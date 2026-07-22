@@ -18,22 +18,16 @@ REVIEW_RE = re.compile(
     r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
 )
 FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
-HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-UNCLOSED_HTML_COMMENT_RE = re.compile(r"<!--.*\Z", re.S)
-HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*?\?>", re.M | re.S)
-UNCLOSED_HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*\Z", re.M | re.S)
-HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*?\]\]>", re.M | re.S)
-UNCLOSED_HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*\Z", re.M | re.S)
-HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Za-z].*?>", re.M | re.S)
-UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Za-z].*\Z", re.M | re.S)
-# CommonMark 0.31.2 HTML block types 1 and 6. Type 7 is handled by the
-# complete-tag matcher below; all other types have explicit terminators above.
+# CommonMark 0.31.2 HTML block starts and terminators.
 RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
-RAW_HTML_TYPE1_BLOCK_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[ \t>]|$).*?"
-    rf"(?:</(?:{RAW_HTML_TYPE1_TAGS})>[^\n]*(?:\n|\Z)|\Z)",
-    re.I | re.M | re.S,
+RAW_HTML_TYPE1_START_RE = re.compile(
+    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[ \t>]|$)", re.I
 )
+RAW_HTML_TYPE1_END_RE = re.compile(rf"</(?:{RAW_HTML_TYPE1_TAGS})>", re.I)
+HTML_COMMENT_START_RE = re.compile(r"^[ ]{0,3}<!--")
+HTML_PROCESSING_START_RE = re.compile(r"^[ ]{0,3}<\?")
+HTML_DECLARATION_START_RE = re.compile(r"^[ ]{0,3}<![A-Za-z]")
+HTML_CDATA_START_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[")
 RAW_HTML_TYPE6_TAGS = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|"
     "dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|"
@@ -44,8 +38,8 @@ RAW_HTML_TYPE6_TAGS = (
 RAW_HTML_TYPE6_START_RE = re.compile(
     rf"^[ ]{{0,3}}</?(?:{RAW_HTML_TYPE6_TAGS})(?=[ \t]|$|/?>)", re.I
 )
-RAW_HTML_ANY_TAG_START_RE = re.compile(
-    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/])[^>]*>", re.I
+RAW_HTML_TYPE7_START_RE = re.compile(
+    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/]).*>[ \t]*$", re.I
 )
 
 CORE_PREFIXES = (
@@ -107,66 +101,71 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
-def strip_fenced_blocks(text):
-    """Remove Markdown fences without letting their contents start HTML blocks."""
+def semantic_text(text):
+    """Return only Markdown that can carry real receipt fields or headings.
+
+    Fences and HTML are consumed in source order. This matters because markers inside
+    an active raw HTML block are data, not new Markdown blocks, and vice versa.
+    """
     output = []
     fence_char = None
     fence_length = 0
+    html_end = None
+    html_until_blank = False
+
     for line in (text or "").splitlines(keepends=True):
         candidate = line.rstrip("\r\n")
+        blank = "\n" if line.endswith(("\n", "\r")) else ""
+
         if fence_char:
-            closing = re.fullmatch(
+            if re.fullmatch(
                 rf"[ ]{{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
                 candidate,
-            )
-            if closing:
+            ):
                 fence_char = None
                 fence_length = 0
-            output.append("\n" if line.endswith(("\n", "\r")) else "")
+            output.append(blank)
             continue
+
+        if html_end:
+            if html_end.search(candidate):
+                html_end = None
+            output.append(blank)
+            continue
+
+        if html_until_blank:
+            if not candidate.strip():
+                html_until_blank = False
+            output.append(blank)
+            continue
+
         opening = FENCE_OPEN_RE.match(candidate)
         if opening:
             marker = opening.group("fence")
             fence_char = marker[0]
             fence_length = len(marker)
-            output.append("\n" if line.endswith(("\n", "\r")) else "")
+            output.append(blank)
             continue
-        output.append(line)
-    return "".join(output)
 
-
-def strip_blank_terminated_html_blocks(text):
-    """Remove CommonMark tag-start blocks through their terminating blank line."""
-    output = []
-    inside = False
-    for line in (text or "").splitlines(keepends=True):
-        candidate = line.rstrip("\r\n")
-        if not inside and (
-            RAW_HTML_TYPE6_START_RE.match(candidate)
-            or RAW_HTML_ANY_TAG_START_RE.match(candidate)
+        for start, end in (
+            (RAW_HTML_TYPE1_START_RE, RAW_HTML_TYPE1_END_RE),
+            (HTML_COMMENT_START_RE, re.compile(r"-->")),
+            (HTML_PROCESSING_START_RE, re.compile(r"\?>")),
+            (HTML_DECLARATION_START_RE, re.compile(r">")),
+            (HTML_CDATA_START_RE, re.compile(r"\]\]>")),
         ):
-            inside = True
-        if inside:
-            output.append("\n" if line.endswith(("\n", "\r")) else "")
-            if not line.strip():
-                inside = False
-            continue
-        output.append(line)
+            if start.match(candidate):
+                html_end = None if end.search(candidate) else end
+                output.append(blank)
+                break
+        else:
+            if RAW_HTML_TYPE6_START_RE.match(candidate) or RAW_HTML_TYPE7_START_RE.match(candidate):
+                html_until_blank = True
+                output.append(blank)
+            else:
+                output.append(line)
+
     return "".join(output)
-
-
-def semantic_text(text):
-    clean = strip_fenced_blocks(text or "")
-    clean = HTML_COMMENT_RE.sub("", clean)
-    clean = UNCLOSED_HTML_COMMENT_RE.sub("", clean)
-    clean = HTML_PROCESSING_RE.sub("", clean)
-    clean = UNCLOSED_HTML_PROCESSING_RE.sub("", clean)
-    clean = HTML_CDATA_RE.sub("", clean)
-    clean = UNCLOSED_HTML_CDATA_RE.sub("", clean)
-    clean = HTML_DECLARATION_RE.sub("", clean)
-    clean = UNCLOSED_HTML_DECLARATION_RE.sub("", clean)
-    clean = RAW_HTML_TYPE1_BLOCK_RE.sub("", clean)
-    return strip_blank_terminated_html_blocks(clean)
 
 
 def parsed_fields(text):

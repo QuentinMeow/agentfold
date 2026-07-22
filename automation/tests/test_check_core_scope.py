@@ -164,6 +164,20 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exactly one real" in error for error in errors))
 
+    def test_fence_markers_inside_html_do_not_change_block_state(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                design=(
+                    "# Design\n\n<div>\n```\nliteral\n```\n" + compact_receipt
+                ),
+            )
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("exactly one real" in error for error in errors))
+
     def test_blank_terminated_and_special_html_receipts_are_not_evidence(self):
         compact_receipt = "\n".join(
             line for line in COMPLETE_DESIGN.splitlines() if line.strip()
