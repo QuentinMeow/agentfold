@@ -17,5 +17,12 @@ What is true today, mapped to the desired-state lines.
   gardener is a protocol only — no script yet.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
+- **Design review (2026-07-22)**: a full grill of the harness — report in
+  `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md` —
+  found the eventual-consistency-vs-blocking-gate contradiction plus honesty and
+  wording gaps. Wording gaps fixed on main; a ninth principle
+  (`handbook/principles/provenance-over-position.md`) added; six hardening tasks
+  filed in the backlog (desired-state line 7).
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
-  public/private overlay, queue viewer — see `desired-state.md` lines 3–6.
+  public/private overlay, queue viewer, design-review hardening — see
+  `desired-state.md` lines 3–7.
