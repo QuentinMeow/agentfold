@@ -134,6 +134,25 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exactly one real" in error for error in errors))
 
+    def test_partial_commonmark_html_start_keeps_compact_receipt_in_block(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
+        for opening in ("<div", "<div class", "<pre"):
+            with self.subTest(opening=opening), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, design="# Design\n\n" + opening + "\n" + compact_receipt
+                )
+                errors = SCOPE.validate_task(task, touched_core=True)
+                self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_type1_html_block_can_end_with_another_type1_end_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, design="# Design\n\n<pre>\nliteral\n</script>\n" + COMPLETE_DESIGN
+            )
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+
     def test_blank_terminated_and_special_html_receipts_are_not_evidence(self):
         compact_receipt = "\n".join(
             line for line in COMPLETE_DESIGN.splitlines() if line.strip()
@@ -143,6 +162,7 @@ class CoreScopeTests(unittest.TestCase):
             "<?processing\n{receipt}\n?>\n",
             "<![CDATA[\n{receipt}\n]]>\n",
             "<!DECLARATION\n{receipt}\n>\n",
+            "<!declaration\n{receipt}\n>\n",
         )
         for wrapper in wrappers:
             with self.subTest(wrapper=wrapper), tempfile.TemporaryDirectory() as tmp:

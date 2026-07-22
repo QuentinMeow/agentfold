@@ -24,17 +24,25 @@ HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*?\?>", re.M | re.S)
 UNCLOSED_HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*\Z", re.M | re.S)
 HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*?\]\]>", re.M | re.S)
 UNCLOSED_HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*\Z", re.M | re.S)
-HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*?>", re.M | re.S)
-UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*\Z", re.M | re.S)
+HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Za-z].*?>", re.M | re.S)
+UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Za-z].*\Z", re.M | re.S)
+# CommonMark 0.31.2 HTML block types 1 and 6. Type 7 is handled by the
+# complete-tag matcher below; all other types have explicit terminators above.
 RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
 RAW_HTML_TYPE1_BLOCK_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?P<tag>{RAW_HTML_TYPE1_TAGS})(?=[\s>/])[^>]*>"
-    r".*?</(?P=tag)\s*>[^\n]*(?:\n|\Z)",
+    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[ \t>]|$).*?"
+    rf"(?:</(?:{RAW_HTML_TYPE1_TAGS})\s*>[^\n]*(?:\n|\Z)|\Z)",
     re.I | re.M | re.S,
 )
-UNCLOSED_RAW_HTML_TYPE1_BLOCK_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[\s>/])[^>]*>.*\Z",
-    re.I | re.M | re.S,
+RAW_HTML_TYPE6_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|"
+    "dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|"
+    "frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|"
+    "menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|"
+    "table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+RAW_HTML_TYPE6_START_RE = re.compile(
+    rf"^[ ]{{0,3}}</?(?:{RAW_HTML_TYPE6_TAGS})(?=[ \t]|$|/?>)", re.I
 )
 RAW_HTML_ANY_TAG_START_RE = re.compile(
     r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/])[^>]*>", re.I
@@ -132,7 +140,11 @@ def strip_blank_terminated_html_blocks(text):
     output = []
     inside = False
     for line in (text or "").splitlines(keepends=True):
-        if not inside and RAW_HTML_ANY_TAG_START_RE.match(line.rstrip("\r\n")):
+        candidate = line.rstrip("\r\n")
+        if not inside and (
+            RAW_HTML_TYPE6_START_RE.match(candidate)
+            or RAW_HTML_ANY_TAG_START_RE.match(candidate)
+        ):
             inside = True
         if inside:
             output.append("\n" if line.endswith(("\n", "\r")) else "")
@@ -154,7 +166,6 @@ def semantic_text(text):
     clean = HTML_DECLARATION_RE.sub("", clean)
     clean = UNCLOSED_HTML_DECLARATION_RE.sub("", clean)
     clean = RAW_HTML_TYPE1_BLOCK_RE.sub("", clean)
-    clean = UNCLOSED_RAW_HTML_TYPE1_BLOCK_RE.sub("", clean)
     return strip_blank_terminated_html_blocks(clean)
 
 
