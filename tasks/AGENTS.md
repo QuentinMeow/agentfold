@@ -14,9 +14,9 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 - Task id = folder name = `YYYY-MM-DD-<kebab-slug>` (date filed). The id never changes;
   status changes are `git mv` between status folders, committed with prefix `harness:`.
 - `task.md` declares `**Repository scope:** core`, `service:<name>`, or `records-only`.
-  Structural or policy-bearing core changes also complete the receipt in
-  `templates/task/design.md`; the Git boundary check requires an independent core-fit
-  verdict before review.
+  Core changes also complete the receipt in `templates/task/design.md`; the Git boundary
+  check requires an independent core-fit verdict before review. The small untracked-fix
+  branch convention applies only outside core until its backlog task defines a safe path.
 - Reference tasks by id, never by full path — paths change with status. Find one with
   `ls tasks/*/<task-id>` .
 - **Claim before working**: set `**Claimed-by:**` in `task.md`, commit, then start.

@@ -16,6 +16,7 @@ FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
     r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
 )
+FENCE_RE = re.compile(r"```.*?```", re.S)
 
 CORE_PREFIXES = (
     "skills/",
@@ -24,7 +25,9 @@ CORE_PREFIXES = (
     "handbook/",
 )
 CORE_EXACT = {
+    ".gitignore",
     "AGENTS.md",
+    "CLAUDE.md",
     "CONTRIBUTING.md",
     "docs/AGENTS.md",
     "docs/designs/AGENTS.md",
@@ -40,11 +43,11 @@ GLOBAL_STATE_MARKERS = (
     (re.compile(r"\bPath\.home\s*\("), "home-path API"),
     (re.compile(r"\.expanduser\s*\("), "home expansion"),
     (re.compile(r"\bos\.path\.expanduser\s*\("), "home expansion"),
-    (re.compile(r"\b(?:os\.)?(?:getenv|environ\.(?:get))\s*\(\s*['\"](?:HOME|USERPROFILE|[A-Z]+_HOME)['\"]"), "home environment"),
-    (re.compile(r"\benviron\s*\[\s*['\"](?:HOME|USERPROFILE|[A-Z]+_HOME)['\"]\s*\]"), "home environment"),
-    (re.compile(r"['\"]~/\."), "dot-directory beneath home"),
-    (re.compile(r"\$(?:HOME|USERPROFILE)\b|\$\{(?:HOME|USERPROFILE)\}|%(?:HOME|USERPROFILE)%"), "shell home environment"),
-    (re.compile(r"\$(?:\{)?env:(?:HOME|USERPROFILE)(?:\})?", re.I), "PowerShell home environment"),
+    (re.compile(r"\b(?:os\.)?(?:getenv|environ\.(?:get))\s*\(\s*['\"](?:HOME|USERPROFILE|[A-Z][A-Z0-9_]*_HOME)['\"]"), "home environment"),
+    (re.compile(r"\benviron\s*\[\s*['\"](?:HOME|USERPROFILE|[A-Z][A-Z0-9_]*_HOME)['\"]\s*\]"), "home environment"),
+    (re.compile(r"(?<![A-Za-z0-9_])~/\."), "dot-directory beneath home"),
+    (re.compile(r"\$(?:\{)?(?:HOME|USERPROFILE|[A-Z][A-Z0-9_]*_HOME)(?:\})?|%(?:HOME|USERPROFILE|[A-Z][A-Z0-9_]*_HOME)%"), "shell home environment"),
+    (re.compile(r"\$(?:\{)?env:(?:HOME|USERPROFILE|[A-Z][A-Z0-9_]*_HOME)(?:\})?", re.I), "PowerShell home environment"),
     (re.compile(r"['\"]/(?:Users|home)/[^/'\"]+/"), "absolute user-home path"),
 )
 
@@ -59,12 +62,20 @@ def git(*args, repo=REPO):
 
 
 def parsed_fields(text):
-    pairs = FIELD_RE.findall(text or "")
+    pairs = FIELD_RE.findall(FENCE_RE.sub("", text or ""))
     counts = {}
     for key, _ in pairs:
         counts[key] = counts.get(key, 0) + 1
     duplicates = sorted(key for key, count in counts.items() if count > 1)
     return dict(pairs), duplicates
+
+
+def named_sections(text, title):
+    clean = FENCE_RE.sub("", text or "")
+    pattern = re.compile(
+        rf"^## {re.escape(title)}(?:[ \t].*)?\n(.*?)(?=^##[ \t]|\Z)", re.M | re.S
+    )
+    return pattern.findall(clean)
 
 
 def is_placeholder(value):
@@ -115,11 +126,21 @@ def task_id_from_branch(branch):
     return branch[len("task/"):] if branch.startswith("task/") else None
 
 
-def find_task(branch, repo=REPO):
+def find_task(branch, repo=REPO, load_text=None):
     task_id = task_id_from_branch(branch)
     if not task_id:
         return None
-    matches = sorted((repo / "tasks").glob(f"*/{task_id}"))
+    if load_text:
+        matches = []
+        for status in ("0_backlog", "1_in-progress", "2_blocked", "3_in-review", "4_done"):
+            task = repo / "tasks" / status / task_id
+            try:
+                load_text((Path("tasks") / status / task_id / "task.md").as_posix())
+                matches.append(task)
+            except RuntimeError:
+                pass
+    else:
+        matches = sorted((repo / "tasks").glob(f"*/{task_id}"))
     return matches[0] if len(matches) == 1 else None
 
 
@@ -184,11 +205,16 @@ def validate_task(task, touched_core, require_review=False, load_text=None):
 
     design = task / "design.md"
     design_text = evidence_text(design, load_text)
-    design_fields, design_duplicates = parsed_fields(design_text)
+    design_sections = named_sections(design_text, "Core fit")
+    design_fields, design_duplicates = parsed_fields(
+        design_sections[0] if len(design_sections) == 1 else ""
+    )
     if touched_core or (task.parent.name in {"3_in-review", "4_done"} and scope == "core"):
         if design_text is None:
             errors.append(f"{display(task)} needs design.md with a completed Core fit section")
         else:
+            if len(design_sections) != 1:
+                errors.append("design.md needs exactly one real `## Core fit` section")
             core_keys = {
                 "Agent substitution", "Provider substitution", "Repository substitution",
                 "User-global writes", "Why AgentFold core", "Thin adapter",
@@ -221,7 +247,10 @@ def validate_task(task, touched_core, require_review=False, load_text=None):
     if review_needed:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
-        verdicts = REVIEW_RE.findall(verification_text)
+        review_sections = named_sections(verification_text, "Review verdicts")
+        if len(review_sections) != 1:
+            errors.append("verification.md needs exactly one real `## Review verdicts` section")
+        verdicts = REVIEW_RE.findall(review_sections[0] if len(review_sections) == 1 else "")
         claimant = task_fields.get("Claimed-by", "")
         latest = {}
         for reviewer, verdict, _ in verdicts:
@@ -251,12 +280,13 @@ def global_state_findings(paths, load_content, load_mode=lambda _: ""):
             mode = load_mode(path)
         except (OSError, RuntimeError):
             continue  # deleted or unavailable in the selected tree
-        if not is_core_executable(path, content, mode):
+        instruction_file = parts[0] == "skills" and Path(path).suffix.lower() == ".md"
+        if not instruction_file and not is_core_executable(path, content, mode):
             continue
         for pattern, label in GLOBAL_STATE_MARKERS:
             if pattern.search(content):
                 findings.append(
-                    f"{path} references {label}; tracked core executables may use repo-local state only"
+                    f"{path} references {label}; tracked core files may use repo-local state only"
                 )
     return findings
 
@@ -273,35 +303,6 @@ def range_paths(spec, repo=REPO):
     ).splitlines() if line]
 
 
-def structural_paths(diff_args, repo=REPO):
-    return [line for line in git(
-        "diff", "--no-renames", "--name-only", "--diff-filter=ACD", *diff_args, repo=repo
-    ).splitlines() if line]
-
-
-def changed_lines(diff_args, repo=REPO):
-    total = 0
-    for line in git("diff", "--no-renames", "--numstat", *diff_args, repo=repo).splitlines():
-        added, deleted, _ = line.split("\t", 2)
-        if not (added.isdigit() and deleted.isdigit()):
-            return 10 ** 9  # binary/unknown changes are never de-minimis
-        total += int(added) + int(deleted)
-    return total
-
-
-def de_minimis_without_task(core_paths, structural, line_count, protected=()):
-    high_risk = lambda path: (
-        Path(path).name == "AGENTS.md"
-        or path.startswith(("automation/", "templates/", "handbook/"))
-        or path in CORE_EXACT
-        or path in set(protected)
-    )
-    return bool(
-        core_paths and line_count <= 20 and not set(core_paths).intersection(structural)
-        and not any(high_risk(path) for path in core_paths)
-    )
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -314,13 +315,11 @@ def main(argv=None):
     branch = args.branch or git("branch", "--show-current").strip()
     if args.diff_range:
         paths = range_paths(args.diff_range)
-        diff_args = [args.diff_range]
         head = args.diff_range.rsplit("...", 1)[-1]
         load_content = lambda path: git("show", f"{head}:{path}")
         load_mode = lambda path: (git("ls-tree", head, "--", path).split() or [""])[0]
     else:
         paths = staged_paths()
-        diff_args = ["--cached"]
         load_content = lambda path: git("show", f":{path}")
         load_mode = lambda path: (git("ls-files", "-s", "--", path).split() or [""])[0]
 
@@ -329,16 +328,13 @@ def main(argv=None):
     except RuntimeError:
         registered_paths = set()
     core_paths = [path for path in paths if is_core_path(path, registered_paths)]
-    structural = structural_paths(diff_args)
-    line_count = changed_lines(diff_args)
-    task = find_task(branch)
+    task = find_task(branch, load_text=load_content)
     errors = []
     if core_paths and task is None:
-        if not de_minimis_without_task(core_paths, structural, line_count, registered_paths):
-            errors.append(
-                "structural or policy-bearing core changes require a `task/<task-id>` "
-                "branch and matching task folder; personal/provider setup belongs outside AgentFold"
-            )
+        errors.append(
+            "core changes require a `task/<task-id>` branch and matching task folder; "
+            "personal/provider setup belongs outside AgentFold"
+        )
     elif task is not None:
         errors.extend(validate_task(
             task, bool(core_paths), args.require_review and bool(core_paths), load_content
@@ -351,8 +347,7 @@ def main(argv=None):
         print("    fix: complete templates/task/design.md, route external setup outside core, or obtain independent review")
         return 1
     if core_paths:
-        owner = f"task {task.name}" if task else "de-minimis non-task change"
-        print(f"core-scope: pass ({len(core_paths)} core path(s), {owner})")
+        print(f"core-scope: pass ({len(core_paths)} core path(s), task {task.name})")
     else:
         print("core-scope: no core changes")
     return 0

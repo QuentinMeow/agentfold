@@ -15,10 +15,10 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   `skills/`, `templates/`, `automation/`, or `message-queue/` are reviewed by a
   maintainer before any agent acts on them
   (`handbook/principles/provenance-over-position.md`).
-- **Core changes prove they belong here.** Structural or policy-bearing core diffs use a
-  task that completes `templates/task/design.md` and receives an independent core-fit
-  verdict. Existing-file edits of at most 20 lines retain the documented small-fix path;
-  personal setup and single-agent/provider/product integrations stay external.
+- **Core changes prove they belong here.** Core diffs use a task that completes
+  `templates/task/design.md` and receives an independent core-fit verdict. The small
+  untracked-fix branch convention applies outside core only; personal setup and
+  single-agent/provider/product integrations stay external.
 - **Keep contracts short.** The reconciler enforces line budgets on every `AGENTS.md`.
   Before adding a line ask: would removing this cause mistakes? If not, cut it.
 

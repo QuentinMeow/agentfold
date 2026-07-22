@@ -74,9 +74,10 @@ personal GitHub authentication safeguard remains outside AgentFold.
 ## Failure behavior
 
 The local hook checks staged bytes, including its task evidence; pull-request CI checks
-the full base-to-head tree. A structural or policy-bearing core change without a task,
-`core` scope declaration, complete substitution evidence, or an independent approve
-majority fails with a routing message. Existing-file edits of at most 20 lines keep the
-documented small-fix path. Obvious home-directory access in changed core executables
-fails directly. Research, product code, and unregistered product CI stay unaffected;
-thin provider adapters are explicitly listed in `automation/core-scope-paths.txt`.
+the full base-to-head tree. A core change without a task, `core` scope declaration,
+complete substitution evidence, or an independent approve majority fails with a routing
+message. Obvious home-directory access in changed core executables and canonical skill
+instructions fails directly. Research, product code, and unregistered product CI stay
+unaffected; thin provider adapters are listed in `automation/core-scope-paths.txt`.
+The existing small-fix branch convention remains available outside core; its dedicated
+backlog task must design any safe core exception rather than this gate guessing one.

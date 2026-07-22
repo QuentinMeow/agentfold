@@ -35,7 +35,10 @@ class CoreScopeTests(unittest.TestCase):
         if design is not None:
             (task / "design.md").write_text(design, encoding="utf-8")
         if verification is not None:
-            (task / "verification.md").write_text(verification, encoding="utf-8")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n" + verification,
+                encoding="utf-8",
+            )
         return task
 
     def test_core_path_boundary_excludes_designs_and_services(self):
@@ -46,6 +49,8 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path("services/example/client.py"))
         self.assertTrue(SCOPE.is_core_path("tasks/AGENTS.md"))
         self.assertTrue(SCOPE.is_core_path("handbook/git-workflow.md"))
+        self.assertTrue(SCOPE.is_core_path("CLAUDE.md"))
+        self.assertTrue(SCOPE.is_core_path(".gitignore"))
 
     def test_only_registered_provider_adapter_is_core(self):
         registered = {".github/workflows/harness.yml", ".gitlab-ci.yml"}
@@ -69,6 +74,12 @@ class CoreScopeTests(unittest.TestCase):
             task = self.make_task(tmp, design=None)
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("needs design.md" in error for error in errors))
+
+    def test_fenced_receipt_example_is_not_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, design=f"# Design\n\n```markdown\n{COMPLETE_DESIGN}\n```\n")
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("exactly one real" in error for error in errors))
 
     def test_service_scope_cannot_change_core(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +158,15 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
             self.assertTrue(any("independent reviewer" in error for error in errors))
 
+    def test_fenced_review_example_is_not_a_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review",
+                verification="```\n- core-fit / reviewer: approve — example only\n```\n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("independent reviewer" in error for error in errors))
+
     def test_blocking_review_without_approve_majority_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
@@ -181,24 +201,26 @@ class CoreScopeTests(unittest.TestCase):
         cases = {
             "automation/install-personal": "#!/bin/sh\ntarget=${HOME}/.agent\n",
             "automation/install.ps1": "$target = $env:USERPROFILE + '/.agent'\n",
+            "automation/install.sh": "mkdir ~/.agent\ncp file $CODEX_HOME/plugins/\n",
+            "automation/install.py": "target = os.getenv('XDG_CONFIG_HOME')\n",
         }
         for path, content in cases.items():
             with self.subTest(path=path):
                 findings = SCOPE.global_state_findings(
                     [path], lambda _: content, lambda _: "100755"
                 )
-                self.assertEqual(1, len(findings))
+                self.assertGreaterEqual(len(findings), 1)
+
+    def test_skill_instruction_cannot_direct_user_home_write(self):
+        findings = SCOPE.global_state_findings(
+            ["skills/example/SKILL.md"], lambda _: "Run `mkdir -p ~/.agent` now.\n"
+        )
+        self.assertEqual(1, len(findings))
 
     def test_tests_and_non_core_files_are_not_static_scanned(self):
         content = "target = Path.home() / '.agent'\n"
         paths = ["automation/tests/test_home.py", "services/example/install.py"]
         self.assertEqual([], SCOPE.global_state_findings(paths, lambda _: content))
-
-    def test_untracked_micro_edit_is_allowed_but_structural_change_is_not(self):
-        path = "skills/example/SKILL.md"
-        self.assertTrue(SCOPE.de_minimis_without_task([path], [], 2))
-        self.assertFalse(SCOPE.de_minimis_without_task([path], [path], 2))
-        self.assertFalse(SCOPE.de_minimis_without_task(["tasks/AGENTS.md"], [], 2))
 
     def test_evidence_loader_cannot_use_untracked_design(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +234,21 @@ class CoreScopeTests(unittest.TestCase):
 
             errors = SCOPE.validate_task(task, touched_core=True, load_text=index_only)
             self.assertTrue(any("needs design.md" in error for error in errors))
+
+    def test_task_discovery_uses_selected_tree_not_working_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wanted = "tasks/3_in-review/2026-07-22-example/task.md"
+
+            def head_tree(path):
+                if path == wanted:
+                    return "**Repository scope:** core\n"
+                raise RuntimeError("missing")
+
+            task = SCOPE.find_task(
+                "task/2026-07-22-example", repo=root, load_text=head_tree
+            )
+            self.assertEqual(root / "tasks/3_in-review/2026-07-22-example", task)
 
     def test_staged_paths_include_deleted_and_both_renamed_endpoints(self):
         with tempfile.TemporaryDirectory() as tmp:
