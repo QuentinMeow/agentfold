@@ -17,3 +17,8 @@
   gate now targets instruction-named root/hidden paths plus explicitly registered
   unusual adapters, leaves ordinary product docs alone, and strips fenced, commented,
   and raw-HTML evidence before parsing.
+- The correctness reviewer continued probing Markdown rendering boundaries. Every
+  reproduced bypass became a canary: CommonMark HTML types and partial tags, source
+  ordering between HTML and fences, exact type-one terminators, blank-line whitespace,
+  CommonMark-only line endings, and CRLF receipts. The final focused suite has 41 tests
+  and all three independent lenses approve the resulting branch.

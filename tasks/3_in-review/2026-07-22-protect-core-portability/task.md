@@ -15,17 +15,17 @@ change belongs in this repository before implementation reaches review.
 
 ## Acceptance criteria
 
-- [ ] The replacement branch contains none of the Codex/GitHub authentication artifacts
+- [x] The replacement branch contains none of the Codex/GitHub authentication artifacts
       from the closed PR and is based directly on the guardrails-design branch.
-- [ ] The root contract states both admission tests: a core change is generally useful
+- [x] The root contract states both admission tests: a core change is generally useful
       to AgentFold's lifecycle and does not require one agent, provider, user, or product.
-- [ ] Every task schema requires an explicit repository-scope classification, a
+- [x] Every task schema requires an explicit repository-scope classification, a
       repository-fit rationale, agent-support scope, and the deliberately excluded
       external pieces; the reconciler and Git boundary gate reject missing,
       placeholder, or contradictory declarations.
-- [ ] Existing task records are migrated, and positive/negative tests exercise the new
+- [x] Existing task records are migrated, and positive/negative tests exercise the new
       check without relying on vendor keyword bans.
-- [ ] An independent core-fit reviewer verifies that the mechanism does not overfit the
+- [x] An independent core-fit reviewer verifies that the mechanism does not overfit the
       triggering incident or unnecessarily constrain future agents.
 
 ## Links
