@@ -19,3 +19,6 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   after its existing tests exposed runtime failures in the default shell.
 - Added 14 guard tests to the normal pre-commit/CI test runner, retained the 8 service
   tests, and filed the one-time Codex hook trust review.
+- Committed and pushed the implementation, then opened stacked draft PR #5 against the
+  design branch; the audited remote diff contained 25 files, 1,501 additions, and 15
+  deletions before the publication handover.
