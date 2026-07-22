@@ -11,8 +11,10 @@ What is true today, mapped to the desired-state lines.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
   schemas, link targets, line budgets (AGENTS.md, SKILL.md, root README), memory
   expiry, and stale items; it
-  files and garbage-collects retry-queue items. Installed as pre-commit hook and CI
-  (`.github/workflows/harness.yml`). No template↔check drift detection yet.
+  files and garbage-collects retry-queue items. A separate Git boundary gate requires
+  substitution evidence and independent review for core diffs and rejects obvious
+  user-global access in tracked executables. Pre-commit and CI also run repository tests
+  across services, skills, and automation. No template↔check drift detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet.

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Run every service test: services/*/tests/test_*.py, each in its own process.
+"""Run every repository test file, each in its own process.
 
-Subprocess-per-file keeps hyphenated service folders importable-free and any
+Discovery covers services, canonical skills, and automation. Subprocess-per-file keeps
+hyphenated folders importable-free and any
 test crash isolated. Exit 0 only if every file passes.
 """
 import subprocess
@@ -9,12 +10,17 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+TEST_GLOBS = (
+    "services/*/tests/test_*.py",
+    "skills/*/tests/test_*.py",
+    "automation/**/tests/test_*.py",
+)
 
 
 def main():
-    test_files = sorted((REPO / "services").glob("*/tests/test_*.py"))
+    test_files = sorted({test for pattern in TEST_GLOBS for test in REPO.glob(pattern)})
     if not test_files:
-        print("no service tests found")
+        print("no repository tests found")
         return 0
     failed = []
     for test in test_files:

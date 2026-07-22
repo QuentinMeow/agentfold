@@ -7,6 +7,10 @@ Cursor, Codex, or a human can follow them. Agent-specific discovery dirs
 created by `automation/install.py`; edit only here (ADR:
 `memory/decisions/2026-07-22-visible-skills-dir-with-symlinks.md`).
 
+Portability is necessary but not sufficient: a canonical skill serves AgentFold's
+lifecycle across unrelated repositories. Personal utilities, provider operations, and
+product workflows stay external; skill scripts never configure user-global state.
+
 ## SKILL.md header (YAML — the one external-convention exception to bold-key metadata)
 
 ```yaml

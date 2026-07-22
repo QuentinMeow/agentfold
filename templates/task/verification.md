@@ -15,3 +15,4 @@ $ <exact command>
 ## Review verdicts (when a review gate applied)
 
 - <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">
+- core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required for core changes>

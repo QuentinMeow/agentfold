@@ -24,8 +24,9 @@ In priority order. Each line is specific enough to spawn tasks against.
 7. **The harness survives its own design review.** Finding severity tiers so advisory
    drift never blocks commits; automated retry filing with waivers; coordination
    write rules that match practice; a de-minimis path for micro-changes; mechanical
-   provenance checks; optional ritual hooks for agent adapters. *(Six tasks filed in
-   `tasks/0_backlog/` from the 2026-07-22 design review; not started.)*
+   provenance checks; optional ritual hooks for agent adapters; a core-admission gate
+   that rejects personal or provider-specific scope. *(The core-admission gate is
+   implemented; six design-review tasks remain in `tasks/0_backlog/`.)*
 8. **Critical obligations survive agent forgetfulness and detector failure.** A
    consequence-based policy separates preferences, repairable invariants, required
    deliberation, and critical boundaries; PII/secret controls layer redacted local

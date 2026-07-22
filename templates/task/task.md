@@ -4,6 +4,7 @@
 **Mode:** <optional — overrides the repo collaboration mode for this task>
 **Filed:** <YYYY-MM-DD>, by <who>, from <chat | request item | roadmap line — link>
 **Parent:** <parent task id, or "none">
+**Repository scope:** <core | service:<name> | records-only>
 
 ## Goal
 

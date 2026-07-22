@@ -8,7 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Core scope — framework changes belong in AgentFold
+        if: github.event_name == 'pull_request'
+        env:
+          CORE_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
+          CORE_SCOPE_HEAD: ${{ github.event.pull_request.head.sha }}
+          CORE_SCOPE_BRANCH: ${{ github.head_ref }}
+        run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH" --require-review
       - name: Reconciler — every harness invariant holds
         run: python3 automation/reconcile/reconcile.py --check
-      - name: Service tests
+      - name: Repository tests
         run: python3 automation/run_tests.py
