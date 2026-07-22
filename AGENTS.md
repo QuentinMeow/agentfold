@@ -53,8 +53,10 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
    affected docs, record an ADR in `memory/decisions/`, delete the queue file.
    An answer heard in chat is written into the queue file in the same turn — chat is
    the only channel with no file trace.
-4. End every reply to the human with one line per open `needs-human/` item you filed or
-   noticed — chat is the human's only push channel.
+4. End every reply to the human with one entry per open `needs-human/` item you filed
+   or noticed — a clickable link to the item plus enough context to act from the reply
+   alone, never a bare name (format: the "Needs your attention" section of
+   `templates/handover.md`). Chat is the human's only push channel.
 
 ## Task lifecycle
 
