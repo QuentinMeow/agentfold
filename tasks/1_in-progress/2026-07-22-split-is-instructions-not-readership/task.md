@@ -16,10 +16,10 @@ README's tour labels itself "(humans only; agents read AGENTS.md)".
 
 ## Acceptance criteria
 
-- [ ] Root `AGENTS.md` states it is self-contained (never depends on the README) and
+- [x] Root `AGENTS.md` states it is self-contained (never depends on the README) and
       that the README carries no agent instructions, without claiming agents never read it
-- [ ] The README tour line no longer says "humans only"
-- [ ] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
+- [x] The README tour line no longer says "humans only"
+- [x] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
 
 ## Links
 
