@@ -24,6 +24,11 @@ screen, and will answer from their phone. Therefore:
 5. **The answer slot is literal**: end with `**Your answer:** ______`. Accept anything
    written there — a letter, a sentence, a counter-question. A counter-question gets
    answered in the file, with examples, and the item stays open.
+6. **The file is disposable context, not an artifact.** Durable background belongs in
+   the task's `design.md` or `memory/`, linked from here — never written only here. A
+   well-made decision file could be deleted and regenerated from its sources; the only
+   thing it ever uniquely holds is the human's answer, which folding moves into docs
+   and an ADR before the file is deleted.
 
 ## Example (abridged)
 
