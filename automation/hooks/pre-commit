@@ -1,0 +1,15 @@
+#!/bin/sh
+# AgentFold pre-commit gate: the reconciler and the service tests must pass.
+# Installed by automation/install.py (git config core.hooksPath automation/hooks).
+# A --no-verify bypass must be reported in the session handover with a reason.
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: reconciler"
+python3 "$ROOT/automation/reconcile/reconcile.py" --check
+
+echo "pre-commit: service tests"
+python3 "$ROOT/automation/run_tests.py"
+
+echo "pre-commit: OK"

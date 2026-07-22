@@ -1,0 +1,14 @@
+name: harness
+on:
+  push:
+  pull_request:
+
+jobs:
+  reconcile-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconciler — every harness invariant holds
+        run: python3 automation/reconcile/reconcile.py --check
+      - name: Service tests
+        run: python3 automation/run_tests.py

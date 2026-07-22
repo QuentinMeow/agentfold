@@ -1,0 +1,27 @@
+# history/ — conversation record
+
+One folder per conversation/session that did work:
+`conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
+plus timezone abbreviation** (e.g. `2026-07-22-0014PDT-fix-cli-crash`; use `UTC` if
+your zone has no letter abbreviation). Every folder **must** contain a `handover.md`
+— the reconciler files a repair item for any that doesn't.
+
+## handover.md (schema: `templates/handover.md`)
+
+The handover is for a human who was away: what happened, how it works now, what needs
+their attention — one screen maximum, plain language, no invented shorthand. Depth
+never goes in the handover; it goes in the task folder (worklog, design, verification)
+and the handover links there. End-of-session ritual: root `AGENTS.md`;
+`skills/session-handover/` walks through it.
+
+## Other files in a conversation folder (optional)
+
+- `transcript.md` — pointer to or export of the raw session log, when available
+- `artifacts/` — files produced during the session worth keeping but belonging to no
+  service (analysis notes, comparison tables)
+
+## Retention
+
+Conversation folders older than ~180 days are pruned by the memory gardener — durable
+learnings get promoted into `memory/` first; git history archives the rest
+(`handbook/principles/design-for-forgetting.md`).
