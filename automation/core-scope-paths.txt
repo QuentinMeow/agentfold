@@ -1,2 +1,3 @@
-# Thin provider adapters that invoke canonical AgentFold core behavior.
+# Thin agent/provider adapters that invoke canonical AgentFold core behavior.
 .github/workflows/harness.yml
+CLAUDE.md

@@ -7,7 +7,7 @@ bare clone.
 | Piece | What it does | Runs |
 |-------|--------------|------|
 | `check_core_scope.py` | gates core diffs on substitution evidence, repo-local state, and independent review | pre-commit, PR CI |
-| `core-scope-paths.txt` | registers thin provider-adapter files whose changes need the same core review | read by the core-scope gate |
+| `core-scope-paths.txt` | registers thin agent/provider adapter files whose changes need the same core review | read by the core-scope gate |
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
 | `hooks/pre-commit` | blocks commits when core scope, repository invariants, or tests fail | every commit (installed) |
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |

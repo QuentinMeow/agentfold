@@ -49,13 +49,14 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path("services/example/client.py"))
         self.assertTrue(SCOPE.is_core_path("tasks/AGENTS.md"))
         self.assertTrue(SCOPE.is_core_path("handbook/git-workflow.md"))
-        self.assertTrue(SCOPE.is_core_path("CLAUDE.md"))
-        self.assertTrue(SCOPE.is_core_path(".gitignore"))
+        self.assertFalse(SCOPE.is_core_path("CLAUDE.md"))
+        self.assertFalse(SCOPE.is_core_path(".gitignore"))
 
     def test_only_registered_provider_adapter_is_core(self):
-        registered = {".github/workflows/harness.yml", ".gitlab-ci.yml"}
+        registered = {".github/workflows/harness.yml", ".gitlab-ci.yml", "CLAUDE.md"}
         self.assertTrue(SCOPE.is_core_path(".github/workflows/harness.yml", registered))
         self.assertTrue(SCOPE.is_core_path(".gitlab-ci.yml", registered))
+        self.assertTrue(SCOPE.is_core_path("CLAUDE.md", registered))
         self.assertFalse(SCOPE.is_core_path(".github/workflows/deploy-payments.yml", registered))
 
     def test_task_branch_parsing_supports_full_ref(self):
@@ -76,8 +77,17 @@ class CoreScopeTests(unittest.TestCase):
             self.assertTrue(any("needs design.md" in error for error in errors))
 
     def test_fenced_receipt_example_is_not_evidence(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, design=f"# Design\n\n{fence}markdown\n{COMPLETE_DESIGN}\n{fence}\n"
+                )
+                errors = SCOPE.validate_task(task, touched_core=True)
+                self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_html_commented_receipt_is_not_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
-            task = self.make_task(tmp, design=f"# Design\n\n```markdown\n{COMPLETE_DESIGN}\n```\n")
+            task = self.make_task(tmp, design=f"# Design\n\n<!--\n{COMPLETE_DESIGN}\n-->\n")
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exactly one real" in error for error in errors))
 
@@ -159,13 +169,14 @@ class CoreScopeTests(unittest.TestCase):
             self.assertTrue(any("independent reviewer" in error for error in errors))
 
     def test_fenced_review_example_is_not_a_verdict(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            task = self.make_task(
-                tmp, status="3_in-review",
-                verification="```\n- core-fit / reviewer: approve — example only\n```\n",
-            )
-            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
-            self.assertTrue(any("independent reviewer" in error for error in errors))
+        for wrapper in (
+            "~~~text\n- core-fit / reviewer: approve — example only\n~~~\n",
+            "<!-- - core-fit / reviewer: approve — example only -->\n",
+        ):
+            with self.subTest(wrapper=wrapper), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review", verification=wrapper)
+                errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+                self.assertTrue(any("independent reviewer" in error for error in errors))
 
     def test_blocking_review_without_approve_majority_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,6 +227,39 @@ class CoreScopeTests(unittest.TestCase):
             ["skills/example/SKILL.md"], lambda _: "Run `mkdir -p ~/.agent` now.\n"
         )
         self.assertEqual(1, len(findings))
+
+    def test_forced_generated_adapter_file_is_rejected_but_deletion_is_allowed(self):
+        path = ".agents/skills/personal/SKILL.md"
+        self.assertEqual(1, len(SCOPE.generated_adapter_findings(
+            [path], lambda _: "personal policy\n"
+        )))
+
+        def deleted(_):
+            raise RuntimeError("missing from tree")
+
+        self.assertEqual([], SCOPE.generated_adapter_findings([path], deleted))
+
+    def test_product_gitignore_edits_outside_adapter_block_are_allowed(self):
+        content = "\n".join((
+            "dist/", SCOPE.ADAPTER_IGNORE_START, *SCOPE.ADAPTER_IGNORE_LINES,
+            SCOPE.ADAPTER_IGNORE_END, ".env.local", "",
+        ))
+        self.assertEqual([], SCOPE.adapter_ignore_findings(
+            [".gitignore"], lambda _: content
+        ))
+
+    def test_adapter_ignore_block_cannot_be_removed_or_unignored(self):
+        missing = "dist/\n"
+        self.assertTrue(SCOPE.adapter_ignore_findings(
+            [".gitignore"], lambda _: missing
+        ))
+        unignored = "\n".join((
+            SCOPE.ADAPTER_IGNORE_START, *SCOPE.ADAPTER_IGNORE_LINES,
+            SCOPE.ADAPTER_IGNORE_END, "!.agents/**", "",
+        ))
+        self.assertTrue(SCOPE.adapter_ignore_findings(
+            [".gitignore"], lambda _: unignored
+        ))
 
     def test_tests_and_non_core_files_are_not_static_scanned(self):
         content = "target = Path.home() / '.agent'\n"

@@ -78,6 +78,8 @@ the full base-to-head tree. A core change without a task, `core` scope declarati
 complete substitution evidence, or an independent approve majority fails with a routing
 message. Obvious home-directory access in changed core executables and canonical skill
 instructions fails directly. Research, product code, and unregistered product CI stay
-unaffected; thin provider adapters are listed in `automation/core-scope-paths.txt`.
+unaffected; thin agent/provider adapters are listed in `automation/core-scope-paths.txt`.
+Generated agent directories are never trackable even with a forced add, while a marked
+block in `.gitignore` protects those paths without treating product ignore rules as core.
 The existing small-fix branch convention remains available outside core; its dedicated
 backlog task must design any safe core exception rather than this gate guessing one.

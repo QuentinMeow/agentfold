@@ -10,8 +10,10 @@ __pycache__/
 tmp/
 
 # Agent-adapter shims created by automation/install.py (generated, never edited)
+# agentfold-adapters:start
 .claude/
 .cursor/
 .agents/
 **/CLAUDE.md
 !/CLAUDE.md
+# agentfold-adapters:end

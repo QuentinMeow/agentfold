@@ -6,6 +6,7 @@ The check is intentionally narrow: syntax forces architectural deliberation; an
 independent reviewer, not a keyword list, judges whether the rationale is true.
 """
 import argparse
+import fnmatch
 import re
 import subprocess
 import sys
@@ -16,7 +17,9 @@ FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
     r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
 )
-FENCE_RE = re.compile(r"```.*?```", re.S)
+FENCE_RE = re.compile(r"^(?P<fence>`{3,}|~{3,}).*?^(?P=fence)[ \t]*$", re.M | re.S)
+UNCLOSED_FENCE_RE = re.compile(r"^(?:`{3,}|~{3,}).*\Z", re.M | re.S)
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
 CORE_PREFIXES = (
     "skills/",
@@ -25,9 +28,7 @@ CORE_PREFIXES = (
     "handbook/",
 )
 CORE_EXACT = {
-    ".gitignore",
     "AGENTS.md",
-    "CLAUDE.md",
     "CONTRIBUTING.md",
     "docs/AGENTS.md",
     "docs/designs/AGENTS.md",
@@ -38,6 +39,15 @@ CORE_EXACT = {
     "tasks/AGENTS.md",
 }
 PROTECTED_PATHS_FILE = "automation/core-scope-paths.txt"
+ADAPTER_IGNORE_START = "# agentfold-adapters:start"
+ADAPTER_IGNORE_END = "# agentfold-adapters:end"
+ADAPTER_IGNORE_LINES = (
+    ".claude/",
+    ".cursor/",
+    ".agents/",
+    "**/CLAUDE.md",
+    "!/CLAUDE.md",
+)
 EXECUTABLE_SUFFIXES = {".py", ".sh", ".bash", ".js", ".ts", ".rb", ".ps1"}
 GLOBAL_STATE_MARKERS = (
     (re.compile(r"\bPath\.home\s*\("), "home-path API"),
@@ -61,8 +71,14 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
+def semantic_text(text):
+    clean = HTML_COMMENT_RE.sub("", text or "")
+    clean = FENCE_RE.sub("", clean)
+    return UNCLOSED_FENCE_RE.sub("", clean)
+
+
 def parsed_fields(text):
-    pairs = FIELD_RE.findall(FENCE_RE.sub("", text or ""))
+    pairs = FIELD_RE.findall(semantic_text(text))
     counts = {}
     for key, _ in pairs:
         counts[key] = counts.get(key, 0) + 1
@@ -71,7 +87,7 @@ def parsed_fields(text):
 
 
 def named_sections(text, title):
-    clean = FENCE_RE.sub("", text or "")
+    clean = semantic_text(text)
     pattern = re.compile(
         rf"^## {re.escape(title)}(?:[ \t].*)?\n(.*?)(?=^##[ \t]|\Z)", re.M | re.S
     )
@@ -291,6 +307,52 @@ def global_state_findings(paths, load_content, load_mode=lambda _: ""):
     return findings
 
 
+def generated_adapter_findings(paths, load_content):
+    findings = []
+    for path in paths:
+        generated = path.startswith((".claude/", ".cursor/", ".agents/"))
+        generated = generated or (Path(path).name == "CLAUDE.md" and path != "CLAUDE.md")
+        if not generated:
+            continue
+        try:
+            load_content(path)
+        except RuntimeError:
+            continue  # deleting an accidentally tracked adapter is the repair
+        findings.append(
+            f"{path} is generated agent-adapter state; keep canonical content in AGENTS.md or skills/"
+        )
+    return findings
+
+
+def adapter_ignore_findings(paths, load_content):
+    if ".gitignore" not in paths:
+        return []
+    try:
+        lines = load_content(".gitignore").splitlines()
+    except RuntimeError:
+        return [".gitignore cannot be deleted; it protects generated agent-adapter state"]
+    if lines.count(ADAPTER_IGNORE_START) != 1 or lines.count(ADAPTER_IGNORE_END) != 1:
+        return [".gitignore must keep the single AgentFold adapter block and its markers"]
+    start = lines.index(ADAPTER_IGNORE_START)
+    end = lines.index(ADAPTER_IGNORE_END)
+    if start >= end or tuple(lines[start + 1:end]) != ADAPTER_IGNORE_LINES:
+        return [".gitignore AgentFold adapter block changed; edit product ignores outside its markers"]
+
+    protected_examples = (
+        ".claude", ".claude/", ".claude/skills/example",
+        ".cursor", ".cursor/", ".cursor/skills/example",
+        ".agents", ".agents/", ".agents/skills/example", "service/CLAUDE.md",
+    )
+    for line in lines[:start] + lines[end + 1:]:
+        rule = line.strip()
+        if not rule.startswith("!") or rule == "!/CLAUDE.md":
+            continue
+        pattern = rule[1:].lstrip("/")
+        if any(fnmatch.fnmatch(example, pattern) for example in protected_examples):
+            return [f".gitignore rule {rule!r} re-includes generated agent-adapter state"]
+    return []
+
+
 def staged_paths(repo=REPO):
     return [line for line in git(
         "diff", "--cached", "--no-renames", "--name-only", "--diff-filter=ACMRD", repo=repo
@@ -330,6 +392,8 @@ def main(argv=None):
     core_paths = [path for path in paths if is_core_path(path, registered_paths)]
     task = find_task(branch, load_text=load_content)
     errors = []
+    errors.extend(adapter_ignore_findings(paths, load_content))
+    errors.extend(generated_adapter_findings(paths, load_content))
     if core_paths and task is None:
         errors.append(
             "core changes require a `task/<task-id>` branch and matching task folder; "
