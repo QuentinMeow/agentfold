@@ -31,7 +31,7 @@ UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Za-z].*\Z", re.M | re.
 RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
 RAW_HTML_TYPE1_BLOCK_RE = re.compile(
     rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[ \t>]|$).*?"
-    rf"(?:</(?:{RAW_HTML_TYPE1_TAGS})\s*>[^\n]*(?:\n|\Z)|\Z)",
+    rf"(?:</(?:{RAW_HTML_TYPE1_TAGS})>[^\n]*(?:\n|\Z)|\Z)",
     re.I | re.M | re.S,
 )
 RAW_HTML_TYPE6_TAGS = (
