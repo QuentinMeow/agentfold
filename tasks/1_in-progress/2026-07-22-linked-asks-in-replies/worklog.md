@@ -10,3 +10,5 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   "pending decision: ABC" passed.
 - Chose `templates/handover.md` as the format's single source; the other two texts
   reference it (single-source-of-truth guardrail).
+- Landed on the task branch (task/2026-07-22-linked-asks-in-replies), merged to main
+  after reconciler + tests passed; verification recorded.

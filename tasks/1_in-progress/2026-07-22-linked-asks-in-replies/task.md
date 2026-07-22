@@ -16,12 +16,12 @@ skill) say "with links" but never pin this format, so a bare mention currently p
 
 ## Acceptance criteria
 
-- [ ] `templates/handover.md` "Needs your attention" specifies the format: clickable
+- [x] `templates/handover.md` "Needs your attention" specifies the format: clickable
       markdown link + 2–3 sentences of context, bare names banned
-- [ ] Root `AGENTS.md` ritual step 4 requires link + context and points at the
+- [x] Root `AGENTS.md` ritual step 4 requires link + context and points at the
       template as the format's single source
-- [ ] `skills/session-handover/SKILL.md` step 6 matches
-- [ ] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
+- [x] `skills/session-handover/SKILL.md` step 6 matches
+- [x] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
 
 ## Links
 
