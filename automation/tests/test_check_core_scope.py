@@ -56,13 +56,18 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path("ARCHITECTURE.md"))
         self.assertFalse(SCOPE.is_core_path("DEVELOPMENT.md"))
         self.assertFalse(SCOPE.is_core_path("API.md"))
+        self.assertFalse(SCOPE.is_core_path("BUSINESS_RULES.md"))
         self.assertFalse(SCOPE.is_core_path("GEMINI.md"))
         self.assertTrue(SCOPE.is_core_path("GEMINI.md", {"GEMINI.md"}))
         self.assertTrue(SCOPE.is_core_path(".github/copilot-instructions.md"))
         self.assertTrue(SCOPE.is_core_path(".windsurf/rules/policy.md"))
-        self.assertTrue(SCOPE.is_core_path(".clinerules/policy.md"))
+        self.assertFalse(SCOPE.is_core_path(".clinerules/policy.md"))
+        self.assertTrue(SCOPE.is_core_path(
+            ".clinerules/policy.md", {".clinerules/policy.md"}
+        ))
         self.assertFalse(SCOPE.is_core_path("README.md"))
         self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/bug_report.md"))
+        self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/agent_bug.md"))
 
     def test_only_registered_provider_adapter_is_core(self):
         registered = {".github/workflows/harness.yml", ".gitlab-ci.yml", "CLAUDE.md"}
@@ -107,10 +112,30 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertTrue(any("exactly one real" in error for error in errors))
 
     def test_raw_html_block_receipt_is_not_evidence(self):
-        for tag in ("pre", "details", "table"):
+        for tag in ("pre", "details", "table", "h1", "menuitem", "custom-element"):
             with self.subTest(tag=tag), tempfile.TemporaryDirectory() as tmp:
                 task = self.make_task(
                     tmp, design=f"# Design\n\n<{tag}>\n{COMPLETE_DESIGN}\n</{tag}>\n"
+                )
+                errors = SCOPE.validate_task(task, touched_core=True)
+                self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_blank_terminated_and_special_html_receipts_are_not_evidence(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
+        wrappers = (
+            "<hr>\n{compact}\n",
+            "<?processing\n{receipt}\n?>\n",
+            "<![CDATA[\n{receipt}\n]]>\n",
+            "<!DECLARATION\n{receipt}\n>\n",
+        )
+        for wrapper in wrappers:
+            with self.subTest(wrapper=wrapper), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, design="# Design\n\n" + wrapper.format(
+                        receipt=COMPLETE_DESIGN, compact=compact_receipt
+                    )
                 )
                 errors = SCOPE.validate_task(task, touched_core=True)
                 self.assertTrue(any("exactly one real" in error for error in errors))

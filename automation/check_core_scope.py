@@ -20,21 +20,30 @@ REVIEW_RE = re.compile(
 FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 UNCLOSED_HTML_COMMENT_RE = re.compile(r"<!--.*\Z", re.S)
+HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*?\?>", re.M | re.S)
+UNCLOSED_HTML_PROCESSING_RE = re.compile(r"^[ ]{0,3}<\?.*\Z", re.M | re.S)
+HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*?\]\]>", re.M | re.S)
+UNCLOSED_HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*\Z", re.M | re.S)
+HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*?>", re.M | re.S)
+UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*\Z", re.M | re.S)
+RAW_HTML_BLOCK_RE = re.compile(
+    r"^[ ]{0,3}<(?P<tag>[A-Za-z][A-Za-z0-9-]*)(?=[\s>/])[^>]*>"
+    r".*?</(?P=tag)\s*>[^\n]*(?:\n|\Z)",
+    re.I | re.M | re.S,
+)
 RAW_HTML_CONTAINER_TAGS = (
     "address|article|aside|blockquote|body|caption|center|colgroup|dd|details|dialog|"
-    "dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|head|header|html|"
-    "iframe|legend|li|main|menu|nav|noframes|noembed|object|ol|optgroup|option|p|"
-    "plaintext|pre|script|search|section|style|summary|table|tbody|td|textarea|tfoot|"
-    "th|thead|title|tr|ul|xmp"
-)
-RAW_HTML_BLOCK_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?P<tag>{RAW_HTML_CONTAINER_TAGS})(?=[\s>/])[^>]*>"
-    rf".*?</(?P=tag)\s*>[^\n]*(?:\n|\Z)",
-    re.I | re.M | re.S,
+    "dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|h1|h2|h3|h4|h5|"
+    "h6|head|header|html|iframe|legend|li|main|menu|menuitem|nav|noframes|noembed|"
+    "object|ol|optgroup|option|p|plaintext|pre|script|search|section|style|summary|"
+    "table|tbody|td|textarea|tfoot|th|thead|title|tr|ul|xmp"
 )
 UNCLOSED_RAW_HTML_BLOCK_RE = re.compile(
     rf"^[ ]{{0,3}}<(?:{RAW_HTML_CONTAINER_TAGS})(?=[\s>/])[^>]*>.*\Z",
     re.I | re.M | re.S,
+)
+RAW_HTML_ANY_TAG_START_RE = re.compile(
+    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/])[^>]*>", re.I
 )
 
 CORE_PREFIXES = (
@@ -59,7 +68,11 @@ ORDINARY_ROOT_MARKDOWN = {
     "CHANGELOG.md", "CODE_OF_CONDUCT.md", "LICENSE.md", "README.md", "SECURITY.md",
     "SUPPORT.md",
 }
-INSTRUCTION_PATH_MARKERS = ("agent", "assistant", "instruction", "prompt", "rule")
+ROOT_INSTRUCTION_TOKENS = {
+    "agent", "agents", "assistant", "assistants", "instruction", "instructions",
+    "prompt", "prompts",
+}
+HIDDEN_INSTRUCTION_TOKENS = {"instruction", "instructions", "prompt", "prompts", "rule", "rules"}
 ADAPTER_IGNORE_START = "# agentfold-adapters:start"
 ADAPTER_IGNORE_END = "# agentfold-adapters:end"
 ADAPTER_IGNORE_LINES = (
@@ -120,12 +133,35 @@ def strip_fenced_blocks(text):
     return "".join(output)
 
 
+def strip_blank_terminated_html_blocks(text):
+    """Remove CommonMark tag-start blocks through their terminating blank line."""
+    output = []
+    inside = False
+    for line in (text or "").splitlines(keepends=True):
+        if not inside and RAW_HTML_ANY_TAG_START_RE.match(line.rstrip("\r\n")):
+            inside = True
+        if inside:
+            output.append("\n" if line.endswith(("\n", "\r")) else "")
+            if not line.strip():
+                inside = False
+            continue
+        output.append(line)
+    return "".join(output)
+
+
 def semantic_text(text):
     clean = strip_fenced_blocks(text or "")
     clean = HTML_COMMENT_RE.sub("", clean)
     clean = UNCLOSED_HTML_COMMENT_RE.sub("", clean)
+    clean = HTML_PROCESSING_RE.sub("", clean)
+    clean = UNCLOSED_HTML_PROCESSING_RE.sub("", clean)
+    clean = HTML_CDATA_RE.sub("", clean)
+    clean = UNCLOSED_HTML_CDATA_RE.sub("", clean)
+    clean = HTML_DECLARATION_RE.sub("", clean)
+    clean = UNCLOSED_HTML_DECLARATION_RE.sub("", clean)
     clean = RAW_HTML_BLOCK_RE.sub("", clean)
-    return UNCLOSED_RAW_HTML_BLOCK_RE.sub("", clean)
+    clean = UNCLOSED_RAW_HTML_BLOCK_RE.sub("", clean)
+    return strip_blank_terminated_html_blocks(clean)
 
 
 def parsed_fields(text):
@@ -169,18 +205,26 @@ def is_core_path(path, extra_exact=()):
     while path.startswith("./"):
         path = path[2:]
     rel = Path(path)
-    instruction_named = any(
-        marker in part.lower()
-        for part in rel.parts
-        for marker in INSTRUCTION_PATH_MARKERS
-    )
+    component_tokens = [
+        re.findall(r"[a-z0-9]+", Path(part).stem.lower()) for part in rel.parts
+    ]
+    root_tokens = component_tokens[0] if component_tokens else []
     root_instruction_doc = (
         len(rel.parts) == 1 and rel.suffix.lower() == ".md"
-        and rel.name not in ORDINARY_ROOT_MARKDOWN and instruction_named
+        and rel.name not in ORDINARY_ROOT_MARKDOWN
+        and bool(root_tokens) and root_tokens[0] in ROOT_INSTRUCTION_TOKENS
+    )
+    hidden_directory_instruction = any(
+        HIDDEN_INSTRUCTION_TOKENS.intersection(tokens)
+        for tokens in component_tokens[1:-1]
+    )
+    hidden_filename_instruction = bool(
+        component_tokens and HIDDEN_INSTRUCTION_TOKENS.intersection(component_tokens[-1])
     )
     hidden_instruction_file = (
         len(rel.parts) > 1 and rel.parts[0].startswith(".")
-        and rel.suffix.lower() == ".md" and instruction_named
+        and rel.suffix.lower() == ".md"
+        and (hidden_directory_instruction or hidden_filename_instruction)
     )
     return bool(
         path in CORE_EXACT or path in set(extra_exact) or path.startswith(CORE_PREFIXES)
