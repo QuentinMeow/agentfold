@@ -93,12 +93,12 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 | Guarantee | Enforced by |
 |-----------|-------------|
 | Every queue item, task, memory entry matches its schema | `reconcile.py` (pre-commit hook + CI) |
-| Every conversation leaves a `handover.md` | reconciler → auto-filed retry item |
+| Every conversation *folder* contains a `handover.md` | reconciler → auto-filed retry item (a session that leaves no folder is invisible to it) |
 | Links in docs point to files that exist | reconciler link check |
 | Contracts stay short (line budgets on AGENTS.md, SKILL.md, this README) | reconciler budget check |
 | Memory expires and gets re-verified or deleted | `Review-by` dates + reconciler + gardener skill |
 | Example services stay green | `automation/run_tests.py` in the pre-commit hook + CI |
-| Merges get adversarial review (in `autonomous` mode) | `skills/adversarial-review/` protocol, majority verdict |
+| Merges get adversarial review (in `autonomous` mode) | `skills/adversarial-review/` protocol — suggested, not machine-checked |
 
 Everything an agent might forget is either checked mechanically or written down where
 the next agent will trip over it. That's the whole trick.

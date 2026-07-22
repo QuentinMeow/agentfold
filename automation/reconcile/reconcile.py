@@ -280,7 +280,8 @@ def check_links():
 
 def check_agents_budget():
     for md in REPO.rglob("*.md"):
-        if md.relative_to(REPO).parts[0].startswith("."):
+        parts = md.relative_to(REPO).parts
+        if parts[0].startswith(".") or parts[0] == "templates":  # schemas, not live contracts
             continue
         lines = len(md.read_text(encoding="utf-8").splitlines())
         budget = None

@@ -15,9 +15,10 @@ What the project must not forget, in four zones — plus a hard rule that memory
 - `index.md` is **generated** — one line per entry from each file's `**Description:**`
   field. Rebuild with `python3 automation/reconcile/reconcile.py --fix-index`; never
   hand-edit.
-- Every entry carries `**Review-by:**` (default: +90 days). Overdue entries become
-  reconciler findings; the `skills/memory-gardener/` pass re-verifies, compacts, or
-  deletes.
+- Every entry carries `**Review-by:**` (defaults are set by each template — the only
+  home of that number). Stagger dates a few weeks when writing several entries at
+  once, so reviews don't all come due together. Overdue entries become reconciler
+  findings; the `skills/memory-gardener/` pass re-verifies, compacts, or deletes.
 - **Merge before adding**: search the zone for an existing entry about the same
   subject; update it instead of duplicating.
 - ADRs are immutable: reversal = new ADR + `**Superseded-by:**` link on the old one.
