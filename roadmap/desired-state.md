@@ -31,5 +31,9 @@ In priority order. Each line is specific enough to spawn tasks against.
    consequence-based policy separates preferences, repairable invariants, required
    deliberation, and critical boundaries; PII/secret controls layer redacted local
    feedback, content-bound evidence, detector canaries, protected exceptions, and
-   remote authority where available. *(Design proposed in
-   `docs/designs/risk-tiered-agent-guardrails.md`; implementation not started.)*
+   remote authority where available. Every guard is selected through one `hard`,
+   `soft`, `off`, or `manual` configuration surface; starter mechanisms are
+   templates, costly agent review is manual by default, and sandboxing is deferred.
+   *(Human-reviewed design in `docs/designs/risk-tiered-agent-guardrails.md`;
+   implementation task `2026-07-22-universal-guard-mode-configuration` filed but not
+   started.)*

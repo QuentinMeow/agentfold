@@ -28,6 +28,10 @@ What is true today, mapped to the desired-state lines.
   wording gaps. Wording gaps fixed on main; a ninth principle
   (`handbook/principles/provenance-over-position.md`) added; six hardening tasks
   filed in the backlog (desired-state line 7).
+- **Guardrail proposal review (2026-07-22)**: the owner approved the provenance
+  principle wording and narrowed the critical-obligations proposal to template-first,
+  universally mode-configurable guards (`hard`, `soft`, `off`, `manual`);
+  independent-agent review is manual by default and sandboxing is deferred.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   public/private overlay, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
