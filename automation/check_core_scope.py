@@ -21,9 +21,20 @@ CORE_PREFIXES = (
     "skills/",
     "automation/",
     "templates/",
-    "handbook/principles/",
-    ".github/workflows/",
+    "handbook/",
 )
+CORE_EXACT = {
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "docs/AGENTS.md",
+    "docs/designs/AGENTS.md",
+    "history/AGENTS.md",
+    "memory/AGENTS.md",
+    "message-queue/AGENTS.md",
+    "services/AGENTS.md",
+    "tasks/AGENTS.md",
+}
+PROTECTED_PATHS_FILE = "automation/core-scope-paths.txt"
 EXECUTABLE_SUFFIXES = {".py", ".sh", ".bash", ".js", ".ts", ".rb", ".ps1"}
 GLOBAL_STATE_MARKERS = (
     (re.compile(r"\bPath\.home\s*\("), "home-path API"),
@@ -32,7 +43,8 @@ GLOBAL_STATE_MARKERS = (
     (re.compile(r"\b(?:os\.)?(?:getenv|environ\.(?:get))\s*\(\s*['\"](?:HOME|USERPROFILE|[A-Z]+_HOME)['\"]"), "home environment"),
     (re.compile(r"\benviron\s*\[\s*['\"](?:HOME|USERPROFILE|[A-Z]+_HOME)['\"]\s*\]"), "home environment"),
     (re.compile(r"['\"]~/\."), "dot-directory beneath home"),
-    (re.compile(r"\$(?:HOME|USERPROFILE)\b|%(?:HOME|USERPROFILE)%"), "shell home environment"),
+    (re.compile(r"\$(?:HOME|USERPROFILE)\b|\$\{(?:HOME|USERPROFILE)\}|%(?:HOME|USERPROFILE)%"), "shell home environment"),
+    (re.compile(r"\$(?:\{)?env:(?:HOME|USERPROFILE)(?:\})?", re.I), "PowerShell home environment"),
     (re.compile(r"['\"]/(?:Users|home)/[^/'\"]+/"), "absolute user-home path"),
 )
 
@@ -46,8 +58,13 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
-def fields(path):
-    return dict(FIELD_RE.findall(path.read_text(encoding="utf-8")))
+def parsed_fields(text):
+    pairs = FIELD_RE.findall(text or "")
+    counts = {}
+    for key, _ in pairs:
+        counts[key] = counts.get(key, 0) + 1
+    duplicates = sorted(key for key, count in counts.items() if count > 1)
+    return dict(pairs), duplicates
 
 
 def is_placeholder(value):
@@ -62,19 +79,33 @@ def display(path):
         return path
 
 
-def is_core_path(path):
+def protected_paths(text):
+    return {
+        line.strip() for line in (text or "").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+def is_core_path(path, extra_exact=()):
     path = Path(path).as_posix()
     while path.startswith("./"):
         path = path[2:]
-    return path == "AGENTS.md" or path.startswith(CORE_PREFIXES)
+    return path in CORE_EXACT or path in set(extra_exact) or path.startswith(CORE_PREFIXES)
 
 
-def is_core_executable(path):
+def is_core_executable(path, content="", mode=""):
     rel = Path(path)
     parts = rel.parts
     if not parts or parts[0] not in {"automation", "skills"} or "tests" in parts:
         return False
-    return rel.suffix in EXECUTABLE_SUFFIXES or parts[:2] == ("automation", "hooks")
+    return (
+        mode == "100755"
+        or content.startswith("#!")
+        or rel.suffix in EXECUTABLE_SUFFIXES
+        or "scripts" in parts
+        or parts[:2] == ("automation", "hooks")
+        or (parts[0] == "automation" and not rel.suffix)
+    )
 
 
 def task_id_from_branch(branch):
@@ -99,10 +130,51 @@ def disposition_with_reason(value, allowed):
                 and len(match.group(2).strip()) >= 12 and not is_placeholder(value))
 
 
-def validate_task(task, touched_core, require_review=False):
+def evidence_text(path, load_text=None):
+    try:
+        if load_text:
+            return load_text(Path(display(path)).as_posix())
+        return path.read_text(encoding="utf-8")
+    except (OSError, RuntimeError):
+        return None
+
+
+def valid_adapter(value):
+    value = (value or "").strip()
+    if value.lower() == "none":
+        return True
+    pieces = [piece.strip() for piece in value.split(";")]
+    if len(pieces) != 4 or any(piece.count("=") != 1 for piece in pieces):
+        return False
+    pairs = dict(piece.split("=", 1) for piece in pieces)
+    if set(pairs) != {"canonical", "optional", "policy", "writes"}:
+        return False
+    canonical = pairs["canonical"].strip()
+    canonical_path = Path(canonical)
+    return bool(
+        canonical
+        and re.fullmatch(r"[A-Za-z0-9._/-]+", canonical)
+        and not canonical_path.is_absolute()
+        and ".." not in canonical_path.parts
+        and pairs["optional"].strip().lower() == "yes"
+        and pairs["policy"].strip().lower() == "none"
+        and pairs["writes"].strip().lower() == "repo-only"
+    )
+
+
+def same_reviewer_as_claimant(reviewer, claimant):
+    claimant_words = re.findall(r"[a-z0-9]+", (claimant or "").lower())
+    reviewer_words = set(re.findall(r"[a-z0-9]+", (reviewer or "").lower()))
+    return bool(claimant_words and claimant_words[0] in reviewer_words)
+
+
+def validate_task(task, touched_core, require_review=False, load_text=None):
     errors = []
     task_file = task / "task.md"
-    task_fields = fields(task_file) if task_file.is_file() else {}
+    task_text = evidence_text(task_file, load_text)
+    task_fields, task_duplicates = parsed_fields(task_text)
+    if task_duplicates:
+        errors.append(f"{display(task_file)} has duplicate field(s): {', '.join(task_duplicates)}")
     scope = task_fields.get("Repository scope", "")
     if touched_core and scope != "core":
         errors.append(
@@ -111,11 +183,19 @@ def validate_task(task, touched_core, require_review=False):
         )
 
     design = task / "design.md"
-    design_fields = fields(design) if design.is_file() else {}
+    design_text = evidence_text(design, load_text)
+    design_fields, design_duplicates = parsed_fields(design_text)
     if touched_core or (task.parent.name in {"3_in-review", "4_done"} and scope == "core"):
-        if not design.is_file():
+        if design_text is None:
             errors.append(f"{display(task)} needs design.md with a completed Core fit section")
         else:
+            core_keys = {
+                "Agent substitution", "Provider substitution", "Repository substitution",
+                "User-global writes", "Why AgentFold core", "Thin adapter",
+            }
+            duplicate_core = sorted(core_keys.intersection(design_duplicates))
+            if duplicate_core:
+                errors.append(f"Core fit has duplicate field(s): {', '.join(duplicate_core)}")
             if not disposition_with_reason(design_fields.get("Agent substitution"), {"pass"}):
                 errors.append("Core fit needs `**Agent substitution:** pass — <reason>`")
             if not disposition_with_reason(
@@ -129,12 +209,10 @@ def validate_task(task, touched_core, require_review=False):
             why = design_fields.get("Why AgentFold core", "")
             if is_placeholder(why) or len(why.strip()) < 24:
                 errors.append("Core fit needs a concrete `**Why AgentFold core:**` rationale")
-            adapter = design_fields.get("Thin adapter", "").strip().lower()
-            adapter_tokens = ("canonical=", "optional=yes", "policy=none", "writes=repo-only")
-            if adapter != "none" and not all(token in adapter for token in adapter_tokens):
+            if not valid_adapter(design_fields.get("Thin adapter")):
                 errors.append(
-                    "`**Thin adapter:**` must be `none` or declare canonical=, "
-                    "optional=yes, policy=none, and writes=repo-only"
+                    "`**Thin adapter:**` must be `none` or exact nonempty canonical=, "
+                    "optional=yes, policy=none, writes=repo-only pairs"
                 )
 
     review_needed = require_review or (
@@ -142,31 +220,39 @@ def validate_task(task, touched_core, require_review=False):
     )
     if review_needed:
         verification = task / "verification.md"
-        text = verification.read_text(encoding="utf-8") if verification.is_file() else ""
-        verdicts = REVIEW_RE.findall(text)
-        claimant = task_fields.get("Claimed-by", "").strip().lower().split(" ", 1)[0]
-        if any(verdict.lower() == "block" for _, verdict, _ in verdicts):
-            errors.append("core-fit review still contains a blocking verdict")
-        independent = [
-            reviewer for reviewer, verdict, _ in verdicts
-            if verdict.lower() == "approve" and reviewer.strip().lower() != claimant
-        ]
-        if not independent:
+        verification_text = evidence_text(verification, load_text) or ""
+        verdicts = REVIEW_RE.findall(verification_text)
+        claimant = task_fields.get("Claimed-by", "")
+        latest = {}
+        for reviewer, verdict, _ in verdicts:
+            if not same_reviewer_as_claimant(reviewer, claimant):
+                latest[reviewer.strip().lower()] = verdict.lower()
+        approvals = sum(verdict == "approve" for verdict in latest.values())
+        blocks = sum(verdict == "block" for verdict in latest.values())
+        if not latest:
             errors.append(
                 "verification.md needs `- core-fit / <independent reviewer>: approve — <finding>`"
+            )
+        elif approvals <= blocks:
+            errors.append(
+                f"core-fit review lacks an approve majority ({approvals} approve, {blocks} block)"
             )
     return errors
 
 
-def global_state_findings(paths, load_content):
+def global_state_findings(paths, load_content, load_mode=lambda _: ""):
     findings = []
     for path in paths:
-        if not is_core_executable(path):
+        parts = Path(path).parts
+        if not parts or parts[0] not in {"automation", "skills"} or "tests" in parts:
             continue
         try:
             content = load_content(path)
+            mode = load_mode(path)
         except (OSError, RuntimeError):
             continue  # deleted or unavailable in the selected tree
+        if not is_core_executable(path, content, mode):
+            continue
         for pattern, label in GLOBAL_STATE_MARKERS:
             if pattern.search(content):
                 findings.append(
@@ -176,11 +262,44 @@ def global_state_findings(paths, load_content):
 
 
 def staged_paths(repo=REPO):
-    return [line for line in git("diff", "--cached", "--name-only", "--diff-filter=ACMR", repo=repo).splitlines() if line]
+    return [line for line in git(
+        "diff", "--cached", "--no-renames", "--name-only", "--diff-filter=ACMRD", repo=repo
+    ).splitlines() if line]
 
 
 def range_paths(spec, repo=REPO):
-    return [line for line in git("diff", "--name-only", "--diff-filter=ACMR", spec, repo=repo).splitlines() if line]
+    return [line for line in git(
+        "diff", "--no-renames", "--name-only", "--diff-filter=ACMRD", spec, repo=repo
+    ).splitlines() if line]
+
+
+def structural_paths(diff_args, repo=REPO):
+    return [line for line in git(
+        "diff", "--no-renames", "--name-only", "--diff-filter=ACD", *diff_args, repo=repo
+    ).splitlines() if line]
+
+
+def changed_lines(diff_args, repo=REPO):
+    total = 0
+    for line in git("diff", "--no-renames", "--numstat", *diff_args, repo=repo).splitlines():
+        added, deleted, _ = line.split("\t", 2)
+        if not (added.isdigit() and deleted.isdigit()):
+            return 10 ** 9  # binary/unknown changes are never de-minimis
+        total += int(added) + int(deleted)
+    return total
+
+
+def de_minimis_without_task(core_paths, structural, line_count, protected=()):
+    high_risk = lambda path: (
+        Path(path).name == "AGENTS.md"
+        or path.startswith(("automation/", "templates/", "handbook/"))
+        or path in CORE_EXACT
+        or path in set(protected)
+    )
+    return bool(
+        core_paths and line_count <= 20 and not set(core_paths).intersection(structural)
+        and not any(high_risk(path) for path in core_paths)
+    )
 
 
 def main(argv=None):
@@ -195,23 +314,36 @@ def main(argv=None):
     branch = args.branch or git("branch", "--show-current").strip()
     if args.diff_range:
         paths = range_paths(args.diff_range)
+        diff_args = [args.diff_range]
         head = args.diff_range.rsplit("...", 1)[-1]
         load_content = lambda path: git("show", f"{head}:{path}")
+        load_mode = lambda path: (git("ls-tree", head, "--", path).split() or [""])[0]
     else:
         paths = staged_paths()
+        diff_args = ["--cached"]
         load_content = lambda path: git("show", f":{path}")
+        load_mode = lambda path: (git("ls-files", "-s", "--", path).split() or [""])[0]
 
-    core_paths = [path for path in paths if is_core_path(path)]
+    try:
+        registered_paths = protected_paths(load_content(PROTECTED_PATHS_FILE))
+    except RuntimeError:
+        registered_paths = set()
+    core_paths = [path for path in paths if is_core_path(path, registered_paths)]
+    structural = structural_paths(diff_args)
+    line_count = changed_lines(diff_args)
     task = find_task(branch)
     errors = []
     if core_paths and task is None:
-        errors.append(
-            "core changes require a `task/<task-id>` branch and matching task folder; "
-            "personal/provider setup belongs outside AgentFold"
-        )
+        if not de_minimis_without_task(core_paths, structural, line_count, registered_paths):
+            errors.append(
+                "structural or policy-bearing core changes require a `task/<task-id>` "
+                "branch and matching task folder; personal/provider setup belongs outside AgentFold"
+            )
     elif task is not None:
-        errors.extend(validate_task(task, bool(core_paths), args.require_review and bool(core_paths)))
-    errors.extend(global_state_findings(core_paths, load_content))
+        errors.extend(validate_task(
+            task, bool(core_paths), args.require_review and bool(core_paths), load_content
+        ))
+    errors.extend(global_state_findings(core_paths, load_content, load_mode))
 
     if errors:
         for error in errors:
@@ -219,7 +351,8 @@ def main(argv=None):
         print("    fix: complete templates/task/design.md, route external setup outside core, or obtain independent review")
         return 1
     if core_paths:
-        print(f"core-scope: pass ({len(core_paths)} core path(s), task {task.name})")
+        owner = f"task {task.name}" if task else "de-minimis non-task change"
+        print(f"core-scope: pass ({len(core_paths)} core path(s), {owner})")
     else:
         print("core-scope: no core changes")
     return 0

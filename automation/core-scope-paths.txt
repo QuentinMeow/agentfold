@@ -1,0 +1,2 @@
+# Thin provider adapters that invoke canonical AgentFold core behavior.
+.github/workflows/harness.yml
