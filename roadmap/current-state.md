@@ -14,8 +14,9 @@ What is true today, mapped to the desired-state lines.
   files and garbage-collects retry-queue items. A separate Git boundary gate requires
   substitution evidence for core diffs and rejects obvious user-global access in
   tracked executables. Its token-expensive independent review mode is manually invoked
-  with `--require-review`; pre-commit and CI do not select it by default. They still run
-  repository tests across services, skills, and automation. No template↔check drift
+  outside the gate; `--require-review` validates a revision-bound receipt, while
+  pre-commit and CI report that the manual review was not invoked by default. They still
+  run repository tests across services, skills, and automation. No template↔check drift
   detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the

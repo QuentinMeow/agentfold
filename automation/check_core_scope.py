@@ -11,12 +11,14 @@ import fnmatch
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
-    r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
+    r"^- core-fit / ([^:\r\n]+):[ \t]*(approve|block)[ \t]+[—-][ \t]+(.+)$",
+    re.I | re.M,
 )
 FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
 # CommonMark 0.31.2 HTML block starts and terminators.
@@ -327,13 +329,21 @@ def valid_adapter(value):
     )
 
 
+def identity_key(identity):
+    normalized = unicodedata.normalize("NFKC", identity or "").casefold()
+    return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
+
+
 def same_reviewer_as_claimant(reviewer, claimant):
-    claimant_words = re.findall(r"[a-z0-9]+", (claimant or "").lower())
-    reviewer_words = set(re.findall(r"[a-z0-9]+", (reviewer or "").lower()))
-    return bool(claimant_words and claimant_words[0] in reviewer_words)
+    claimant_key = identity_key(claimant)
+    reviewer_key = identity_key(reviewer)
+    return bool(claimant_key and reviewer_key == claimant_key)
 
 
-def validate_task(task, touched_core, require_review=False, load_text=None):
+def validate_task(
+    task, touched_core, require_review=False, load_text=None,
+    review_revision_check=None,
+):
     errors = []
     task_file = task / "task.md"
     task_text = evidence_text(task_file, load_text)
@@ -385,18 +395,38 @@ def validate_task(task, touched_core, require_review=False, load_text=None):
                     "optional=yes, policy=none, writes=repo-only pairs"
                 )
 
-    if require_review:
+    if require_review and scope != "core":
+        errors.append("--require-review applies only to a task with `Repository scope: core`")
+    elif require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
         review_sections = named_sections(verification_text, "Review verdicts")
         if len(review_sections) != 1:
             errors.append("verification.md needs exactly one real `## Review verdicts` section")
-        verdicts = REVIEW_RE.findall(review_sections[0] if len(review_sections) == 1 else "")
+        review_section = review_sections[0] if len(review_sections) == 1 else ""
+        revision_matches = list(re.finditer(
+            r"^\*\*Reviewed revision:\*\*[ \t]*([0-9a-fA-F]{7,40})[ \t]*$",
+            review_section,
+            re.M,
+        ))
+        if len(revision_matches) != 1:
+            errors.append(
+                "Review verdicts needs exactly one real "
+                "`**Reviewed revision:** <commit>` field"
+            )
+            verdict_source = ""
+        else:
+            reviewed_revision = revision_matches[0].group(1)
+            verdict_source = review_section[revision_matches[0].end():]
+            if review_revision_check:
+                errors.extend(review_revision_check(reviewed_revision))
+        verdicts = REVIEW_RE.findall(verdict_source)
         claimant = task_fields.get("Claimed-by", "")
         latest = {}
         for reviewer, verdict, _ in verdicts:
-            if not same_reviewer_as_claimant(reviewer, claimant):
-                latest[reviewer.strip().lower()] = verdict.lower()
+            reviewer_key = identity_key(reviewer)
+            if reviewer_key and not same_reviewer_as_claimant(reviewer, claimant):
+                latest[reviewer_key] = verdict.lower()
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())
         if not latest:
@@ -489,6 +519,41 @@ def range_paths(spec, repo=REPO):
     ).splitlines() if line]
 
 
+def review_revision_findings(
+    reviewed_revision, current_revision, registered_paths=(),
+    pending_core_paths=(), repo=REPO,
+):
+    resolved = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}"],
+        cwd=repo, text=True, capture_output=True, check=False,
+    )
+    if resolved.returncode:
+        return [f"reviewed revision {reviewed_revision!r} is not a commit in this repository"]
+    reviewed_commit = resolved.stdout.strip()
+    current = git("rev-parse", "--verify", f"{current_revision}^{{commit}}", repo=repo).strip()
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reviewed_commit, current],
+        cwd=repo, text=True, capture_output=True, check=False,
+    )
+    if ancestry.returncode:
+        return [
+            f"reviewed revision {reviewed_revision} is not an ancestor of {current[:12]}"
+        ]
+    later_paths = range_paths(f"{reviewed_commit}...{current}", repo=repo)
+    later_core = [
+        path for path in later_paths if is_core_path(path, registered_paths)
+    ]
+    later_core.extend(path for path in pending_core_paths if path not in later_core)
+    if later_core:
+        preview = ", ".join(later_core[:3])
+        suffix = " ..." if len(later_core) > 3 else ""
+        return [
+            f"core-fit review for {reviewed_commit[:12]} is stale; later core changes: "
+            f"{preview}{suffix}"
+        ]
+    return []
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -505,10 +570,12 @@ def main(argv=None):
     if args.diff_range:
         paths = range_paths(args.diff_range)
         head = args.diff_range.rsplit("...", 1)[-1]
+        current_revision = git("rev-parse", "--verify", f"{head}^{{commit}}").strip()
         load_content = lambda path: git("show", f"{head}:{path}")
         load_mode = lambda path: (git("ls-tree", head, "--", path).split() or [""])[0]
     else:
         paths = staged_paths()
+        current_revision = git("rev-parse", "--verify", "HEAD^{commit}").strip()
         load_content = lambda path: git("show", f":{path}")
         load_mode = lambda path: (git("ls-files", "-s", "--", path).split() or [""])[0]
 
@@ -521,14 +588,25 @@ def main(argv=None):
     errors = []
     errors.extend(adapter_ignore_findings(paths, load_content))
     errors.extend(generated_adapter_findings(paths, load_content))
-    if core_paths and task is None:
+    if (core_paths or args.require_review) and task is None:
         errors.append(
             "core changes require a `task/<task-id>` branch and matching task folder; "
             "personal/provider setup belongs outside AgentFold"
         )
     elif task is not None:
+        pending_core_paths = core_paths if not args.diff_range else ()
+        review_revision_check = lambda revision: review_revision_findings(
+            revision,
+            current_revision,
+            registered_paths,
+            pending_core_paths,
+        )
         errors.extend(validate_task(
-            task, bool(core_paths), args.require_review and bool(core_paths), load_content
+            task,
+            bool(core_paths),
+            args.require_review,
+            load_content,
+            review_revision_check,
         ))
     errors.extend(global_state_findings(core_paths, load_content, load_mode))
 
@@ -541,9 +619,21 @@ def main(argv=None):
         )
         return 1
     if core_paths:
-        print(f"core-scope: pass ({len(core_paths)} core path(s), task {task.name})")
+        review_state = (
+            "independent review verified" if args.require_review
+            else "independent review manual; not invoked"
+        )
+        print(
+            f"core-scope: pass ({len(core_paths)} core path(s), task {task.name}; "
+            f"{review_state})"
+        )
+    elif args.require_review:
+        print(
+            f"core-scope: pass (no later core changes, task {task.name}; "
+            "independent review verified)"
+        )
     else:
-        print("core-scope: no core changes")
+        print("core-scope: no core changes (independent review manual; not invoked)")
     return 0
 
 

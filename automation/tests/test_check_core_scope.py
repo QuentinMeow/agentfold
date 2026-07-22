@@ -36,7 +36,8 @@ class CoreScopeTests(unittest.TestCase):
             (task / "design.md").write_text(design, encoding="utf-8")
         if verification is not None:
             (task / "verification.md").write_text(
-                "# Verification\n\n## Review verdicts\n\n" + verification,
+                "# Verification\n\n## Review verdicts\n\n"
+                "**Reviewed revision:** abc1234\n\n" + verification,
                 encoding="utf-8",
             )
         return task
@@ -299,6 +300,52 @@ class CoreScopeTests(unittest.TestCase):
                 verification="- core-fit / reviewer: approve — tried replacing every integration\n"
             )
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True, require_review=True))
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=False, require_review=True))
+
+    def test_anonymous_review_does_not_satisfy_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit /  : approve — no reviewer identity\n"
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("independent reviewer" in error for error in errors))
+
+    def test_review_identity_cannot_cross_a_line_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / \nreviewer: approve — split identity\n"
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("independent reviewer" in error for error in errors))
+
+    def test_shared_identity_tokens_do_not_merge_distinct_reviewers(self):
+        for claimant, reviewer in (
+            ("codex agent", "claude agent"),
+            ("author@example.com", "reviewer@example.com"),
+            ("Alice Smith", "Bob Smith"),
+        ):
+            with self.subTest(claimant=claimant), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant=claimant,
+                    verification=(
+                        f"- core-fit / {reviewer}: approve — independent review\n"
+                    ),
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
+    def test_unicode_review_identity_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / 李雷: approve — independent review\n",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
 
     def test_self_review_does_not_satisfy_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -309,14 +356,28 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
             self.assertTrue(any("independent reviewer" in error for error in errors))
 
-    def test_claimant_alias_does_not_satisfy_gate(self):
+    def test_identity_word_order_does_not_create_a_second_reviewer(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
-                tmp, status="3_in-review", claimant="codex",
-                verification="- core-fit / codex-reviewer: approve — looks portable\n"
+                tmp, status="3_in-review", claimant="Smith Alice",
+                verification="- core-fit / Alice Smith: approve — self review\n"
             )
             errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
             self.assertTrue(any("independent reviewer" in error for error in errors))
+
+    def test_reviewed_revision_field_is_required(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review",
+                verification="- core-fit / reviewer: approve — unbound review\n",
+            )
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                "- core-fit / reviewer: approve — unbound review\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("Reviewed revision" in error for error in errors))
 
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (
@@ -478,6 +539,57 @@ class CoreScopeTests(unittest.TestCase):
             tool.unlink()
             subprocess.run(["git", "add", "-u"], cwd=root, check=True)
             self.assertIn("automation/tool.py", SCOPE.staged_paths(root))
+
+    def test_reviewed_revision_rejects_later_or_pending_core_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            (root / "automation").mkdir()
+            tool = root / "automation" / "tool.py"
+            tool.write_text("print('reviewed')\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "reviewed"], cwd=root, check=True)
+            reviewed = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+
+            (root / "notes.txt").write_text("review record\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "records"], cwd=root, check=True)
+            records_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            self.assertEqual([], SCOPE.review_revision_findings(
+                reviewed, records_head, repo=root
+            ))
+            self.assertTrue(SCOPE.review_revision_findings(
+                reviewed, records_head, pending_core_paths=["automation/pending.py"], repo=root
+            ))
+
+            tool.write_text("print('changed after review')\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "later core change"], cwd=root, check=True)
+            current = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            findings = SCOPE.review_revision_findings(reviewed, current, repo=root)
+            self.assertTrue(any("stale" in finding for finding in findings))
+
+    def test_reviewed_revision_must_be_a_known_ancestor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            (root / "notes.txt").write_text("head\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=root, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            self.assertTrue(SCOPE.review_revision_findings("deadbee", head, repo=root))
 
 
 if __name__ == "__main__":

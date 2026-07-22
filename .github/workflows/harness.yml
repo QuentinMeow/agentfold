@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Core scope — framework changes belong in AgentFold
+      - name: Core scope — deterministic boundary (agent review is manual)
         if: github.event_name == 'pull_request'
         env:
           CORE_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}

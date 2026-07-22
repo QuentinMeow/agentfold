@@ -1,10 +1,11 @@
 # AgentFold core requires generality, portability, and repository-local state
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-22
 **Decided-by:** human (the owner corrected an agent-specific core proposal in chat)
 **Description:** Core must survive agent, provider, and adopted-repository substitution; personal setup and user-global writes stay external
 **Review-by:** 2027-01-22
+**Superseded-by:** `memory/decisions/2026-07-22-core-portability-review-is-manually-selected.md`
 
 ## Context
 

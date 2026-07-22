@@ -15,8 +15,9 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   status changes are `git mv` between status folders, committed with prefix `harness:`.
 - `task.md` declares `**Repository scope:** core`, `service:<name>`, or `records-only`.
   Core changes also complete the receipt in `templates/task/design.md`; the Git boundary
-  check enforces that receipt automatically. Independent core-fit review is manual via
-  `--require-review` until guard modes are configurable. The small untracked-fix branch
+  check enforces that receipt automatically. Independent core-fit review is manually
+  invoked until guard modes are configurable; `--require-review` validates its
+  revision-bound receipt but does not launch a reviewer. The small untracked-fix branch
   convention applies only outside core until its backlog task defines a safe path.
 - Reference tasks by id, never by full path — paths change with status. Find one with
   `ls tasks/*/<task-id>` .

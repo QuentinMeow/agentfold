@@ -48,9 +48,10 @@ interface is proven useful.
 
 Use a narrow Git boundary check to trigger structured architectural questions for core
 paths. Deterministic checks always validate the receipt and reject obvious user-global
-state access; `--require-review` adds an independent challenge when a human or selected
-guard profile asks for it. Chosen: it forces deliberation without pretending syntax can
-prove architectural relevance or making a token-expensive reviewer always-on.
+state access. A human or selected guard profile may explicitly invoke an independent
+challenge; `--require-review` then validates its revision-bound receipt but does not
+launch the reviewer. Chosen: it forces deliberation without pretending syntax can prove
+architectural relevance or making a token-expensive reviewer always-on.
 
 ## Chosen boundary
 
@@ -78,9 +79,12 @@ The local hook checks staged bytes, including its task evidence; pull-request CI
 the full base-to-head tree. A core change without a task, `core` scope declaration,
 or complete substitution evidence fails with a routing message. Obvious home-directory
 access in changed core executables fails directly. When `--require-review` is explicitly
-selected, a missing independent approve majority also fails; otherwise verdict parsing
-does not run. Skill prose remains a semantic review responsibility so negative examples
-stay legal.
+selected, a missing, stale, or non-approving review receipt fails even when the selected
+diff changes only task records; later core edits invalidate an earlier reviewed commit.
+Without the flag, the command reports that manual review was not invoked and does not
+parse verdicts. Reviewer labels are untrusted claims rather than authenticated identity;
+the separately invoked panel supplies actual independence. Skill prose remains a
+semantic review responsibility so negative examples stay legal.
 Research, product code, and unregistered product CI stay
 unaffected; thin agent/provider adapters are listed in `automation/core-scope-paths.txt`.
 Generated agent directories are never trackable even with a forced add, while a marked
