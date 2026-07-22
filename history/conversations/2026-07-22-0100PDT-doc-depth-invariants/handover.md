@@ -1,7 +1,7 @@
 # Handover — doc-depth-invariants
 
-**Session:** 2026-07-22 01:00–01:11 PDT, claude (chat session with the repo owner)
-**Task:** 2026-07-22-doc-depth-invariants
+**Session:** 2026-07-22 01:00–01:16 PDT, claude (chat session with the repo owner)
+**Task:** 2026-07-22-doc-depth-invariants, then 2026-07-22-linked-asks-in-replies
 **Mode:** async
 
 One screen max, plain language, for a teammate who was away. Depth goes in the task
@@ -21,6 +21,10 @@ folder; this file links to it.
   140 lines (same `agents-budget` check as contract files); verified the check fires.
 - Chose not to add a `references/` folder — `handbook/` already plays that role and
   the naming conventions ban generic buckets.
+- Second chat rule, same conversation: a surfaced `needs-human/` item is a clickable
+  link plus a few sentences of context, never a bare name. Format pinned in
+  `templates/handover.md`; ritual step 4 and the session-handover skill now require it
+  (task 2026-07-22-linked-asks-in-replies).
 
 ## How it works now
 
@@ -31,9 +35,10 @@ file — additions must displace something or push depth into `handbook/`.
 
 ## Decisions made for you
 
-- Both rules were directed by you in chat; recorded as ADRs:
-  `memory/decisions/2026-07-22-queue-items-are-regenerable-projections.md` and
-  `memory/decisions/2026-07-22-root-readme-line-budget.md`.
+- All three rules were directed by you in chat; recorded as ADRs:
+  `memory/decisions/2026-07-22-queue-items-are-regenerable-projections.md`,
+  `memory/decisions/2026-07-22-root-readme-line-budget.md`, and
+  `memory/decisions/2026-07-22-surfaced-asks-are-links-plus-context.md`.
 
 ## Needs your attention
 
@@ -47,7 +52,8 @@ file — additions must displace something or push depth into `handbook/`.
 
 ## Deep links
 
-- Task folder: `tasks/4_done/2026-07-22-doc-depth-invariants/` · Worklog:
-  `tasks/4_done/2026-07-22-doc-depth-invariants/worklog.md` · Verification:
-  `tasks/4_done/2026-07-22-doc-depth-invariants/verification.md`
-- Commits: 10f9279 (claim + ADRs), c464740 (branch work), merge + 72426ab, 04e975d
+- Task folders: `tasks/4_done/2026-07-22-doc-depth-invariants/` and
+  `tasks/4_done/2026-07-22-linked-asks-in-replies/` (each holds its worklog and
+  verification)
+- Commits: 10f9279 (claim + ADRs), c464740 (branch work), merge + 72426ab, 04e975d;
+  second task: claim + ADR, branch work, merge, review/done moves (see git log)
