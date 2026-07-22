@@ -42,7 +42,7 @@ Every name is chosen so you can guess the contents without opening the folder.
 ```
 agentfold/
 ├── AGENTS.md            # root agent contract — the API of the whole repo
-├── README.md            # you are here (humans only; agents read AGENTS.md)
+├── README.md            # you are here — the human doc; agent contract is AGENTS.md
 ├── handbook/            # why & how: principles, modes, git workflow, naming, adoption
 ├── message-queue/       # all async communication, one file per message
 │   ├── needs-human/     #   your move:
