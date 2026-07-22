@@ -54,8 +54,9 @@ order starting with 2026-07-22-severity-tiers-for-reconciler-findings.
 
 - Work the backlog in order: severity tiers → retry automation → write rules →
   de-minimis → provenance checks → ritual hooks (rationale in the report, Part 3).
-- All commits are **local only** — push (or ask a session to) when you want them on
-  origin.
+- Everything from this session is published on branch
+  `session/2026-07-22-0130PDT-design-review-grill` as a PR the owner asked for —
+  review and merge it; nothing lands on main until then.
 
 ## Deep links
 
