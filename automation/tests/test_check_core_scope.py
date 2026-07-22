@@ -634,8 +634,38 @@ class CoreScopeTests(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=root, text=True
             ).strip()
 
-            (task / "task.md").write_text("**Claimed-by:** reviewer\n", encoding="utf-8")
+            done_task = root / "tasks" / "4_done" / task_id
+            done_task.parent.mkdir(parents=True)
+            subprocess.run(["git", "mv", str(task), str(done_task)], cwd=root, check=True)
+            self.assertEqual([], SCOPE.review_revision_findings(
+                reviewed,
+                reviewed,
+                pending_paths=SCOPE.staged_paths(root),
+                task_id=task_id,
+                selected_task_blobs=SCOPE.staged_task_input_blobs(task_id, root),
+                repo=root,
+            ))
             subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "move to done"], cwd=root, check=True)
+            moved = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            self.assertEqual([], SCOPE.review_revision_findings(
+                reviewed, moved, task_id=task_id, repo=root
+            ))
+
+            (done_task / "task.md").write_text(
+                "**Claimed-by:** reviewer\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            self.assertTrue(SCOPE.review_revision_findings(
+                reviewed,
+                moved,
+                pending_paths=SCOPE.staged_paths(root),
+                task_id=task_id,
+                selected_task_blobs=SCOPE.staged_task_input_blobs(task_id, root),
+                repo=root,
+            ))
             subprocess.run(["git", "commit", "-qm", "change claimant"], cwd=root, check=True)
             current = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=root, text=True
@@ -644,13 +674,28 @@ class CoreScopeTests(unittest.TestCase):
                 reviewed, current, task_id=task_id, repo=root
             )
             self.assertTrue(any("task.md" in finding for finding in findings))
-            self.assertTrue(SCOPE.review_revision_findings(
-                reviewed,
-                reviewed,
-                pending_paths=[f"tasks/3_in-review/{task_id}/design.md"],
-                task_id=task_id,
-                repo=root,
-            ))
+
+    def test_sha256_receipt_rejects_a_40_character_abbreviation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initialized = subprocess.run(
+                ["git", "init", "-q", "--object-format=sha256"],
+                cwd=root, text=True, capture_output=True, check=False,
+            )
+            if initialized.returncode:
+                self.skipTest("installed Git does not support SHA-256 repositories")
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            (root / "notes.txt").write_text("head\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=root, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            self.assertEqual(64, len(head))
+            self.assertEqual([], SCOPE.review_revision_findings(head, head, repo=root))
+            findings = SCOPE.review_revision_findings(head[:40], head, repo=root)
+            self.assertTrue(any("full commit ID" in finding for finding in findings))
 
     def test_reviewed_revision_must_be_a_known_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -82,7 +82,8 @@ or complete substitution evidence fails with a routing message. Obvious home-dir
 access in changed core executables fails directly. When `--require-review` is explicitly
 selected, a missing, stale, or non-approving review receipt fails even when the selected
 diff changes only task records; later core edits or changes to the task, design, or plan
-inputs invalidate an earlier reviewed commit.
+inputs invalidate an earlier reviewed commit. Moving unchanged task inputs between
+lifecycle status folders does not.
 Without the flag, the command reports that manual review was not invoked and does not
 parse verdicts. Reviewer labels are untrusted claims rather than authenticated identity;
 the separately invoked panel supplies actual independence. Skill prose remains a

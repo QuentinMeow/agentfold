@@ -3,8 +3,8 @@
 
 Local hooks inspect staged bytes. Pull-request CI supplies a base...head range.
 The deterministic checks force architectural deliberation without pretending syntax
-proves the rationale. ``--require-review`` explicitly adds an independent verdict when
-the selected workflow calls for that token-expensive check.
+proves the rationale. ``--require-review`` validates a revision-bound receipt after a
+human explicitly invokes that token-expensive independent review.
 """
 import argparse
 import fnmatch
@@ -530,9 +530,31 @@ def is_review_bound_task_path(path, task_id):
     )
 
 
+def task_input_blob_map(lines, task_id):
+    blobs = {}
+    for line in lines:
+        metadata, separator, path = line.partition("\t")
+        fields = metadata.split()
+        if not separator or len(fields) < 2 or not is_review_bound_task_path(path, task_id):
+            continue
+        oid = fields[2] if len(fields) >= 3 and fields[1] == "blob" else fields[1]
+        blobs.setdefault(Path(path).name, []).append(oid)
+    return {name: tuple(sorted(oids)) for name, oids in blobs.items()}
+
+
+def committed_task_input_blobs(revision, task_id, repo=REPO):
+    lines = git("ls-tree", "-r", revision, "--", "tasks", repo=repo).splitlines()
+    return task_input_blob_map(lines, task_id)
+
+
+def staged_task_input_blobs(task_id, repo=REPO):
+    lines = git("ls-files", "-s", "--", "tasks", repo=repo).splitlines()
+    return task_input_blob_map(lines, task_id)
+
+
 def review_revision_findings(
     reviewed_revision, current_revision, registered_paths=(),
-    pending_paths=(), task_id="", repo=REPO,
+    pending_paths=(), task_id="", selected_task_blobs=None, repo=REPO,
 ):
     resolved = subprocess.run(
         ["git", "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}"],
@@ -541,6 +563,11 @@ def review_revision_findings(
     if resolved.returncode:
         return [f"reviewed revision {reviewed_revision!r} is not a commit in this repository"]
     reviewed_commit = resolved.stdout.strip()
+    if reviewed_revision.lower() != reviewed_commit.lower():
+        return [
+            f"reviewed revision {reviewed_revision!r} must be the repository's full "
+            "commit ID, not an abbreviation"
+        ]
     current = git("rev-parse", "--verify", f"{current_revision}^{{commit}}", repo=repo).strip()
     ancestry = subprocess.run(
         ["git", "merge-base", "--is-ancestor", reviewed_commit, current],
@@ -554,15 +581,21 @@ def review_revision_findings(
     later_bound = [
         path for path in later_paths
         if is_core_path(path, registered_paths)
-        or is_review_bound_task_path(path, task_id)
     ]
     later_bound.extend(
         path for path in pending_paths
-        if (
-            is_core_path(path, registered_paths)
-            or is_review_bound_task_path(path, task_id)
-        )
+        if is_core_path(path, registered_paths)
         and path not in later_bound
+    )
+    reviewed_task_blobs = committed_task_input_blobs(reviewed_commit, task_id, repo=repo)
+    if selected_task_blobs is None:
+        selected_task_blobs = committed_task_input_blobs(current, task_id, repo=repo)
+    changed_inputs = sorted(
+        name for name in set(reviewed_task_blobs).union(selected_task_blobs)
+        if reviewed_task_blobs.get(name) != selected_task_blobs.get(name)
+    )
+    later_bound.extend(
+        f"task input {name}" for name in changed_inputs
     )
     if later_bound:
         preview = ", ".join(later_bound[:3])
@@ -582,7 +615,7 @@ def main(argv=None):
     parser.add_argument("--branch", help="task branch name; defaults to the current branch")
     parser.add_argument(
         "--require-review", action="store_true",
-        help="manually require an independent approval for this run",
+        help="validate a revision-bound receipt from an explicitly invoked review",
     )
     args = parser.parse_args(argv)
 
@@ -615,12 +648,16 @@ def main(argv=None):
         )
     elif task is not None:
         pending_paths = paths if not args.diff_range else ()
+        selected_task_blobs = (
+            None if args.diff_range else staged_task_input_blobs(task.name)
+        )
         review_revision_check = lambda revision: review_revision_findings(
             revision,
             current_revision,
             registered_paths,
             pending_paths,
             task.name,
+            selected_task_blobs,
         )
         errors.extend(validate_task(
             task,

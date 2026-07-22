@@ -14,7 +14,7 @@ $ <exact command>
 
 ## Review verdicts (when a review was explicitly run)
 
-**Reviewed revision:** <immutable commit reviewed by every verdict below>
+**Reviewed revision:** <full immutable commit ID reviewed by every verdict below>
 
 - <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">
 - core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required only when `--require-review` is explicitly selected>

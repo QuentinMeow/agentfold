@@ -28,7 +28,7 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 2/2 files passed
 ```
 
-## Review verdicts
+## Legacy review notes (unbound)
 
 - review-security-correctness / security and correctness: approve — sensitive-path,
   receipt-authority, egress-sink, and contextual-replay findings resolved

@@ -70,7 +70,7 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 3/3 files passed
 ```
 
-## Review verdicts
+## Legacy review notes (unbound)
 
 - core-fit / core-fit-review: approve — the substitutable core-scope model remains unchanged.
 - core-fit / flexibility-review: approve — changes remain limited to CommonMark evidence parsing, preserve the approved flexibility boundaries, and all 41 scope tests pass.

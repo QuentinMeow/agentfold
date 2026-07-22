@@ -48,7 +48,7 @@ The demo also exposed a cascade bug (retries filed about retry items citing dead
 paths) — fixed, and recorded as
 `memory/lessons/automation/repair-records-cite-broken-state.md`.
 
-## Review verdicts
+## Legacy review notes (unbound)
 
 - No panel — bootstrap ran solo by owner instruction; first outside-agent session is
   the real review (`roadmap/desired-state.md`, line 1).
