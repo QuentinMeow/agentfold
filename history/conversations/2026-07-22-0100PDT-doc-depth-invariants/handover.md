@@ -53,8 +53,8 @@ file — additions must displace something or push depth into `handbook/`.
 
 ## Next steps
 
-- Nothing pending from this session. Commits are local only — push to origin when you
-  want them published.
+- Nothing pending from this session. Published: all commits merged to origin/main via
+  PR #2 (owner asked in chat for push + auto-merge).
 
 ## Deep links
 
