@@ -15,18 +15,18 @@ and preserve freedom for future, more capable agents.
 
 ## Acceptance criteria
 
-- [ ] The documentation and design folders exist with local contracts appropriate to the
+- [x] The documentation and design folders exist with local contracts appropriate to the
       folder-as-a-service architecture.
-- [ ] A research-backed design document defines agent-oriented design principles and
+- [x] A research-backed design document defines agent-oriented design principles and
       traces material claims to primary or authoritative sources.
-- [ ] The design explores the choice space breadth-first, compares multiple approaches
+- [x] The design explores the choice space breadth-first, compares multiple approaches
       and enforcement times, and recommends a layered architecture with explicit
       trade-offs, failure modes, and escape hatches.
-- [ ] PII prevention is worked through as a concrete threat model, including imperfect
+- [x] PII prevention is worked through as a concrete threat model, including imperfect
       detectors and direct agent inspection of inputs and outputs.
-- [ ] The proposal relies primarily on files, git, hooks, automation, and CI while
+- [x] The proposal relies primarily on files, git, hooks, automation, and CI while
       avoiding constraints that would unnecessarily limit smarter future agents.
-- [ ] Repository checks pass and the completed work has an evidence-backed review.
+- [x] Repository checks pass and the completed work has an evidence-backed review.
 
 ## Links
 
