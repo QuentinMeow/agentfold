@@ -49,8 +49,12 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path("services/example/client.py"))
         self.assertTrue(SCOPE.is_core_path("tasks/AGENTS.md"))
         self.assertTrue(SCOPE.is_core_path("handbook/git-workflow.md"))
-        self.assertFalse(SCOPE.is_core_path("CLAUDE.md"))
+        self.assertTrue(SCOPE.is_core_path("CLAUDE.md"))
         self.assertFalse(SCOPE.is_core_path(".gitignore"))
+        self.assertTrue(SCOPE.is_core_path("GEMINI.md"))
+        self.assertTrue(SCOPE.is_core_path(".github/copilot-instructions.md"))
+        self.assertFalse(SCOPE.is_core_path("README.md"))
+        self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/bug_report.md"))
 
     def test_only_registered_provider_adapter_is_core(self):
         registered = {".github/workflows/harness.yml", ".gitlab-ci.yml", "CLAUDE.md"}
@@ -86,8 +90,19 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertTrue(any("exactly one real" in error for error in errors))
 
     def test_html_commented_receipt_is_not_evidence(self):
+        for close in ("-->\n", ""):
+            with self.subTest(close=close), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, design=f"# Design\n\n<!--\n{COMPLETE_DESIGN}\n{close}"
+                )
+                errors = SCOPE.validate_task(task, touched_core=True)
+                self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_three_space_indented_fence_is_not_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
-            task = self.make_task(tmp, design=f"# Design\n\n<!--\n{COMPLETE_DESIGN}\n-->\n")
+            task = self.make_task(
+                tmp, design=f"# Design\n\n   ~~~markdown\n{COMPLETE_DESIGN}\n   ~~~\n"
+            )
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exactly one real" in error for error in errors))
 
@@ -222,11 +237,12 @@ class CoreScopeTests(unittest.TestCase):
                 )
                 self.assertGreaterEqual(len(findings), 1)
 
-    def test_skill_instruction_cannot_direct_user_home_write(self):
+    def test_skill_audit_examples_are_left_to_core_fit_review(self):
         findings = SCOPE.global_state_findings(
-            ["skills/example/SKILL.md"], lambda _: "Run `mkdir -p ~/.agent` now.\n"
+            ["skills/example/SKILL.md"],
+            lambda _: "Reject scripts that run `mkdir -p ~/.agent`.\n",
         )
-        self.assertEqual(1, len(findings))
+        self.assertEqual([], findings)
 
     def test_forced_generated_adapter_file_is_rejected_but_deletion_is_allowed(self):
         path = ".agents/skills/personal/SKILL.md"

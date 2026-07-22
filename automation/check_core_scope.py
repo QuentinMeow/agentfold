@@ -17,9 +17,12 @@ FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
     r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
 )
-FENCE_RE = re.compile(r"^(?P<fence>`{3,}|~{3,}).*?^(?P=fence)[ \t]*$", re.M | re.S)
-UNCLOSED_FENCE_RE = re.compile(r"^(?:`{3,}|~{3,}).*\Z", re.M | re.S)
+FENCE_RE = re.compile(
+    r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*?^[ ]{0,3}(?P=fence)[ \t]*$", re.M | re.S
+)
+UNCLOSED_FENCE_RE = re.compile(r"^[ ]{0,3}(?:`{3,}|~{3,}).*\Z", re.M | re.S)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+UNCLOSED_HTML_COMMENT_RE = re.compile(r"<!--.*\Z", re.S)
 
 CORE_PREFIXES = (
     "skills/",
@@ -39,6 +42,10 @@ CORE_EXACT = {
     "tasks/AGENTS.md",
 }
 PROTECTED_PATHS_FILE = "automation/core-scope-paths.txt"
+ORDINARY_ROOT_MARKDOWN = {
+    "CHANGELOG.md", "CODE_OF_CONDUCT.md", "LICENSE.md", "README.md", "SECURITY.md",
+    "SUPPORT.md",
+}
 ADAPTER_IGNORE_START = "# agentfold-adapters:start"
 ADAPTER_IGNORE_END = "# agentfold-adapters:end"
 ADAPTER_IGNORE_LINES = (
@@ -73,6 +80,7 @@ def git(*args, repo=REPO):
 
 def semantic_text(text):
     clean = HTML_COMMENT_RE.sub("", text or "")
+    clean = UNCLOSED_HTML_COMMENT_RE.sub("", clean)
     clean = FENCE_RE.sub("", clean)
     return UNCLOSED_FENCE_RE.sub("", clean)
 
@@ -117,7 +125,19 @@ def is_core_path(path, extra_exact=()):
     path = Path(path).as_posix()
     while path.startswith("./"):
         path = path[2:]
-    return path in CORE_EXACT or path in set(extra_exact) or path.startswith(CORE_PREFIXES)
+    rel = Path(path)
+    root_architecture_doc = (
+        len(rel.parts) == 1 and rel.suffix.lower() == ".md"
+        and rel.name not in ORDINARY_ROOT_MARKDOWN
+    )
+    hidden_instruction_file = (
+        len(rel.parts) > 1 and rel.parts[0].startswith(".")
+        and rel.suffix.lower() == ".md" and "instruction" in rel.name.lower()
+    )
+    return bool(
+        path in CORE_EXACT or path in set(extra_exact) or path.startswith(CORE_PREFIXES)
+        or root_architecture_doc or hidden_instruction_file
+    )
 
 
 def is_core_executable(path, content="", mode=""):
@@ -296,8 +316,7 @@ def global_state_findings(paths, load_content, load_mode=lambda _: ""):
             mode = load_mode(path)
         except (OSError, RuntimeError):
             continue  # deleted or unavailable in the selected tree
-        instruction_file = parts[0] == "skills" and Path(path).suffix.lower() == ".md"
-        if not instruction_file and not is_core_executable(path, content, mode):
+        if not is_core_executable(path, content, mode):
             continue
         for pattern, label in GLOBAL_STATE_MARKERS:
             if pattern.search(content):

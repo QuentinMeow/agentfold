@@ -76,10 +76,13 @@ personal GitHub authentication safeguard remains outside AgentFold.
 The local hook checks staged bytes, including its task evidence; pull-request CI checks
 the full base-to-head tree. A core change without a task, `core` scope declaration,
 complete substitution evidence, or an independent approve majority fails with a routing
-message. Obvious home-directory access in changed core executables and canonical skill
-instructions fails directly. Research, product code, and unregistered product CI stay
+message. Obvious home-directory access in changed core executables fails directly;
+skill prose remains a semantic review responsibility so negative examples stay legal.
+Research, product code, and unregistered product CI stay
 unaffected; thin agent/provider adapters are listed in `automation/core-scope-paths.txt`.
 Generated agent directories are never trackable even with a forced add, while a marked
 block in `.gitignore` protects those paths without treating product ignore rules as core.
+New root architecture/instruction documents and hidden `*-instructions.md` surfaces
+enter the same review instead of creating an unreviewed agent-specific contract.
 The existing small-fix branch convention remains available outside core; its dedicated
 backlog task must design any safe core exception rather than this gate guessing one.
