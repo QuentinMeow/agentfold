@@ -87,6 +87,11 @@ class CoreScopeTests(unittest.TestCase):
             task = self.make_task(tmp)
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
 
+    def test_complete_core_fit_passes_with_crlf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, design=COMPLETE_DESIGN.replace("\n", "\r\n"))
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+
     def test_missing_design_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(tmp, design=None)

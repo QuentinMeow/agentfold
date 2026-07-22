@@ -180,7 +180,8 @@ def parsed_fields(text):
 def named_sections(text, title):
     clean = semantic_text(text)
     pattern = re.compile(
-        rf"^## {re.escape(title)}(?:[ \t].*)?\n(.*?)(?=^##[ \t]|\Z)", re.M | re.S
+        rf"^## {re.escape(title)}(?:[ \t].*)?\r?\n(.*?)(?=^##[ \t]|\Z)",
+        re.M | re.S,
     )
     return pattern.findall(clean)
 
