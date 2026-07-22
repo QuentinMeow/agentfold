@@ -35,6 +35,16 @@ $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 finding(s)
 ```
 
+## Full review gate after moving the task to in-review
+
+```
+$ python3 automation/check_core_scope.py --range origin/task/2026-07-22-design-critical-agent-guardrails...HEAD --branch task/2026-07-22-protect-core-portability --require-review
+core-scope: pass (15 core path(s), task 2026-07-22-protect-core-portability)
+
+$ /usr/bin/python3 automation/check_core_scope.py --range origin/task/2026-07-22-design-critical-agent-guardrails...HEAD --branch task/2026-07-22-protect-core-portability --require-review
+core-scope: pass (15 core path(s), task 2026-07-22-protect-core-portability)
+```
+
 ## Repository tests
 
 ```
