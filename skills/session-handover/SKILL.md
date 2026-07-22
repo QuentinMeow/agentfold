@@ -25,9 +25,10 @@ anything.
    local time + timezone abbreviation). One screen, plain
    language, written for a teammate who was away: what happened, how it works now,
    what needs their attention, links to depth. No invented shorthand.
-6. **Final reply**: end with the handover's "Needs your attention" lines — one line per
-   open `needs-human/` item, with links. Repeat items from previous sessions that are
-   still open; humans skim, so polite repetition is the delivery mechanism.
+6. **Final reply**: end with the handover's "Needs your attention" entries, formatted
+   per `templates/handover.md` — each a clickable link to the queue item plus 2–3
+   sentences of context, never a bare name. Repeat items from previous sessions that
+   are still open; humans skim, so polite repetition is the delivery mechanism.
 
 ## Skip conditions
 
