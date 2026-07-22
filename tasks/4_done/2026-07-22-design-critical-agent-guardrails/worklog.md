@@ -34,3 +34,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   explicit review checklist covering the security boundary and assurance claims.
 - Verified the PR's remote head, base, file list, and aggregate additions/deletions
   against the pushed branch before the publication handover update.
+
+## 2026-07-22 — fold human design review (codex)
+
+- Preserved and claimed both human review responses before folding them.
+- Recorded approval of the provenance principle wording without changing the approved
+  principle or its immutable ADR.
+- Revised the critical-obligations proposal to defer sandboxing, ship mechanisms as
+  templates, use one `hard`/`soft`/`off`/`manual` configuration surface, and
+  keep token-expensive independent-agent review manual in the starter template.
+- Recorded the durable decision in
+  `memory/decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md`
+  and removed both resolved review projections after their answers were folded.

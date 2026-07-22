@@ -13,15 +13,45 @@ Build a small, layered guardrail system around this rule:
 
 Do not turn the handbook into one universal blocking checklist. Classify each obligation
 by consequence, reversibility, and detectability. Preferences stay as guidance;
-repairable drift becomes a reconciler finding; judgment-heavy risks require explicit,
-content-bound review; prohibited disclosure is blocked at more than one independently
-controlled boundary.
+repairable drift becomes a reconciler finding; judgment-heavy risks can request explicit,
+content-bound review; and a deployment claiming protected disclosure boundaries runs the
+relevant guards in `hard` mode at more than one independently controlled boundary.
 
 The proposed “acknowledge button” is useful because it interrupts the normal path and
 demands current dispositions. A self-authored receipt proves neither that the agent read
 the evidence nor that its judgment was correct; it is a deliberate nudge plus an
 auditable claim. For PII or credentials, it can complement scanners but cannot override
 a confirmed critical finding.
+
+### Human review disposition
+
+The owner reviewed this proposal and narrowed its initial adoption:
+
+- do not build or require a capability sandbox now;
+- ship proposed guard mechanisms as templates, not automatically active policy;
+- use one versioned configuration surface to select each guard's mode; and
+- keep token-expensive independent-agent review manual by default rather than running it
+  on every change.
+
+Every guard supports the same four modes:
+
+| Mode | Automatic behavior | Transition effect |
+|------|--------------------|-------------------|
+| `hard` | runs at its declared trigger | finding, incomplete coverage, or error blocks that transition |
+| `soft` | runs at its declared trigger | reports evidence and remediation without blocking |
+| `off` | does not run | records that the guard contributes no assurance |
+| `manual` | runs only when explicitly invoked | produces evidence but is not an always-on gate |
+
+The configuration controls invocation, not truth. Selecting `off` or `manual` for a
+critical guard visibly lowers the assurance profile; it cannot still claim that the
+boundary is enforced. A separately controlled provider rule may remain mandatory even
+when repository-local automation is off. Mode changes are ordinary reviewed policy
+changes, never an implicit exception written inside a detector.
+
+Unless a later section explicitly says otherwise, words such as “block,” “reject,” and
+“fail closed” describe `hard` mode or an assurance profile that requires that hard guard.
+In `soft`, the same result is reported without stopping the transition; in `manual`, it
+affects only an explicitly requested run; in `off`, the guard supplies no result.
 
 ## Context and current gap
 
@@ -57,9 +87,10 @@ This design does not:
 - prescribe how an agent must investigate or implement ordinary work;
 - make every handbook preference a gate;
 - defend against a malicious repository administrator who controls policy, checks,
-  branch protection, and audit history; or
+  branch protection, and audit history;
 - make CI the first privacy boundary—content on a PR branch has already reached the
-  remote system.
+  remote system; or
+- include a filesystem/network capability sandbox in the initial implementation.
 
 ## How this design was made
 
@@ -136,19 +167,22 @@ unavailable to the producing agent.
 ### Treat the verifier as attack surface
 
 A critical check distinguishes pass, finding, incomplete coverage, runtime error, and
-not applicable. It fails on zero scanned inputs when inputs were expected. Scanner,
+not applicable. It returns incomplete coverage on zero scanned inputs when inputs were
+expected. Scanner,
 workflow, fixtures, policy, allowlists, and waiver changes receive stronger ownership
 than ordinary code. The design tests both positive and negative cases and never turns a
 crash into “clean.”
 
-Failure closed applies at the protected transition, not to every kind of work. Keep a
-pinned, minimal offline detector as the portable baseline; optional semantic/provider
-detectors may degrade only according to declared policy. During an outage, agents can
-inspect and repair locally, but the affected commit/push/merge transition remains
-blocked. An operational break-glass is distinct from a content false-positive waiver:
-it is short-lived, scope- and revision-bound, authenticated by a separate owner, and
-cannot silently change an error into clean. If neither last-known-good verification nor
-an authorized break-glass exists, confidentiality intentionally wins over availability.
+In `hard` mode, failure closed applies at the protected transition, not to every kind of
+work. Keep a pinned, minimal offline detector as the portable baseline; optional
+semantic/provider detectors may degrade only according to declared policy. During an
+outage, agents can inspect and repair locally, but a hard-mode commit/push/merge
+transition remains blocked. An operational break-glass is distinct from a content
+false-positive waiver: it is short-lived, scope- and revision-bound, authenticated by a
+separate owner, and cannot silently change an error into clean. If neither
+last-known-good verification nor an authorized break-glass exists, a hard confidentiality
+boundary intentionally wins over availability. `soft` reports the outage and continues;
+`manual` reports it only when invoked; `off` makes no detector-health claim.
 
 ### Use independent layers with different failure modes
 
@@ -172,7 +206,9 @@ There is no universal choke point for every disclosure sink. Git commits, LFS up
 provider API calls, CI logs/artifacts, package/release publication, and mirrors each need
 an adapter or a capability boundary before their own egress. An agent with unrestricted
 network credentials can bypass repository scripts, so a no-transmission profile also
-requires sandboxed network access and credentials scoped to guarded wrappers.
+requires an external capability boundary and credentials scoped to guarded wrappers.
+That stronger profile remains future work because the reviewed initial design explicitly
+defers sandboxing.
 
 ### Make escape hatches narrower than the rule
 
@@ -204,12 +240,12 @@ prompt injection, configuration mistakes, and compromised actors.
 
 The same mechanism should not govern taste and disclosure.
 
-| Tier | Meaning | Default treatment | Examples |
-|------|---------|-------------------|----------|
+| Tier | Meaning | Typical available treatment | Examples |
+|------|---------|-----------------------------|----------|
 | Preference | Failure is cheap and subjective | concise contract guidance; no receipt | naming taste, prose style |
-| Repairable invariant | Wrong state is detectable and reversible | reconciler advisory or block near transition; retry queue | stale handover, broken link |
-| Deliberation required | Consequence is meaningful but judgment is necessary | risk-triggered inspection plus content-bound receipt; optional independent review | migration trade-off, ambiguous public contact data |
-| Critical boundary | Disclosure or action is expensive or irreversible | least privilege, multiple detectors, fail-closed local feedback, authoritative remote control, separate approval for exceptions | prohibited PII, active credentials, destructive release |
+| Repairable invariant | Wrong state is detectable and reversible | reconciler advisory, optionally hard near a transition; retry queue | stale handover, broken link |
+| Deliberation required | Consequence is meaningful but judgment is necessary | risk-triggered inspection plus content-bound receipt; optional manual independent review | migration trade-off, ambiguous public contact data |
+| Critical boundary | Disclosure or action is expensive or irreversible | hard-capable independent detectors and remote controls, plus separate approval for exceptions; weaker modes must advertise weaker assurance | prohibited PII, active credentials, destructive release |
 
 Classification is driven by consequence, reversibility, detectability, and where the
 last safe boundary sits—not by words such as MUST in prose.
@@ -255,7 +291,7 @@ last safe boundary sits—not by words such as MUST in prose.
 | One universal pre-commit gate | simple mental model and fast feedback | bypassable; false positives and detector errors can deadlock all work |
 | One “smart” PII scanner | catches context patterns regex misses | remains a fallible oracle and a sensitive-data processor |
 | Independent reviewer agent | useful semantic critique | shared blind spots; no deterministic boundary; ongoing cost |
-| Capability sandbox alone | prevents broad classes of reads/exfiltration | cannot classify every permitted artifact or protect later Git use |
+| Capability sandbox alone (deferred) | prevents broad classes of reads/exfiltration | not selected now; cannot classify every permitted artifact or protect later Git use |
 | Risk-tiered layered evidence gates | matches friction and authority to consequence; replaceable detectors | more design work; strongest guarantees need hosting/infrastructure support |
 
 The last approach is recommended. The others remain useful layers or deployment modes,
@@ -271,14 +307,15 @@ cannot be observed.
 | Profile | Required observed controls | Honest claim |
 |---------|----------------------------|--------------|
 | Feedback only | local staged scan | catches ordinary mistakes before ordinary commits; bypassable |
-| Merge protected | independent required CI from a trusted source | prohibited findings cannot merge; they may already exist remotely |
-| Repository admission | server pre-receive or equivalent push protection over declared Git surfaces | rejected objects do not become reachable refs; the host still processed the attempted push |
-| Controlled egress | admission controls plus sandboxed filesystem/network access and guarded credentials for every declared sink | prohibited data cannot leave the approved boundary through covered capabilities |
+| Merge protected | independent required CI from a trusted source, with covered guards in `hard` mode | prohibited findings cannot merge; they may already exist remotely |
+| Repository admission | server pre-receive or equivalent push protection over declared Git surfaces, with covered guards in `hard` mode | rejected objects do not become reachable refs; the host still processed the attempted push |
+| Controlled egress (future) | admission controls plus an external filesystem/network capability boundary and guarded credentials for every declared sink | prohibited data cannot leave the approved boundary through covered capabilities |
 
-If a repository lacks remote admission, critical policy may still block local ordinary
-commits and merges, but the harness must display “merge protected,” never “PII cannot
-reach the remote.” If a declared capability goes unavailable, the profile degrades
-visibly and its stronger transitions stop until recovery or authenticated break-glass.
+If a repository lacks remote admission, a critical guard configured `hard` may still
+block ordinary local commits and merges, but the harness must display “merge protected,”
+never “PII cannot reach the remote.” If a declared hard capability goes unavailable,
+the profile degrades visibly and its stronger transitions stop until recovery or
+authenticated break-glass. Soft, manual, and off deployments never inherit this claim.
 
 ## Recommended architecture
 
@@ -294,12 +331,21 @@ visibly and its stronger transitions stop until recovery or authenticated break-
 
 This can remain Python-stdlib-first inside the existing automation service. Optional
 provider or semantic-scanner adapters add coverage without becoming a core dependency.
-A possible future layout is illustrative, not a required schema:
+Templates are the adoption boundary: installing AgentFold makes choices visible but
+does not silently enable every guard. A possible future layout is illustrative, not a
+required schema:
 
 ```text
+templates/guardrails/
+├── config.json                # every guard id -> hard | soft | off | manual
+├── policy.json                # classifications and tier-to-control mapping
+└── evidence/                  # receipt, finding, waiver, and run-manifest schemas
+
 automation/guardrails/
 ├── AGENTS.md
-├── policy.json                 # classifications and tier-to-control mapping
+├── config.json                 # adopted repository choices copied from the template
+├── policy.json
+├── run.py                      # one manual/automatic entry point that reads mode
 ├── checks/                     # small replaceable detectors
 ├── adapters/                   # staged, pre-push, CI, provider integration
 ├── fixtures/
@@ -312,27 +358,36 @@ tmp/guardrails/                 # ignored local reports; never raw matched liter
 ```
 
 The root reconciler can validate the policy/evidence schemas and expiry without owning
-the detectors themselves.
+the detectors themselves. The runner reports disabled and manual-only guards explicitly
+so absence of execution cannot be confused with a clean result.
 
 ### Transition model
 
 ```mermaid
 flowchart LR
-    A["External or generated input"] --> B{"Classified for agent access?"}
-    B -- "No / unknown" --> Q["Untracked quarantine or rejection"]
-    B -- "Yes" --> W["Agent workspace"]
-    W --> S["Candidate staged tree"]
-    S --> L{"Local policy checks"}
-    L -- "Finding / incomplete / error" --> R["Redacted report and remediation"]
+    W["Agent workspace"] --> S["Candidate staged tree"]
+    S --> M{"Configured mode"}
+    M -- "off" --> C0["Continue; no guard assurance"]
+    M -- "manual, not invoked" --> C0
+    M -- "hard / soft / manual invoked" --> L{"Run local policy check"}
+    L -- "Clean" --> C1["Continue with recorded evidence"]
+    L -- "Judgment required" --> J{"Manual content review invoked?"}
+    J -- "Yes" --> K["Content-bound review receipt"]
+    J -- "No" --> X{"Mode hard?"}
+    K --> C1
+    L -- "Finding / incomplete / error" --> X
+    X -- "Yes" --> R["Redacted report and remediation"]
     R --> W
-    L -- "Judgment required" --> K["Content-bound review receipt"]
-    K --> C["Local commit"]
-    L -- "Clean" --> C
+    X -- "No" --> N["Report weaker evidence; do not block"]
+    N --> C0
+    C0 --> C["Local commit"]
+    C1 --> C
     C --> E{"Declared assurance controls healthy?"}
-    E -- "No" --> D["Degraded: repair locally or authenticated break-glass"]
+    E -- "No, required hard control" --> D["Degraded: repair locally or authenticated break-glass"]
     D --> W
-    E -- "Merge-only profile" --> I
-    E -- "Admission profile" --> P["Remote object admission"]
+    E -- "No hard control required" --> I
+    E -- "Healthy merge-only profile" --> I
+    E -- "Healthy admission profile" --> P["Remote object admission"]
     P -- "Reject" --> R
     P -- "Accept" --> I["Required CI and merge-result checks"]
     I -- "Reject" --> R
@@ -340,16 +395,22 @@ flowchart LR
     G --> H["Scheduled full-history rescan"]
 ```
 
-Critical findings do not take the self-receipt path. They are removed, sanitized, or
-sent through a separately approved waiver. A scanner crash, timeout, unreadable file,
-or unexplained skip is incomplete coverage—not clean. The merge-only edge is an
-explicitly weaker deployment: content reaches the remote before CI, and the UI must say
-so rather than presenting that path as repository admission protection.
+In `hard` mode, critical findings do not take the self-receipt path. They are removed,
+sanitized, or sent through a separately approved waiver. A scanner crash, timeout,
+unreadable file, or unexplained skip is incomplete coverage—not clean—but only `hard`
+turns that outcome into a transition block. Soft and invoked-manual runs preserve the
+result as evidence and continue; off and uninvoked-manual paths make no inspection
+claim. The merge-only edge is an explicitly weaker deployment: content reaches the
+remote before CI, and the UI must say so rather than presenting that path as repository
+admission protection. A future sandbox/ingress design may add controls before the
+workspace; it is intentionally not part of this reviewed initial transition.
 
 ### Content-bound acknowledgement
 
-For the deliberation tier, the local gate may intentionally fail once and generate a
-challenge. The agent inspects the staged diff and redacted report, records a disposition
+For the deliberation tier, a local guard configured `hard` may intentionally fail once
+and generate a challenge. A soft or explicitly invoked manual run can generate the same
+challenge without stopping the transition. The agent inspects the staged diff and
+redacted report, records a disposition
 for every finding ID, and asks the acknowledgement command to bind the receipt to:
 
 - the defined candidate envelope: repository identity, destination sink/ref/profile,
@@ -432,11 +493,12 @@ not a non-transmission boundary.
 
 ### Ingress and direct inspection
 
-Unknown external data lands outside tracked Git in an ignored, access-controlled
-quarantine. A local classifier minimizes, redacts, tokenizes, or rejects it before a
-cloud agent sees it when policy requires. The agent may inspect sanitized input, tool
-output, generated files, and the exact staged diff to catch contextual PII that patterns
-miss.
+The initial implementation begins with repository content already available to the
+agent; it does not promise sandboxed ingress. A future controlled-egress deployment may
+place unknown external data outside tracked Git in an access-controlled quarantine and
+minimize, redact, tokenize, or reject it before a cloud agent sees it. The agent may
+inspect sanitized input, tool output, generated files, and the exact staged diff to
+catch contextual PII that patterns miss.
 
 Direct agent inspection is secondary evidence. If showing raw data to the model would
 itself violate policy, the harness must route review to an approved local model or human;
@@ -444,28 +506,35 @@ it must not print the raw value into a prompt merely to ask whether the value is
 
 ### Local feedback
 
-Run cheap structured patterns, checksums, organization-specific tokens, high-entropy
-signals, and file-type/coverage checks over the staged candidate. On a finding, emit only
+When a local guard is configured to run, use cheap structured patterns, checksums,
+organization-specific tokens, high-entropy signals, and file-type/coverage checks over
+the staged candidate. On a finding, emit only
 category, an opaque locator, and a path only when the path is independently clean. A
 sensitive filename is replaced with a redacted label and resolved only inside the
 access-controlled local inspection path. Low-entropy PII should not be hashed without a
 key because dictionary guessing can recover it; durable fingerprints need a protected
 keyed construction or must avoid value-derived IDs.
 
-Ambiguous contextual findings may take the content-bound review route. Active
-credentials and high-confidence prohibited identifiers hard-block. If a credential may
-have escaped the approved boundary, revoke or rotate it before cleaning history.
+Ambiguous contextual findings may take the content-bound review route. In `hard` mode,
+active credentials and high-confidence prohibited identifiers block the configured
+transition. In `soft` or an invoked `manual` run they are reported without blocking and
+the deployment cannot claim that boundary as protected; in `off` they are not inspected
+by this guard. If a credential may have escaped the approved boundary, revoke or rotate
+it before cleaning history.
 
 ### Remote authority
 
-When the Git server is controlled, scan all newly reachable objects in pre-receive
+When the Git server is controlled and repository-admission protection is selected, run
+the covered guards in `hard` mode over all newly reachable objects in pre-receive
 quarantine and reject atomically. On GitHub, enable push protection and delegated bypass
-for supported secrets, recognizing that secret scanning is not general PII scanning
+for supported secrets when that profile is desired, recognizing that secret scanning is
+not general PII scanning
 ([GitHub push protection](https://docs.github.com/en/code-security/concepts/secret-security/push-protection)).
 
-Required CI then replays the policy in a clean environment, preferably with at least one
-different detector or configuration, validates self-receipt freshness and external
-waiver authority, checks detector canaries, and scans the prospective merge result.
+For a merge-protected profile, required CI then replays the hard policy in a clean
+environment, preferably with at least one different detector or configuration,
+validates self-receipt freshness and external waiver authority, checks detector
+canaries, and scans the prospective merge result.
 Rules protect the scanner, workflow, policy, fixtures, and waiver paths themselves.
 Without remote admission, document the weaker promise honestly: “cannot merge,” not
 “cannot reach the remote.”
@@ -511,8 +580,11 @@ inside those boundaries remains open:
 
 - policy declares outcomes and evidence, not a fixed sequence of tool calls;
 - scanners and provider integrations are adapters, not framework dependencies;
+- one universal mode surface makes every guard removable or manually invocable without
+  changing its implementation;
 - receipts trigger only on risk or findings, not every commit;
-- independent review is reserved for unresolved high-consequence judgment;
+- independent-agent review is manual by default and reserved for unresolved
+  high-consequence judgment;
 - each non-security scaffold carries a hypothesis and eval so it can be ablated; and
 - a stronger future agent may satisfy the invariant with better evidence without asking
   permission to use a better internal method.
@@ -522,9 +594,11 @@ what may cross a boundary, not how intelligence must work on the safe side of it
 
 ## Decision and rejected directions
 
-Choose the risk-tiered layered design. Keep the existing reconciler for repository-state
-invariants, extend the automation service with replaceable obligation checks, use local
-hooks for feedback, and add remote authority when the deployment supports it.
+Choose the risk-tiered layered design as a template-first, mode-configurable system.
+Keep the existing reconciler for repository-state invariants, offer replaceable
+obligation checks without enabling them all by default, use local hooks only for guards
+configured to run there, and add remote authority when the deployment supports it. Do
+not include a capability sandbox in the initial implementation.
 
 Reject these as sole solutions:
 
@@ -533,31 +607,38 @@ Reject these as sole solutions:
   severity or recovery model;
 - a generic acknowledgement—the agent can learn to click through it;
 - one PII model—its own vendor says detection is incomplete;
+- an always-on guard bundle—costly review becomes wallpaper and adopters lose control;
 - CI-only scanning—remote disclosure has already occurred; and
 - a mandatory multi-agent workflow—valuable for high-risk review, unnecessary ceremony
   for routine work, and still subject to correlated blind spots.
 
 ## Implementation sequence
 
-1. Define the data/obligation policy, sink inventory, and honest assurance profiles
+1. Define the universal guard configuration template and exact `hard`, `soft`,
+   `off`, and `manual` runner semantics.
+2. Define the data/obligation policy, sink inventory, and honest assurance profiles
    before choosing a scanner.
-2. Add a stdlib coverage/result protocol and synthetic pass/finding/error canaries.
-3. Implement fast staged-tree feedback with redacted diagnostics.
-4. Add risk-triggered, content-bound self-receipts for deliberation-tier findings,
-   including dependency-aware carry-forward for unchanged finding subjects.
-5. Add authenticated external approval for critical and operational exceptions; protect
-   policy/check/fixture/waiver changes and validate authority in CI.
-6. Add pre-push, pre-receive/provider, LFS, provider-API, log/artifact, publication, and
-   mirror adapters as required by each deployment profile; never claim coverage for an
-   unguarded sink.
-7. Verify active deployment capabilities with canaries, then add scheduled history scans
-   and an incident/outage exercise.
-8. Measure false negatives, false-positive burden, bypass rate, detector errors,
+3. Add a manually invocable stdlib coverage/result protocol and synthetic
+   pass/finding/error canaries.
+4. Offer fast staged-tree feedback with redacted diagnostics; adopters choose its mode
+   instead of receiving an always-on hook.
+5. Add risk-triggered, content-bound self-receipts for deliberation-tier findings,
+   including dependency-aware carry-forward for unchanged finding subjects. Keep
+   independent-agent review `manual` in the starter template.
+6. Add authenticated external approval for critical and operational exceptions; protect
+   policy/check/fixture/waiver changes and validate authority where enabled.
+7. Offer pre-push, pre-receive/provider, LFS, provider-API, log/artifact, publication,
+   and mirror adapter templates as required by each deployment profile; never claim
+   coverage for an unguarded or disabled sink.
+8. Verify active deployment capabilities with canaries, then add optional scheduled
+   history scans and an incident/outage exercise.
+9. Measure false negatives, false-positive burden, bypass rate, detector errors,
    remediation success after feedback, and whether agents game receipts.
-9. Periodically ablate non-security scaffolding against held-out agent evals.
+10. Periodically ablate non-security scaffolding against held-out agent evals.
 
 Each step can land independently. No step should weaken the existing repository when a
-later, provider-specific layer is unavailable.
+later, provider-specific layer is unavailable. Sandboxing requires a separate future
+design and is not a prerequisite for this sequence.
 
 ## Research sources
 
