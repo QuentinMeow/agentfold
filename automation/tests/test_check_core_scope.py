@@ -178,6 +178,17 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exactly one real" in error for error in errors))
 
+    def test_non_ascii_space_does_not_end_html_block(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, design="# Design\n\n<div>\n\N{NO-BREAK SPACE}\n" + compact_receipt
+            )
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("exactly one real" in error for error in errors))
+
     def test_blank_terminated_and_special_html_receipts_are_not_evidence(self):
         compact_receipt = "\n".join(
             line for line in COMPLETE_DESIGN.splitlines() if line.strip()

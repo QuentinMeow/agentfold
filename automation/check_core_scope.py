@@ -134,7 +134,7 @@ def semantic_text(text):
             continue
 
         if html_until_blank:
-            if not candidate.strip():
+            if re.fullmatch(r"[ \t]*", candidate):
                 html_until_blank = False
             output.append(blank)
             continue
