@@ -26,20 +26,14 @@ HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*?\]\]>", re.M | re.S)
 UNCLOSED_HTML_CDATA_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[.*\Z", re.M | re.S)
 HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*?>", re.M | re.S)
 UNCLOSED_HTML_DECLARATION_RE = re.compile(r"^[ ]{0,3}<![A-Z].*\Z", re.M | re.S)
-RAW_HTML_BLOCK_RE = re.compile(
-    r"^[ ]{0,3}<(?P<tag>[A-Za-z][A-Za-z0-9-]*)(?=[\s>/])[^>]*>"
+RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
+RAW_HTML_TYPE1_BLOCK_RE = re.compile(
+    rf"^[ ]{{0,3}}<(?P<tag>{RAW_HTML_TYPE1_TAGS})(?=[\s>/])[^>]*>"
     r".*?</(?P=tag)\s*>[^\n]*(?:\n|\Z)",
     re.I | re.M | re.S,
 )
-RAW_HTML_CONTAINER_TAGS = (
-    "address|article|aside|blockquote|body|caption|center|colgroup|dd|details|dialog|"
-    "dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|h1|h2|h3|h4|h5|"
-    "h6|head|header|html|iframe|legend|li|main|menu|menuitem|nav|noframes|noembed|"
-    "object|ol|optgroup|option|p|plaintext|pre|script|search|section|style|summary|"
-    "table|tbody|td|textarea|tfoot|th|thead|title|tr|ul|xmp"
-)
-UNCLOSED_RAW_HTML_BLOCK_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?:{RAW_HTML_CONTAINER_TAGS})(?=[\s>/])[^>]*>.*\Z",
+UNCLOSED_RAW_HTML_TYPE1_BLOCK_RE = re.compile(
+    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[\s>/])[^>]*>.*\Z",
     re.I | re.M | re.S,
 )
 RAW_HTML_ANY_TAG_START_RE = re.compile(
@@ -159,8 +153,8 @@ def semantic_text(text):
     clean = UNCLOSED_HTML_CDATA_RE.sub("", clean)
     clean = HTML_DECLARATION_RE.sub("", clean)
     clean = UNCLOSED_HTML_DECLARATION_RE.sub("", clean)
-    clean = RAW_HTML_BLOCK_RE.sub("", clean)
-    clean = UNCLOSED_RAW_HTML_BLOCK_RE.sub("", clean)
+    clean = RAW_HTML_TYPE1_BLOCK_RE.sub("", clean)
+    clean = UNCLOSED_RAW_HTML_TYPE1_BLOCK_RE.sub("", clean)
     return strip_blank_terminated_html_blocks(clean)
 
 

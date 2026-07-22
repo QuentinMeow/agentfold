@@ -112,13 +112,27 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertTrue(any("exactly one real" in error for error in errors))
 
     def test_raw_html_block_receipt_is_not_evidence(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
         for tag in ("pre", "details", "table", "h1", "menuitem", "custom-element"):
             with self.subTest(tag=tag), tempfile.TemporaryDirectory() as tmp:
                 task = self.make_task(
-                    tmp, design=f"# Design\n\n<{tag}>\n{COMPLETE_DESIGN}\n</{tag}>\n"
+                    tmp, design=f"# Design\n\n<{tag}>\n{compact_receipt}\n</{tag}>\n"
                 )
                 errors = SCOPE.validate_task(task, touched_core=True)
                 self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_complete_custom_tag_keeps_following_compact_receipt_in_html_block(self):
+        compact_receipt = "\n".join(
+            line for line in COMPLETE_DESIGN.splitlines() if line.strip()
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, design="# Design\n\n<custom-element></custom-element>\n" + compact_receipt
+            )
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("exactly one real" in error for error in errors))
 
     def test_blank_terminated_and_special_html_receipts_are_not_evidence(self):
         compact_receipt = "\n".join(
