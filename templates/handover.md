@@ -22,8 +22,13 @@ no shorthand invented mid-session.>
 
 ## Needs your attention
 
-<One line per open needs-human/ item, with links — including still-open items from
-earlier sessions. This section is repeated verbatim in the session's final chat reply.>
+<One entry per open needs-human/ item — including still-open items from earlier
+sessions. Never a bare name: write a clickable markdown link plus enough context to
+act without opening anything — `[short name](<repo path to the queue item>)` followed
+by 2–3 sentences: what the choice is, why it came up, the default path. The linked
+item holds the options and links onward to its sources (it is a projection —
+`message-queue/AGENTS.md`). This section is repeated verbatim in the session's final
+chat reply.>
 
 ## Next steps
 

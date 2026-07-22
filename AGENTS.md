@@ -4,8 +4,12 @@ This repo is a working example of an **agent-native repository**: every folder i
 independent service whose `AGENTS.md` is its API, coordination happens through files
 instead of live conversation, and quality is enforced by systems (hooks, tests, the
 reconciler) rather than by hoping agents follow instructions. This file is the root
-contract every agent reads before acting. Humans read `README.md` instead — never put
-human usage guides here, never put agent instructions there.
+contract every agent reads before acting, and it is self-contained — acting correctly
+never requires the README. `README.md` is the human landing page: agents write it and
+may skim it for the big picture, but it never carries agent instructions (and no human
+usage guides live here). The README stays a short pitch + map: technical depth lives
+in `handbook/` and is linked, never restated (the reconciler budgets the README's
+lines like any contract).
 
 **Collaboration mode:** `async` — see `handbook/collaboration-modes.md` for what each
 mode permits. A task file may override the mode for that task only.
@@ -51,8 +55,10 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
    affected docs, record an ADR in `memory/decisions/`, delete the queue file.
    An answer heard in chat is written into the queue file in the same turn — chat is
    the only channel with no file trace.
-4. End every reply to the human with one line per open `needs-human/` item you filed or
-   noticed — chat is the human's only push channel.
+4. End every reply to the human with one entry per open `needs-human/` item you filed
+   or noticed — a clickable link to the item plus enough context to act from the reply
+   alone, never a bare name (format: the "Needs your attention" section of
+   `templates/handover.md`). Chat is the human's only push channel.
 
 ## Task lifecycle
 

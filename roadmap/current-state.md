@@ -8,7 +8,8 @@ What is true today, mapped to the desired-state lines.
   bootstrap task (`2026-07-22-bootstrap-the-harness`, in `tasks/4_done/`) is the worked
   example of the full lifecycle.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
-  schemas, link targets, AGENTS.md line budgets, memory expiry, and stale items; it
+  schemas, link targets, line budgets (AGENTS.md, SKILL.md, root README), memory
+  expiry, and stale items; it
   files and garbage-collects retry-queue items. Installed as pre-commit hook and CI
   (`.github/workflows/harness.yml`). No template↔check drift detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,

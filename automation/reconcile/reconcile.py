@@ -43,6 +43,9 @@ QUEUE_SCHEMAS = {
 ROOT_AGENTS_BUDGET = 140
 LEAF_AGENTS_BUDGET = 60
 SKILL_BUDGET = 70
+# The root README is the human landing page — pitch + map, depth linked in handbook/
+# (memory/decisions/2026-07-22-root-readme-line-budget.md).
+ROOT_README_BUDGET = 140
 
 STALE_QUEUE_DAYS = 30
 STALE_TASK_DAYS = 14
@@ -285,6 +288,8 @@ def check_agents_budget():
             budget = ROOT_AGENTS_BUDGET if md.parent == REPO else LEAF_AGENTS_BUDGET
         elif md.name == "SKILL.md":
             budget = SKILL_BUDGET
+        elif md.name == "README.md" and md.parent == REPO:
+            budget = ROOT_README_BUDGET
         if budget and lines > budget:
             yield Finding("agents-budget", md.relative_to(REPO),
                           f"{lines} lines exceeds the {budget}-line budget",
