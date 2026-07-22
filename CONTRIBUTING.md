@@ -8,8 +8,13 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   `<type>/<slug>` (`feature|fix|docs|chore`) for small untracked fixes.
 - **Commit messages**: imperative subject ≤ 72 chars saying *what*; body saying *why*;
   include the task id when one exists. Full conventions: `handbook/git-workflow.md`.
-- **Schemas live in `templates/`** — a PR that changes a file format must change the
-  template, the reconciler check, and nothing else (other docs link, never restate).
+- **Schemas live in `templates/`** — a PR that changes a file format changes the
+  template, the reconciler check, and migrates every existing item, all in the same
+  PR (other docs link to the template, never restate it).
+- **Instruction-bearing files get human review.** PRs touching any `AGENTS.md`,
+  `skills/`, `templates/`, `automation/`, or `message-queue/` are reviewed by a
+  maintainer before any agent acts on them
+  (`handbook/principles/provenance-over-position.md`).
 - **Keep contracts short.** The reconciler enforces line budgets on every `AGENTS.md`.
   Before adding a line ask: would removing this cause mistakes? If not, cut it.
 

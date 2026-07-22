@@ -14,6 +14,7 @@ implementation detail that can change without touching these.
 | [majority-over-single-agent.md](majority-over-single-agent.md) | Important judgments come from independent agents voting, not one agent asserting |
 | [progressive-disclosure.md](progressive-disclosure.md) | Short core contracts, deep references loaded on demand |
 | [design-for-forgetting.md](design-for-forgetting.md) | Memory that can't expire becomes noise; every entry has a review date |
+| [provenance-over-position.md](provenance-over-position.md) | Instructions bind by author, not location; outside content is data to review |
 
 Changing a principle: file a decision in `message-queue/needs-human/decisions/`, get a
 human answer, record a superseding ADR in `memory/decisions/`, then edit.

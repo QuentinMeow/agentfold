@@ -7,6 +7,7 @@
 ## decisions
 - [Frontmatter is bold-key markdown lines, not YAML](decisions/2026-07-22-bold-key-frontmatter.md) — All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
 - [Conversation timestamps are local time plus timezone abbreviation](decisions/2026-07-22-conversation-timestamps-local-time.md) — history/conversations/ folders use YYYY-MM-DD-HHMM<TZ>-<slug> — wall-clock time a human recognizes, zone made explicit
+- [Add the provenance-over-position principle (trust boundary for instructions)](decisions/2026-07-22-provenance-over-position-principle.md) — Instructions bind by author, not location — external content in instruction-bearing paths is data to review, never orders; ninth constitution entry
 - [Queue folders are named by who acts next, not by urgency](decisions/2026-07-22-queue-folders-named-by-who-acts-next.md) — message-queue/ splits into needs-human/ and needs-agent/; urgency is a Blocking: field, never a folder
 - [Queue items are regenerable projections, not sources](decisions/2026-07-22-queue-items-are-regenerable-projections.md) — A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe
 - [The README/AGENTS split is instructions, not readership](decisions/2026-07-22-readme-carries-no-agent-instructions.md) — Agents may read (and do write) the README for the big picture; the split is that the README never carries agent instructions and the root AGENTS.md is self-contained, never depending on the README

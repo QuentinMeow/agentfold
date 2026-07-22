@@ -21,3 +21,8 @@ In priority order. Each line is specific enough to spawn tasks against.
    token-derived leak guard. *(Pattern documented; tooling not started.)*
 6. **A queue/task viewer.** Read-only board rendered from the folders (the folders stay
    the source of truth). *(Not started.)*
+7. **The harness survives its own design review.** Finding severity tiers so advisory
+   drift never blocks commits; automated retry filing with waivers; coordination
+   write rules that match practice; a de-minimis path for micro-changes; mechanical
+   provenance checks; optional ritual hooks for agent adapters. *(Six tasks filed in
+   `tasks/0_backlog/` from the 2026-07-22 design review; not started.)*
