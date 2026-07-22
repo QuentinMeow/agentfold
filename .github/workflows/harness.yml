@@ -16,7 +16,7 @@ jobs:
           CORE_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
           CORE_SCOPE_HEAD: ${{ github.event.pull_request.head.sha }}
           CORE_SCOPE_BRANCH: ${{ github.head_ref }}
-        run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH" --require-review
+        run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH"
       - name: Reconciler — every harness invariant holds
         run: python3 automation/reconcile/reconcile.py --check
       - name: Repository tests

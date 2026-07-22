@@ -27,3 +27,10 @@
   boundary semantics, flexibility, evidence integrity, review policy, and absence of
   incident-specific artifacts at the top. Closed PR #5 now links to #6 as its clean
   replacement and remains intact as the rejected-design audit record.
+
+## 2026-07-22 — human guard-mode review (codex)
+
+- Folded the owner's review that expensive agent review must not run automatically.
+  Deterministic core admission remains active in hooks and CI; independent core-fit
+  verdict validation now runs only when `--require-review` is explicitly selected,
+  pending the universal hard/soft/off/manual guard-mode configuration.

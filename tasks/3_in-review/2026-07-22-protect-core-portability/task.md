@@ -25,8 +25,8 @@ change belongs in this repository before implementation reaches review.
       placeholder, or contradictory declarations.
 - [x] Existing task records are migrated, and positive/negative tests exercise the new
       check without relying on vendor keyword bans.
-- [x] An independent core-fit reviewer verifies that the mechanism does not overfit the
-      triggering incident or unnecessarily constrain future agents.
+- [x] A manually invoked independent core-fit review verifies that the mechanism does
+      not overfit the triggering incident or unnecessarily constrain future agents.
 
 ## Links
 

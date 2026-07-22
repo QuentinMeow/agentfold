@@ -44,12 +44,13 @@ Create a paved home for every agent/provider integration. This would encourage t
 specific integrations the owner wants kept out and add constraints before a general
 interface is proven useful.
 
-### Option D — require a core-fit receipt and independent challenge
+### Option D — require a core-fit receipt and offer an independent challenge
 
 Use a narrow Git boundary check to trigger structured architectural questions for core
-paths. Deterministic checks validate the receipt and reject obvious user-global state
-access; an independent reviewer challenges the semantic claim before review. Chosen:
-it forces deliberation without pretending syntax can prove architectural relevance.
+paths. Deterministic checks always validate the receipt and reject obvious user-global
+state access; `--require-review` adds an independent challenge when a human or selected
+guard profile asks for it. Chosen: it forces deliberation without pretending syntax can
+prove architectural relevance or making a token-expensive reviewer always-on.
 
 ## Chosen boundary
 
@@ -75,9 +76,11 @@ personal GitHub authentication safeguard remains outside AgentFold.
 
 The local hook checks staged bytes, including its task evidence; pull-request CI checks
 the full base-to-head tree. A core change without a task, `core` scope declaration,
-complete substitution evidence, or an independent approve majority fails with a routing
-message. Obvious home-directory access in changed core executables fails directly;
-skill prose remains a semantic review responsibility so negative examples stay legal.
+or complete substitution evidence fails with a routing message. Obvious home-directory
+access in changed core executables fails directly. When `--require-review` is explicitly
+selected, a missing independent approve majority also fails; otherwise verdict parsing
+does not run. Skill prose remains a semantic review responsibility so negative examples
+stay legal.
 Research, product code, and unregistered product CI stay
 unaffected; thin agent/provider adapters are listed in `automation/core-scope-paths.txt`.
 Generated agent directories are never trackable even with a forced add, while a marked

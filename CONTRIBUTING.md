@@ -16,9 +16,11 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   maintainer before any agent acts on them
   (`handbook/principles/provenance-over-position.md`).
 - **Core changes prove they belong here.** Core diffs use a task that completes
-  `templates/task/design.md` and receives an independent core-fit verdict. The small
-  untracked-fix branch convention applies outside core only; personal setup and
-  single-agent/provider/product integrations stay external.
+  `templates/task/design.md`; hooks and CI enforce that receipt. Independent core-fit
+  review is available through `automation/check_core_scope.py --require-review` and is
+  manual by default until guard modes are configurable. The small untracked-fix branch
+  convention applies outside core only; personal setup and single-agent/provider/product
+  integrations stay external.
 - **Keep contracts short.** The reconciler enforces line budgets on every `AGENTS.md`.
   Before adding a line ask: would removing this cause mistakes? If not, cut it.
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Gate AgentFold core changes on explicit, independently reviewed core fit.
+"""Gate AgentFold core changes on explicit core-fit evidence.
 
 Local hooks inspect staged bytes. Pull-request CI supplies a base...head range.
-The check is intentionally narrow: syntax forces architectural deliberation; an
-independent reviewer, not a keyword list, judges whether the rationale is true.
+The deterministic checks force architectural deliberation without pretending syntax
+proves the rationale. ``--require-review`` explicitly adds an independent verdict when
+the selected workflow calls for that token-expensive check.
 """
 import argparse
 import fnmatch
@@ -384,10 +385,7 @@ def validate_task(task, touched_core, require_review=False, load_text=None):
                     "optional=yes, policy=none, writes=repo-only pairs"
                 )
 
-    review_needed = require_review or (
-        task.parent.name in {"3_in-review", "4_done"} and scope == "core"
-    )
-    if review_needed:
+    if require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
         review_sections = named_sections(verification_text, "Review verdicts")
@@ -497,7 +495,10 @@ def main(argv=None):
     mode.add_argument("--staged", action="store_true", help="inspect the staged Git diff (default)")
     mode.add_argument("--range", dest="diff_range", help="inspect a Git base...head range")
     parser.add_argument("--branch", help="task branch name; defaults to the current branch")
-    parser.add_argument("--require-review", action="store_true", help="require an independent approval")
+    parser.add_argument(
+        "--require-review", action="store_true",
+        help="manually require an independent approval for this run",
+    )
     args = parser.parse_args(argv)
 
     branch = args.branch or git("branch", "--show-current").strip()
@@ -534,7 +535,10 @@ def main(argv=None):
     if errors:
         for error in errors:
             print(f"[core-scope] {error}")
-        print("    fix: complete templates/task/design.md, route external setup outside core, or obtain independent review")
+        print(
+            "    fix: complete templates/task/design.md, route external setup outside "
+            "core, or record review when --require-review is selected"
+        )
         return 1
     if core_paths:
         print(f"core-scope: pass ({len(core_paths)} core path(s), task {task.name})")

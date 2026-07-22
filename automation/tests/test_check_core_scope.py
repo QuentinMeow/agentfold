@@ -285,7 +285,14 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True)
             self.assertTrue(any("exact nonempty" in error for error in errors))
 
-    def test_independent_review_is_required_at_review(self):
+    def test_independent_review_is_manual_by_default_at_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review")
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("independent reviewer" in error for error in errors))
+
+    def test_manual_independent_review_accepts_valid_verdict(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp, status="3_in-review", claimant="author",
