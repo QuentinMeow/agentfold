@@ -24,7 +24,8 @@ anything.
    `history/conversations/<YYYY-MM-DD-HHMM><TZ>-<slug>/handover.md` (session start,
    local time + timezone abbreviation). One screen, plain
    language, written for a teammate who was away: what happened, how it works now,
-   what needs their attention, links to depth. No invented shorthand.
+   what needs their attention, dead ends not to retry, links to depth. No invented
+   shorthand.
 6. **Final reply**: end with the handover's "Needs your attention" entries, formatted
    per `templates/handover.md` — each a clickable link to the queue item plus 2–3
    sentences of context, never a bare name. Repeat items from previous sessions that
@@ -32,6 +33,7 @@ anything.
 
 ## Skip conditions
 
-`pair` mode sessions may skip steps 5–6 ceremony *only* if the human watched everything
-live — but decisions still get files (chat is the only channel with no trace), and the
-reconciler still expects a handover for any conversation folder you created.
+There are none for existence — every session that did work leaves a handover
+(`history/AGENTS.md`). `pair` mode sessions where the human watched everything live
+may compress it to a few lines, but decisions still get files (chat is the only
+channel with no trace).

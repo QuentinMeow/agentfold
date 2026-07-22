@@ -30,6 +30,11 @@ item holds the options and links onward to its sources (it is a projection —
 `message-queue/AGENTS.md`). This section is repeated verbatim in the session's final
 chat reply.>
 
+## Dead ends
+
+<What was tried and abandoned, and why — so the next session doesn't retry it.
+Failed approaches are exactly what compaction and chat lose. "None" is fine.>
+
 ## Next steps
 
 <What the next session should probably do first.>

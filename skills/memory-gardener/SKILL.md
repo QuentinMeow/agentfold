@@ -22,7 +22,9 @@ This pass keeps `memory/`, `tasks/4_done/`, and `history/` small enough to stay 
    - **Proven repeatedly** (a lesson every session obeys) → promote into the relevant
      `AGENTS.md` and delete the lesson — one home per fact.
 3. **Prune old tasks/conversations**: promote any still-valuable learning into
-   `memory/` first, then delete the folders.
+   `memory/` first, then delete the folders. Expect link-check findings: files outside
+   the record folders (e.g. `roadmap/current-state.md`) may cite a pruned task —
+   update or unlink them in the same commit.
 4. **Regenerate**: `reconcile.py --fix-index`; then `--check` must pass.
 5. **Report before apply**: in `async`/`pair` mode, or whenever touching more than ~10
    items in any mode, present the deletion list as a
