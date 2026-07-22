@@ -28,8 +28,13 @@ checks, explicit agent attestations, independent scans, and CI/merge controls. C
 boundaries fail closed; judgment-heavy or recoverable obligations retain escape hatches
 and eventual repair.
 
-## Chosen
+## Recommended
 
-Still exploring. The research and threat model will test whether Option C can stay
-filesystem- and git-native, explain its trust assumptions, and avoid ritual without
-evidence.
+Option C is the proposal, not an accepted decision. The durable design is
+`docs/designs/risk-tiered-agent-guardrails.md`. It keeps policy, detection, evidence,
+and enforcement separate; uses local hooks for feedback and remotely protected checks
+for authority; reserves acknowledgement receipts for judgment-heavy cases; and requires
+separate approval for confirmed critical findings. It encodes outcomes and evidence,
+not an agent's internal procedure, so stronger future agents retain latitude. No agent
+should implement the proposed controls as settled architecture until the proposal is
+accepted through the repository's normal decision process.

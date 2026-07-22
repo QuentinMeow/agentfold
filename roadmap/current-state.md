@@ -4,7 +4,8 @@
 
 What is true today, mapped to the desired-state lines.
 
-- **Structure**: all ten top-level folders exist and follow their own contracts; the
+- **Structure**: all eleven top-level folders exist and follow their own contracts;
+  `docs/designs/` holds durable proposals separately from principles and ADRs; the
   bootstrap task (`2026-07-22-bootstrap-the-harness`, in `tasks/4_done/`) is the worked
   example of the full lifecycle.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
@@ -25,4 +26,4 @@ What is true today, mapped to the desired-state lines.
   filed in the backlog (desired-state line 7).
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   public/private overlay, queue viewer, design-review hardening — see
-  `desired-state.md` lines 3–7.
+  `desired-state.md` lines 3–8.

@@ -15,6 +15,7 @@ can say (`handbook/principles/progressive-disclosure.md`).
 |-------------------|-------------|
 | What is this repo / where do I start | `README.md` (humans) / root `AGENTS.md` (agents) |
 | Why a design is the way it is | `handbook/principles/<principle>.md`, then the ADRs in `memory/decisions/` |
+| What has been designed but not accepted or implemented | `docs/designs/` |
 | How to ask the human / file a question | `message-queue/AGENTS.md` + `handbook/decision-guide.md` |
 | How work is tracked | `tasks/AGENTS.md`; worked example in `tasks/4_done/` |
 | What happened in past sessions | `history/` handovers |

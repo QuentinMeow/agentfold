@@ -44,6 +44,7 @@ agentfold/
 ├── AGENTS.md            # root agent contract — the API of the whole repo
 ├── README.md            # you are here — the human doc; agent contract is AGENTS.md
 ├── handbook/            # why & how: principles, modes, git workflow, naming, adoption
+├── docs/                # durable system designs and research-backed proposals
 ├── message-queue/       # all async communication, one file per message
 │   ├── needs-human/     #   your move:
 │   │   ├── decisions/   #     choices only you may make (each has a default path)
