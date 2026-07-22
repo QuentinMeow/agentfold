@@ -1,0 +1,9 @@
+{
+  "quotes": [
+    {"text": "Simplicity is prerequisite for reliability.", "author": "Edsger W. Dijkstra", "topic": "simplicity"},
+    {"text": "Make it work, make it right, make it fast.", "author": "Kent Beck", "topic": "process"},
+    {"text": "Programs must be written for people to read, and only incidentally for machines to execute.", "author": "Harold Abelson", "topic": "readability"},
+    {"text": "The best way to get a project done faster is to start sooner.", "author": "Jim Highsmith", "topic": "process"},
+    {"text": "Deleted code is debugged code.", "author": "Jeff Sickel", "topic": "simplicity"}
+  ]
+}

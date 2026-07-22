@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS noise
+.DS_Store
+
+# Scratch space — never committed (see handbook/naming-conventions.md)
+tmp/
+
+# Agent-adapter shims created by automation/install.py (generated, never edited)
+.claude/
+.cursor/
+.agents/
+**/CLAUDE.md
+!/CLAUDE.md
