@@ -21,6 +21,11 @@ states a default path, every review is safe to ignore. Principle:
   the `**Filed:**` field). Schemas: copy from `templates/queue/` — never write from memory.
 - Every item is self-contained: the reader acts from the file alone, assuming only the
   root `AGENTS.md` as context.
+- **Items are projections, not sources.** Like a retryable API call, an item carries
+  only the summary the reader needs to act; everything durable (background, artifacts,
+  reasoning) lives in the linked task folder, `memory/`, or code — so a lost or stale
+  item is simply regenerated from its sources. The one thing an item ever uniquely
+  holds is a not-yet-folded human answer, which is why folding precedes deletion.
 - **Claim before resolving**: commit a one-line `**Status:**` edit (`folding`,
   `in-repair`) before acting on an item, so parallel sessions don't double-process.
 - Resolved items are **deleted in the resolving commit** — git history is the archive;

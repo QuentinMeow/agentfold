@@ -95,7 +95,7 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 | Every queue item, task, memory entry matches its schema | `reconcile.py` (pre-commit hook + CI) |
 | Every conversation leaves a `handover.md` | reconciler → auto-filed retry item |
 | Links in docs point to files that exist | reconciler link check |
-| Contracts stay short (line budgets on AGENTS.md files) | reconciler budget check |
+| Contracts stay short (line budgets on AGENTS.md, SKILL.md, this README) | reconciler budget check |
 | Memory expires and gets re-verified or deleted | `Review-by` dates + reconciler + gardener skill |
 | Example services stay green | `automation/run_tests.py` in the pre-commit hook + CI |
 | Merges get adversarial review (in `autonomous` mode) | `skills/adversarial-review/` protocol, majority verdict |
