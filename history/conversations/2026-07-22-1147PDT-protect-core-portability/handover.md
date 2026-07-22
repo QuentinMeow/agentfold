@@ -50,4 +50,4 @@ separate personal plugin/config repository, never in AgentFold core.
 ## Deep links
 
 - Task folder: [`tasks/3_in-review/2026-07-22-protect-core-portability/`](../../../tasks/3_in-review/2026-07-22-protect-core-portability/) · Worklog: [`worklog.md`](../../../tasks/3_in-review/2026-07-22-protect-core-portability/worklog.md) · Verification: [`verification.md`](../../../tasks/3_in-review/2026-07-22-protect-core-portability/verification.md)
-- Pull request: https://github.com/QuentinMeow/agentfold/pull/6 · Commits: `4876bfd..7085e55` plus this publication handover commit
+- Pull request: https://github.com/QuentinMeow/agentfold/pull/6 · Commits: branch history from `4876bfd` through the publication handover
