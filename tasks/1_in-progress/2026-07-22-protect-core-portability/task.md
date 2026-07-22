@@ -21,8 +21,8 @@ change belongs in this repository before implementation reaches review.
       to AgentFold's lifecycle and does not require one agent, provider, user, or product.
 - [ ] Every task schema requires an explicit repository-scope classification, a
       repository-fit rationale, agent-support scope, and the deliberately excluded
-      external pieces; the reconciler rejects missing, placeholder, or contradictory
-      declarations.
+      external pieces; the reconciler and Git boundary gate reject missing,
+      placeholder, or contradictory declarations.
 - [ ] Existing task records are migrated, and positive/negative tests exercise the new
       check without relying on vendor keyword bans.
 - [ ] An independent core-fit reviewer verifies that the mechanism does not overfit the

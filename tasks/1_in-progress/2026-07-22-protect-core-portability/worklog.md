@@ -6,3 +6,14 @@
   that personal Codex setup and GitHub authentication policy do not belong in AgentFold.
 - Started a clean branch at the exact remote tip of the guardrails-design branch; no
   incident-specific commit is an ancestor of this task.
+- Added a substitution-based core receipt, an independent-review gate, repository-local
+  executable checks, and a registry for thin adapter files. The mechanism deliberately
+  avoids vendor-name bans and leaves product/service paths outside core.
+- Three adversarial reviewers found and drove fixes for index-versus-working-tree
+  evidence, deletion and rename coverage, claimant aliases, historical review verdicts,
+  generated adapter paths, product `.gitignore` freedom, raw examples in skill prose,
+  hidden Markdown evidence, and Python 3.9 compatibility.
+- A final review round rejected a root-Markdown catch-all and raw HTML evidence. The
+  gate now targets instruction-named root/hidden paths plus explicitly registered
+  unusual adapters, leaves ordinary product docs alone, and strips fenced, commented,
+  and raw-HTML evidence before parsing.

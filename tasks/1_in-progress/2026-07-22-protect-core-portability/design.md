@@ -82,7 +82,8 @@ Research, product code, and unregistered product CI stay
 unaffected; thin agent/provider adapters are listed in `automation/core-scope-paths.txt`.
 Generated agent directories are never trackable even with a forced add, while a marked
 block in `.gitignore` protects those paths without treating product ignore rules as core.
-New root architecture/instruction documents and hidden `*-instructions.md` surfaces
-enter the same review instead of creating an unreviewed agent-specific contract.
+Instruction-named root or hidden paths enter the same review, while unusual ecosystem
+filenames are registered explicitly beside existing thin adapters. Ordinary product
+documents remain outside core even when they live at the repository root.
 The existing small-fix branch convention remains available outside core; its dedicated
 backlog task must design any safe core exception rather than this gate guessing one.

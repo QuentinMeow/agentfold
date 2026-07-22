@@ -17,12 +17,25 @@ FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
     r"^- core-fit / ([^:]+):\s*(approve|block)\s+[—-]\s+(.+)$", re.I | re.M
 )
-FENCE_RE = re.compile(
-    r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*?^[ ]{0,3}(?P=fence)[ \t]*$", re.M | re.S
-)
-UNCLOSED_FENCE_RE = re.compile(r"^[ ]{0,3}(?:`{3,}|~{3,}).*\Z", re.M | re.S)
+FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 UNCLOSED_HTML_COMMENT_RE = re.compile(r"<!--.*\Z", re.S)
+RAW_HTML_CONTAINER_TAGS = (
+    "address|article|aside|blockquote|body|caption|center|colgroup|dd|details|dialog|"
+    "dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|head|header|html|"
+    "iframe|legend|li|main|menu|nav|noframes|noembed|object|ol|optgroup|option|p|"
+    "plaintext|pre|script|search|section|style|summary|table|tbody|td|textarea|tfoot|"
+    "th|thead|title|tr|ul|xmp"
+)
+RAW_HTML_BLOCK_RE = re.compile(
+    rf"^[ ]{{0,3}}<(?P<tag>{RAW_HTML_CONTAINER_TAGS})(?=[\s>/])[^>]*>"
+    rf".*?</(?P=tag)\s*>[^\n]*(?:\n|\Z)",
+    re.I | re.M | re.S,
+)
+UNCLOSED_RAW_HTML_BLOCK_RE = re.compile(
+    rf"^[ ]{{0,3}}<(?:{RAW_HTML_CONTAINER_TAGS})(?=[\s>/])[^>]*>.*\Z",
+    re.I | re.M | re.S,
+)
 
 CORE_PREFIXES = (
     "skills/",
@@ -46,6 +59,7 @@ ORDINARY_ROOT_MARKDOWN = {
     "CHANGELOG.md", "CODE_OF_CONDUCT.md", "LICENSE.md", "README.md", "SECURITY.md",
     "SUPPORT.md",
 }
+INSTRUCTION_PATH_MARKERS = ("agent", "assistant", "instruction", "prompt", "rule")
 ADAPTER_IGNORE_START = "# agentfold-adapters:start"
 ADAPTER_IGNORE_END = "# agentfold-adapters:end"
 ADAPTER_IGNORE_LINES = (
@@ -78,11 +92,40 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
+def strip_fenced_blocks(text):
+    """Remove Markdown fences without letting their contents start HTML blocks."""
+    output = []
+    fence_char = None
+    fence_length = 0
+    for line in (text or "").splitlines(keepends=True):
+        candidate = line.rstrip("\r\n")
+        if fence_char:
+            closing = re.fullmatch(
+                rf"[ ]{{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
+                candidate,
+            )
+            if closing:
+                fence_char = None
+                fence_length = 0
+            output.append("\n" if line.endswith(("\n", "\r")) else "")
+            continue
+        opening = FENCE_OPEN_RE.match(candidate)
+        if opening:
+            marker = opening.group("fence")
+            fence_char = marker[0]
+            fence_length = len(marker)
+            output.append("\n" if line.endswith(("\n", "\r")) else "")
+            continue
+        output.append(line)
+    return "".join(output)
+
+
 def semantic_text(text):
-    clean = HTML_COMMENT_RE.sub("", text or "")
+    clean = strip_fenced_blocks(text or "")
+    clean = HTML_COMMENT_RE.sub("", clean)
     clean = UNCLOSED_HTML_COMMENT_RE.sub("", clean)
-    clean = FENCE_RE.sub("", clean)
-    return UNCLOSED_FENCE_RE.sub("", clean)
+    clean = RAW_HTML_BLOCK_RE.sub("", clean)
+    return UNCLOSED_RAW_HTML_BLOCK_RE.sub("", clean)
 
 
 def parsed_fields(text):
@@ -126,17 +169,22 @@ def is_core_path(path, extra_exact=()):
     while path.startswith("./"):
         path = path[2:]
     rel = Path(path)
-    root_architecture_doc = (
+    instruction_named = any(
+        marker in part.lower()
+        for part in rel.parts
+        for marker in INSTRUCTION_PATH_MARKERS
+    )
+    root_instruction_doc = (
         len(rel.parts) == 1 and rel.suffix.lower() == ".md"
-        and rel.name not in ORDINARY_ROOT_MARKDOWN
+        and rel.name not in ORDINARY_ROOT_MARKDOWN and instruction_named
     )
     hidden_instruction_file = (
         len(rel.parts) > 1 and rel.parts[0].startswith(".")
-        and rel.suffix.lower() == ".md" and "instruction" in rel.name.lower()
+        and rel.suffix.lower() == ".md" and instruction_named
     )
     return bool(
         path in CORE_EXACT or path in set(extra_exact) or path.startswith(CORE_PREFIXES)
-        or root_architecture_doc or hidden_instruction_file
+        or root_instruction_doc or hidden_instruction_file
     )
 
 

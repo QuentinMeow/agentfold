@@ -49,10 +49,18 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path("services/example/client.py"))
         self.assertTrue(SCOPE.is_core_path("tasks/AGENTS.md"))
         self.assertTrue(SCOPE.is_core_path("handbook/git-workflow.md"))
-        self.assertTrue(SCOPE.is_core_path("CLAUDE.md"))
+        self.assertFalse(SCOPE.is_core_path("CLAUDE.md"))
+        self.assertTrue(SCOPE.is_core_path("CLAUDE.md", {"CLAUDE.md"}))
         self.assertFalse(SCOPE.is_core_path(".gitignore"))
-        self.assertTrue(SCOPE.is_core_path("GEMINI.md"))
+        self.assertTrue(SCOPE.is_core_path("AGENT_GUIDE.md"))
+        self.assertFalse(SCOPE.is_core_path("ARCHITECTURE.md"))
+        self.assertFalse(SCOPE.is_core_path("DEVELOPMENT.md"))
+        self.assertFalse(SCOPE.is_core_path("API.md"))
+        self.assertFalse(SCOPE.is_core_path("GEMINI.md"))
+        self.assertTrue(SCOPE.is_core_path("GEMINI.md", {"GEMINI.md"}))
         self.assertTrue(SCOPE.is_core_path(".github/copilot-instructions.md"))
+        self.assertTrue(SCOPE.is_core_path(".windsurf/rules/policy.md"))
+        self.assertTrue(SCOPE.is_core_path(".clinerules/policy.md"))
         self.assertFalse(SCOPE.is_core_path("README.md"))
         self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/bug_report.md"))
 
@@ -94,6 +102,15 @@ class CoreScopeTests(unittest.TestCase):
             with self.subTest(close=close), tempfile.TemporaryDirectory() as tmp:
                 task = self.make_task(
                     tmp, design=f"# Design\n\n<!--\n{COMPLETE_DESIGN}\n{close}"
+                )
+                errors = SCOPE.validate_task(task, touched_core=True)
+                self.assertTrue(any("exactly one real" in error for error in errors))
+
+    def test_raw_html_block_receipt_is_not_evidence(self):
+        for tag in ("pre", "details", "table"):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, design=f"# Design\n\n<{tag}>\n{COMPLETE_DESIGN}\n</{tag}>\n"
                 )
                 errors = SCOPE.validate_task(task, touched_core=True)
                 self.assertTrue(any("exactly one real" in error for error in errors))
@@ -192,6 +209,17 @@ class CoreScopeTests(unittest.TestCase):
                 task = self.make_task(tmp, status="3_in-review", verification=wrapper)
                 errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
                 self.assertTrue(any("independent reviewer" in error for error in errors))
+
+    def test_raw_html_block_review_is_not_a_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review",
+                verification=(
+                    "<pre>\n- core-fit / reviewer: approve — example only\n</pre>\n"
+                ),
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("independent reviewer" in error for error in errors))
 
     def test_blocking_review_without_approve_majority_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
