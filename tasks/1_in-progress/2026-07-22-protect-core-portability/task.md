@@ -4,6 +4,7 @@
 **Mode:** async
 **Filed:** 2026-07-22, by codex, from the owner's architecture correction in chat
 **Parent:** none
+**Repository scope:** core
 
 ## Goal
 
