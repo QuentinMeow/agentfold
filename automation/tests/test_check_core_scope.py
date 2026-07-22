@@ -21,6 +21,7 @@ COMPLETE_DESIGN = """# Design
 **Why AgentFold core:** this protects AgentFold extension boundaries in every adopted repository
 **Thin adapter:** none
 """
+REVIEWED_REVISION = "a" * 40
 
 
 class CoreScopeTests(unittest.TestCase):
@@ -37,7 +38,7 @@ class CoreScopeTests(unittest.TestCase):
         if verification is not None:
             (task / "verification.md").write_text(
                 "# Verification\n\n## Review verdicts\n\n"
-                "**Reviewed revision:** abc1234\n\n" + verification,
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n" + verification,
                 encoding="utf-8",
             )
         return task
@@ -379,6 +380,45 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
             self.assertTrue(any("Reviewed revision" in error for error in errors))
 
+    def test_reviewed_revision_accepts_full_sha1_or_sha256_ids(self):
+        for length in (40, 64):
+            with self.subTest(length=length), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review",
+                    verification="- core-fit / reviewer: approve — bound review\n",
+                )
+                revision = "b" * length
+                (task / "verification.md").write_text(
+                    "# Verification\n\n## Review verdicts\n\n"
+                    f"**Reviewed revision:** {revision}\n\n"
+                    "- core-fit / reviewer: approve — bound review\n",
+                    encoding="utf-8",
+                )
+                checked = []
+                errors = SCOPE.validate_task(
+                    task,
+                    touched_core=True,
+                    require_review=True,
+                    review_revision_check=lambda value: checked.append(value) or [],
+                )
+                self.assertEqual([], errors)
+                self.assertEqual([revision], checked)
+
+    def test_abbreviated_reviewed_revision_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review",
+                verification="- core-fit / reviewer: approve — weak binding\n",
+            )
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                "**Reviewed revision:** abc1234\n\n"
+                "- core-fit / reviewer: approve — weak binding\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(any("Reviewed revision" in error for error in errors))
+
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (
             "~~~text\n- core-fit / reviewer: approve — example only\n~~~\n",
@@ -565,7 +605,7 @@ class CoreScopeTests(unittest.TestCase):
                 reviewed, records_head, repo=root
             ))
             self.assertTrue(SCOPE.review_revision_findings(
-                reviewed, records_head, pending_core_paths=["automation/pending.py"], repo=root
+                reviewed, records_head, pending_paths=["automation/pending.py"], repo=root
             ))
 
             tool.write_text("print('changed after review')\n", encoding="utf-8")
@@ -576,6 +616,41 @@ class CoreScopeTests(unittest.TestCase):
             ).strip()
             findings = SCOPE.review_revision_findings(reviewed, current, repo=root)
             self.assertTrue(any("stale" in finding for finding in findings))
+
+    def test_reviewed_revision_binds_task_decision_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            task_id = "2026-07-22-example"
+            task = root / "tasks" / "3_in-review" / task_id
+            task.mkdir(parents=True)
+            (task / "task.md").write_text("**Claimed-by:** author\n", encoding="utf-8")
+            (task / "design.md").write_text(COMPLETE_DESIGN, encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "reviewed"], cwd=root, check=True)
+            reviewed = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+
+            (task / "task.md").write_text("**Claimed-by:** reviewer\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "change claimant"], cwd=root, check=True)
+            current = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            findings = SCOPE.review_revision_findings(
+                reviewed, current, task_id=task_id, repo=root
+            )
+            self.assertTrue(any("task.md" in finding for finding in findings))
+            self.assertTrue(SCOPE.review_revision_findings(
+                reviewed,
+                reviewed,
+                pending_paths=[f"tasks/3_in-review/{task_id}/design.md"],
+                task_id=task_id,
+                repo=root,
+            ))
 
     def test_reviewed_revision_must_be_a_known_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -31,5 +31,5 @@ change belongs in this repository before implementation reaches review.
 ## Links
 
 - Root contracts: `AGENTS.md`, `skills/AGENTS.md`, and `automation/AGENTS.md`
-- Portability decision: `memory/decisions/2026-07-22-visible-skills-dir-with-symlinks.md`
+- Portability decision: `memory/decisions/2026-07-22-core-portability-review-is-manually-selected.md`
 - Enforcement principle: `handbook/principles/systems-over-instructions.md`

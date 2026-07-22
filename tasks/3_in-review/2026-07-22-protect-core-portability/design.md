@@ -48,10 +48,11 @@ interface is proven useful.
 
 Use a narrow Git boundary check to trigger structured architectural questions for core
 paths. Deterministic checks always validate the receipt and reject obvious user-global
-state access. A human or selected guard profile may explicitly invoke an independent
-challenge; `--require-review` then validates its revision-bound receipt but does not
-launch the reviewer. Chosen: it forces deliberation without pretending syntax can prove
-architectural relevance or making a token-expensive reviewer always-on.
+state access. Today a human may explicitly invoke an independent challenge;
+`--require-review` then validates its revision-bound receipt but does not launch the
+reviewer. The future universal guard configuration may select the same check. Chosen: it
+forces deliberation without pretending syntax can prove architectural relevance or
+making a token-expensive reviewer always-on.
 
 ## Chosen boundary
 
@@ -80,7 +81,8 @@ the full base-to-head tree. A core change without a task, `core` scope declarati
 or complete substitution evidence fails with a routing message. Obvious home-directory
 access in changed core executables fails directly. When `--require-review` is explicitly
 selected, a missing, stale, or non-approving review receipt fails even when the selected
-diff changes only task records; later core edits invalidate an earlier reviewed commit.
+diff changes only task records; later core edits or changes to the task, design, or plan
+inputs invalidate an earlier reviewed commit.
 Without the flag, the command reports that manual review was not invoked and does not
 parse verdicts. Reviewer labels are untrusted claims rather than authenticated identity;
 the separately invoked panel supplies actual independence. Skill prose remains a

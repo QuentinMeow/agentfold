@@ -20,6 +20,7 @@ REVIEW_RE = re.compile(
     r"^- core-fit / ([^:\r\n]+):[ \t]*(approve|block)[ \t]+[—-][ \t]+(.+)$",
     re.I | re.M,
 )
+FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
 # CommonMark 0.31.2 HTML block starts and terminators.
 RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
@@ -405,7 +406,7 @@ def validate_task(
             errors.append("verification.md needs exactly one real `## Review verdicts` section")
         review_section = review_sections[0] if len(review_sections) == 1 else ""
         revision_matches = list(re.finditer(
-            r"^\*\*Reviewed revision:\*\*[ \t]*([0-9a-fA-F]{7,40})[ \t]*$",
+            rf"^\*\*Reviewed revision:\*\*[ \t]*({FULL_COMMIT_PATTERN})[ \t]*$",
             review_section,
             re.M,
         ))
@@ -519,9 +520,19 @@ def range_paths(spec, repo=REPO):
     ).splitlines() if line]
 
 
+def is_review_bound_task_path(path, task_id):
+    parts = Path(path).parts
+    return bool(
+        len(parts) == 4
+        and parts[0] == "tasks"
+        and parts[2] == task_id
+        and parts[3] in {"task.md", "design.md", "plan.md"}
+    )
+
+
 def review_revision_findings(
     reviewed_revision, current_revision, registered_paths=(),
-    pending_core_paths=(), repo=REPO,
+    pending_paths=(), task_id="", repo=REPO,
 ):
     resolved = subprocess.run(
         ["git", "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}"],
@@ -540,15 +551,24 @@ def review_revision_findings(
             f"reviewed revision {reviewed_revision} is not an ancestor of {current[:12]}"
         ]
     later_paths = range_paths(f"{reviewed_commit}...{current}", repo=repo)
-    later_core = [
-        path for path in later_paths if is_core_path(path, registered_paths)
+    later_bound = [
+        path for path in later_paths
+        if is_core_path(path, registered_paths)
+        or is_review_bound_task_path(path, task_id)
     ]
-    later_core.extend(path for path in pending_core_paths if path not in later_core)
-    if later_core:
-        preview = ", ".join(later_core[:3])
-        suffix = " ..." if len(later_core) > 3 else ""
+    later_bound.extend(
+        path for path in pending_paths
+        if (
+            is_core_path(path, registered_paths)
+            or is_review_bound_task_path(path, task_id)
+        )
+        and path not in later_bound
+    )
+    if later_bound:
+        preview = ", ".join(later_bound[:3])
+        suffix = " ..." if len(later_bound) > 3 else ""
         return [
-            f"core-fit review for {reviewed_commit[:12]} is stale; later core changes: "
+            f"core-fit review for {reviewed_commit[:12]} is stale; later bound changes: "
             f"{preview}{suffix}"
         ]
     return []
@@ -594,12 +614,13 @@ def main(argv=None):
             "personal/provider setup belongs outside AgentFold"
         )
     elif task is not None:
-        pending_core_paths = core_paths if not args.diff_range else ()
+        pending_paths = paths if not args.diff_range else ()
         review_revision_check = lambda revision: review_revision_findings(
             revision,
             current_revision,
             registered_paths,
-            pending_core_paths,
+            pending_paths,
+            task.name,
         )
         errors.extend(validate_task(
             task,

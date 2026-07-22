@@ -17,4 +17,4 @@ $ <exact command>
 **Reviewed revision:** <immutable commit reviewed by every verdict below>
 
 - <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">
-- core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required only when core-fit review mode is selected>
+- core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required only when `--require-review` is explicitly selected>
