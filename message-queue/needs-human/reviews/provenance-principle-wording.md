@@ -1,6 +1,6 @@
 # New constitution entry: provenance-over-position — review the wording
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-22, by claude (design-review session — report: `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md`)
 **Look-at:** `handbook/principles/provenance-over-position.md`
 **Why-you-might-care:** principles are near-immutable once settled, and this one constrains you too: it commits the repo to human review of *every* external change to instruction-bearing paths (AGENTS.md files, `skills/`, `templates/`, `automation/`, `message-queue/`), in every mode
@@ -12,4 +12,4 @@ five listed paths are the right trust boundary, and whether binding `autonomous`
 mode to human review of external instruction changes is what you want. Reasoning
 and alternatives: `memory/decisions/2026-07-22-provenance-over-position-principle.md`.
 
-**Resolution:** ______ <human: anything here counts as acknowledged>
+**Resolution:** read and approved
