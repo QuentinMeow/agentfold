@@ -7,7 +7,7 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Completed the queue ritual, mapped the root contracts and existing design-review
   findings, and claimed the task on its required branch.
 - Preserved the pre-existing edit to
-  `message-queue/needs-human/reviews/design-review-direct-fixes.md` untouched.
+  message-queue/needs-human/reviews/design-review-direct-fixes.md untouched.
 - Ran three independent breadth-first research passes on agent-oriented software design,
   PII/secret defense in depth, and filesystem/Git enforcement, then verified the main
   claims against primary or authoritative sources.
@@ -20,3 +20,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   context-aware; the second verdict was unanimously approve.
 - Ran the reconciler and service tests successfully, filed the optional human review,
   recorded verification, and completed the session handover.
+
+## 2026-07-22 — publish-guardrails-pr (codex)
+
+- Verified that GitHub CLI authentication is valid outside the restricted execution
+  environment; the apparent expiration was a keychain-access false negative, not an
+  expired credential or a repository setup problem.
+- Preserved the human's `ack` for the earlier design-review wording in commit
+  `7fee36b`, then removed the resolved review item from the live queue as its lifecycle
+  requires; Git history remains the archive.
+- Confirmed the full local commit range, pushed
+  task/2026-07-22-design-critical-agent-guardrails, and opened draft PR #4 with an
+  explicit review checklist covering the security boundary and assurance claims.
+- Verified the PR's remote head, base, file list, and aggregate additions/deletions
+  against the pushed branch before the publication handover update.
