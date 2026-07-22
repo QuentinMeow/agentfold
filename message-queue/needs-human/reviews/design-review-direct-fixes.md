@@ -13,4 +13,4 @@ claims handover coverage and adversarial review are fully machine-enforced (they
 aren't); and `memory/AGENTS.md` no longer states a +90-day default that
 contradicted the templates.
 
-**Resolution:** ______ <human: anything here counts as acknowledged>
+**Resolution:** ack
