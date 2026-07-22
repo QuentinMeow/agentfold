@@ -18,14 +18,14 @@ explicit and mechanical.
 
 ## Acceptance criteria
 
-- [ ] `message-queue/AGENTS.md` states that items are regenerable projections of state
+- [x] `message-queue/AGENTS.md` states that items are regenerable projections of state
       that lives elsewhere, and names the one exception (an unfolded human answer)
-- [ ] `handbook/decision-guide.md` tells writers durable background belongs in the task
+- [x] `handbook/decision-guide.md` tells writers durable background belongs in the task
       folder, never only in the queue file
-- [ ] Root `AGENTS.md` states the README depth rule (short pitch + map, depth in `handbook/`)
-- [ ] `reconcile.py` enforces a line budget on the root `README.md`; the check fires
+- [x] Root `AGENTS.md` states the README depth rule (short pitch + map, depth in `handbook/`)
+- [x] `reconcile.py` enforces a line budget on the root `README.md`; the check fires
       when the budget is exceeded (demonstrated in `verification.md`)
-- [ ] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
+- [x] `automation/reconcile/reconcile.py --check` and `automation/run_tests.py` pass
 
 ## Links
 
