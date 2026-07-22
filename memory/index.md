@@ -11,6 +11,7 @@
 - [Queue items are regenerable projections, not sources](decisions/2026-07-22-queue-items-are-regenerable-projections.md) — A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe
 - [Name the repo "AgentFold"](decisions/2026-07-22-repo-name-agentfold.md) — Repo is named AgentFold — folders + "bring agents into the fold"; harness-family names were saturated
 - [The root README gets a reconciler line budget](decisions/2026-07-22-root-readme-line-budget.md) — README.md is a human landing page — short pitch + map, depth linked in handbook/ — and the reconciler enforces a 140-line budget on it
+- [A surfaced needs-human item is a clickable link plus context, never a bare name](decisions/2026-07-22-surfaced-asks-are-links-plus-context.md) — Handovers and final replies surface pending items as a clickable link to the queue file plus 2–3 sentences of context; the file links onward to its sources
 - [Task status is the folder the task sits in](decisions/2026-07-22-task-status-as-folders.md) — tasks/0_backlog…4_done folders ARE the status; no status field exists to drift
 - [Skills live in a visible skills/ dir; agent dirs are generated symlinks](decisions/2026-07-22-visible-skills-dir-with-symlinks.md) — skills/ is canonical; install.py symlinks it into .claude/, .cursor/, .agents/; symlinks are git-ignored
 
