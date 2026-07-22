@@ -101,6 +101,16 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
+def commonmark_lines(text):
+    """Split only on CommonMark line endings; Python also splits on form feed."""
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    pieces = normalized.split("\n")
+    lines = [piece + "\n" for piece in pieces[:-1]]
+    if pieces[-1]:
+        lines.append(pieces[-1])
+    return lines
+
+
 def semantic_text(text):
     """Return only Markdown that can carry real receipt fields or headings.
 
@@ -113,9 +123,9 @@ def semantic_text(text):
     html_end = None
     html_until_blank = False
 
-    for line in (text or "").splitlines(keepends=True):
-        candidate = line.rstrip("\r\n")
-        blank = "\n" if line.endswith(("\n", "\r")) else ""
+    for line in commonmark_lines(text):
+        candidate = line[:-1] if line.endswith("\n") else line
+        blank = "\n" if line.endswith("\n") else ""
 
         if fence_char:
             if re.fullmatch(
