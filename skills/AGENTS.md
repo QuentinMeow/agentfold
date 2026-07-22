@@ -29,3 +29,4 @@ SKILL.md) → optional `scripts/` (self-contained; never imports from outside th
 | `session-handover/` | ending any session that did work |
 | `adversarial-review/` | a merge or claim needs a trustworthy verdict |
 | `memory-gardener/` | reconciler reports overdue memory, or on a maintenance pass |
+| `github-auth-guard/` | `gh` authentication fails or an agent considers reauthentication |

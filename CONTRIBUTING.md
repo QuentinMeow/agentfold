@@ -22,7 +22,7 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
 
 ```bash
 python3 automation/reconcile/reconcile.py --check   # must pass with zero findings
-python3 automation/run_tests.py                     # example services stay green
+python3 automation/run_tests.py                     # repository tests stay green
 ```
 
 Both also run in CI and as the pre-commit hook (`automation/install.py` installs it).

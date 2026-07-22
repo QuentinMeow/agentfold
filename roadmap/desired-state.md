@@ -15,7 +15,9 @@ In priority order. Each line is specific enough to spawn tasks against.
    folders into an existing repo, asks three questions (name, mode, first service), and
    wires the hooks — the claude-code-templates playbook. *(Not started.)*
 4. **Per-skill eval canaries.** 3–6 scripted scenarios per skill with expected
-   behaviors; behavioral skill edits must pass them before merge. *(Not started.)*
+   behaviors; behavioral skill edits must pass them before merge. *(The GitHub auth
+   guard now has 14 unit/canary scenarios in the normal pre-commit/CI runner; the other
+   four skills do not yet have canaries.)*
 5. **Public/private overlay as a packaged module.** The mirror-structure pattern from
    `handbook/adoption-guide.md` shipped as tooling: mount script + config indirection +
    token-derived leak guard. *(Pattern documented; tooling not started.)*

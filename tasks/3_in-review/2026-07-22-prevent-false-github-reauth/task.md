@@ -14,17 +14,17 @@ the sandbox, exposing tokens, or replacing secure keychain storage with plaintex
 
 ## Acceptance criteria
 
-- [ ] WHEN a GitHub check cannot access the network or credential store, THE SYSTEM
+- [x] WHEN a GitHub check cannot access the network or credential store, THE SYSTEM
       SHALL classify the result as inconclusive and SHALL NOT prescribe login.
-- [ ] WHEN GitHub accepts the current credential, THE SYSTEM SHALL report the active
+- [x] WHEN GitHub accepts the current credential, THE SYSTEM SHALL report the active
       account without printing the token.
-- [ ] WHEN a Codex agent attempts `gh auth login` without confirmed invalid credentials,
+- [x] WHEN a Codex agent attempts `gh auth login` without confirmed invalid credentials,
       THE SYSTEM SHALL block the command and direct the agent to the diagnostic.
-- [ ] Persistent Codex and repository guidance SHALL require an escalated control check
+- [x] Persistent Codex and repository guidance SHALL require an escalated control check
       before claiming expiry or asking the human to authenticate.
-- [ ] The existing personal GitHub-manager skill SHALL no longer recommend login merely
+- [x] The existing personal GitHub-manager skill SHALL no longer recommend login merely
       because an agent lacks access to keychain-backed authentication.
-- [ ] Automated tests and a real authenticated check SHALL pass without exposing a
+- [x] Automated tests and a real authenticated check SHALL pass without exposing a
       credential.
 
 ## Links

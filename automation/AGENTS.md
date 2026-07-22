@@ -9,7 +9,7 @@ bare clone.
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
 | `hooks/pre-commit` | blocks commits when the reconciler finds anything or a service test fails | every commit (installed) |
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
-| `run_tests.py` | finds and runs every `services/*/tests/test_*.py` | pre-commit, CI, on demand |
+| `run_tests.py` | runs every `services/*/tests/test_*.py` and `skills/*/tests/test_*.py` | pre-commit, CI, on demand |
 
 Rules:
 

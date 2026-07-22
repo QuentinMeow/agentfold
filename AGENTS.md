@@ -85,6 +85,10 @@ The `skills/session-handover/` skill walks through this.
   default path — then continuing on the default path unless the file says `**Blocking:** yes`.
 - **Never fabricate** test results, benchmark numbers, or completion claims.
   `verification.md` contains only commands actually run and their real output.
+- **Authentication requires an external control**: a failed credential check inside an
+  agent sandbox is inconclusive. For GitHub, use `skills/github-auth-guard/`; never
+  claim expiry or recommend `gh auth login` unless its host-access diagnostic returns
+  `safe_to_recommend_login: true`, and never display a token.
 - **Append, don't clobber**: re-read any two-way file (queue items, worklogs, decision
   blocks) immediately before writing; merge, never overwrite another writer's text.
   Never edit text the human wrote; a file holding a human answer is deleted only after

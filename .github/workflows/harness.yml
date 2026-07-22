@@ -10,5 +10,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reconciler — every harness invariant holds
         run: python3 automation/reconcile/reconcile.py --check
-      - name: Service tests
+      - name: Repository tests
         run: python3 automation/run_tests.py
