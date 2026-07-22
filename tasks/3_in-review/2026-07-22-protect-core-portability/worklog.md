@@ -34,3 +34,16 @@
   Deterministic core admission remains active in hooks and CI; independent core-fit
   verdict validation now runs only when `--require-review` is explicitly selected,
   pending the universal hard/soft/off/manual guard-mode configuration.
+- Superseded the earlier always-review consequence without weakening its portability
+  boundary. The replacement ADR keeps substitution evidence automatic and makes the
+  semantic panel an explicitly invoked, revision-bound check.
+- A manually invoked three-lens panel found stale historical receipts, ambiguous
+  reviewer identity handling, unbound task inputs, abbreviated SHA-256 object IDs, and
+  status-move invalidation. Each reproduced failure became a canary; all three lenses
+  approved exact commit `7247638` after the fixes.
+- Bound the final receipt to the full reviewed commit, migrated historical verdicts to
+  explicit legacy/unbound notes, and verified that later core or task-input edits stale
+  the receipt while unchanged status moves and records-only follow-up remain possible.
+- Merged the reviewed PR #4 response fold into the stacked branch, pushed all commits,
+  updated PR #6's reviewer checklist and verification counts, and confirmed both GitHub
+  Actions runs pass.
