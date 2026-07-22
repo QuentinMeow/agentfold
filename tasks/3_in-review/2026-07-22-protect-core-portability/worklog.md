@@ -22,3 +22,8 @@
   ordering between HTML and fences, exact type-one terminators, blank-line whitespace,
   CommonMark-only line endings, and CRLF receipts. The final focused suite has 41 tests
   and all three independent lenses approve the resulting branch.
+- Pushed the clean branch and opened draft PR #6 stacked directly on draft PR #4. GitHub
+  reports 36 changed files (+1,398/-15), both workflow runs pass, and the published
+  summary puts boundary semantics, flexibility, evidence integrity, review policy, and
+  absence of incident-specific artifacts at the top. Closed PR #5 now links to #6 as
+  its clean replacement and remains intact as the rejected-design audit record.

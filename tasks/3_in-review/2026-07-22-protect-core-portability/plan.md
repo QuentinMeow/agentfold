@@ -8,5 +8,5 @@
       acknowledgement; migrate existing records and add canary tests.
 - [x] 4. Run repository checks and an independent core-fit review, then record exact
       evidence and move the task to review.
-- [ ] 5. Publish a clean replacement draft PR based on the guardrails-design branch and
+- [x] 5. Publish a clean replacement draft PR based on the guardrails-design branch and
       link it from the closed incident-specific draft.
