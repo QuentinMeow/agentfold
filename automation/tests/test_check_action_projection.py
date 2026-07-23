@@ -1139,6 +1139,9 @@ class ActionProjectionTests(unittest.TestCase):
             "The release circle must validate this before release.",
             "The security guild has to sanity-check this before merge.",
             "The security guild is required to sanity-check this before merge.",
+            "The security guild is currently required to review this before merge.",
+            "The security guild has to review this before the merge.",
+            "The release circle must validate this before releasing.",
         )
         descriptions = (
             "The bot should not update the snapshot.",
@@ -1155,6 +1158,10 @@ class ActionProjectionTests(unittest.TestCase):
             "The parser should validate input offline.",
             "The security guild no longer needs to sanity-check this before merge.",
             "The memo noted security guild must review this before merge.",
+            (
+                "The memo noted that\n"
+                "the security guild has to review this before merge."
+            ),
         )
         for action in actions:
             with self.subTest(action=action):
@@ -1166,7 +1173,7 @@ class ActionProjectionTests(unittest.TestCase):
                 )
 
         with self.repo() as root:
-            for action in (actions[0], *actions[-4:]):
+            for action in (actions[0], *actions[-7:]):
                 with self.subTest(end_to_end_action=action):
                     findings = self.findings(
                         root,
@@ -1180,7 +1187,7 @@ class ActionProjectionTests(unittest.TestCase):
                         "missing a declared action section",
                         findings[0],
                     )
-            for description in descriptions[-6:]:
+            for description in descriptions[-7:]:
                 with self.subTest(end_to_end_description=description):
                     self.assertEqual(
                         [],

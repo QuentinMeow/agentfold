@@ -550,3 +550,19 @@
   projection tests passed; the reviewer block invalidated the entire panel.
 - Session handover:
   `history/conversations/2026-07-23-1629PDT-repair-obligation-synonyms-commonmark/handover.md`.
+
+## 2026-07-23 — obligation modifier and clause-boundary repair (codex)
+
+- The first reviewer of `1887449a` found that a modifier inside `is required to`, an
+  article inside the lifecycle phrase, and an inflected lifecycle word could bypass the
+  high-confidence obligation fallback.
+- Reused the shared obligation-modifier grammar inside passive hard obligations and
+  normalized common articles and lifecycle inflections.
+- A reported statement split by a CommonMark soft line break was falsely classified
+  because matching restarted at the second source line. Reported-speech evidence now
+  carries across soft line breaks within the same clause, but not across a sentence or
+  paragraph boundary.
+- Added exact end-to-end cases for every reported failure plus an adjacent inflection.
+  All 100 projection tests passed; the reviewer block invalidated the whole panel.
+- Session handover:
+  `history/conversations/2026-07-23-1643PDT-repair-obligation-modifiers-clauses/handover.md`.

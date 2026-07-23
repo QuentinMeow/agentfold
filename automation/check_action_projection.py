@@ -172,7 +172,7 @@ DIRECTIVE_PREFIX_PATTERN = r"(?:(?:and|also|then)[ \t]+)*"
 OPEN_COMMAND_WORD_PATTERN = r"[A-Za-z][A-Za-z'-]*"
 OBLIGATION_MODIFIER_PATTERN = (
     r"(?:(?:also|always|carefully|currently|definitely|directly|explicitly|"
-    r"first|generally|independently|manually|normally|often|personally|"
+    r"first|generally|independently|manually|normally|now|often|personally|"
     r"probably|really|simply|sometimes|still|typically|usually)[ \t]+)*"
 )
 REQUEST_WORK_VERB_PATTERN = (
@@ -212,6 +212,10 @@ FREEFORM_OBLIGATION_SUBJECT_PATTERN = (
     r"(?:(?!(?:are|been|did|do|does|had|has|have|is|must|needs?|never|"
     r"no|not|longer|previously|required|requested|should|was|were)\b)"
     rf"{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{1,6}}?"
+)
+REPORTED_SPEECH_CUE_PATTERN = (
+    r"(?:described|documented|explained|explains|noted|notes|recorded|"
+    r"reported|said|says|stated|wrote)"
 )
 AUTOMATION_ACTOR_PATTERN = (
     r"(?:(?:a|an|the)[ \t]+)?"
@@ -351,18 +355,20 @@ AUTOMATION_ACTOR_OBLIGATION_RE = re.compile(
 )
 FREEFORM_ACTOR_OBLIGATION_RE = re.compile(
     r"(?:^|[.!?][ \t]+|\n)[ \t]*"
-    r"(?![^.!?\n]*\b(?:described|documented|explained|explains|noted|notes|"
-    r"recorded|reported|said|says|stated|wrote)\b)"
+    rf"(?![^.!?\n]*\b{REPORTED_SPEECH_CUE_PATTERN}\b)"
     rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
     r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
     r"(?:must|needs?[ \t]+to|(?:has|have)[ \t]+to|"
-    r"(?:is|are)[ \t]+(?:requested|required)[ \t]+to|"
+    r"(?:is|are)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}(?:requested|required)[ \t]+to|"
     r"(?:requested|required)[ \t]+to)[ \t]+"
     rf"{OBLIGATION_MODIFIER_PATTERN}"
     r"(?!(?:not|never)\b)"
     rf"{ACTION_VERB_PATTERN}\b"
     r"[^.!?\n]{0,120}\b(?:before|by|prior[ \t]+to)[ \t]+"
-    r"(?:deployment|merge|publication|release|shipping)\b",
+    r"(?:(?:a|an|the|this|that)[ \t]+)?"
+    r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
+    r"releas(?:e|ing)|ship(?:ping)?)\b",
     re.I | re.M,
 )
 ACTOR_HARD_PROHIBITION_RE = re.compile(
@@ -874,6 +880,17 @@ def declarative_action_request(clean):
         for matched in pattern.finditer(clean):
             if matched.groupdict().get("negation"):
                 continue
+            if pattern is FREEFORM_ACTOR_OBLIGATION_RE:
+                clause_prefix = re.split(
+                    r"(?:[.!?][ \t]+|\n[ \t]*\n)",
+                    clean[:matched.start()],
+                )[-1]
+                if re.search(
+                    rf"\b{REPORTED_SPEECH_CUE_PATTERN}\b",
+                    clause_prefix,
+                    re.I,
+                ):
+                    continue
             prefix = clean[max(0, matched.start() - 64):matched.start()]
             if re.search(
                 r"\b(?:no|without)[ \t]+"
