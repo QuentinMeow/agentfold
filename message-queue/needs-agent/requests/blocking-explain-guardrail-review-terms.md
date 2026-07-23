@@ -1,6 +1,6 @@
 # Explain the guardrail review terms and repair the review interface
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-23, by the owner in chat
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
 

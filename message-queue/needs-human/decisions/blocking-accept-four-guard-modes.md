@@ -1,6 +1,6 @@
 # Use the same four modes for every configurable guard
 
-**Status:** waiting
+**Status:** folding
 **Blocking:** yes — guardrail implementation must not invent different mode semantics
 **Filed:** 2026-07-23, by codex, from the owner's PR #4 response in chat
 

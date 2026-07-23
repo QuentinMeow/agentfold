@@ -1,6 +1,6 @@
 # Make every pending human or durable agent action a queue-owned message
 
-**Status:** waiting
+**Status:** folding
 **Blocking:** yes — this coordination-contract change waits for owner direction
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 
