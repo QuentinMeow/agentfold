@@ -47,19 +47,28 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
   one top-level entry and one queue link per action, including every live human path
-  in the task's `Queue actions`. External assignments retain direction: a human
+  in the task's `Queue actions`. A `task/<id>` branch declares its task and is checked
+  against changed task records and `task:` commit tokens between the trusted base and
+  immutable candidate; another branch is bound from that same evidence. Conflicting
+  or ambiguous scope fails closed. External assignments retain direction: a human
   reviewer or assignee requires a distinct `needs-human/` link, while an assigned
   agent or bot requires a distinct `needs-agent/` link. Use the exact
-  `No queued action requested.` acknowledgement only when neither task scope nor
-  external assignment state exposes an action. Editing PR prose never creates or
-  resolves an ask.
+  `No queued action requested.`
+  acknowledgement only when neither task scope nor assignment exposes an action.
+- A provider title is change-summary metadata, so a conventional title such as
+  `Fix the login race` is not itself an ask. Questions, TODOs, explicit obligations,
+  authority commands such as `Review this change`, and requests in a title or body
+  still require queue projection. Editing provider prose never creates or resolves an
+  ask.
 - GitHub issue and conversation adapters accept either queue actor because the linked
   path says who acts next. Assignment adapters map GitHub `User` accounts and teams to
   `needs-human`, map `Bot` accounts to `needs-agent`, and fail closed on unknown account
-  types or missing identities. Formal review bodies project `needs-agent/` actions
-  individually. `pull_request_target`, issue, and issue-comment checks run trusted
-  default/base workflow code; direct review and diff-comment event checks are advisory
-  because GitHub has no trusted target-context variant for them.
+  types or missing identities. These inbound comments are explicitly unscoped: they
+  must project their own asks but cannot stand in for a task's complete action set.
+  Formal review bodies project `needs-agent/` actions individually.
+  `pull_request_target`, issue, and issue-comment checks run trusted default/base
+  workflow code; direct review and diff-comment event checks are advisory because
+  GitHub has no trusted target-context variant for them.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 

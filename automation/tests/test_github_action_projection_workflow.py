@@ -101,10 +101,14 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.pull_request.requested_teams",
             "github.event.pull_request.assignees",
             "github.event.pull_request.head.ref",
+            "ACTION_PROJECTION_BASE_REVISION: "
+            "${{ github.event.pull_request.base.sha }}",
             "steps.authoritative-pr-candidate.outputs.revision",
+            "--additional-summary-env ACTION_PROJECTION_TITLE",
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
             "--queue-actor any",
             "--required-queue-actor needs-human",
+            '--base-revision "$ACTION_PROJECTION_BASE_REVISION"',
         ))
         self.assertNotIn(
             "--external-action-env ACTION_PROJECTION_REQUESTED_", projection
@@ -125,10 +129,11 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}",
             "ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}",
             "github.event.issue.assignees",
-            "github.event.repository.default_branch",
             "ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}",
+            "--additional-prose-env ACTION_PROJECTION_TITLE",
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
             "--queue-actor any",
+            "--unscoped",
             "--allow-missing-action-section-if-no-action",
         ))
 
@@ -175,8 +180,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "!github.event.issue.pull_request",
             "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
             "ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}",
-            "github.event.repository.default_branch",
             "--queue-actor any",
+            "--unscoped",
         ))
         pull_request = self.step(
             "authoritative-external-action-projection",
@@ -187,8 +192,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.issue.pull_request",
             "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
             "steps.authoritative-pr-candidate.outputs.revision",
-            "github.event.repository.default_branch",
             "--queue-actor any",
+            "--unscoped",
         ))
         self.assertNotIn("steps.authoritative-pr-candidate", issue)
         for step in (issue, pull_request):
@@ -237,9 +242,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.review.state == 'changes_requested'",
             "--external-action-env ACTION_PROJECTION_CHANGES_REQUESTED",
             "--queue-actor needs-agent",
+            "--unscoped",
             "--allow-missing-action-section-if-no-action",
-            "ACTION_PROJECTION_BRANCH: "
-            "${{ github.event.repository.default_branch }}",
             "steps.advisory-pr-candidate.outputs.revision",
         ))
         self.assertNotIn("github.event.pull_request.head.ref", review)
@@ -250,9 +254,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assert_contains_all(comment, (
             "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
             "--queue-actor needs-agent",
+            "--unscoped",
             "--allow-missing-action-section-if-no-action",
-            "ACTION_PROJECTION_BRANCH: "
-            "${{ github.event.repository.default_branch }}",
             "steps.advisory-pr-candidate.outputs.revision",
         ))
         self.assertNotIn("--external-action-env", comment)

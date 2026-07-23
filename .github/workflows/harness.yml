@@ -141,6 +141,7 @@ jobs:
           ACTION_PROJECTION_REQUESTED_TEAMS: ${{ toJSON(github.event.pull_request.requested_teams) }}
           ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.pull_request.assignees) }}
           ACTION_PROJECTION_BRANCH: ${{ github.event.pull_request.head.ref }}
+          ACTION_PROJECTION_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
         run: |
@@ -176,12 +177,13 @@ jobs:
           export ACTION_PROJECTION_ASSIGNMENTS
           python3 automation/check_action_projection.py \
             --from-env ACTION_PROJECTION_BODY \
-            --additional-prose-env ACTION_PROJECTION_TITLE \
+            --additional-summary-env ACTION_PROJECTION_TITLE \
             --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
             --action-section "What to review" \
             --queue-actor any \
             --required-queue-actor needs-human \
             --branch "$ACTION_PROJECTION_BRANCH" \
+            --base-revision "$ACTION_PROJECTION_BASE_REVISION" \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-description
@@ -191,7 +193,6 @@ jobs:
           ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}
           ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}
           ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.issue.assignees) }}
-          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
         run: |
@@ -224,7 +225,7 @@ jobs:
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor any \
-            --branch "$ACTION_PROJECTION_BRANCH" \
+            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-issue
@@ -232,7 +233,6 @@ jobs:
         if: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request }}
         env:
           ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
-          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
         run: |
@@ -241,7 +241,7 @@ jobs:
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor any \
-            --branch "$ACTION_PROJECTION_BRANCH" \
+            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-issue-comment
@@ -249,7 +249,6 @@ jobs:
         if: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request }}
         env:
           ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
-          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
         run: |
@@ -258,7 +257,7 @@ jobs:
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor any \
-            --branch "$ACTION_PROJECTION_BRANCH" \
+            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-conversation-comment
@@ -300,7 +299,6 @@ jobs:
         env:
           ACTION_PROJECTION_BODY: ${{ github.event.review.body }}
           ACTION_PROJECTION_CHANGES_REQUESTED: ${{ github.event.review.state == 'changes_requested' && github.event.review.state || '' }}
-          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
         run: |
@@ -310,7 +308,7 @@ jobs:
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor needs-agent \
-            --branch "$ACTION_PROJECTION_BRANCH" \
+            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-review
@@ -318,7 +316,6 @@ jobs:
         if: ${{ github.event_name == 'pull_request_review_comment' }}
         env:
           ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
-          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
         run: |
@@ -327,7 +324,7 @@ jobs:
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor needs-agent \
-            --branch "$ACTION_PROJECTION_BRANCH" \
+            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-review-comment

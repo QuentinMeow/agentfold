@@ -393,3 +393,28 @@
   `git diff --check` also passed.
 - Session handover:
   `history/conversations/2026-07-23-1312PDT-repair-agent-obligation-task-projection/handover.md`.
+
+## 2026-07-23 — provider summary and task-scope repair (codex)
+
+- Split provider title summaries from ordinary action prose: conventional change
+  titles remain valid, while questions, TODOs, authority commands, explicit
+  obligations, conjoined asks, and present courtesy requests still require queue
+  projection.
+- Made obligation parsing preserve capability/system descriptions while recognizing
+  direct hard prohibitions and work requests after common modifiers. Reported
+  historical courtesy prose remains non-actionable.
+- Bound conventional branch names to the one task identified by changed task records
+  or any embedded canonical `task:` commit token. A task-named branch is cross-checked
+  against the same immutable base/candidate evidence; conflicts, multiple tasks,
+  missing trusted range input, and ancestry errors fail closed.
+- Made inbound issue/comment/review surfaces explicitly unscoped: they enforce every
+  ask they carry without pretending to project a task's complete `Queue actions`.
+- Two independent preflight reviewers reproduced the original bypasses, then passed
+  the repaired scope, conjunction, modifier, reported-speech, and hyphen-separator
+  cases.
+- `python3 automation/run_tests.py` passed all six test files: 89 projection tests,
+  55 core-scope tests (one skip), eight GitHub adapter tests, 209 queue/history tests,
+  five quote API tests, and three quote CLI tests. Python compilation, Ruby workflow
+  parsing, and `git diff --check` also passed.
+- Session handover:
+  `history/conversations/2026-07-23-1349PDT-repair-provider-summary-task-scope/handover.md`.

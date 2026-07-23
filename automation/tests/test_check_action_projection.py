@@ -80,6 +80,7 @@ class ActionProjectionTests(unittest.TestCase):
         external_actions=(),
         external_assignments=(),
         additional_prose=(),
+        additional_summaries=(),
         allow_missing_action_section_if_no_action=False,
         queue_actor="needs-human",
         required_queue_actor=None,
@@ -95,6 +96,7 @@ class ActionProjectionTests(unittest.TestCase):
             external_actions=external_actions,
             external_assignments=external_assignments,
             additional_prose=additional_prose,
+            additional_summaries=additional_summaries,
             allow_missing_action_section_if_no_action=(
                 allow_missing_action_section_if_no_action
             ),
@@ -1067,12 +1069,21 @@ class ActionProjectionTests(unittest.TestCase):
             "The worker needs to update the generated snapshot.",
             "An automation worker is requested to retry the job.",
             "The coding assistant should review the release notes.",
+            "Reviewers must assess the security impact before merge.",
+            "A reviewer is requested to evaluate the migration.",
+            "Reviewers must carefully assess the migration.",
+            "You must never merge this branch.",
+            "Reviewers must not disclose credentials.",
         )
         descriptions = (
             "The bot should not update the snapshot.",
+            "The bot should generally not update the snapshot.",
             "The worker updated the snapshot yesterday.",
             "The agent must be able to review changes offline.",
             "The assistant was requested to retry the old job.",
+            "The reviewer must be able to assess changes offline.",
+            "The reviewer must always be able to assess changes offline.",
+            "Reviewers should see failure reasons inline.",
         )
         for action in actions:
             with self.subTest(action=action):
@@ -1137,6 +1148,93 @@ class ActionProjectionTests(unittest.TestCase):
             findings = self.findings(root, inside, queue_actor="any")
             self.assertEqual(1, len(findings))
             self.assertIn("additional unlinked", findings[0])
+
+    def test_passive_work_appreciation_is_an_action(self):
+        actions = (
+            "A fix would be appreciated.",
+            "A fix would be greatly appreciated.",
+            "A fix would be appreciated before merge.",
+            "More test coverage would be helpful.",
+            "More test coverage would be very helpful.",
+            "This migration repair would be welcome.",
+            "It would be appreciated if you fixed the race.",
+        )
+        descriptions = (
+            "A fix would not be appreciated.",
+            "A fix would have been appreciated.",
+            "A fix would be appreciated by users of the old release.",
+            "The archived issue said a fix would be appreciated.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            findings = self.findings(
+                root,
+                actions[0],
+                allow_missing_action_section_if_no_action=True,
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("missing a declared action section", findings[0])
+
+    def test_provider_summary_allows_change_verbs_but_not_authority_asks(self):
+        summaries = (
+            "Fix the login race.",
+            "Update dependency metadata.",
+            "Implement retry backoff.",
+        )
+        actions = (
+            "Review this change.",
+            "Rev\u200biew this change.",
+            "Please fix the login race.",
+            "Fix the login race and please review the security implications.",
+            "Fix the login race - please review the security implications.",
+            "Implement retry backoff and approve this change.",
+            "Should we merge?",
+            "TODO: fix the login race.",
+            "A reviewer must assess the security impact.",
+            "A fix would be appreciated.",
+            "Reviewers must not disclose credentials.",
+        )
+        for summary in summaries:
+            with self.subTest(summary=summary):
+                self.assertFalse(
+                    PROJECTION.action_like_summary_prose(summary)
+                )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(
+                    PROJECTION.action_like_summary_prose(action)
+                )
+
+        with self.repo() as root:
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    "## What to review\n\nNo queued action requested.\n",
+                    queue_actor="any",
+                    require_all_live=False,
+                    additional_summaries=(summaries[0],),
+                ),
+            )
+            findings = self.findings(
+                root,
+                "## What to review\n\nNo queued action requested.\n",
+                queue_actor="any",
+                require_all_live=False,
+                additional_summaries=(actions[0],),
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("additional summary input", findings[0])
 
     def test_boundary_until_human_review_is_an_action_request(self):
         asks = (
@@ -2257,7 +2355,7 @@ class ActionProjectionTests(unittest.TestCase):
             args = [
                 "--from-env", "BODY",
                 "--action-section", "What to review",
-                "--branch", "feature/provider-neutral",
+                "--unscoped",
             ]
             with mock.patch.dict(os.environ, env), \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -2299,7 +2397,7 @@ class ActionProjectionTests(unittest.TestCase):
                         "--action-section", "What to review",
                         "--external-assignment-env", "ASSIGNMENTS",
                         "--queue-actor", "any",
-                        "--branch", "feature/provider-neutral",
+                        "--unscoped",
                     ]),
                 )
 
@@ -2350,7 +2448,7 @@ class ActionProjectionTests(unittest.TestCase):
                     0,
                     PROJECTION.main([
                         *common,
-                        "--branch", "main",
+                        "--unscoped",
                     ]),
                 )
 
@@ -2391,7 +2489,7 @@ class ActionProjectionTests(unittest.TestCase):
                         "--external-action-env", "TEAMS",
                         "--external-action-env", "ASSIGNEES",
                         "--additional-prose-env", "TITLE",
-                        "--branch", "feature/provider-neutral",
+                        "--unscoped",
                     ]),
                 )
                 os.environ["BODY"] += (
@@ -2406,7 +2504,7 @@ class ActionProjectionTests(unittest.TestCase):
                         "--external-action-env", "TEAMS",
                         "--external-action-env", "ASSIGNEES",
                         "--additional-prose-env", "TITLE",
-                        "--branch", "feature/provider-neutral",
+                        "--unscoped",
                     ]),
                 )
                 os.environ["TEAMS"] = "[]"
@@ -2419,11 +2517,132 @@ class ActionProjectionTests(unittest.TestCase):
                         "--external-action-env", "TEAMS",
                         "--external-action-env", "ASSIGNEES",
                         "--additional-prose-env", "TITLE",
-                        "--branch", "feature/provider-neutral",
+                        "--unscoped",
                     ]),
                 )
 
-    def test_cli_keeps_non_task_branches_unscoped(self):
+    def test_cli_infers_task_scope_on_a_non_task_branch(self):
+        task_id = "2026-07-23-conventional-branch"
+        with self.repo() as root:
+            item = self.queue_item(root)
+            path = item.relative_to(root).as_posix()
+            self.task_record(root, task_id, f"`{path}`")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task state")
+            base = self.git(root, "rev-parse", "HEAD")
+            (root / "feature.md").write_text("# Feature\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(
+                root,
+                "commit",
+                "-m", f"implement feature for task: {task_id}",
+            )
+            candidate = self.git(root, "rev-parse", "HEAD")
+            env = {
+                "BODY": (
+                    "## What to review\n\n"
+                    "No queued action requested.\n"
+                ),
+            }
+            args = [
+                "--from-env", "BODY",
+                "--action-section", "What to review",
+                "--queue-actor", "any",
+                "--required-queue-actor", "needs-human",
+                "--branch", "feature/conventional",
+                "--base-revision", base,
+                "--candidate-revision", candidate,
+            ]
+            with mock.patch.dict(os.environ, env), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(1, PROJECTION.main(args))
+                os.environ["BODY"] = (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary.]({path})\n"
+                )
+                self.assertEqual(0, PROJECTION.main(args))
+
+    def test_cli_task_branch_rejects_conflicting_candidate_scope(self):
+        task_a = "2026-07-23-actual-task"
+        task_b = "2026-07-23-misnamed-branch"
+        with self.repo() as root:
+            item = self.queue_item(root)
+            path = item.relative_to(root).as_posix()
+            self.task_record(root, task_a, f"`{path}`")
+            self.task_record(root, task_b, "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task state")
+            base = self.git(root, "rev-parse", "HEAD")
+            (root / "feature.md").write_text("# Feature\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(
+                root,
+                "commit",
+                "-m", f"implement feature for task: {task_a}",
+            )
+            candidate = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        "No queued action requested.\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    2,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--queue-actor", "any",
+                        "--required-queue-actor", "needs-human",
+                        "--branch", f"task/{task_b}",
+                        "--base-revision", base,
+                        "--candidate-revision", candidate,
+                    ]),
+                )
+
+    def test_cli_non_task_branch_without_base_fails_closed(self):
+        with self.repo() as root, mock.patch.dict(
+            os.environ,
+            {"BODY": "## What to review\n\nNo queued action requested.\n"},
+        ), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                2,
+                PROJECTION.main([
+                    "--from-env", "BODY",
+                    "--action-section", "What to review",
+                    "--branch", "feature/conventional",
+                ]),
+            )
+
+    def test_changed_task_record_infers_scope_without_commit_tag(self):
+        task_id = "2026-07-23-changed-record-scope"
+        with self.repo() as root:
+            item = self.queue_item(root)
+            path = item.relative_to(root).as_posix()
+            task = self.task_record(root, task_id, "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task")
+            base = self.git(root, "rev-parse", "HEAD")
+            task.write_text(
+                f"# Task\n\n**Queue actions:** `{path}`\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "change task projection")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                task_id,
+                PROJECTION.inferred_changed_task_id(
+                    base, candidate, repo=root
+                ),
+            )
+
+    def test_cli_requires_explicit_unscoped_inbound_surface(self):
         with self.repo() as root, mock.patch.dict(
             os.environ,
             {"BODY": "## What to review\n\nNo human action requested.\n"},
@@ -2435,7 +2654,7 @@ class ActionProjectionTests(unittest.TestCase):
                 PROJECTION.main([
                     "--from-env", "BODY",
                     "--action-section", "What to review",
-                    "--branch", "feature/provider-neutral",
+                    "--unscoped",
                 ]),
             )
 
@@ -2453,7 +2672,7 @@ class ActionProjectionTests(unittest.TestCase):
                 PROJECTION.main([
                     "--from-env", "BODY",
                     "--action-section", "What to review",
-                    "--branch", "feature/provider-neutral",
+                    "--unscoped",
                 ]),
             )
 

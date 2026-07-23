@@ -6,7 +6,7 @@ bare clone.
 
 | Piece | What it does | Runs |
 |-------|--------------|------|
-| `check_action_projection.py` | requires each declared external action entry to link a live canonical item for the selected next actor | PR/provider boundary, on demand |
+| `check_action_projection.py` | binds provider asks and task actions to live canonical queue items for the selected next actor | PR/provider boundary, on demand |
 | `check_core_scope.py` | gates core diffs on substitution evidence and repo-local state; `--require-review` validates a revision-bound manual review receipt | pre-commit, PR CI, on demand |
 | `core-scope-paths.txt` | registers thin agent/provider adapter files whose changes need the same core-scope check | read by the core-scope gate |
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
@@ -31,6 +31,12 @@ Rules:
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
   head remains the candidate; a divergent old-tip snapshot must retain every live action,
   and an unavailable nonzero old tip fails closed.
+- PR adapters treat titles as summaries, bind one task from the trusted base/candidate
+  range, cross-check a task-named branch against that evidence, and project the task
+  completely. Inbound comments use explicit unscoped mode: their own asks remain
+  enforceable, but they do not claim to represent a task. Summary mode allows ordinary
+  change-title work verbs while still rejecting questions, TODOs, obligations, and
+  authority requests.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository

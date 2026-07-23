@@ -57,6 +57,11 @@ TASK_QUEUE_ACTION_FIELD_RE = re.compile(
     re.M,
 )
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
+TASK_COMMIT_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])task:\s*"
+    r"(?P<task>\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)"
+    r"(?![A-Za-z0-9-])",
+)
 HEADING_RE = re.compile(
     r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
     r"(?P<title>.*?)[ \t]*#*[ \t]*$"
@@ -135,11 +140,10 @@ ACTION_VERB_PATTERN = (
     rf"{KEEP_POSTED_PATTERN}|"
     rf"{REQUEST_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
 )
-DIRECTIVE_ACTION_PATTERN = (
+NONWORK_DIRECTIVE_ACTION_PATTERN = (
     rf"(?:{CLEAR_DIRECTIVE_ACTION_PATTERN}"
     rf"|{LET_KNOW_PATTERN}"
     rf"|{KEEP_POSTED_PATTERN}"
-    rf"|{WORK_DIRECTIVE_PATTERN}"
     r"|answer(?="
     r"[.!?;,:)]|$|[ \t]+(?:how|that|the|this|what|when|whether|which|"
     r"who|why|with)\b)"
@@ -150,8 +154,21 @@ DIRECTIVE_ACTION_PATTERN = (
     r"[.!?;,:)]|$|[ \t]+(?:about|after|before|below|here|if|now|on|"
     r"promptly|tomorrow|when)\b))"
 )
+DIRECTIVE_ACTION_PATTERN = (
+    rf"(?:{NONWORK_DIRECTIVE_ACTION_PATTERN}|{WORK_DIRECTIVE_PATTERN})"
+)
 DIRECTIVE_PREFIX_PATTERN = r"(?:(?:and|also|then)[ \t]+)*"
 OPEN_COMMAND_WORD_PATTERN = r"[A-Za-z][A-Za-z'-]*"
+OBLIGATION_MODIFIER_PATTERN = (
+    r"(?:(?:also|always|carefully|currently|definitely|directly|explicitly|"
+    r"first|generally|independently|manually|normally|often|personally|"
+    r"probably|really|simply|sometimes|still|typically|usually)[ \t]+)*"
+)
+REQUEST_WORK_VERB_PATTERN = (
+    r"(?!(?:also|always|be|currently|generally|have|never|normally|not|"
+    r"often|remain|see|sometimes|still|typically|usually)\b"
+    rf"){OPEN_COMMAND_WORD_PATTERN}"
+)
 PLEASE_COMMAND_PATTERN = (
     rf"{DIRECTIVE_PREFIX_PATTERN}please"
     r"(?:[ \t]*,[ \t]*|[ \t]+)"
@@ -189,12 +206,31 @@ DIRECTIVE_RE = re.compile(
     re.I | re.M,
 )
 ADDITIONAL_DIRECTIVE_RE = re.compile(
-    r"(?:^|[,.!;:—][ \t]+)"
+    r"(?:^|(?:[,.!;:—]|[ \t]+-)[ \t]+)"
     r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
     rf"{PLEASE_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
+    r")\b",
+    re.I | re.M,
+)
+SUMMARY_DIRECTIVE_RE = re.compile(
+    r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:"
+    rf"{PLEASE_COMMAND_PATTERN}"
+    r"|"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{NONWORK_DIRECTIVE_ACTION_PATTERN}"
+    r")\b",
+    re.I | re.M,
+)
+ADDITIONAL_SUMMARY_DIRECTIVE_RE = re.compile(
+    r"(?:^|(?:[,.!;:—]|[ \t]+-)[ \t]+)"
+    r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:"
+    rf"{PLEASE_COMMAND_PATTERN}"
+    r"|"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{NONWORK_DIRECTIVE_ACTION_PATTERN}"
     r")\b",
     re.I | re.M,
 )
@@ -227,7 +263,7 @@ HUMAN_REQUEST_RE = re.compile(
     rf"\b{HUMAN_ACTOR_PATTERN}\b"
     r"[ \t]+(?:is|are)[ \t]+"
     r"(?P<negation>not[ \t]+)?(?:requested|required)[ \t]+to[ \t]+"
-    rf"{ACTION_VERB_PATTERN}\b",
+    rf"{REQUEST_WORK_VERB_PATTERN}\b",
     re.I,
 )
 FIRST_PERSON_REQUEST_RE = re.compile(
@@ -241,18 +277,30 @@ FIRST_PERSON_REQUEST_RE = re.compile(
 )
 ACTOR_OBLIGATION_RE = re.compile(
     rf"\b{ACTION_SOURCE_PATTERN}\b[ \t]+"
-    r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
+    r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
     r"(?:must|should|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
     r"requested[ \t]+to)[ \t]+"
-    rf"{ACTION_VERB_PATTERN}\b",
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!(?:not|never)\b)"
+    rf"{REQUEST_WORK_VERB_PATTERN}\b",
     re.I,
 )
 AUTOMATION_ACTOR_OBLIGATION_RE = re.compile(
     rf"\b{AUTOMATION_ACTOR_PATTERN}\b[ \t]+"
-    r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
+    r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
     r"(?:must|should|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
     r"requested[ \t]+to)[ \t]+"
-    rf"{ACTION_VERB_PATTERN}\b",
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!(?:not|never)\b)"
+    rf"{REQUEST_WORK_VERB_PATTERN}\b",
+    re.I,
+)
+ACTOR_HARD_PROHIBITION_RE = re.compile(
+    rf"\b(?:{ACTION_SOURCE_PATTERN}|{AUTOMATION_ACTOR_PATTERN})\b[ \t]+"
+    r"must[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?:not|never)[ \t]+"
+    rf"{OPEN_COMMAND_WORD_PATTERN}\b",
     re.I,
 )
 BOUNDARY_VERB_PATTERN = (
@@ -336,6 +384,32 @@ PASSIVE_COURTESY_REQUEST_RE = re.compile(
     r")"
     r"[ \t]+(?:appreciated|valued|welcome)\b",
     re.I,
+)
+PASSIVE_WORK_APPRECIATION_RE = re.compile(
+    r"(?:^|\n)[ \t]*"
+    r"(?![^\n]*\b(?:reported|said|says|stated|wrote)\b"
+    r"[^\n]*\bwould[ \t]+be\b)"
+    r"(?P<negation>(?:(?:no|not)[ \t]+)?)"
+    r"(?:(?:a|an|the|this|that)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,4}"
+    r"[A-Za-z][A-Za-z'-]*[ \t]+would[ \t]+be[ \t]+"
+    r"(?:(?:especially|greatly|much|really|very)[ \t]+)?"
+    r"(?:appreciated|helpful|valued|welcome)"
+    r"(?:[ \t]+(?:before|if|when)[ \t]+[^.!?\n]{1,80})?"
+    r"[ \t]*[.!]?[ \t]*(?=$|\n)",
+    re.I | re.M,
+)
+IMPERSONAL_WORK_APPRECIATION_RE = re.compile(
+    r"(?:^|\n)[ \t]*it[ \t]+would[ \t]+"
+    r"(?P<negation>not[ \t]+)?be[ \t]+"
+    r"(?:(?:especially|greatly|much|really|very)[ \t]+)?"
+    r"(?:appreciated|helpful|valued|welcome)[ \t]+"
+    r"(?:if|when)[ \t]+"
+    r"(?:you|(?:(?:a|an|the)[ \t]+)?"
+    rf"{HUMAN_ACTOR_PATTERN})[ \t]+"
+    rf"{OPEN_COMMAND_WORD_PATTERN}\b"
+    r"[^.!?\n]{0,80}[.!]?[ \t]*(?=$|\n)",
+    re.I | re.M,
 )
 ELLIPTICAL_COURTESY_REQUEST_RE = re.compile(
     r"(?:^|(?<=[.!;:—]))[ \t]*"
@@ -685,19 +759,22 @@ def declarative_action_request(clean):
         DECLARATIVE_ACTION_RE,
         HUMAN_REQUEST_RE,
         FIRST_PERSON_REQUEST_RE,
+        ACTOR_HARD_PROHIBITION_RE,
         ACTOR_OBLIGATION_RE,
         AUTOMATION_ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         FIRST_PERSON_COURTESY_REQUEST_RE,
         PASSIVE_COURTESY_REQUEST_RE,
+        PASSIVE_WORK_APPRECIATION_RE,
+        IMPERSONAL_WORK_APPRECIATION_RE,
         ELLIPTICAL_COURTESY_REQUEST_RE,
         FIRST_PERSON_CURIOSITY_RE,
         FIRST_PERSON_WONDER_RE,
         ELLIPTICAL_CURIOSITY_RE,
     ):
         for matched in pattern.finditer(clean):
-            if matched.group("negation"):
+            if matched.groupdict().get("negation"):
                 continue
             prefix = clean[max(0, matched.start() - 64):matched.start()]
             if re.search(
@@ -719,7 +796,19 @@ def summary_followed_by_command(clean):
     )
 
 
-def action_like_clean_text(clean, strip_leading_symbols=False):
+def summary_conjoined_authority_request(clean):
+    """Recognize an authority request appended to a change-summary clause."""
+    return any(
+        SUMMARY_DIRECTIVE_RE.search("and " + suffix)
+        for suffix in re.split(r"\band[ \t]+", clean or "", flags=re.I)[1:]
+    )
+
+
+def action_like_clean_text(
+    clean,
+    strip_leading_symbols=False,
+    summary_context=False,
+):
     """Classify already-visible prose with the deterministic action grammar."""
     clean = strip_default_ignorable_characters(clean)
     if unchecked_task_list_item(clean):
@@ -733,12 +822,22 @@ def action_like_clean_text(clean, strip_leading_symbols=False):
         )
     if question_mark_count(clean) or TODO_RE.search(clean):
         return True
+    directive = SUMMARY_DIRECTIVE_RE if summary_context else DIRECTIVE_RE
+    additional_directive = (
+        ADDITIONAL_SUMMARY_DIRECTIVE_RE
+        if summary_context
+        else ADDITIONAL_DIRECTIVE_RE
+    )
     return any(
-        DIRECTIVE_RE.search(variant)
-        or ADDITIONAL_DIRECTIVE_RE.search(variant)
+        directive.search(variant)
+        or additional_directive.search(variant)
         or declarative_action_request(variant)
         or BOUNDARY_UNTIL_HUMAN_ACTION_RE.search(variant)
-        or summary_followed_by_command(variant)
+        or (
+            summary_context
+            and summary_conjoined_authority_request(variant)
+        )
+        or (not summary_context and summary_followed_by_command(variant))
         for variant in action_prose_variants(clean)
     )
 
@@ -768,6 +867,16 @@ def action_like_plain_prose(text):
     return action_like_clean_text(
         strip_action_emphasis(clean),
         strip_leading_symbols=True,
+    )
+
+
+def action_like_summary_prose(text):
+    """Recognize asks in a provider summary without treating work verbs as commands."""
+    clean = strip_prose_quote_markers(text or "")
+    return action_like_clean_text(
+        strip_action_emphasis(clean),
+        strip_leading_symbols=True,
+        summary_context=True,
     )
 
 
@@ -975,6 +1084,63 @@ def candidate_revision_oid(value, repo=REPO):
     if output.casefold() != revision.casefold():
         raise ValueError("candidate revision must name its exact commit object")
     return output
+
+
+def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
+    """Infer one task from changed task records and commit audit tags."""
+    base = candidate_revision_oid(base_revision, repo=repo)
+    candidate = candidate_revision_oid(candidate_revision, repo=repo)
+    ancestor = subprocess.run(
+        [
+            "git", "--no-replace-objects", "merge-base",
+            "--is-ancestor", base, candidate,
+        ],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if ancestor.returncode:
+        raise ValueError(
+            "base revision must be an ancestor of the candidate revision"
+        )
+    changed = git_output(
+        [
+            "--no-replace-objects", "diff", "--name-only", "-z",
+            base, candidate, "--", "tasks",
+        ],
+        repo=repo,
+    )
+    task_ids = {
+        parts[2]
+        for record in changed.split(b"\0")
+        if record
+        for parts in [
+            Path(record.decode(
+                "utf-8", errors="surrogateescape"
+            )).parts
+        ]
+        if len(parts) >= 4
+        and parts[0] == "tasks"
+        and TASK_ID_RE.fullmatch(parts[2])
+    }
+    messages = git_output(
+        [
+            "--no-replace-objects", "log", "--format=%B%x00",
+            f"{base}..{candidate}",
+        ],
+        repo=repo,
+    ).decode("utf-8", errors="replace")
+    task_ids.update(
+        matched.group("task")
+        for matched in TASK_COMMIT_TOKEN_RE.finditer(messages)
+    )
+    if len(task_ids) > 1:
+        raise ValueError(
+            "candidate maps to multiple task scopes: "
+            + ", ".join(sorted(task_ids))
+        )
+    return next(iter(task_ids), None)
 
 
 def candidate_record(path, repo=REPO, candidate_revision=None):
@@ -1306,6 +1472,7 @@ def projection_findings(
     external_actions=(),
     external_assignments=(),
     additional_prose=(),
+    additional_summaries=(),
     allow_missing_action_section_if_no_action=False,
     queue_actor="needs-human",
     required_queue_actor=None,
@@ -1368,6 +1535,12 @@ def projection_findings(
             findings.append(
                 f"additional prose input {input_number} contains an action-like "
                 "question or directive outside the declared action section"
+            )
+    for input_number, prose in enumerate(additional_summaries, start=1):
+        if action_like_summary_prose(prose):
+            findings.append(
+                f"additional summary input {input_number} contains an action-like "
+                "question or authority request outside the declared action section"
             )
     legacy_external_action_count = sum(
         external_action_state_count(value) for value in external_actions
@@ -1698,6 +1871,17 @@ def main(argv=None):
         ),
     )
     parser.add_argument(
+        "--additional-summary-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "check provider summary metadata for questions, TODOs, explicit "
+            "requests, and authority commands while allowing conventional "
+            "imperative change summaries"
+        ),
+    )
+    parser.add_argument(
         "--allow-missing-action-section-if-no-action",
         action="store_true",
         help=(
@@ -1715,7 +1899,26 @@ def main(argv=None):
     scope.add_argument(
         "--branch",
         metavar="NAME",
-        help="derive task scope from task/<id>; other branches stay unscoped",
+        help=(
+            "derive task scope from task/<id>, or from --base-revision plus "
+            "changed task records/commit tags on another branch"
+        ),
+    )
+    scope.add_argument(
+        "--unscoped",
+        action="store_true",
+        help=(
+            "explicitly check one inbound provider surface without requiring "
+            "a task's complete Queue actions projection"
+        ),
+    )
+    parser.add_argument(
+        "--base-revision",
+        metavar="FULL_OBJECT_ID",
+        help=(
+            "trusted PR base used with a non-task --branch to infer task scope "
+            "from the immutable candidate"
+        ),
     )
     parser.add_argument("--label", default="external projection")
     args = parser.parse_args(argv)
@@ -1724,12 +1927,46 @@ def main(argv=None):
         external_actions = read_env_values(args.external_action_env)
         external_assignments = read_env_values(args.external_assignment_env)
         additional_prose = read_env_values(args.additional_prose_env)
+        additional_summaries = read_env_values(args.additional_summary_env)
         task_id = args.task_id
         require_all_live = True
         if args.branch and args.branch.startswith("task/"):
             task_id = args.branch
+            if args.base_revision:
+                if not args.candidate_revision:
+                    raise ValueError(
+                        "--base-revision requires --candidate-revision"
+                    )
+                inferred_task_id = inferred_changed_task_id(
+                    args.base_revision,
+                    args.candidate_revision,
+                    repo=REPO,
+                )
+                if (
+                    inferred_task_id is not None
+                    and normalized_task_id(task_id) != inferred_task_id
+                ):
+                    raise ValueError(
+                        "task branch conflicts with immutable candidate scope: "
+                        f"{normalized_task_id(task_id)} != {inferred_task_id}"
+                    )
         elif args.branch:
+            if not args.base_revision or not args.candidate_revision:
+                raise ValueError(
+                    "a non-task branch requires --base-revision and "
+                    "--candidate-revision; use --unscoped only for an "
+                    "intentionally inbound surface"
+                )
+            task_id = inferred_changed_task_id(
+                args.base_revision,
+                args.candidate_revision,
+                repo=REPO,
+            )
+            require_all_live = task_id is not None
+        elif args.unscoped:
             require_all_live = False
+        elif args.base_revision:
+            raise ValueError("--base-revision requires --branch")
         findings = projection_findings(
             text,
             args.action_section,
@@ -1741,6 +1978,7 @@ def main(argv=None):
             external_actions=external_actions,
             external_assignments=external_assignments,
             additional_prose=additional_prose,
+            additional_summaries=additional_summaries,
             allow_missing_action_section_if_no_action=(
                 args.allow_missing_action_section_if_no_action
             ),
