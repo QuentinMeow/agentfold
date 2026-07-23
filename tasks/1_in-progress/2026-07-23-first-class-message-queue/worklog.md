@@ -533,3 +533,20 @@
   focused positive/negative matrix. The block invalidated the entire panel.
 - Session handover:
   `history/conversations/2026-07-23-1612PDT-repair-obligation-explanation-boundary/handover.md`.
+
+## 2026-07-23 — obligation synonym and CommonMark repair (codex)
+
+- The first reviewer of `cd1e9341` found four adjacent failures: `has to` and
+  `is required to` hard obligations escaped, `no longer needs to` and “the memo noted”
+  descriptions were false positives, and a self-answered explanation failed when its
+  answer used a CommonMark soft line break.
+- Added the two hard-obligation forms, blocked `no longer` from being consumed as an
+  actor name, and expanded the bounded reported-speech cues. The high-confidence
+  lifecycle deadline and action-verb requirements remain unchanged.
+- Accepted one soft line break before the allowlisted explanatory answer while keeping
+  blank or standalone questions actionable. The answer continues through the ordinary
+  action classifier.
+- Added end-to-end projection checks for every new positive and negative case. All 100
+  projection tests passed; the reviewer block invalidated the entire panel.
+- Session handover:
+  `history/conversations/2026-07-23-1629PDT-repair-obligation-synonyms-commonmark/handover.md`.

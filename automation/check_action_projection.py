@@ -210,7 +210,7 @@ FREEFORM_ADDRESSEE_PATTERN = (
 )
 FREEFORM_OBLIGATION_SUBJECT_PATTERN = (
     r"(?:(?!(?:are|been|did|do|does|had|has|have|is|must|needs?|never|"
-    r"not|previously|requested|should|was|were)\b)"
+    r"no|not|longer|previously|required|requested|should|was|were)\b)"
     rf"{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{1,6}}?"
 )
 AUTOMATION_ACTOR_PATTERN = (
@@ -277,7 +277,7 @@ SELF_ANSWERED_EXPLANATORY_QUESTION_RE = re.compile(
     r"(?!(?:[^?!\n]{0,120}\b"
     r"(?:could|must|need(?:s)?|should|you|we|will|would)\b))"
     r"[^?!\n]{0,120}\?"
-    r"(?=[ \t]+(?:because\b|"
+    r"(?=(?:[ \t]+|\n[ \t]*)(?:because\b|"
     r"(?:(?:it|that|this)|the[ \t]+[A-Za-z][A-Za-z'-]*)[ \t]+"
     r"(?:are|avoids?|documents?|explains?|is|keeps?|means?|preserves?|"
     r"records?|uses?)\b))",
@@ -351,11 +351,13 @@ AUTOMATION_ACTOR_OBLIGATION_RE = re.compile(
 )
 FREEFORM_ACTOR_OBLIGATION_RE = re.compile(
     r"(?:^|[.!?][ \t]+|\n)[ \t]*"
-    r"(?![^.!?\n]*\b(?:explained|explains|reported|said|says|stated|wrote)\b)"
+    r"(?![^.!?\n]*\b(?:described|documented|explained|explains|noted|notes|"
+    r"recorded|reported|said|says|stated|wrote)\b)"
     rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
     r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
-    r"(?:must|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
-    r"requested[ \t]+to)[ \t]+"
+    r"(?:must|needs?[ \t]+to|(?:has|have)[ \t]+to|"
+    r"(?:is|are)[ \t]+(?:requested|required)[ \t]+to|"
+    r"(?:requested|required)[ \t]+to)[ \t]+"
     rf"{OBLIGATION_MODIFIER_PATTERN}"
     r"(?!(?:not|never)\b)"
     rf"{ACTION_VERB_PATTERN}\b"

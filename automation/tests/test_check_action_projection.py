@@ -1137,6 +1137,8 @@ class ActionProjectionTests(unittest.TestCase):
             "Reviewers must not disclose credentials.",
             "The security guild needs to sanity-check this before merge.",
             "The release circle must validate this before release.",
+            "The security guild has to sanity-check this before merge.",
+            "The security guild is required to sanity-check this before merge.",
         )
         descriptions = (
             "The bot should not update the snapshot.",
@@ -1151,6 +1153,8 @@ class ActionProjectionTests(unittest.TestCase):
             "The security guild needed to sanity-check this yesterday.",
             "The security guild needs to be able to sanity-check this before merge.",
             "The parser should validate input offline.",
+            "The security guild no longer needs to sanity-check this before merge.",
+            "The memo noted security guild must review this before merge.",
         )
         for action in actions:
             with self.subTest(action=action):
@@ -1162,31 +1166,58 @@ class ActionProjectionTests(unittest.TestCase):
                 )
 
         with self.repo() as root:
-            findings = self.findings(
-                root,
-                actions[0],
-                allow_missing_action_section_if_no_action=True,
-                queue_actor="any",
-                require_all_live=False,
-            )
-            self.assertEqual(1, len(findings))
-            self.assertIn("missing a declared action section", findings[0])
+            for action in (actions[0], *actions[-4:]):
+                with self.subTest(end_to_end_action=action):
+                    findings = self.findings(
+                        root,
+                        action,
+                        allow_missing_action_section_if_no_action=True,
+                        queue_actor="any",
+                        require_all_live=False,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+            for description in descriptions[-6:]:
+                with self.subTest(end_to_end_description=description):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            "## Goal\n\n"
+                            f"{description}\n\n"
+                            "## What to review\n\n"
+                            "No queued action requested.\n",
+                            queue_actor="any",
+                            require_all_live=False,
+                        ),
+                    )
 
     def test_self_answered_explanatory_question_is_not_a_hidden_action(self):
-        explanation = (
-            "Why this approach? It keeps queue ownership provider-neutral."
+        explanations = (
+            "Why this approach? It keeps queue ownership provider-neutral.",
+            "Why this approach?\nIt keeps queue ownership provider-neutral.",
         )
-        self.assertFalse(PROJECTION.action_like_plain_prose(explanation))
-        self.assertFalse(PROJECTION.action_like_summary_prose(explanation))
+        for explanation in explanations:
+            with self.subTest(explanation=explanation):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(explanation)
+                )
+                self.assertFalse(
+                    PROJECTION.action_like_summary_prose(explanation)
+                )
+
+                with self.repo() as root:
+                    body = (
+                        "## Goal\n\n"
+                        f"{explanation}\n\n"
+                        "## What to review\n\nNo human action requested.\n"
+                    )
+                    self.assertEqual([], self.findings(root, body))
 
         with self.repo() as root:
-            body = (
-                "## Goal\n\n"
-                f"{explanation}\n\n"
-                "## What to review\n\nNo human action requested.\n"
-            )
-            self.assertEqual([], self.findings(root, body))
-
             for ask in (
                 "Why this approach?\n",
                 "Does the boundary work? It should be checked before merge.\n",
