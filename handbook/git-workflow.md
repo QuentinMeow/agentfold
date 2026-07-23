@@ -49,10 +49,11 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   one top-level entry and one queue link per action, including every live human path
   in the task's `Queue actions`. A `task/<id>` branch declares its task and is checked
   against changed task records and `task:` commit tokens between the trusted base and
-  immutable candidate; another branch is bound from that same evidence. Conflicting
-  or ambiguous scope fails closed. External assignments retain direction: a human
-  reviewer or assignee requires a distinct `needs-human/` link, while an assigned
-  agent or bot requires a distinct `needs-agent/` link. Use the exact
+  immutable candidate; another branch is bound from that same evidence. Missing,
+  conflicting, or ambiguous scope fails closed. External assignments retain direction:
+  a human reviewer or assignee requires a distinct task-owned `needs-human/` link,
+  while an assigned agent or bot requires a distinct task-owned `needs-agent/` link.
+  Use the exact
   `No queued action requested.`
   acknowledgement only when neither task scope nor assignment exposes an action.
 - A provider title is change-summary metadata, so a conventional title such as

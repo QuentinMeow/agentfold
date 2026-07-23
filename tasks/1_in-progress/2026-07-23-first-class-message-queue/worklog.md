@@ -418,3 +418,23 @@
   parsing, and `git diff --check` also passed.
 - Session handover:
   `history/conversations/2026-07-23-1349PDT-repair-provider-summary-task-scope/handover.md`.
+
+## 2026-07-23 — panel-ten provider and history repair (codex)
+
+- Rejected visible action headings and common look/chime/weigh/ping requests outside
+  the declared action section while preserving descriptive headings and PR summaries.
+- Required every scoped external assignment to consume a distinct task-owned queue
+  action of the matching actor; an unrelated global queue item no longer satisfies a
+  PR assignment.
+- Required immutable task evidence for every PR branch, including `task/<id>`, and
+  rejected missing, conflicting, or multi-task scope before projection.
+- Made governed v1 handover paths single-incarnation across staged, range, and
+  parallel-history checks. Deletion remains allowed, and a pre-activation legacy
+  incarnation may be reused after activation.
+- The three blocking reviewers' exact heading, idiom, assignment, branch-evidence,
+  and valid delete/re-add cases were reproduced. Bounded rechecks passed the provider
+  repairs. `python3 automation/run_tests.py` passed all six files: 92 projection,
+  55 core-scope (one skip), eight provider-adapter, 214 queue/history, five quote API,
+  and three quote CLI tests.
+- Session handover:
+  `history/conversations/2026-07-23-1411PDT-repair-panel-ten-blockers/handover.md`.

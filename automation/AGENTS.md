@@ -32,8 +32,9 @@ Rules:
   head remains the candidate; a divergent old-tip snapshot must retain every live action,
   and an unavailable nonzero old tip fails closed.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
-  range, cross-check a task-named branch against that evidence, and project the task
-  completely. Inbound comments use explicit unscoped mode: their own asks remain
+  range, require and cross-check that evidence even for a task-named branch, and
+  project the task completely. Scoped external assignments count only task-owned queue
+  actions. Inbound comments use explicit unscoped mode: their own asks remain
   enforceable, but they do not claim to represent a task. Summary mode allows ordinary
   change-title work verbs while still rejecting questions, TODOs, obligations, and
   authority requests.

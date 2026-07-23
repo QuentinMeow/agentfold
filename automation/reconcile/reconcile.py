@@ -4014,6 +4014,76 @@ def handover_current_incarnation_text(rel):
     return artifact.stdout, None
 
 
+def prior_governed_v1_handover_incarnation(rel):
+    """Find an earlier immutable v1 incarnation of a newly added handover."""
+    revision = committed_candidate_revision()
+    if revision is None:
+        return None, None
+
+    current_creation = None
+    if CHANGE_RANGE is not None:
+        current_creation, creation_error = handover_creation_commit(rel)
+        if creation_error:
+            return None, creation_error
+
+    history = subprocess.run(
+        [
+            "git", "--no-replace-objects", "log",
+            "--full-history", "--reverse", "--format=%H",
+            "--diff-filter=A", revision, "--", rel.as_posix(),
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if history.returncode:
+        return None, history.stderr.strip() \
+            or "could not inspect prior handover incarnations"
+    commits = history.stdout.splitlines()
+    if not commits:
+        return None, None
+
+    activations, activation_error = schema_activation_commits(
+        revision,
+        "history/AGENTS.md",
+        "Queue projection schema",
+    )
+    if activation_error:
+        return None, activation_error
+    if not activations:
+        return None, None
+
+    for commit in commits:
+        if commit == current_creation:
+            continue
+        try:
+            artifact = git_artifact_bytes_at(commit, rel.as_posix())
+            if artifact is None:
+                return None, (
+                    f"could not read prior handover incarnation at {commit}"
+                )
+            prior_text = decode_utf8_artifact(
+                artifact,
+                f"`{rel.as_posix()}` at {commit}",
+            )
+        except GitSnapshotError as error:
+            return None, str(error)
+        if text_fields(prior_text).get(
+            "Queue projection", ""
+        ).strip() != "v1":
+            continue
+        governed, governance_error = governed_by_activation_join(
+            commit, activations
+        )
+        if governance_error:
+            return None, governance_error
+        if governed:
+            return commit, None
+    return None, None
+
+
 def new_handover_queue_target(handover, target, actor="needs-human"):
     """Resolve a new handover link to one exact portable queue path."""
     candidate = target.split("#", 1)[0]
@@ -4255,6 +4325,27 @@ def check_handover_queue_projection():
                     "could not verify strict action-entry activation: "
                     + strict_error,
                     "preserve the schema activation and handover creation commits",
+                )
+            prior_incarnation, incarnation_error = (
+                prior_governed_v1_handover_incarnation(rel)
+            )
+            if incarnation_error:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "could not verify prior handover incarnations: "
+                    + incarnation_error,
+                    "preserve the path history or use a new conversation folder",
+                )
+                continue
+            if prior_incarnation:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "reuses a path that already has a committed governed v1 "
+                    f"handover incarnation at {prior_incarnation}",
+                    "keep committed handover paths single-incarnation; record "
+                    "the correction in a new conversation handover",
                 )
         else:
             text = candidate_text

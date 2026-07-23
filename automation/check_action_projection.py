@@ -82,6 +82,11 @@ NO_ACTION_TEXT_BY_ACTOR = {
 NO_ACTION_TEXT = NO_ACTION_TEXT_BY_ACTOR["needs-human"]
 CLEAR_ACTION_VERB_PATTERN = (
     r"(?:accept|approve|authorize|choose|confirm|consider|"
+    r"(?:chime|weigh)[ \t]+in|"
+    r"(?:have|take)[ \t]+"
+    r"(?:(?:a|an|another|one|your)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,2}look|"
+    r"ping[ \t]+(?:me|us)|"
     r"decide|deploy|(?:give|provide)"
     r"(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|inspect|"
     r"(?:add|leave)(?:[ \t]+(?:a|your))?[ \t]+comment|merge|"
@@ -90,6 +95,11 @@ CLEAR_ACTION_VERB_PATTERN = (
 )
 UNAMBIGUOUS_CLEAR_COMMAND_PATTERN = (
     r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
+    r"(?:chime|weigh)[ \t]+in|"
+    r"(?:have|take)[ \t]+"
+    r"(?:(?:a|an|another|one|your)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,2}look|"
+    r"ping[ \t]+(?:me|us)|"
     r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|inspect|"
     r"(?:add|leave)(?:[ \t]+(?:a|your))?[ \t]+comment|select|"
     r"sign[ \t]+off|tell|verify)"
@@ -722,9 +732,14 @@ def strip_action_emphasis(text):
 
 
 def strip_action_list_markers(text):
-    """Remove top-level Markdown list markers before classifying their prose."""
+    """Remove visible Markdown list/heading markers before classifying prose."""
     return "\n".join(
-        LIST_ITEM_RE.sub("", line, count=1)
+        re.sub(
+            r"^[ ]{0,3}#{1,6}[ \t]+",
+            "",
+            LIST_ITEM_RE.sub("", line, count=1),
+            count=1,
+        )
         for line in (text or "").split("\n")
     )
 
@@ -1523,6 +1538,15 @@ def projection_findings(
         require_all_live=require_all_live,
         candidate_revision=candidate_revision,
     )
+    task_all_paths = (
+        task_queue_paths(
+            task_id,
+            queue_actor="any",
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
+        if task_id is not None else None
+    )
     section_spans = action_section_spans(text, titles)
     sections = [body for _start, _end, body in section_spans]
     rendered_sections = [
@@ -1754,9 +1778,14 @@ def projection_findings(
             "a no-action acknowledgement cannot appear beside listed actions"
         )
     if not saw_no_action:
+        assignment_paths = (
+            linked_paths
+            if task_all_paths is None
+            else linked_paths.intersection(task_all_paths)
+        )
         linked_action_counts = {
             actor: sum(
-                queue_item_actor(path) == actor for path in linked_paths
+                queue_item_actor(path) == actor for path in assignment_paths
             )
             for actor in QUEUE_ACTORS
         }
@@ -1942,10 +1971,12 @@ def main(argv=None):
                     args.candidate_revision,
                     repo=REPO,
                 )
-                if (
-                    inferred_task_id is not None
-                    and normalized_task_id(task_id) != inferred_task_id
-                ):
+                if inferred_task_id is None:
+                    raise ValueError(
+                        "immutable candidate has no task scope evidence; "
+                        "change its task record or include a `task:` commit token"
+                    )
+                if normalized_task_id(task_id) != inferred_task_id:
                     raise ValueError(
                         "task branch conflicts with immutable candidate scope: "
                         f"{normalized_task_id(task_id)} != {inferred_task_id}"
@@ -1962,7 +1993,11 @@ def main(argv=None):
                 args.candidate_revision,
                 repo=REPO,
             )
-            require_all_live = task_id is not None
+            if task_id is None:
+                raise ValueError(
+                    "immutable candidate has no task scope evidence; "
+                    "change its task record or include a `task:` commit token"
+                )
         elif args.unscoped:
             require_all_live = False
         elif args.base_revision:

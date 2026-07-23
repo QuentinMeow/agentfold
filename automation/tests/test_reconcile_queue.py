@@ -6359,6 +6359,224 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertTrue(any("Queue projection" in message
                                 for message in messages))
 
+    def test_range_rejects_valid_v1_handover_readded_at_same_path(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-readded-valid-v1",
+                "None.",
+            )
+            original = handover.read_text(encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add governed v1 handover")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            handover.unlink()
+            handover.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete governed v1 handover")
+
+            self.write(
+                root,
+                handover.relative_to(root),
+                original.replace("# Handover", "# Corrected handover"),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "readd altered valid v1 handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "reuses a path that already has a committed governed v1 "
+                "handover incarnation" in message
+                for message in messages
+            ), messages)
+
+    def test_staged_rejects_valid_v1_handover_readded_at_same_path(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-readded-valid-v1-staged",
+                "None.",
+            )
+            original = handover.read_text(encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add governed v1 handover")
+
+            handover.unlink()
+            handover.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete governed v1 handover")
+
+            self.write(
+                root,
+                handover.relative_to(root),
+                original.replace("# Handover", "# Corrected handover"),
+            )
+            self.git(root, "add", ".")
+
+            messages = self.messages(
+                RECONCILE.check_handover_queue_projection()
+            )
+            self.assertTrue(any(
+                "reuses a path that already has a committed governed v1 "
+                "handover incarnation" in message
+                for message in messages
+            ), messages)
+
+    def test_range_allows_deleting_v1_handover_without_reusing_path(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-deleted-v1",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add governed v1 handover")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            handover.unlink()
+            handover.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete governed v1 handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_root_range_allows_reusing_pre_activation_v1_path(self):
+        with self.repo() as root:
+            self.init_git(root)
+            rel = (
+                "history/conversations/"
+                "2026-07-22-1200PDT-pre-activation-v1/handover.md"
+            )
+            legacy = (
+                "# Legacy handover\n\n"
+                "**Queue projection:** v1\n\n"
+                "## Needs your attention\n\nNone.\n\n"
+                "## Next steps\n\nNone.\n"
+            )
+            handover = self.write(root, rel, legacy)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add pre-activation v1 handover")
+
+            handover.unlink()
+            handover.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete pre-activation handover")
+
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n**Queue projection schema:** v1\n",
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/README.md",
+                "# Reviews\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projection schema")
+
+            self.write(
+                root,
+                rel,
+                legacy.replace("# Legacy handover", "# Governed handover"),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reuse legacy path after activation")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"root:{head}"
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_parallel_history_rejects_reusing_governed_v1_path(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n**Queue projection schema:** v1\n",
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/README.md",
+                "# Reviews\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projection schema")
+            common = self.git(root, "rev-parse", "HEAD")
+            trunk = self.git(root, "branch", "--show-current")
+
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-parallel-reuse",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add trunk v1 handover")
+            handover.unlink()
+            handover.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete trunk v1 handover")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "feature", common)
+            feature_handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-parallel-reuse",
+                "None.",
+            )
+            feature_handover.write_text(
+                feature_handover.read_text(encoding="utf-8").replace(
+                    "# Handover", "# Parallel handover"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reuse path on parallel branch")
+            feature_head = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "merge", "--no-ff", trunk, "-m", "synthetic merge")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE,
+                    "CHANGE_RANGE",
+                    f"{base}...{feature_head}",
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "reuses a path that already has a committed governed v1 "
+                "handover incarnation" in message
+                for message in messages
+            ), messages)
+
     def test_multi_commit_range_preserves_handover_before_schema_activation(self):
         with self.repo() as root:
             self.init_git(root)

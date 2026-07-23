@@ -1008,6 +1008,37 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertEqual(1, len(findings))
             self.assertIn("outside the declared action section", findings[0])
 
+    def test_heading_and_idiomatic_asks_outside_section_are_rejected(self):
+        asks = (
+            "## Please approve and merge this change",
+            "Take a look when you can.",
+            "Take a quick look when you can.",
+            "Take one last look before merge.",
+            "Have a look when you can.",
+            "Have another careful look before merge.",
+            "Chime in with feedback.",
+            "Weigh in on the fallback.",
+            "Ping me with any concerns.",
+        )
+        for ask in asks:
+            with self.subTest(ask=ask), self.repo() as root:
+                task_id = "2026-07-23-orphan-provider-ask"
+                self.task_record(root, task_id, "none")
+                self.git(root, "add", ".")
+                findings = self.findings(
+                    root,
+                    f"{ask}\n\n## What to review\n\n"
+                    "No queued action requested.\n",
+                    task_id=task_id,
+                    queue_actor="any",
+                    required_queue_actor="needs-human",
+                )
+                self.assertEqual(1, len(findings))
+                self.assertIn(
+                    "outside the declared action section",
+                    findings[0],
+                )
+
     def test_ordinary_declarative_prose_outside_section_is_accepted(self):
         with self.repo() as root:
             item = self.queue_item(root)
@@ -2236,6 +2267,35 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertEqual(1, len(findings))
             self.assertIn(agent_path, findings[0])
 
+    def test_scoped_external_assignment_requires_task_owned_queue_path(self):
+        task_id = "2026-07-23-scoped-bot-assignment"
+        with self.repo() as root:
+            unrelated = self.queue_item(
+                root,
+                name="non-blocking-review-unrelated-bot-work.md",
+                action="Review unrelated bot work.",
+                actor="needs-agent",
+            )
+            unrelated_path = unrelated.relative_to(root).as_posix()
+            self.task_record(root, task_id, "none")
+            self.git(root, "add", ".")
+            findings = self.findings(
+                root,
+                (
+                    "## What to review\n\n"
+                    f"1. [Review unrelated bot work.]({unrelated_path})\n"
+                ),
+                task_id=task_id,
+                queue_actor="any",
+                required_queue_actor="needs-human",
+                external_assignments=(json.dumps([{
+                    "actor": "needs-agent",
+                    "identity": "review-bot",
+                }]),),
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("only 0 distinct", findings[0])
+
     def test_mixed_pr_surface_uses_queued_no_action_marker(self):
         task_id = "2026-07-23-no-pr-actions"
         with self.repo() as root:
@@ -2599,6 +2659,40 @@ class ActionProjectionTests(unittest.TestCase):
                         "--queue-actor", "any",
                         "--required-queue-actor", "needs-human",
                         "--branch", f"task/{task_b}",
+                        "--base-revision", base,
+                        "--candidate-revision", candidate,
+                    ]),
+                )
+
+    def test_cli_task_branch_requires_immutable_scope_evidence(self):
+        task_id = "2026-07-23-empty-task-branch"
+        with self.repo() as root:
+            self.task_record(root, task_id, "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task state")
+            base = self.git(root, "rev-parse", "HEAD")
+            (root / "feature.md").write_text("# Feature\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "unscoped feature change")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        "No queued action requested.\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    2,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--queue-actor", "any",
+                        "--required-queue-actor", "needs-human",
+                        "--branch", f"task/{task_id}",
                         "--base-revision", base,
                         "--candidate-revision", candidate,
                     ]),
