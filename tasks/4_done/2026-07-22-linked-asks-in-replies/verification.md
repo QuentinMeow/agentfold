@@ -22,7 +22,7 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 2/2 files passed
 ```
 
-## Review verdicts (when a review gate applied)
+## Legacy review notes (unbound)
 
 - async-mode gate (tests + reconciler): pass — additive doc/template change, not a
   one-way door. The format itself is template-enforced, not reconciler-checkable

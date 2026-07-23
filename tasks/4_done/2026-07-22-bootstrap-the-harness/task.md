@@ -4,6 +4,7 @@
 **Mode:** autonomous
 **Filed:** 2026-07-22, by the repo owner (chat request, transcribed here — chat leaves no trace)
 **Parent:** none
+**Repository scope:** core
 
 ## Goal
 

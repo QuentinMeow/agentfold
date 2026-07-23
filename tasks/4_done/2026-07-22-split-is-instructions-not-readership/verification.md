@@ -25,7 +25,7 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 2/2 files passed
 ```
 
-## Review verdicts (when a review gate applied)
+## Legacy review notes (unbound)
 
 - async-mode gate (tests + reconciler): pass — wording correction in two files, not a
   one-way door.

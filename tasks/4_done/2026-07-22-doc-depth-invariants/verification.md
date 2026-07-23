@@ -41,7 +41,7 @@ $ wc -l README.md
      121 README.md
 ```
 
-## Review verdicts (when a review gate applied)
+## Legacy review notes (unbound)
 
 - async-mode gate (tests + reconciler): pass — no adversarial panel needed; the change
   is additive docs plus one additive check, not a one-way door.

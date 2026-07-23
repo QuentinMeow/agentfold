@@ -15,6 +15,13 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   `skills/`, `templates/`, `automation/`, or `message-queue/` are reviewed by a
   maintainer before any agent acts on them
   (`handbook/principles/provenance-over-position.md`).
+- **Core changes prove they belong here.** Core diffs use a task that completes
+  `templates/task/design.md`; hooks and CI enforce that receipt. Independent core-fit
+  review is manual by default until guard modes are configurable. After a reviewer is
+  explicitly invoked, `automation/check_core_scope.py --require-review` validates its
+  revision-bound receipt; the command does not spawn a reviewer. The small untracked-fix
+  branch convention applies outside core only; personal setup and
+  single-agent/provider/product integrations stay external.
 - **Keep contracts short.** The reconciler enforces line budgets on every `AGENTS.md`.
   Before adding a line ask: would removing this cause mistakes? If not, cut it.
 
@@ -22,7 +29,7 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
 
 ```bash
 python3 automation/reconcile/reconcile.py --check   # must pass with zero findings
-python3 automation/run_tests.py                     # example services stay green
+python3 automation/run_tests.py                     # repository test files stay green
 ```
 
 Both also run in CI and as the pre-commit hook (`automation/install.py` installs it).

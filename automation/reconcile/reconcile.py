@@ -51,6 +51,7 @@ STALE_QUEUE_DAYS = 30
 STALE_TASK_DAYS = 14
 
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
+REPOSITORY_SCOPE_RE = re.compile(r"^(core|records-only|service:[a-z0-9][a-z0-9-]*)$")
 CONVERSATION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}[A-Z]{2,5}-[a-z0-9][a-z0-9-]*$")
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -152,11 +153,16 @@ def check_task_structure():
                               "copy templates/task/task.md")
                 continue
             got = fields(task / "task.md")
-            for key in ("Claimed-by", "Filed"):
+            for key in ("Claimed-by", "Filed", "Repository scope"):
                 if key not in got:
                     yield Finding("task-structure", rel / "task.md",
                                   f"missing required field **{key}:**",
                                   "copy the header from templates/task/task.md")
+            scope = got.get("Repository scope", "")
+            if scope and not REPOSITORY_SCOPE_RE.fullmatch(scope):
+                yield Finding("task-structure", rel / "task.md",
+                              f"invalid Repository scope {scope!r}",
+                              "use core, records-only, or service:<name>")
             if entry.name in ("1_in-progress", "2_blocked", "3_in-review", "4_done"):
                 for needed in ("plan.md", "worklog.md"):
                     if not (task / needed).is_file():
