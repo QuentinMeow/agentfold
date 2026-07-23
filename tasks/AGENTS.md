@@ -8,7 +8,7 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 ```
 0_backlog → 1_in-progress → 3_in-review → 4_done
                   ↕
-              2_blocked (only while a Blocking: yes decision is open)
+              2_blocked (only while an unresolved blocking-* action stops it)
 ```
 
 - Task id = folder name = `YYYY-MM-DD-<kebab-slug>` (date filed). The id never changes;
@@ -20,12 +20,25 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   revision-bound receipt but does not launch a reviewer. The small untracked-fix branch
   convention applies only outside core until its backlog task defines a safe path.
 - Reference tasks by id, never by full path — paths change with status. Find one with
-  `ls tasks/*/<task-id>` .
-- **Claim before working**: set `**Claimed-by:**` in `task.md`, commit, then start.
+  `ls tasks/*/<task-id>`. The sole exception is a `task-pickup` request: it links the
+  backlog path and is deleted atomically when that same commit moves the task.
+- `task.md` declares `**Queue actions:** none` or every live queue action the task
+  projects. Tasks do not originate asks; the linked queue files own delivery/status.
+  A queue item naming `task:<id>` or using that task as its pickup context must link
+  back here; the reconciler checks both directions.
+- Every unclaimed backlog task links a non-blocking agent request with
+  `Request kind: task-pickup`. Claiming resolves and deletes it in the claim commit.
+- **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the
+  task from backlog to in-progress, and resolve its pickup request; push, then start.
   One agent per task; a rejected push means someone beat you — pick another.
 - One git branch per task: `task/<task-id>` (`handbook/git-workflow.md`).
-- `2_blocked` is only for tasks stopped on a `message-queue/needs-human/decisions/`
-  item with `Blocking: yes`; `task.md` links the decision file.
+- `2_blocked` requires a live `blocking-*` human or agent item in `Queue actions`, with
+  that item reciprocally naming `task:<id>` in `Blocks now`. A task stays in progress
+  while an agent is actively repairing a dependency; move it only when no work can
+  proceed.
+- A task cannot cross `transition:start`, `transition:review`, or
+  `transition:complete` while a linked `future-blocking-*` item remains. Git/provider
+  admission invokes the reconciler with its external boundary, such as merge.
 - `4_done` requires `verification.md` with real command output — the reconciler checks
   it exists; the adversarial-review gate (mode-dependent) checks it's honest.
 - Done tasks are pruned by the memory gardener after ~90 days: durable learnings are

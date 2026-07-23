@@ -7,4 +7,7 @@ their session's area; never delete one without fixing it or recording a rejectio
 reason in the file. Reconciler-filed items are garbage-collected automatically once
 their finding clears.
 
-File one manually: copy `templates/queue/retry.md`.
+Every current reconciler finding blocks repository admission, so generated files use
+`blocking-reconcile-<check>-<subject>.md`; stable finding identity excludes the timing
+prefix. File one manually with the appropriate prefix by copying
+`templates/queue/retry.md`.

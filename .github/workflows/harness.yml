@@ -17,7 +17,14 @@ jobs:
           CORE_SCOPE_HEAD: ${{ github.event.pull_request.head.sha }}
           CORE_SCOPE_BRANCH: ${{ github.head_ref }}
         run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH"
+      - name: Reconciler — pull-request merge boundary
+        if: github.event_name == 'pull_request'
+        env:
+          QUEUE_TASK_BRANCH: ${{ github.head_ref }}
+          QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+        run: python3 automation/reconcile/reconcile.py --check --at-transition merge --at-transition repository-admission --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
       - name: Reconciler — every harness invariant holds
+        if: github.event_name != 'pull_request'
         run: python3 automation/reconcile/reconcile.py --check
       - name: Repository tests
         run: python3 automation/run_tests.py

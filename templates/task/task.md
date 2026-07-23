@@ -1,10 +1,11 @@
 # <What this task achieves, one line>
 
-**Claimed-by:** <agent/human name, set when claiming — leave "unclaimed" in backlog>
+**Claimed-by:** unclaimed
 **Mode:** <optional — overrides the repo collaboration mode for this task>
 **Filed:** <YYYY-MM-DD>, by <who>, from <chat | request item | roadmap line — link>
 **Parent:** <parent task id, or "none">
 **Repository scope:** <core | service:<name> | records-only>
+**Queue actions:** <the non-blocking needs-agent pickup request; add any other live message-queue paths>
 
 ## Goal
 

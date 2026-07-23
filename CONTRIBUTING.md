@@ -13,7 +13,8 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   PR (other docs link to the template, never restate it).
 - **Instruction-bearing files get human review.** PRs touching any `AGENTS.md`,
   `skills/`, `templates/`, `automation/`, or `message-queue/` are reviewed by a
-  maintainer before any agent acts on them
+  maintainer before merge. The review is first filed in `message-queue/needs-human/`
+  and the PR links it; a PR reviewer prompt is never the only copy
   (`handbook/principles/provenance-over-position.md`).
 - **Core changes prove they belong here.** Core diffs use a task that completes
   `templates/task/design.md`; hooks and CI enforce that receipt. Independent core-fit
@@ -36,6 +37,7 @@ Both also run in CI and as the pre-commit hook (`automation/install.py` installs
 
 ## Proposing design changes
 
-File a decision in `message-queue/needs-human/decisions/` (copy
-`templates/queue/decision.md`) or open a GitHub issue. Accepted decisions become ADRs
-in `memory/decisions/` — never rewrite an existing ADR; supersede it with a new one.
+File a timing-prefixed decision in `message-queue/needs-human/decisions/` (copy
+`templates/queue/decision.md`). A GitHub issue or PR may discuss it only by linking that
+canonical item. Accepted decisions become ADRs in `memory/decisions/` — never rewrite
+an existing ADR; supersede it with a new one.

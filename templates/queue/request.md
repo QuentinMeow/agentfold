@@ -1,7 +1,37 @@
+<!--
+Filename: choose exactly one delivery prefix, then a kebab-case slug:
+- blocking-: a named current task, transition, or operation cannot proceed now.
+- future-blocking-: work may continue, but must stop at a named date, event, or transition.
+- non-blocking-: this message never stops work and names the safe unattended outcome.
+The filename prefix is canonical. Do not add a separate **Blocking:** field.
+-->
+
 # <What you want, one line>
 
-**Filed:** <YYYY-MM-DD>, by <who>
+**Status:** open
+**Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
+**Action:** <the concrete action the receiving agent should take>
+**Full context:** [<complete source>](<repo-relative path>)
+<!-- Add **Request kind:** task-pickup only for the canonical pickup request of one
+unclaimed backlog task. Other request kinds may define their own explicit value. -->
 
-<Free form — this template is optional; anything dropped in requests/ gets read.
-Useful extras: links, priority, "done when …". The next session converts this into a
-task or acts directly, then deletes it.>
+<!-- Replace this comment with exactly one block matching the filename:
+blocking-*:
+**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
+
+future-blocking-*:
+**Blocks at:** <YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+**Until then:** <the explicit safe path while work continues>
+
+non-blocking-*:
+**If unanswered:** <the explicit safe outcome; this message will never stop work>
+-->
+
+## What you need to know
+
+<A self-contained summary of why the action is needed and the relevant current state.
+The Full context link supplies depth rather than missing prerequisites.>
+
+## Done when
+
+<An observable result the receiving agent can verify before deleting the request.>

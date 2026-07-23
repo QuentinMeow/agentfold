@@ -1,15 +1,40 @@
-# <The question, one sentence, answerable in a word or two>
+<!--
+Filename: choose exactly one delivery prefix, then a kebab-case slug:
+- blocking-: a named current task, transition, or operation cannot proceed now.
+- future-blocking-: work may continue, but must stop at a named date, event, or transition.
+- non-blocking-: this message never stops work and names the safe unattended outcome.
+The filename prefix is canonical. Do not add a separate **Blocking:** field.
+-->
+
+# <The decision, one sentence, answerable in a word or two>
 
 **Status:** waiting
-**Blocking:** <yes — task <id> is stopped | no — proceeding on the default path>
-**Default path:** <what agents do if unanswered, and from when — required if Blocking: no>
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
+**Action:** <choose one option, or state another choice>
+**Full context:** [<complete source>](<repo-relative path>)
+
+<!-- Replace this comment with exactly one block matching the filename:
+blocking-*:
+**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
+
+future-blocking-*:
+**Blocks at:** <YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+**Until then:** <the explicit safe path while work continues>
+
+non-blocking-*:
+**If unanswered:** <the explicit safe outcome; this message will never stop work>
+-->
 
 ## What you need to know
 
 <2–3 sentences from zero — no domain expertise assumed. What part of the system,
-why the question came up now. Link sources for depth; never require them.
-Writing guide: `handbook/decision-guide.md`.>
+why the choice came up now, and what the answer will change. This summary must stand
+alone; the Full context link supplies depth rather than missing prerequisites.>
+
+## Differences
+
+<Compare the meaningful alternatives in plain language. Name the trade-off or boundary
+that changes; do not merely repeat the option labels.>
 
 ## Options
 

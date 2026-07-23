@@ -24,9 +24,9 @@ Four rules make that work:
 1. **Folder as a service.** Every folder is independent, and its `AGENTS.md` is its API.
    Subfolders are endpoints. A folder that needs another service links to it — never
    reaches into it. Agents working in different folders don't collide.
-2. **Files as messages.** All coordination goes through `message-queue/` — one file per
-   message, named and routed by **who acts next**. Chat is ephemeral; files are the
-   record.
+2. **Files as messages.** Every pending human or cross-session agent action goes through
+   `message-queue/` — one file per action, routed by who acts next and prefixed by when
+   it blocks. Chat and PRs surface links; files survive.
 3. **Systems over instructions.** Agents forget. Instructions are wishes; hooks, tests,
    and the reconciler are guarantees. Every invariant that matters is checked
    mechanically, and violations become repair tasks the next agent picks up —
@@ -45,13 +45,13 @@ agentfold/
 ├── README.md            # you are here — the human doc; agent contract is AGENTS.md
 ├── handbook/            # why & how: principles, modes, git workflow, naming, adoption
 ├── docs/                # durable system designs and research-backed proposals
-├── message-queue/       # all async communication, one file per message
+├── message-queue/       # canonical pending actions; filenames say when they block
 │   ├── needs-human/     #   your move:
-│   │   ├── decisions/   #     choices only you may make (each has a default path)
-│   │   ├── clarifications/ #  questions that will matter soon; agents proceeding meanwhile
-│   │   └── reviews/     #     optional human-eyes items; safe to ignore
+│   │   ├── decisions/   #     choices only you may make
+│   │   ├── clarifications/ #  corrections or intent the agent needs
+│   │   └── reviews/     #     judgment over a named diff, artifact, or claim
 │   └── needs-agent/     #   an agent's move:
-│       ├── requests/    #     your free-form drop box ("hey, could you…")
+│       ├── requests/    #     durable work assigned to another session
 │       └── retries/     #     repair work auto-filed by the reconciler / failed jobs
 ├── tasks/               # work items; the folder a task sits in IS its status
 │   ├── 0_backlog/  1_in-progress/  2_blocked/  3_in-review/  4_done/
@@ -82,9 +82,9 @@ to the right document. To adopt AgentFold in your own project (new or existing),
 
 | Mode | Agent decides | Agent files & proceeds | Agent stops and asks |
 |------|--------------|------------------------|----------------------|
-| `autonomous` | everything | FYI reviews only | never — you review if you feel like it |
-| `async` (default) | everything reversible | expensive-to-reverse decisions, on a stated default path | only when a decision file says `Blocking: yes` |
-| `pair` | nothing significant | — | before every meaningful step |
+| `autonomous` | everything permitted | `non-blocking-*` FYI items | only separately mandated trust gates |
+| `async` (default) | everything reversible | `future-blocking-*` actions until their named boundary | `blocking-*`, or an unresolved future boundary |
+| `pair` | nothing significant | — | queued `blocking-*` action before each meaningful step |
 
 The active mode is one line in `AGENTS.md`. Details, and the exact list of what counts
 as "expensive to reverse": `handbook/collaboration-modes.md`.
@@ -93,7 +93,7 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 
 | Guarantee | Enforced by |
 |-----------|-------------|
-| Every queue item, task, memory entry matches its schema | `reconcile.py` (pre-commit hook + CI) |
+| Queue names/timing, action links, and queue/task/memory schemas agree | `reconcile.py` (pre-commit hook + CI) |
 | Every conversation *folder* contains a `handover.md` | reconciler → auto-filed retry item (a session that leaves no folder is invisible to it) |
 | Links in docs point to files that exist | reconciler link check |
 | Contracts stay short (line budgets on AGENTS.md, SKILL.md, this README) | reconciler budget check |

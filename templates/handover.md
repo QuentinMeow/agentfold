@@ -3,6 +3,7 @@
 **Session:** <YYYY-MM-DD HH:MM–HH:MM TZ, local time>, <who>
 **Task:** <task id, or "none — exploratory">
 **Mode:** <autonomous | async | pair>
+**Queue projection:** v1
 
 One screen max, plain language, for a teammate who was away. Depth goes in the task
 folder; this file links to it.
@@ -22,13 +23,14 @@ no shorthand invented mid-session.>
 
 ## Needs your attention
 
-<One entry per open needs-human/ item — including still-open items from earlier
-sessions. Never a bare name: write a clickable markdown link plus enough context to
-act without opening anything — `[short name](<repo path to the queue item>)` followed
-by 2–3 sentences: what the choice is, why it came up, the default path. The linked
-item holds the options and links onward to its sources (it is a projection —
-`message-queue/AGENTS.md`). This section is repeated verbatim in the session's final
-chat reply.>
+<This is a projection of every open `message-queue/needs-human/` item, not a place to
+originate an ask. Order entries by filename class: `blocking-`, then
+`future-blocking-`, then `non-blocking-`. Never use a bare name: write a clickable
+markdown link plus enough context to act without opening anything —
+`[short name](<repo path to the queue item>)` followed by 2–3 sentences explaining the
+choice, why it arose, and the named boundary or unattended outcome. The queue file
+remains canonical and links to the full source. Repeat this section verbatim in the
+session's final chat reply. Write `None.` when no items are open.>
 
 ## Dead ends
 
@@ -37,7 +39,9 @@ Failed approaches are exactly what compaction and chat lose. "None" is fine.>
 
 ## Next steps
 
-<What the next session should probably do first.>
+<What the next session should probably do first. Any action assigned to a human or
+another session must already have a canonical queue item linked here; do not create an
+orphan ask in a handover.>
 
 ## Deep links
 

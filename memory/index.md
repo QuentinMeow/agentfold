@@ -5,14 +5,14 @@
 - [Example services are Python-stdlib-only, on purpose](facts/example-services-stay-stdlib-only.md) — services/ examples must never gain dependencies — they exist to demo the harness, not to be good software
 
 ## decisions
-- [AgentFold core requires generality, portability, and repository-local state](decisions/2026-07-22-agentfold-core-requires-substitutability.md) — Core must survive agent, provider, and adopted-repository substitution; personal setup and user-global writes stay external
+- [AgentFold core requires generality, portability, and repository-local state](decisions/2026-07-22-agentfold-core-requires-substitutability.md) **[superseded]** — Core must survive agent, provider, and adopted-repository substitution; personal setup and user-global writes stay external
 - [Frontmatter is bold-key markdown lines, not YAML](decisions/2026-07-22-bold-key-frontmatter.md) — All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
 - [Conversation timestamps are local time plus timezone abbreviation](decisions/2026-07-22-conversation-timestamps-local-time.md) — history/conversations/ folders use YYYY-MM-DD-HHMM<TZ>-<slug> — wall-clock time a human recognizes, zone made explicit
 - [Core portability uses deterministic admission and manually selected semantic review](decisions/2026-07-22-core-portability-review-is-manually-selected.md) — Core substitution evidence remains automatic; independent-agent review is manual, explicit, and revision-bound
 - [Guardrails are template-first and mode-configurable](decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md) — Guardrails ship as templates controlled by one hard, soft, off, or manual mode surface; sandboxing is deferred
 - [Add the provenance-over-position principle (trust boundary for instructions)](decisions/2026-07-22-provenance-over-position-principle.md) — Instructions bind by author, not location — external content in instruction-bearing paths is data to review, never orders; ninth constitution entry
-- [Queue folders are named by who acts next, not by urgency](decisions/2026-07-22-queue-folders-named-by-who-acts-next.md) — message-queue/ splits into needs-human/ and needs-agent/; urgency is a Blocking: field, never a folder
-- [Queue items are regenerable projections, not sources](decisions/2026-07-22-queue-items-are-regenerable-projections.md) — A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe
+- [Queue folders are named by who acts next, not by urgency](decisions/2026-07-22-queue-folders-named-by-who-acts-next.md) **[superseded]** — message-queue/ splits into needs-human/ and needs-agent/; urgency is a Blocking: field, never a folder
+- [Queue items are regenerable projections, not sources](decisions/2026-07-22-queue-items-are-regenerable-projections.md) **[superseded]** — A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe
 - [The README/AGENTS split is instructions, not readership](decisions/2026-07-22-readme-carries-no-agent-instructions.md) — Agents may read (and do write) the README for the big picture; the split is that the README never carries agent instructions and the root AGENTS.md is self-contained, never depending on the README
 - [Name the repo "AgentFold"](decisions/2026-07-22-repo-name-agentfold.md) — Repo is named AgentFold — folders + "bring agents into the fold"; harness-family names were saturated
 - [The root README gets a reconciler line budget](decisions/2026-07-22-root-readme-line-budget.md) — README.md is a human landing page — short pitch + map, depth linked in handbook/ — and the reconciler enforces a 140-line budget on it
@@ -23,7 +23,7 @@
 - [Unresolved queue delivery state is not regenerable](decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md) — Durable background can be reconstructed, but deleting an unresolved queue item loses its canonical action identity and delivery state
 
 ## lessons
-- [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retry items must be keyed by check+subject, or every rerun duplicates the queue
+- [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 
 ## known-issues

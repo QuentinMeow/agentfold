@@ -33,7 +33,7 @@ mode permits. A task file may override the mode for that task only.
 |------|------------|
 | `handbook/` | Design principles, collaboration modes, git workflow, naming rules, adoption guide |
 | `docs/` | Durable software and harness designs; proposals, not accepted decisions |
-| `message-queue/` | Async human↔agent messages and mechanical repair queues; split by **who acts next** (`needs-human/`, `needs-agent/`) |
+| `message-queue/` | Canonical pending human↔agent and durable agent↔agent actions, split by **who acts next** |
 | `tasks/` | Work items; a task's status **is** the folder it sits in (`0_backlog` … `4_done`) |
 | `history/` | One folder per conversation/session; each must contain a `handover.md` |
 | `memory/` | Long-term project memory: `facts/`, `decisions/` (ADRs), `lessons/`, `known-issues/`; `index.md` is generated |
@@ -47,16 +47,16 @@ mode permits. A task file may override the mode for that task only.
 
 Filenames first — open only what is relevant. Full lifecycle: `message-queue/AGENTS.md`.
 
-1. `ls message-queue/needs-agent/requests/` — act on each, or convert it to a task, then
-   delete the file in the same commit.
-2. `ls message-queue/needs-agent/retries/` — repair work filed by the reconciler or a
-   failed job. Handle items touching your session's area; never delete one without
-   fixing or explicitly rejecting it in the file.
-3. Scan `message-queue/needs-human/decisions/` for filled `**Your answer:**` lines.
-   Claim first (commit a one-line `**Status:** folding` edit), fold the answer into the
-   affected docs, record an ADR in `memory/decisions/`, delete the queue file.
-   An answer heard in chat is written into the queue file in the same turn — chat is
-   the only channel with no file trace.
+1. List filenames recursively under `message-queue/needs-agent/`. Claim and act on
+   relevant requests/retries, or convert a request to a task; delete only with the
+   completed action or an explicit in-file rejection.
+2. Scan recursively under `message-queue/needs-human/` for filled `**Your answer:**` or
+   `**Your review:**` lines. Claim first with a one-line `**Status:** folding` commit,
+   fold the response into its durable source (and an ADR for decisions), then delete
+   the item in the resolving commit.
+3. Before assigning any human action or durable cross-session agent action, create its
+   canonical queue item from `templates/queue/`. PRs, issues, chat, tasks, and handovers
+   only summarize and link that item; an answer heard in chat is transcribed before use.
 4. End every reply to the human with one entry per open `needs-human/` item you filed
    or noticed — a clickable link to the item plus enough context to act from the reply
    alone, never a bare name (format: the "Needs your attention" section of
@@ -65,24 +65,27 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
 ## Task lifecycle
 
 Create tasks from `templates/task/`; the folder name is `YYYY-MM-DD-<kebab-slug>` and its
-status is the status folder it sits in. Claim a task by setting `**Claimed-by:**` in
-`task.md` and committing before you start. One agent per task; one task branch per task
-(`task/<task-id>` — see `handbook/git-workflow.md`). Full rules: `tasks/AGENTS.md`.
+status is the status folder it sits in. Claim in one pushed coordination commit: name
+the claimant, move backlog to in-progress, and resolve its pickup request before work.
+One agent per task; one task branch per task (`task/<task-id>` — see
+`handbook/git-workflow.md`). Full rules: `tasks/AGENTS.md`.
 
 ## End-of-session ritual
 
 Before ending any session that did work: write `history/conversations/<timestamp>-<slug>/handover.md`
-from `templates/handover.md`, update the task's `worklog.md`, file any pending questions
-into `message-queue/`, and update `roadmap/current-state.md` if reality changed.
+from `templates/handover.md`, update the task's `worklog.md`, file every pending human
+or cross-session action in `message-queue/`, and update `roadmap/current-state.md` if
+reality changed.
 The `skills/session-handover/` skill walks through this.
 
 ## Guardrails (hard invariants)
 
 - **Single source of truth**: every fact lives in exactly one file; other places link to
   it. Never restate a schema — link to its template.
-- **Nothing blocks silently**: hitting a human-owned decision in `async` mode means
-  filing it in `message-queue/needs-human/decisions/` with options, consequences, and a
-  default path — then continuing on the default path unless the file says `**Blocking:** yes`.
+- **Nothing blocks or waits silently**: every pending human or durable cross-session
+  agent action has one queue item. Its filename says whether it blocks now, at a named
+  future boundary, or never; external channels are linked projections only
+  (`message-queue/AGENTS.md`).
 - **Never fabricate** test results, benchmark numbers, or completion claims.
   `verification.md` contains only commands actually run and their real output.
 - **Append, don't clobber**: re-read any two-way file (queue items, worklogs, decision

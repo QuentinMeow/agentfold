@@ -33,7 +33,8 @@ The owner reviewed this proposal and narrowed its initial adoption:
 - keep token-expensive independent-agent review manual by default rather than running it
   on every change.
 
-Every guard supports the same four modes:
+On 2026-07-23, the owner explicitly confirmed that every repository guard should use
+the same four mode semantics:
 
 | Mode | Automatic behavior | Transition effect |
 |------|--------------------|-------------------|
@@ -52,6 +53,27 @@ Unless a later section explicitly says otherwise, words such as “block,” “
 “fail closed” describe `hard` mode or an assurance profile that requires that hard guard.
 In `soft`, the same result is reported without stopping the transition; in `manual`, it
 affects only an explicitly requested run; in `off`, the guard supplies no result.
+
+### Review vocabulary and concrete differences
+
+The first PR review compressed several distinct concepts into unexplained yes/no
+questions. Use these definitions when reviewing or implementing the design:
+
+| Concept | What it controls or proves | Small example |
+|---------|----------------------------|---------------|
+| Guard mode | How one guard runs at one declared trigger | A PII scanner in `soft` reports a finding and permits the commit; the same scanner in `hard` blocks that commit. |
+| Assurance profile | The strongest whole-deployment security claim supported by every required control that is installed, active, and observable | Hard CI can justify “the finding cannot merge,” but not “the data never reached GitHub,” because the PR branch is already remote. |
+| Template-first adoption | What AgentFold makes available without silently activating policy | Independent-agent review ships discoverably in a template as `manual`; an adopter must explicitly choose `hard` or `soft` to run it automatically. |
+| Self-authored acknowledgement | An untrusted, content-bound reminder that the producing agent considered an ambiguous case | The agent records why a public business email is allowed; this is useful audit evidence but not independent approval. |
+| Authenticated exception | Separate authority to permit a confirmed critical finding at a precisely bound destination | A human/provider approval may allow one content digest on one internal ref until expiry; the producing agent cannot grant this by writing `approved`. |
+| Detector failure state | Evidence that inspection was incomplete rather than clean | A crash or zero scanned files when files were expected blocks only in `hard`; `soft` reports the incomplete run and continues. |
+| Incident recovery | Post-disclosure containment, not permission to continue | Rotate an exposed credential first, then clean history and inventory clones, logs, artifacts, mirrors, and caches. |
+
+These concepts are deliberately separate. A mode is a per-guard behavior setting;
+an assurance profile is a deployment-wide claim ceiling. An acknowledgement addresses
+forgetfulness but cannot authorize a critical exception. A detector error is neither a
+finding nor a clean result. Recovery starts only after possible disclosure and cannot
+turn that disclosure into a successful guard run.
 
 ## Context and current gap
 
@@ -271,8 +293,8 @@ last safe boundary sits—not by words such as MUST in prose.
 
 ### Enforcement times and honest guarantees
 
-| Time | Best use | Guarantee ceiling |
-|------|----------|-------------------|
+| Time | Best use | Guarantee ceiling when selected and healthy |
+|------|----------|---------------------------------------------|
 | Before agent input | classify, minimize, redact, or quarantine raw data | can prevent model exposure if access and egress are also controlled |
 | While editing | workspace/output scan and rapid correction | educational feedback; incomplete and agent-controlled |
 | Pre-commit | exact staged-tree scan and acknowledgement interlock | prevents ordinary local commits only |
@@ -299,10 +321,12 @@ but none should be advertised as a complete PII guarantee by itself.
 
 ### Deployment assurance profiles
 
-The installed controls determine the claim; a policy file cannot declare itself secure.
-An installer records capabilities, and a protected canary verifies them against provider
-configuration. The reconciler and CI reject a stronger label when its required controls
-cannot be observed.
+An assurance profile is the strongest whole-deployment claim justified by the combined
+controls, not another guard mode and not a label a policy file may declare for itself.
+The installed controls determine the claim. An installer records capabilities, and a
+protected canary verifies them against provider configuration. In `hard`, the
+profile-integrity guard rejects a stronger label when its required controls cannot be
+observed; other modes cannot treat that stronger profile as verified.
 
 | Profile | Required observed controls | Honest claim |
 |---------|----------------------------|--------------|
@@ -361,6 +385,13 @@ The root reconciler can validate the policy/evidence schemas and expiry without 
 the detectors themselves. The runner reports disabled and manual-only guards explicitly
 so absence of execution cannot be confused with a clean result.
 
+“Template-first” therefore means opt-in activation, not missing documentation or an
+endorsed end-to-end workflow. AgentFold ships discoverable, replaceable mechanisms and
+one mode surface; an adopted repository chooses which mechanisms run. Enabling a starter
+bundle automatically would provide stronger defaults, but it would also impose token
+cost, false-positive friction, and one workflow before an adopter has chosen that
+trade-off.
+
 ### Transition model
 
 ```mermaid
@@ -388,9 +419,9 @@ flowchart LR
     E -- "No hard control required" --> I
     E -- "Healthy merge-only profile" --> I
     E -- "Healthy admission profile" --> P["Remote object admission"]
-    P -- "Reject" --> R
+    P -- "Reject (hard admission)" --> R
     P -- "Accept" --> I["Required CI and merge-result checks"]
-    I -- "Reject" --> R
+    I -- "Reject (hard profile check)" --> R
     I -- "Accept" --> G["Protected history"]
     G --> H["Scheduled full-history rescan"]
 ```
@@ -422,8 +453,9 @@ for every finding ID, and asks the acknowledgement command to bind the receipt t
 - claimed attester identity, rationale, timestamp, and expiry.
 
 A Git commit trailer is a reasonable portable carrier for a self-authored deliberation
-claim because the envelope can exclude the trailer and avoid a circular digest. CI can
-reject structurally stale claims, but it cannot prove the agent read anything. An
+claim because the envelope can exclude the trailer and avoid a circular digest. Hard CI
+in a profile requiring this validation can reject structurally stale claims, but it
+cannot prove the agent read anything. An
 unchanged finding-level disposition carries forward when its path, blob, rule, relevant
 policy slice, and declared context dependencies match; the new run manifest records that
 reuse so genuinely unrelated changes do not create warning fatigue. A contextual

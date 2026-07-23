@@ -89,6 +89,25 @@ class CoreScopeTests(unittest.TestCase):
             task = self.make_task(tmp)
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
 
+    def test_annotated_core_fit_heading_does_not_consume_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            annotated = COMPLETE_DESIGN.replace(
+                "## Core fit", "## Core fit (required when changing AgentFold core)"
+            )
+            task = self.make_task(tmp, design=annotated)
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+
+    def test_bare_level_two_heading_terminates_core_fit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fields_only = COMPLETE_DESIGN.split("## Core fit\n\n", 1)[1]
+            design = (
+                "# Design\n\n## Core fit\n\nThe receipt stops here.\n\n"
+                "##\n\n" + fields_only
+            )
+            task = self.make_task(tmp, design=design)
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("Agent substitution" in error for error in errors))
+
     def test_complete_core_fit_passes_with_crlf(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(tmp, design=COMPLETE_DESIGN.replace("\n", "\r\n"))

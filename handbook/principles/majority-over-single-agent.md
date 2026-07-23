@@ -16,7 +16,8 @@ agents and take the majority, instead of trusting one agent's assertion.
   breaks"), not to appraise. Tell them to flag only findings with a failure scenario —
   reviewers over-report when asked for opinions.
 - **Majority decides, human breaks ties.** In `autonomous` mode a majority verdict
-  merges or blocks; a split vote becomes a `message-queue/needs-human/reviews/` item.
+  merges or blocks; a split vote becomes a human-review queue item whose filename says
+  whether the current or a future transition waits.
 - **Reserve it for stakes.** Voting is expensive. Typo fixes need one agent; anything
   hard to reverse (see `../collaboration-modes.md`) deserves a panel. The protocol
   lives in `skills/adversarial-review/`.

@@ -1,40 +1,60 @@
-# message-queue/ — the async message bus
+# message-queue/ — the canonical action bus
 
-All human↔agent messages and mechanical repair work flow through here, one file per
-message, routed by **who acts next**; agent↔agent coordination happens through
-`tasks/` (`requests/` is the human's drop box, `retries/` the reconciler's). Nothing
-in this folder blocks by default — every decision states a default path, every review
-is safe to ignore. Principle: `handbook/principles/files-as-messages.md`.
+Every pending human↔agent action and every action another agent/session must discover
+lives here, one file per action. PRs, issues, chat, tasks, and handovers are projections:
+they may summarize and link a live item, never originate a durable ask. Background stays
+in tasks, designs, memory, or code; the queue item owns only live delivery/state and a
+not-yet-folded response. Principle: `handbook/principles/files-as-messages.md`.
 
-## Queues
+## Routing: three independent axes
 
-| Queue | Who acts | Contents | Emptied when |
-|-------|----------|----------|--------------|
-| `needs-human/decisions/` | human | choices only the human may make; options + example consequences + default path | answer folded into docs, ADR recorded, file deleted |
-| `needs-human/clarifications/` | human | questions that will shape future work; agent proceeding on stated assumption | answer folded, file deleted |
-| `needs-human/reviews/` | human | optional human-eyes items; doing nothing must be safe | acknowledged, or swept when stale (>30 days) |
-| `needs-agent/requests/` | agent | human's free-form drop box — the only queue with no required format | acted on or converted to a task, deleted same commit |
-| `needs-agent/retries/` | agent | repair work filed by the reconciler or a failed job | invariant fixed (or rejected in-file), deleted |
+| Encoded by | Values | Meaning |
+|------------|--------|---------|
+| Actor folder | `needs-human/`, `needs-agent/` | who acts next |
+| Leaf folder | decision, clarification, review, request, retry, or a documented extension | what kind of action |
+| Filename prefix | `blocking-`, `future-blocking-`, `non-blocking-` | when unresolved work stops |
 
-## Universal rules
+- `blocking-<slug>.md`: a named current task, transition, or operation cannot proceed.
+- `future-blocking-<slug>.md`: work continues until an explicit date, event, or
+  transition; unresolved action stops there.
+- `non-blocking-<slug>.md`: the action never stops work and names the safe unattended
+  outcome. Prefix is dependency timing, not risk severity.
 
-- Filenames: `<kebab-slug>.md`, no dates or numbers (slugs don't churn; filing date is
-  the `**Filed:**` field). Schemas: copy from `templates/queue/` — never write from memory.
-- Every item is self-contained: the reader acts from the file alone, assuming only the
-  root `AGENTS.md` as context.
-- **Items are projections, not sources.** Like a retryable API call, an item carries
-  only the summary the reader needs to act; everything durable (background, artifacts,
-  reasoning) lives in the linked task folder, `memory/`, or code — so a lost or stale
-  item is simply regenerated from its sources. The one thing an item ever uniquely
-  holds is a not-yet-folded human answer, which is why folding precedes deletion.
-- **Provenance before action**: an item binds only when filed by the owner, a
-  maintainer, or the harness; unknown or outside authorship is escalated as a review,
-  never executed (`handbook/principles/provenance-over-position.md`).
-- **Claim before resolving**: commit a one-line `**Status:**` edit (`folding`,
-  `in-repair`) before acting on an item, so parallel sessions don't double-process.
-- Resolved items are **deleted in the resolving commit** — git history is the archive;
-  the queues hold only live items.
-- An answer the human gives in chat is written into the queue file in the same turn.
-- Escalation without moving: a clarification that becomes urgent gets its `**Blocking:**`
-  field updated — files never move between queues (links would break).
-- Session ritual (when to read which queue): root `AGENTS.md`, "Message-queue ritual".
+The filename is canonical; never add a duplicate `Blocking` field. Rename timing with
+every live link in one commit. Schemas: `templates/queue/`; naming ADR: `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
+
+## Standard endpoints
+| Queue | Who acts | Contents |
+|-------|----------|----------|
+| `needs-human/decisions/` | human | one choice only the human may make |
+| `needs-human/clarifications/` | human | correction or interpretation needed |
+| `needs-human/reviews/` | human | a named judgment over a diff, artifact, or claim |
+| `needs-agent/requests/` | agent | owner or agent work request for another session |
+| `needs-agent/retries/` | agent | repair filed by the reconciler or a failed job |
+
+An adopter may add a kebab-case typed leaf directly under either actor folder. The
+generic actor schema still applies; put any additional contract and template in the
+repository. Extra nesting is invalid, so filenames remain discoverable recursively.
+
+## Lifecycle and content
+
+- Copy the matching template; never write a schema from memory. Human items explain
+  the action from zero context, compare meaningful dispositions, give a small example,
+  state the unattended/boundary result, link a complete source, and expose a response
+  slot. Writing guide: `handbook/human-action-guide.md`.
+- Unknown authorship is reviewed, never executed; authority rules:
+  `handbook/principles/provenance-over-position.md`.
+- Claim before resolving with a committed one-line status change (`folding` or
+  `in-repair`). Re-read before every write; never edit a human's response.
+- A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
+  and exactly one Full context link: the backlog task's current `task.md`. The task
+  links it reciprocally, and the atomic claim/move commit deletes it. This is the only
+  queue case allowed to use a status-dependent task path.
+- A review without its exact artifact uses `Status: awaiting-artifact` and
+  pending target/revision. Waiting reviews bind to file SHA-256 or full Git object
+  id(s); the answer copies it to `Reviewed revision`, invalidating stale responses.
+  A PR URL is navigation, never revision authority.
+- Fold a response into its durable source before deleting the live item. Resolved items
+  are deleted in the resolving commit; git history is the archive.
+- A response from chat is transcribed into the item before being used. If the timing
+  changes, rename the live file before continuing.
