@@ -97,11 +97,14 @@ portable adoption:
 - Force-ref admission names the displaced old tip explicitly, so continuity compares it
   with the new range head without treating ordinary PR divergence as a force push.
   Whole queue-service removal remains modular only when its edge erases no live action.
-- External action prose crosses a provider-neutral projection gate. Every declared PR
-  review entry carries exactly one live human queue link and declarative context; task
-  PRs project every human action in `Queue actions`, or use an explicit no-action
-  acknowledgement when none exists. Allowed absolute links bind to an adapter-supplied
-  immutable prefix. The GitHub workflow only passes event data to the generic gate.
+- External action prose crosses a provider-neutral projection gate. Outbound task PR
+  descriptions project every `needs-human` action in `Queue actions`; inbound formal
+  reviews project only the `needs-agent` actions carried by that surface; issues and
+  conversation comments may link either actor because the path owns direction. Allowed
+  absolute links bind to an adapter-supplied immutable prefix. GitHub's default/base
+  context makes PR-description, issue, and conversation checks authoritative; direct
+  review-event checks are explicitly advisory because GitHub has no target-context
+  variant whose workflow definition is base-owned.
 
 The live queue owns unresolved delivery state even though its background stays
 elsewhere. The correcting ADR is
@@ -123,4 +126,5 @@ Refined resolution lifecycle:
 **Thin adapter:** canonical=automation/check_action_projection.py; optional=yes; policy=none; writes=repo-only
 
 The registered `.github/workflows/harness.yml` adapter only maps GitHub event context
-and PR Markdown to those canonical gates; it owns no queue policy.
+and Markdown to those canonical gates; it owns no queue policy and does not claim that
+an advisory review-event run is repository-admission evidence.

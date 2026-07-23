@@ -50,6 +50,11 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   every live human path in the task's `Queue actions`. Use the exact
   `No human action requested.` acknowledgement only when that task—or an explicitly
   non-task branch—has no human ask. Editing PR prose never creates or resolves an ask.
+- GitHub issue and conversation adapters accept either queue actor because the linked
+  path, not an account type, says who acts next. Formal review bodies project
+  `needs-agent/` actions individually. `pull_request_target`, issue, and issue-comment
+  checks run trusted default/base workflow code; direct review and diff-comment event
+  checks are advisory because GitHub has no trusted target-context variant for them.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 

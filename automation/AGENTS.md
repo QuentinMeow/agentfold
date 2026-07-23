@@ -6,7 +6,7 @@ bare clone.
 
 | Piece | What it does | Runs |
 |-------|--------------|------|
-| `check_action_projection.py` | requires each declared external human-action entry to link a live canonical queue item | PR/provider boundary, on demand |
+| `check_action_projection.py` | requires each declared external action entry to link a live canonical item for the selected next actor | PR/provider boundary, on demand |
 | `check_core_scope.py` | gates core diffs on substitution evidence and repo-local state; `--require-review` validates a revision-bound manual review receipt | pre-commit, PR CI, on demand |
 | `core-scope-paths.txt` | registers thin agent/provider adapter files whose changes need the same core-scope check | read by the core-scope gate |
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |

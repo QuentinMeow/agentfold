@@ -177,3 +177,96 @@
   requested teams, and assignees on assignment and review-request state changes.
 - `python3 -m unittest automation.tests.test_check_action_projection` passed 56 tests;
   seven focused strict-handover tests passed, and Ruby parsed the workflow YAML.
+
+## 2026-07-23 — projection grammar and provider-comment boundary (codex subagent)
+
+- Classified explicit human obligations such as “a maintainer should select” and the
+  elliptical request “Feedback welcome” without treating descriptive system behavior
+  as a human action.
+- Replaced blanket question-mark detection with punctuation-aware detection, so actual
+  questions remain actions while query tokens such as `?foo` do not make an ordinary
+  title actionable.
+- Exposed one rendered-prose action API for strict handover boundaries; it sees visible
+  raw-HTML text and accessibility attributes while ignoring hidden elements and code.
+- Added an opt-in provider boundary for issues, reviews, and comments: a missing action
+  section is allowed only when body, additional prose, and external assignment state
+  contain no action signal. Pull-request descriptions remain strict by default.
+- `python3 automation/tests/test_check_action_projection.py` passed all 59 tests;
+  `py_compile` and `git diff --check` passed for the focused projection files.
+- A pre-freeze follow-up made action direction explicit. `needs-human` remains the
+  default, `needs-agent` requires an exact canonical Action label, and `any` lets each
+  canonical queue path declare its own actor for mixed issue/conversation surfaces.
+- List-prefixed feedback invitations and “Feedback/Reviews are welcome” now count as
+  asks. Query tokens and quoted literal question marks stay descriptive while terminal
+  questions still count. The expanded projection suite passed all 63 tests.
+
+## 2026-07-23 — GitHub durable-action surface adapter (codex subagent)
+
+- Moved authoritative pull-request description, title, requested-reviewer, team, and
+  assignee projection to `pull_request_target`. It executes default-branch/base code,
+  fetches the event's merge ref only as Git data, and verifies the fetched object
+  against the payload's immutable test-merge revision.
+- Split `issue_comment` by artifact. Issue comments inspect the event's default-branch
+  commit; pull-request conversation comments fetch the current merge candidate.
+  Issue and conversation surfaces accept either queue actor because GitHub identity
+  does not determine who acts next; formal reviews require `needs-agent`.
+- GitHub exposes no `pull_request_review_target` or
+  `pull_request_review_comment_target`. Those event checks are explicitly advisory:
+  they check out base code and use read-only permissions, but a proposed workflow can
+  evade dispatch. This is not admission proof. The provider boundary follows GitHub's
+  documented [`pull_request_target` trust model](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target).
+- A `changes_requested` review is external agent-action state; approval and comment
+  reviews remain neutral unless their body contains an ask. Seven step-scoped static
+  tests cover the event, candidate, actor, and assurance matrix.
+- Formal review and review-comment bodies deliberately pass the repository default
+  branch as a non-task scope. Each inbound surface validates only the actions it
+  carries; the outbound pull-request description remains task-scoped and complete.
+  A two-action task regression proves that one linked inbound agent action passes
+  unscoped while the same subset fails under `task/<id>`.
+- `python3 -m unittest automation.tests.test_check_action_projection
+  automation.tests.test_github_action_projection_workflow` passed all 71 tests
+  (64 projection and 7 provider-matrix tests). Ruby parsed all three workflow jobs,
+  `py_compile` passed for both focused test files, and `git diff --check` was clean.
+
+## 2026-07-23 — activation-join lifecycle hardening (codex subagent)
+
+- Made displaced-tip continuity apply when queue v1 is active on either the old or new
+  history. A force-pushed replacement can no longer activate v1 while discarding a
+  still-live action filed on its pre-v1 old tip.
+- Made newly admitted handovers governable when their creation and schema activation
+  are parallel histories joined by the candidate. Same-lineage handovers created
+  before activation remain legacy records.
+- Required concrete `Why-you-might-care` and `If-you-do-nothing` fields on every live
+  human item under queue v1. Existing items may gain them without changing identity
+  only on the exact v0-to-v1 activation edge; later framing rewrites remain blocked.
+- Applied the shared rendered-action grammar to strict handover prose outside
+  `Needs your attention` and `Next steps`, including visible raw-HTML accessibility
+  text that could otherwise hide an unqueued ask. Newly strict handovers now reject
+  raw HTML outside code everywhere, because HTML-contained fake Markdown headings can
+  desynchronize raw and semantic section boundaries.
+- Bound every queue action identity to its next-actor folder and typed leaf. Exact
+  path-only slug clarifications within the same actor and leaf remain valid; actor
+  reassignment, leaf reclassification, and content-changing renames do not.
+- Limited mutable `Agent notes` to retry items. Manual retries may append plain
+  diagnostic prose through claim and resolution, but structured bold-key fields are
+  rejected across every notes section, including duplicate sections and nested headings.
+- The final focused boundary and lifecycle tests passed. The complete queue suite
+  passed all 200 tests in 96.097 seconds; the expected fail-closed Git-snapshot
+  diagnostics were emitted by negative-path tests.
+
+## 2026-07-23 — root pre-freeze integration
+
+- Rejected the first immutable candidate after three fresh adversarial reviewers found
+  concrete provider, projection, and Git-lifecycle bypasses. Every repair invalidated
+  that panel; none of its verdicts will be counted as approval.
+- Ran two additional read-only repair audits before refreezing. They closed task-wide
+  inbound-review overprojection, actor/leaf reassignment, structured retry-note hiding,
+  and raw-HTML parser desynchronization. The final lifecycle audit passed 16 focused
+  cases; the final provider audit found one subset bug, which was repaired and bound by
+  the 71-case combined projection/provider suite.
+- Root verification on the integrated unstaged tree passed 64 action-projection tests,
+  seven GitHub adapter tests, and 200 queue/history tests. The repository-wide runner
+  then passed all six discovered test files: the same automation suites, 55 core-scope
+  cases with one intentional skip, five quote-api tests, and three quote-cli tests.
+- Updated durable design and Git workflow guidance to distinguish actor direction and
+  authoritative default/base-context checks from advisory direct-review event checks.

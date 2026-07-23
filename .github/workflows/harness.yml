@@ -3,9 +3,23 @@ on:
   push:
   pull_request:
     types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned]
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned]
+  issues:
+    types: [opened, edited, reopened, assigned, unassigned]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
 
 jobs:
   reconcile-and-test:
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,29 +53,6 @@ jobs:
             --branch "$QUEUE_TASK_BRANCH" \
             --range "$QUEUE_CHANGE_RANGE" \
             "${QUEUE_DISPLACED_ARGS[@]}"
-      - name: Action projection — pull-request questions are queued
-        if: ${{ always() && github.event_name == 'pull_request' }}
-        env:
-          ACTION_PROJECTION_BODY: ${{ github.event.pull_request.body }}
-          ACTION_PROJECTION_TITLE: ${{ github.event.pull_request.title }}
-          ACTION_PROJECTION_REQUESTED_REVIEWERS: ${{ toJSON(github.event.pull_request.requested_reviewers) }}
-          ACTION_PROJECTION_REQUESTED_TEAMS: ${{ toJSON(github.event.pull_request.requested_teams) }}
-          ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.pull_request.assignees) }}
-          ACTION_PROJECTION_BRANCH: ${{ github.head_ref }}
-          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
-          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
-        run: |
-          python3 automation/check_action_projection.py \
-            --from-env ACTION_PROJECTION_BODY \
-            --additional-prose-env ACTION_PROJECTION_TITLE \
-            --external-action-env ACTION_PROJECTION_REQUESTED_REVIEWERS \
-            --external-action-env ACTION_PROJECTION_REQUESTED_TEAMS \
-            --external-action-env ACTION_PROJECTION_ASSIGNEES \
-            --action-section "What to review" \
-            --branch "$ACTION_PROJECTION_BRANCH" \
-            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
-            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
-            --label pull-request-description
       - name: Reconciler — every harness invariant holds
         if: github.event_name == 'push'
         env:
@@ -94,3 +85,198 @@ jobs:
       - name: Repository tests
         if: ${{ always() }}
         run: python3 automation/run_tests.py
+
+  authoritative-external-action-projection:
+    name: Authoritative action projection from trusted workflow code
+    if: >-
+      ${{
+        github.event_name == 'pull_request_target' ||
+        github.event_name == 'issues' ||
+        github.event_name == 'issue_comment'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default-branch projection gate
+        if: ${{ github.event_name == 'issues' || github.event_name == 'issue_comment' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Checkout trusted PR-base projection gate
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch immutable PR candidate without checking it out
+        id: authoritative-pr-candidate
+        if: >-
+          ${{
+            github.event_name == 'pull_request_target' ||
+            (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+          }}
+        env:
+          ACTION_PROJECTION_EVENT: ${{ github.event_name }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.issue.number }}
+          ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || '' }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
+          ACTION_PROJECTION_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          if [ "$ACTION_PROJECTION_EVENT" = "pull_request_target" ]; then
+            test -n "$ACTION_PROJECTION_EXPECTED_REVISION"
+            test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
+              "$ACTION_PROJECTION_EXPECTED_REVISION"
+          fi
+          printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            >> "$GITHUB_OUTPUT"
+      - name: Action projection — pull-request description and state
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.pull_request.body }}
+          ACTION_PROJECTION_TITLE: ${{ github.event.pull_request.title }}
+          ACTION_PROJECTION_REQUESTED_REVIEWERS: ${{ toJSON(github.event.pull_request.requested_reviewers) }}
+          ACTION_PROJECTION_REQUESTED_TEAMS: ${{ toJSON(github.event.pull_request.requested_teams) }}
+          ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.pull_request.assignees) }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.pull_request.head.ref }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --additional-prose-env ACTION_PROJECTION_TITLE \
+            --external-action-env ACTION_PROJECTION_REQUESTED_REVIEWERS \
+            --external-action-env ACTION_PROJECTION_REQUESTED_TEAMS \
+            --external-action-env ACTION_PROJECTION_ASSIGNEES \
+            --action-section "What to review" \
+            --queue-actor needs-human \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-description
+      - name: Action projection — issue body and assignment state
+        if: ${{ github.event_name == 'issues' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}
+          ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}
+          ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.issue.assignees) }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --additional-prose-env ACTION_PROJECTION_TITLE \
+            --external-action-env ACTION_PROJECTION_ASSIGNEES \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor any \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-issue
+      - name: Action projection — issue conversation comment
+        if: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor any \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-issue-comment
+      - name: Action projection — PR conversation comment
+        if: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor any \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-conversation-comment
+
+  # GitHub has no pull_request_review_target or pull_request_review_comment_target.
+  # These checks run read-only base code when dispatched, but a PR may alter the
+  # event workflow before dispatch. They are useful diagnostics, not admission proof.
+  advisory-review-action-projection:
+    name: Advisory only — review and review-comment action projection
+    if: >-
+      ${{
+        github.event_name == 'pull_request_review' ||
+        github.event_name == 'pull_request_review_comment'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR-base projection gate for best-effort review
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch event-bound PR merge candidate without checking it out
+        id: advisory-pr-candidate
+        env:
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
+          ACTION_PROJECTION_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
+            "$ACTION_PROJECTION_EXPECTED_REVISION"
+          printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            >> "$GITHUB_OUTPUT"
+      - name: Advisory action projection — PR review body
+        if: ${{ github.event_name == 'pull_request_review' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.review.body }}
+          ACTION_PROJECTION_CHANGES_REQUESTED: ${{ github.event.review.state == 'changes_requested' && github.event.review.state || '' }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --external-action-env ACTION_PROJECTION_CHANGES_REQUESTED \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor needs-agent \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-review
+      - name: Advisory action projection — PR review comment
+        if: ${{ github.event_name == 'pull_request_review_comment' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor needs-agent \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-review-comment

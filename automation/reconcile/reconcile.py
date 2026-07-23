@@ -28,8 +28,10 @@ if str(AUTOMATION) not in sys.path:
 
 from check_action_projection import (
     LIST_ITEM_RE,
+    action_like_rendered_prose,
     prose_without_links,
     section_entries,
+    visible_outside_action_sections,
 )
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
@@ -136,6 +138,10 @@ QUEUE_TIMING_FIELDS = {
     "future-blocking": ("Blocks at", "Until then"),
     "non-blocking": ("If unanswered",),
 }
+HUMAN_PROJECTION_FIELDS = (
+    "Why-you-might-care",
+    "If-you-do-nothing",
+)
 QUEUE_ROOT_DOCUMENT_PATHS = {
     "message-queue/AGENTS.md",
     "message-queue/README.md",
@@ -1011,16 +1017,22 @@ def name_status_records(data):
     return records
 
 
-def identity_preserving_queue_move(source, destination):
-    """Allow timing moves and malformed-to-canonical path normalization."""
-    if not valid_queue_item_path(destination) \
-            or queue_action_slug(source) != queue_action_slug(destination):
+def identity_preserving_queue_move(source, destination, status=""):
+    """Keep queue-to-queue renames in the mutation stream for identity checks."""
+    if not valid_queue_item_path(destination):
         return False
     if not valid_queue_item_path(source):
         return governed_queue_path(source)
     source_parts = Path(source).parts
     destination_parts = Path(destination).parts
-    return source_parts[1:3] == destination_parts[1:3]
+    if source_parts[1:3] != destination_parts[1:3]:
+        return True
+    if queue_action_slug(source) == queue_action_slug(destination):
+        return True
+    # A path-only slug clarification is safe to send through content identity.
+    # A content-changing new slug may be a resolution successor, so leave it in
+    # the deletion stream where successor evidence is evaluated.
+    return status == "R100"
 
 
 def deleted_queue_paths_from_name_status(data):
@@ -1030,7 +1042,7 @@ def deleted_queue_paths_from_name_status(data):
         if status.startswith("R"):
             if governed_queue_path(source) \
                     and not identity_preserving_queue_move(
-                        source, destination
+                        source, destination, status
                     ):
                 paths.append(source)
         elif status == "D" and governed_queue_path(source):
@@ -1044,7 +1056,9 @@ def mutated_queue_paths_from_name_status(data):
     for status, source, destination in name_status_records(data):
         if status.startswith("R"):
             if governed_queue_path(source) \
-                    and identity_preserving_queue_move(source, destination):
+                    and identity_preserving_queue_move(
+                        source, destination, status
+                    ):
                 paths.append((source, destination))
         elif status in {"M", "T"} and governed_queue_path(source):
             paths.append((source, destination))
@@ -1111,6 +1125,26 @@ def queue_resolution_enabled():
     )
 
 
+def queue_resolution_v1_at(revision):
+    """Return whether one exact candidate or commit enables queue v1."""
+    artifact = (
+        repo_artifact_bytes(QUEUE / "AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "message-queue/AGENTS.md")
+    )
+    return bool(
+        artifact is not None
+        and text_fields(decode_utf8_artifact(
+            artifact,
+            (
+                "candidate `message-queue/AGENTS.md`"
+                if revision is None
+                else f"`message-queue/AGENTS.md` at {revision}"
+            ),
+        )).get("Queue resolution schema", "").strip() == "v1"
+    )
+
+
 def schema_activation_commits(head, path, field):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
@@ -1174,6 +1208,37 @@ def descended_from_any(revision, ancestors):
             return False, detail or (
                 f"could not compare activation {ancestor} to {revision}"
             )
+    return False, None
+
+
+def governed_by_activation_join(revision, activations):
+    """Govern descendants and histories joined in parallel with an activation."""
+    governed, error = descended_from_any(revision, activations)
+    if governed or error:
+        return governed, error
+    for activation in activations:
+        relationship = subprocess.run(
+            [
+                "git", "--no-replace-objects", "merge-base",
+                "--is-ancestor", revision, activation,
+            ],
+            cwd=REPO,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if relationship.returncode == 1:
+            # Neither commit descends from the other. The candidate that joins
+            # them activates the schema for this newly admitted history.
+            return True, None
+        if relationship.returncode != 0:
+            detail = relationship.stderr.decode(
+                "utf-8", errors="replace"
+            ).strip() if relationship.stderr else ""
+            return False, detail or (
+                f"could not compare {revision} to activation {activation}"
+            )
+    # The revision predates every activation and remains a legacy record.
     return False, None
 
 
@@ -1553,11 +1618,16 @@ LIFECYCLE_MUTABLE_FIELDS = {
     "Until then",
     "If unanswered",
 }
+AGENT_NOTES_SECTION_RE = re.compile(
+    r"^## Agent notes\s*\n.*?(?=^##(?:\s|$)|\Z)",
+    flags=re.M | re.S,
+)
 
 
-def immutable_action_text(text, actor, leaf):
+def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
     """Return action-defining visible text with lifecycle state removed."""
     mutable_fields = set(LIFECYCLE_MUTABLE_FIELDS)
+    mutable_fields.update(extra_mutable_fields)
     if actor == "needs-human" and leaf == "reviews":
         mutable_fields.update({
             "Your review", "Review target", "Review revision",
@@ -1566,12 +1636,8 @@ def immutable_action_text(text, actor, leaf):
     elif actor == "needs-human":
         mutable_fields.update({"Your answer", "Your review"})
     clean = semantic_text(text)
-    clean = re.sub(
-        r"^## Agent notes\s*\n.*?(?=^##(?:\s|$)|\Z)",
-        "",
-        clean,
-        flags=re.M | re.S,
-    )
+    if actor == "needs-agent" and leaf == "retries":
+        clean = AGENT_NOTES_SECTION_RE.sub("", clean)
     lines = []
     for line in clean.splitlines():
         matched = FIELD_RE.fullmatch(line)
@@ -1589,21 +1655,30 @@ def retry_action_identity(path, text):
     ):
         return None
     got = text_fields(text)
+    parts = Path(path).parts
+    actor = parts[1] if len(parts) > 1 else ""
+    leaf = parts[2] if len(parts) > 2 else ""
     return (
         "generated-retry",
+        actor,
+        leaf,
         got.get("Check", "").strip(),
         got.get("Subject", "").strip().strip("`"),
     )
 
 
-def queue_action_identity(path, text):
+def queue_action_identity(path, text, extra_mutable_fields=()):
     retry = retry_action_identity(path, text)
     parts = Path(path).parts
     actor = parts[1] if len(parts) > 1 else ""
     leaf = parts[2] if len(parts) > 2 else ""
     return retry if retry is not None else (
         "ordinary-action",
-        immutable_action_text(text, actor, leaf),
+        actor,
+        leaf,
+        immutable_action_text(
+            text, actor, leaf, extra_mutable_fields=extra_mutable_fields
+        ),
     )
 
 
@@ -1637,10 +1712,51 @@ def unanswered_review(fields):
     )
 
 
-def queue_mutation_problem(source, destination, before, after):
+def human_projection_context_migration(
+    source, destination, before, after, prior_revision, revision
+):
+    """Allow one legacy-human enrichment on the exact queue-v1 activation edge."""
+    source_parts = Path(source).parts
+    destination_parts = Path(destination).parts
+    if len(source_parts) < 3 or len(destination_parts) < 3 \
+            or source_parts[1] != "needs-human" \
+            or destination_parts[1] != "needs-human" \
+            or source_parts[2] != destination_parts[2] \
+            or queue_resolution_v1_at(prior_revision) \
+            or not queue_resolution_v1_at(revision):
+        return False
+    prior = text_fields(before)
+    current = text_fields(after)
+    for field in HUMAN_PROJECTION_FIELDS:
+        if not has_concrete_value(current.get(field, "")):
+            return False
+        if has_concrete_value(prior.get(field, "")) \
+                and prior[field].strip() != current[field].strip():
+            return False
+    return queue_action_identity(
+        source,
+        before,
+        extra_mutable_fields=HUMAN_PROJECTION_FIELDS,
+    ) == queue_action_identity(
+        destination,
+        after,
+        extra_mutable_fields=HUMAN_PROJECTION_FIELDS,
+    )
+
+
+def queue_mutation_problem(
+    source, destination, before, after, prior_revision=None, revision=None
+):
     """Reject action replacement while permitting lifecycle-only updates."""
     if queue_action_identity(source, before) != queue_action_identity(
         destination, after
+    ) and not human_projection_context_migration(
+        source,
+        destination,
+        before,
+        after,
+        prior_revision,
+        revision,
     ):
         return "action identity changed while the queue item remained live"
 
@@ -2146,7 +2262,9 @@ def check_queue_resolution():
             queue_deletion_events(activations),
             False,
         ))
-    if continuity_edge is not None and displaced_activations:
+    if continuity_edge is not None and (
+        activations or displaced_activations
+    ):
         parent, revision = continuity_edge
         mutation_event_groups.append(
             committed_queue_mutation_events(parent, revision)
@@ -2161,11 +2279,16 @@ def check_queue_resolution():
             destination,
             before,
             after,
-            _prior_revision,
-            _revision,
+            prior_revision,
+            revision,
         ) in events:
             problem = queue_mutation_problem(
-                source, destination, before, after
+                source,
+                destination,
+                before,
+                after,
+                prior_revision,
+                revision,
             )
             if not problem:
                 continue
@@ -2236,6 +2359,7 @@ def check_queue_location():
 
 
 def check_queue_schema():
+    queue_v1 = queue_resolution_enabled()
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue  # queue-location owns unsafe or broken filesystem entries
@@ -2323,6 +2447,10 @@ def check_queue_schema():
         required = QUEUE_SCHEMAS.get(rel)
         if required is None:
             required = ["Status", "Filed", "Action", "Full context"]
+        else:
+            required = list(required)
+        if actor == "needs-human" and queue_v1:
+            required.extend(HUMAN_PROJECTION_FIELDS)
         text = repo_text(item)
         clean = semantic_text(text)
         got = text_fields(text)
@@ -2354,6 +2482,16 @@ def check_queue_schema():
                 yield Finding("queue-schema", item.relative_to(REPO),
                               f"missing required field **{key}:**",
                               f"copy the base schema from templates/queue/ ({rel})")
+        if actor == "needs-human" and queue_v1:
+            for key in HUMAN_PROJECTION_FIELDS:
+                if key in got and not has_concrete_value(got[key]):
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        f"field **{key}:** is empty or a placeholder",
+                        "state the concrete consequence copied into handover "
+                        "action projections",
+                    )
         if "Filed" in got and parse_leading_date(got["Filed"]) is None:
             yield Finding(
                 "queue-schema",
@@ -2380,6 +2518,21 @@ def check_queue_schema():
             reconciler_owned_retry(item, text)
             or legacy_reconciler_retry(item, text)
         )
+        if is_repair_record and not is_generated_retry:
+            structured_notes = sorted({
+                key
+                for notes in AGENT_NOTES_SECTION_RE.findall(clean)
+                for key, _value in FIELD_RE.findall(notes)
+            })
+            if structured_notes:
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "manual retry Agent notes contain structured queue fields: "
+                    + ", ".join(structured_notes),
+                    "keep bold-key queue fields in the item header; Agent notes "
+                    "may contain only unstructured diagnostic prose",
+                )
         needs_resolution_evidence = (
             actor == "needs-human" and leaf != "reviews"
         ) or (
@@ -3428,7 +3581,7 @@ def strict_handover_entries_governed(rel):
         )
         if activation_error:
             return False, activation_error
-    governed, governance_error = descended_from_any(
+    governed, governance_error = governed_by_activation_join(
         created_at, activations
     )
     return governed, governance_error
@@ -3573,7 +3726,7 @@ def newly_added_handovers():
                     f"could not find a creation commit for {path}"
                 )
                 return set(), detail
-            is_governed, governance_error = descended_from_any(
+            is_governed, governance_error = governed_by_activation_join(
                 commits[-1], activations
             )
             if governance_error:
@@ -3817,9 +3970,14 @@ def handover_projection_entries(
         problems.append("has no top-level queue-linked action entries")
         return projected, problems
 
-    raw_entries, _raw_outside = section_entries(
+    raw_entries, raw_outside = section_entries(
         body if raw_body is None else raw_body
     )
+    if action_like_rendered_prose(raw_outside):
+        problems.append(
+            "contains an action-like rendered question or directive outside "
+            "the top-level action list"
+        )
     for index, entry in enumerate(entries, start=1):
         raw_entry = raw_entries[index - 1] if index <= len(raw_entries) else ""
         if contains_raw_html(raw_entry):
@@ -4014,6 +4172,29 @@ def check_handover_queue_projection():
                 )
         else:
             text = candidate_text
+        if strict_entries and contains_raw_html(text):
+            yield Finding(
+                "handover-queue-projection",
+                rel,
+                "strict handover contains raw HTML outside code",
+                "replace raw HTML with structural Markdown; arbitrary HTML "
+                "cannot define or preserve queue-projection boundaries",
+            )
+            continue
+        if strict_entries and action_like_rendered_prose(
+            visible_outside_action_sections(
+                text,
+                ("Needs your attention", "Next steps"),
+            )
+        ):
+            yield Finding(
+                "handover-queue-projection",
+                rel,
+                "action-like question or directive exists outside the "
+                "queue-owned projection sections",
+                "move the pending action into a canonical queue item and "
+                "project it only from Needs your attention or Next steps",
+            )
         has_v1 = text_fields(text).get("Queue projection", "").strip() == "v1"
         if not has_v1 and not is_new:
             continue  # old records stay immutable; creation-time checks govern new ones

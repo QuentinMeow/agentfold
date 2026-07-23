@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require external human-action sections to project live queue items."""
+"""Require external action sections to project live queue items."""
 import argparse
 import json
 import os
@@ -24,8 +24,11 @@ from markdown_semantics import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
+QUEUE_ACTORS = ("needs-human", "needs-agent")
+QUEUE_ACTOR_CHOICES = (*QUEUE_ACTORS, "any")
 QUEUE_ITEM_RE = re.compile(
-    r"^message-queue/needs-human/[a-z0-9][a-z0-9-]*/"
+    r"^message-queue/(?P<actor>needs-human|needs-agent)/"
+    r"[a-z0-9][a-z0-9-]*/"
     r"(?:blocking|future-blocking|non-blocking)-"
     r"[a-z0-9][a-z0-9-]*\.md$"
 )
@@ -45,7 +48,12 @@ LIST_ITEM_RE = re.compile(
     r"^(?P<indent>[ ]{0,3})(?P<marker>[-+*]|\d+[.)])"
     r"(?P<spacing>[ \t]+)"
 )
-NO_ACTION_TEXT = "No human action requested."
+NO_ACTION_TEXT_BY_ACTOR = {
+    "needs-human": "No human action requested.",
+    "needs-agent": "No agent action requested.",
+    "any": "No queued action requested.",
+}
+NO_ACTION_TEXT = NO_ACTION_TEXT_BY_ACTOR["needs-human"]
 CLEAR_ACTION_VERB_PATTERN = (
     r"(?:accept|approve|authorize|choose|confirm|consider|"
     r"decide|deploy|(?:give|provide)"
@@ -124,6 +132,10 @@ ADDITIONAL_DIRECTIVE_RE = re.compile(
     re.I | re.M,
 )
 TODO_RE = re.compile(r"\bTODO\b", re.I)
+QUESTION_MARK_RE = re.compile(r"""\?(?=$|[\s)\]}>.,!;:'"’”])""")
+QUOTED_QUESTION_LITERAL_RE = re.compile(
+    r"""(?:'\?'|"\?"|‘\?’|“\?”)"""
+)
 EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3})")
 FULL_OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
 QUEUE_ACTION_RE = re.compile(
@@ -161,9 +173,9 @@ FIRST_PERSON_REQUEST_RE = re.compile(
     re.I,
 )
 ACTOR_OBLIGATION_RE = re.compile(
-    rf"\b(?:you|{HUMAN_ACTOR_PATTERN})\b[ \t]+"
+    rf"\b{ACTION_SOURCE_PATTERN}\b[ \t]+"
     r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
-    r"(?:must|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
+    r"(?:must|should|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
     r"requested[ \t]+to)[ \t]+"
     rf"{ACTION_VERB_PATTERN}\b",
     re.I,
@@ -184,7 +196,7 @@ MODAL_ACTOR_REQUEST_RE = re.compile(
     rf"{OPEN_COMMAND_WORD_PATTERN}\b",
     re.I,
 )
-COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|review)"
+COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|reviews?)"
 FIRST_PERSON_COURTESY_REQUEST_RE = re.compile(
     r"\b(?:we|i)"
     r"(?:"
@@ -210,6 +222,14 @@ PASSIVE_COURTESY_REQUEST_RE = re.compile(
     r")"
     r"[ \t]+(?:appreciated|valued|welcome)\b",
     re.I,
+)
+ELLIPTICAL_COURTESY_REQUEST_RE = re.compile(
+    r"(?:^|(?<=[.!;:—]))[ \t]*"
+    r"(?:(?:any|some|your)[ \t]+)?"
+    rf"{COURTESY_ACTION_NOUN_PATTERN}[ \t]+"
+    r"(?:(?:is|are)[ \t]+(?P<negation>not[ \t]+)?)?"
+    r"(?:appreciated|valued|welcome)[ \t]*[.!]?[ \t]*(?=$|\n)",
+    re.I | re.M,
 )
 GENERIC_ACTION_LABELS = {
     ("action", "request"),
@@ -238,6 +258,25 @@ LEAF_GENERIC_ACTION_LABELS = {
 
 def normalized_title(value):
     return " ".join((value or "").strip().casefold().split())
+
+
+def normalized_queue_actor(value):
+    actor = (value or "").strip().casefold()
+    if actor not in QUEUE_ACTOR_CHOICES:
+        raise ValueError(
+            "queue actor must be `needs-human`, `needs-agent`, or `any`"
+        )
+    return actor
+
+
+def allowed_queue_actors(queue_actor):
+    actor = normalized_queue_actor(queue_actor)
+    return set(QUEUE_ACTORS) if actor == "any" else {actor}
+
+
+def queue_item_actor(path):
+    matched = QUEUE_ITEM_RE.fullmatch(path or "")
+    return matched.group("actor") if matched else None
 
 
 def quote_depth(line):
@@ -397,6 +436,14 @@ def strip_action_emphasis(text):
     return EMPHASIS_MARKER_RE.sub("", text or "")
 
 
+def strip_action_list_markers(text):
+    """Remove top-level Markdown list markers before classifying their prose."""
+    return "\n".join(
+        LIST_ITEM_RE.sub("", line, count=1)
+        for line in (text or "").split("\n")
+    )
+
+
 def declarative_action_request(clean):
     """Recognize narrow declarative/courtesy requests, excluding local negation."""
     for pattern in (
@@ -408,6 +455,7 @@ def declarative_action_request(clean):
         MODAL_ACTOR_REQUEST_RE,
         FIRST_PERSON_COURTESY_REQUEST_RE,
         PASSIVE_COURTESY_REQUEST_RE,
+        ELLIPTICAL_COURTESY_REQUEST_RE,
     ):
         for matched in pattern.finditer(clean):
             if matched.group("negation"):
@@ -426,7 +474,7 @@ def declarative_action_request(clean):
 
 def action_like_clean_text(clean):
     """Classify already-visible prose with the deterministic action grammar."""
-    if "?" in clean or TODO_RE.search(clean):
+    if question_mark_count(clean) or TODO_RE.search(clean):
         return True
     return any(
         DIRECTIVE_RE.search(variant)
@@ -439,14 +487,16 @@ def action_like_clean_text(clean):
 def action_like_prose(text):
     """Recognize deterministic human-action grammar in visible Markdown prose.
 
-    A fragment is action-like when it contains a question mark, a standalone TODO,
-    an authority verb in command position at the start of a line/list item, or a
-    narrow present-tense declaration that human approval/review/confirmation is
-    requested or required. Markdown destinations and code are not prose; callers
-    inspect link labels separately. Ordinary descriptive prose remains accepted.
+    A fragment is action-like when it contains question punctuation, a standalone
+    TODO, an authority verb in command position at the start of a line/list item,
+    or a narrow present-tense declaration that human approval/review/confirmation
+    is requested or required. Query-token prefixes such as `?foo` are not question
+    punctuation. Markdown destinations and code are not prose; callers inspect link
+    labels separately. Ordinary descriptive prose remains accepted.
     """
     clean = strip_prose_quote_markers(semantic_text(text))
     clean = strip_indented_code(strip_inline_code(clean))
+    clean = strip_action_list_markers(clean)
     clean = MARKDOWN_LINK_RE.sub(
         lambda matched: matched.group("label"),
         clean,
@@ -457,6 +507,7 @@ def action_like_prose(text):
 def action_like_plain_prose(text):
     """Recognize actions in provider text that has no Markdown semantics."""
     clean = strip_prose_quote_markers(text or "")
+    clean = strip_action_list_markers(clean)
     clean = "\n".join(
         re.sub(r"^[^\w]+", "", line)
         for line in clean.split("\n")
@@ -464,10 +515,28 @@ def action_like_plain_prose(text):
     return action_like_clean_text(strip_action_emphasis(clean))
 
 
+def action_like_rendered_prose(text):
+    """Recognize asks exposed by rendered HTML without granting it structure."""
+    clean = strip_prose_quote_markers(rendered_human_text(text or ""))
+    clean = strip_indented_code(strip_inline_code(clean))
+    clean = strip_action_list_markers(clean)
+    clean = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"),
+        clean,
+    )
+    return action_like_clean_text(strip_action_emphasis(clean))
+
+
+def question_mark_count(text):
+    """Count punctuation questions, excluding query tokens and quoted `?` literals."""
+    clean = QUOTED_QUESTION_LITERAL_RE.sub("", text or "")
+    return len(QUESTION_MARK_RE.findall(clean))
+
+
 def link_label_action_count(label):
     """Count authority actions in a short link label conservatively."""
     verbs = len(ACTION_VERB_RE.findall(label or ""))
-    questions = (label or "").count("?")
+    questions = question_mark_count(label)
     todos = len(TODO_RE.findall(label or ""))
     return max(verbs, questions, todos)
 
@@ -476,19 +545,26 @@ def additional_action_like_prose(text):
     """Recognize a second action in prose surrounding an owning queue link."""
     clean = strip_prose_quote_markers(semantic_text(text))
     clean = strip_indented_code(strip_inline_code(clean))
+    clean = strip_action_list_markers(clean)
     clean = strip_action_emphasis(clean)
     return bool(
-        "?" in clean
+        question_mark_count(clean)
         or TODO_RE.search(clean)
         or any(
-            ADDITIONAL_DIRECTIVE_RE.search(variant)
+            DIRECTIVE_RE.search(variant)
+            or ADDITIONAL_DIRECTIVE_RE.search(variant)
             or declarative_action_request(variant)
             for variant in action_prose_variants(clean)
         )
     )
 
 
-def label_projects_action(label, canonical_action, queue_path):
+def label_projects_action(
+    label,
+    canonical_action,
+    queue_path,
+    queue_actor=None,
+):
     """Bind a projected label to one Action without fuzzy semantic borrowing.
 
     A small neutral vocabulary remains usable per queue leaf. Every descriptive
@@ -499,6 +575,12 @@ def label_projects_action(label, canonical_action, queue_path):
     action_tokens = normalized_action_tokens(canonical_action)
     if not label_tokens or not action_tokens:
         return False
+    path_actor = queue_item_actor(queue_path)
+    if queue_actor is not None \
+            and path_actor not in allowed_queue_actors(queue_actor):
+        return False
+    if path_actor == "needs-agent":
+        return label_tokens == action_tokens
     leaf = Path(queue_path).parts[2]
     generic_labels = GENERIC_ACTION_LABELS | LEAF_GENERIC_ACTION_LABELS.get(
         leaf, set()
@@ -535,8 +617,13 @@ def normalized_url_prefix(value, candidate_revision=None):
     return parsed.scheme.casefold(), parsed.netloc.casefold(), path
 
 
-def queue_path_from_destination(destination, allowed_url_prefixes=()):
-    """Resolve one unambiguous canonical queue path from a link destination."""
+def queue_path_from_destination(
+    destination,
+    allowed_url_prefixes=(),
+    queue_actor="needs-human",
+):
+    """Resolve one unambiguous canonical queue path for the selected actor."""
+    actors = allowed_queue_actors(queue_actor)
     destination = (destination or "").strip()
     parsed = urlsplit(destination)
     candidates = []
@@ -571,7 +658,10 @@ def queue_path_from_destination(destination, allowed_url_prefixes=()):
         if path.is_absolute() or ".." in path.parts:
             return None
         candidates = [path.as_posix()]
-    valid = [candidate for candidate in candidates if QUEUE_ITEM_RE.fullmatch(candidate)]
+    valid = [
+        candidate for candidate in candidates
+        if queue_item_actor(candidate) in actors
+    ]
     return valid[0] if len(valid) == 1 and len(candidates) == 1 else None
 
 
@@ -669,19 +759,34 @@ def candidate_paths(prefix, repo=REPO, candidate_revision=None):
     ]
 
 
-def live_human_queue_paths(repo=REPO, candidate_revision=None):
+def live_queue_paths(
+    queue_actor="needs-human",
+    repo=REPO,
+    candidate_revision=None,
+):
+    actors = allowed_queue_actors(queue_actor)
     return {
         path
+        for actor in actors
         for path in candidate_paths(
-            "message-queue/needs-human",
+            f"message-queue/{actor}",
             repo=repo,
             candidate_revision=candidate_revision,
         )
-        if QUEUE_ITEM_RE.fullmatch(path)
+        if queue_item_actor(path) == actor
         and tracked_regular_file(
             path, repo=repo, candidate_revision=candidate_revision
         )
     }
+
+
+def live_human_queue_paths(repo=REPO, candidate_revision=None):
+    """Backward-compatible human-only queue listing."""
+    return live_queue_paths(
+        "needs-human",
+        repo=repo,
+        candidate_revision=candidate_revision,
+    )
 
 
 def normalized_task_id(value):
@@ -722,7 +827,13 @@ def canonical_queue_action(path, repo=REPO, candidate_revision=None):
     return matches[0].strip() if len(matches) == 1 else None
 
 
-def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
+def task_queue_paths(
+    task_id,
+    queue_actor="needs-human",
+    repo=REPO,
+    candidate_revision=None,
+):
+    actors = allowed_queue_actors(queue_actor)
     task_id = normalized_task_id(task_id)
     task_paths = [
         path for path in candidate_paths(
@@ -756,19 +867,56 @@ def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
         return set()
     if not queue_paths:
         raise RuntimeError(f"`{task_path}` has an invalid Queue actions field")
-    human_paths = {path for path in queue_paths if QUEUE_ITEM_RE.fullmatch(path)}
+    actor_paths = {
+        path for path in queue_paths
+        if queue_item_actor(path) in actors
+    }
     non_live = sorted(
-        path for path in human_paths
+        path for path in actor_paths
         if not tracked_regular_file(
             path, repo=repo, candidate_revision=candidate_revision
         )
     )
     if non_live:
         raise RuntimeError(
-            f"`{task_path}` links non-live human queue item(s): "
+            f"`{task_path}` links non-live {queue_actor} queue item(s): "
             + ", ".join(non_live)
         )
-    return human_paths
+    return actor_paths
+
+
+def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
+    """Backward-compatible human-only task queue listing."""
+    return task_queue_paths(
+        task_id,
+        "needs-human",
+        repo=repo,
+        candidate_revision=candidate_revision,
+    )
+
+
+def required_queue_paths(
+    task_id=None,
+    queue_actor="needs-human",
+    repo=REPO,
+    require_all_live=True,
+    candidate_revision=None,
+):
+    if task_id is not None:
+        return task_queue_paths(
+            task_id,
+            queue_actor,
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
+    return (
+        live_queue_paths(
+            queue_actor,
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
+        if require_all_live else set()
+    )
 
 
 def required_human_queue_paths(
@@ -777,15 +925,13 @@ def required_human_queue_paths(
     require_all_live=True,
     candidate_revision=None,
 ):
-    if task_id is not None:
-        return task_human_queue_paths(
-            task_id, repo=repo, candidate_revision=candidate_revision
-        )
-    return (
-        live_human_queue_paths(
-            repo=repo, candidate_revision=candidate_revision
-        )
-        if require_all_live else set()
+    """Backward-compatible human-only required queue listing."""
+    return required_queue_paths(
+        task_id=task_id,
+        queue_actor="needs-human",
+        repo=repo,
+        require_all_live=require_all_live,
+        candidate_revision=candidate_revision,
     )
 
 
@@ -827,7 +973,21 @@ def projection_findings(
     candidate_revision=None,
     external_actions=(),
     additional_prose=(),
+    allow_missing_action_section_if_no_action=False,
+    queue_actor="needs-human",
 ):
+    queue_actor = normalized_queue_actor(queue_actor)
+    no_action_text = NO_ACTION_TEXT_BY_ACTOR[queue_actor]
+    actor_description = (
+        "human" if queue_actor == "needs-human"
+        else "agent" if queue_actor == "needs-agent"
+        else "queued"
+    )
+    queue_link_description = (
+        f"canonical {queue_actor} queue link"
+        if queue_actor != "any"
+        else "canonical needs-human or needs-agent queue link"
+    )
     if candidate_revision is not None:
         candidate_revision = candidate_revision_oid(
             candidate_revision, repo=repo
@@ -847,8 +1007,9 @@ def projection_findings(
         )
         for prefix in allowed_url_prefixes
     )
-    required_paths = required_human_queue_paths(
+    required_paths = required_queue_paths(
         task_id=task_id,
+        queue_actor=queue_actor,
         repo=repo,
         require_all_live=require_all_live,
         candidate_revision=candidate_revision,
@@ -866,15 +1027,20 @@ def projection_findings(
                 f"additional prose input {input_number} contains an action-like "
                 "question or directive outside the declared action section"
             )
-    if not sections:
-        findings.append(
-            "missing a declared action section; add `What to review` with "
-            f"queue-linked actions or exactly `{NO_ACTION_TEXT}`"
-        )
-        return findings
     has_external_actions = any(
         material_external_action_state(value) for value in external_actions
     )
+    if not sections:
+        if allow_missing_action_section_if_no_action \
+                and not findings \
+                and not has_external_actions \
+                and not action_like_rendered_prose(text):
+            return []
+        findings.append(
+            "missing a declared action section; add `What to review` with "
+            f"queue-linked actions or exactly `{no_action_text}`"
+        )
+        return findings
     linked_paths = set()
     saw_entries = False
     saw_no_action = False
@@ -903,18 +1069,20 @@ def projection_findings(
                 "unlinked request in rendered HTML; put the single action in "
                 "the queue-link label"
             )
-        if body.strip() == NO_ACTION_TEXT:
+        if body.strip() == no_action_text:
             saw_no_action = True
             if required_paths:
                 findings.append(
-                    f"action section {section_number} claims no human action "
+                    f"action section {section_number} claims no "
+                    f"{actor_description} action "
                     "but scoped live queue item(s) exist: "
                     + ", ".join(sorted(required_paths))
                 )
             elif has_external_actions:
                 findings.append(
-                    f"action section {section_number} claims no human action "
-                    "but externally assigned human-action state is non-empty; "
+                    f"action section {section_number} claims no "
+                    f"{actor_description} action "
+                    "but externally assigned action state is non-empty; "
                     "project at least one live canonical queue link"
                 )
             continue
@@ -945,6 +1113,7 @@ def projection_findings(
                 queue_path_from_destination(
                     destination,
                     allowed_url_prefixes=normalized_prefixes,
+                    queue_actor=queue_actor,
                 )
                 for _label, destination in queue_looking
             ]
@@ -953,7 +1122,7 @@ def projection_findings(
                 invalid_projection = True
                 findings.append(
                     f"action section {section_number}, entry {entry_number} "
-                    "must contain exactly one valid canonical needs-human queue link"
+                    f"must contain exactly one valid {queue_link_description}"
                 )
                 continue
             queue_label = queue_looking[0][0]
@@ -1016,11 +1185,20 @@ def projection_findings(
                 )
                 continue
             if not label_projects_action(
-                    queue_label, canonical_action, queue_path):
+                    queue_label,
+                    canonical_action,
+                    queue_path,
+                    queue_actor=queue_actor):
                 invalid_projection = True
+                label_requirement = (
+                    "exactly match"
+                    if queue_item_actor(queue_path) == "needs-agent"
+                    else "summarize"
+                )
                 findings.append(
                     f"action section {section_number}, entry {entry_number} "
-                    "has a queue-link label that does not summarize the linked "
+                    "has a queue-link label that does not "
+                    f"{label_requirement} the linked "
                     f"queue item's canonical `Action` in `{queue_path}`"
                 )
                 continue
@@ -1088,7 +1266,16 @@ def main(argv=None):
         metavar="NAME",
         help=(
             "require a queue-linked projection when any named external "
-            "human-action state is non-empty"
+            "action state is non-empty"
+        ),
+    )
+    parser.add_argument(
+        "--queue-actor",
+        choices=QUEUE_ACTOR_CHOICES,
+        default="needs-human",
+        help=(
+            "who must act next: constrain links to needs-human or needs-agent, "
+            "or let each canonical path select either actor with any"
         ),
     )
     parser.add_argument(
@@ -1101,11 +1288,20 @@ def main(argv=None):
             "provider prose outside the declared action section"
         ),
     )
+    parser.add_argument(
+        "--allow-missing-action-section-if-no-action",
+        action="store_true",
+        help=(
+            "allow ordinary provider prose to omit an action section only "
+            "when the rendered body, additional prose, and external action "
+            "state contain no queued-action signal"
+        ),
+    )
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument(
         "--task-id",
         metavar="ID|task/ID",
-        help="scope required human queue links to one canonical task record",
+        help="scope required selected-actor queue links to one canonical task record",
     )
     scope.add_argument(
         "--branch",
@@ -1134,6 +1330,10 @@ def main(argv=None):
             candidate_revision=args.candidate_revision,
             external_actions=external_actions,
             additional_prose=additional_prose,
+            allow_missing_action_section_if_no_action=(
+                args.allow_missing_action_section_if_no_action
+            ),
+            queue_actor=args.queue_actor,
         )
     except (RuntimeError, ValueError) as error:
         print(f"action-projection: input error: {error}", file=sys.stderr)
