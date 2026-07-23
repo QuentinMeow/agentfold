@@ -186,9 +186,10 @@ PLEASE_COMMAND_PATTERN = (
     rf"{OPEN_COMMAND_WORD_PATTERN}"
 )
 HUMAN_ACTION_NOUN_PATTERN = (
-    r"(?:approval|authorization|choice|clarification|comments?|confirmation|"
-    r"decision|feedback|input|repl(?:y|ies)|responses?|review|"
-    r"sign[ -]?off|verification|vote)"
+    r"(?:advice|approval|authorization|choice|clarification|comments?|"
+    r"confirmation|decision|feedback|guidance|input|opinions?|perspective|"
+    r"repl(?:y|ies)|responses?|review|sign[ -]?off|takes?|thoughts?|"
+    r"verification|views?|vote)"
 )
 HUMAN_ACTOR_PATTERN = r"(?:human|maintainer|owner|reviewer)s?"
 AUTOMATION_ACTOR_PATTERN = (

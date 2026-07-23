@@ -457,3 +457,14 @@
   queue/history tests, and both quote-service suites.
 - Session handover:
   `history/conversations/2026-07-23-1428PDT-repair-assignment-identity-binding/handover.md`.
+
+## 2026-07-23 — human-judgment vocabulary repair (codex)
+
+- Extended the shared human-action noun grammar with advice, guidance, opinion,
+  perspective, take, thoughts, and view so indirect “we need your …” judgments cannot
+  remain only in provider prose.
+- Added exact view/opinion/perspective/thought/take regressions while preserving
+  descriptive view prose. All 93 projection tests and the blocking reviewer's bounded
+  exact-case recheck passed.
+- Session handover:
+  `history/conversations/2026-07-23-1437PDT-repair-human-judgment-vocabulary/handover.md`.
