@@ -102,8 +102,13 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.pull_request.assignees",
             "github.event.pull_request.head.ref",
             "steps.authoritative-pr-candidate.outputs.revision",
-            "--queue-actor needs-human",
+            "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
+            "--queue-actor any",
+            "--required-queue-actor needs-human",
         ))
+        self.assertNotIn(
+            "--external-action-env ACTION_PROJECTION_REQUESTED_", projection
+        )
         self.assertNotIn(
             "--allow-missing-action-section-if-no-action", projection
         )
@@ -122,9 +127,43 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.issue.assignees",
             "github.event.repository.default_branch",
             "ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}",
+            "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
             "--queue-actor any",
             "--allow-missing-action-section-if-no-action",
         ))
+
+    def test_assignment_adapter_maps_bot_direction_and_fails_unknowns_closed(self):
+        pull_request = self.step(
+            "authoritative-external-action-projection",
+            "Action projection — pull-request description and state",
+        )
+        self.assert_contains_all(pull_request, (
+            '--argjson reviewers "$ACTION_PROJECTION_REQUESTED_REVIEWERS"',
+            '--argjson teams "$ACTION_PROJECTION_REQUESTED_TEAMS"',
+            '--argjson assignees "$ACTION_PROJECTION_ASSIGNEES"',
+            'if .type == "User"',
+            '{actor: "needs-human", identity: .login}',
+            'elif .type == "Bot"',
+            '{actor: "needs-agent", identity: .login}',
+            '{actor: "needs-human", identity: .slug}',
+            'error("unknown external account actor type")',
+            'error("external assignment has no identity")',
+        ))
+        issue = self.step(
+            "authoritative-external-action-projection",
+            "Action projection — issue body and assignment state",
+        )
+        self.assert_contains_all(issue, (
+            '--argjson assignees "$ACTION_PROJECTION_ASSIGNEES"',
+            'if .type == "User"',
+            'elif .type == "Bot"',
+            '{actor: "needs-agent", identity: .login}',
+            'error("unknown external account actor type")',
+            "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
+        ))
+        self.assertNotIn(
+            "--external-action-env ACTION_PROJECTION_ASSIGNEES", issue
+        )
 
     def test_issue_and_pr_conversation_comments_use_distinct_candidates(self):
         issue = self.step(

@@ -89,8 +89,9 @@ portable adoption:
   human response is immutable. A counter-question is folded into durable evidence and
   continued in a new same-timing item that names its predecessor; agents never rewrite
   human text. An answered/open item is claimed separately; ordinary deletion changes predeclared
-  evidence files, approved reviews revalidate the exact target, requested changes leave
-  a same-boundary successor, and approval/rejection/abandonment forbid one. An
+  evidence files and approved reviews revalidate the exact target. Requested changes
+  leave a same-boundary agent repair plus a dependent artifact-pending human re-review;
+  approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
   and generated-retry exceptions prove their own state transitions, and activation
   cannot be removed to disable history checks.
@@ -113,8 +114,8 @@ elsewhere. The correcting ADR is
 Accepted decision:
 `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
 
-Refined resolution lifecycle:
-`memory/decisions/2026-07-23-queue-resolution-preserves-review-intent.md`.
+Refined actor-correct resolution lifecycle:
+`memory/decisions/2026-07-23-requested-review-changes-route-through-agent-repair.md`.
 
 ## Core fit
 

@@ -44,17 +44,22 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - `main` is always green: reconciler clean, tests passing.
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
-- A PR description may summarize human actions only by linking their live canonical
-  `message-queue/needs-human/` items. Its declared “What to review” section is checked at
-  the provider boundary: one top-level entry and one queue link per action, including
-  every live human path in the task's `Queue actions`. Use the exact
-  `No human action requested.` acknowledgement only when that task—or an explicitly
-  non-task branch—has no human ask. Editing PR prose never creates or resolves an ask.
+- A PR description may summarize actions only by linking their live canonical queue
+  items. Its declared “What to review” section is checked at the provider boundary:
+  one top-level entry and one queue link per action, including every live human path
+  in the task's `Queue actions`. External assignments retain direction: a human
+  reviewer or assignee requires a distinct `needs-human/` link, while an assigned
+  agent or bot requires a distinct `needs-agent/` link. Use the exact
+  `No queued action requested.` acknowledgement only when neither task scope nor
+  external assignment state exposes an action. Editing PR prose never creates or
+  resolves an ask.
 - GitHub issue and conversation adapters accept either queue actor because the linked
-  path, not an account type, says who acts next. Formal review bodies project
-  `needs-agent/` actions individually. `pull_request_target`, issue, and issue-comment
-  checks run trusted default/base workflow code; direct review and diff-comment event
-  checks are advisory because GitHub has no trusted target-context variant for them.
+  path says who acts next. Assignment adapters map GitHub `User` accounts and teams to
+  `needs-human`, map `Bot` accounts to `needs-agent`, and fail closed on unknown account
+  types or missing identities. Formal review bodies project `needs-agent/` actions
+  individually. `pull_request_target`, issue, and issue-comment checks run trusted
+  default/base workflow code; direct review and diff-comment event checks are advisory
+  because GitHub has no trusted target-context variant for them.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 
@@ -66,6 +71,7 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - A misfiled queue item is moved with every live link updated. A stale item is
   re-surfaced, reclassified, or explicitly resolved. Delete only after a one-line claim
   and changed durable evidence. Approved reviews revalidate their target;
-  `changes-requested` (and legacy `not-approved`) leaves a same-boundary successor;
-  `rejected` and `abandoned` end the action. Verified pickup/retry exceptions stay
-  atomic. Git history can recover accidents, not replace live delivery state.
+  `changes-requested` (and legacy `not-approved`) leaves a same-boundary agent repair
+  and dependent artifact-pending re-review; `rejected` and `abandoned` end the action.
+  Verified pickup/retry exceptions stay atomic. Git history can recover accidents, not
+  replace live delivery state.

@@ -23,7 +23,8 @@ Rules:
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Sticky `queue-resolution` checks every staged/range deletion
-  against its one-line claim and changed resolution evidence; `stale-queue` age-checks
+  against its one-line claim and changed resolution evidence; requested review changes
+  require an agent repair plus a dependent artifact-pending re-review. `stale-queue` age-checks
   `blocking-*`, never
   hard-stales `non-blocking-*`, and checks `future-blocking-*` only when `Blocks at`
   starts with a reached UTC `YYYY-MM-DD`; event boundaries require actor reclassification.

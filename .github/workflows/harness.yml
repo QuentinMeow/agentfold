@@ -144,14 +144,43 @@ jobs:
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
         run: |
+          # GitHub requested teams are human teams. Account assignments must
+          # declare User or Bot; a missing or future actor type fails closed.
+          ACTION_PROJECTION_ASSIGNMENTS="$(
+            jq -cn \
+              --argjson reviewers "$ACTION_PROJECTION_REQUESTED_REVIEWERS" \
+              --argjson teams "$ACTION_PROJECTION_REQUESTED_TEAMS" \
+              --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              '
+              def identified:
+                if ((.identity | type) == "string" and
+                    (.identity | length) > 0)
+                then .
+                else error("external assignment has no identity")
+                end;
+              def account:
+                if .type == "User"
+                then {actor: "needs-human", identity: .login} | identified
+                elif .type == "Bot"
+                then {actor: "needs-agent", identity: .login} | identified
+                else error("unknown external account actor type")
+                end;
+              [
+                ($reviewers[] | account),
+                ($teams[] |
+                  {actor: "needs-human", identity: .slug} | identified),
+                ($assignees[] | account)
+              ]
+              '
+          )"
+          export ACTION_PROJECTION_ASSIGNMENTS
           python3 automation/check_action_projection.py \
             --from-env ACTION_PROJECTION_BODY \
             --additional-prose-env ACTION_PROJECTION_TITLE \
-            --external-action-env ACTION_PROJECTION_REQUESTED_REVIEWERS \
-            --external-action-env ACTION_PROJECTION_REQUESTED_TEAMS \
-            --external-action-env ACTION_PROJECTION_ASSIGNEES \
+            --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
             --action-section "What to review" \
-            --queue-actor needs-human \
+            --queue-actor any \
+            --required-queue-actor needs-human \
             --branch "$ACTION_PROJECTION_BRANCH" \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
@@ -166,10 +195,32 @@ jobs:
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
         run: |
+          ACTION_PROJECTION_ASSIGNMENTS="$(
+            jq -cn \
+              --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              '
+              def identified:
+                if ((.identity | type) == "string" and
+                    (.identity | length) > 0)
+                then .
+                else error("external assignment has no identity")
+                end;
+              [
+                $assignees[] |
+                if .type == "User"
+                then {actor: "needs-human", identity: .login} | identified
+                elif .type == "Bot"
+                then {actor: "needs-agent", identity: .login} | identified
+                else error("unknown external account actor type")
+                end
+              ]
+              '
+          )"
+          export ACTION_PROJECTION_ASSIGNMENTS
           python3 automation/check_action_projection.py \
             --from-env ACTION_PROJECTION_BODY \
             --additional-prose-env ACTION_PROJECTION_TITLE \
-            --external-action-env ACTION_PROJECTION_ASSIGNEES \
+            --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
             --queue-actor any \

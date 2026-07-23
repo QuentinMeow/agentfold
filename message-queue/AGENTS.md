@@ -54,7 +54,7 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   retries may quote one only as broken-state evidence.
 - Ordinary actions, including manual retries, predeclare `Resolution evidence`; every named non-queue file changes
   in the deletion commit. Reviews bind one target/revision: `approved`, `rejected`, and
-  `abandoned` end the action; `changes-requested` requires a new same-timing successor.
-  Legacy `not-approved` means `changes-requested`. Approval revalidates the target; a PR URL is navigation, never revision authority.
+  `abandoned` end it; `changes-requested` creates a same-timing agent repair plus a
+  distinct artifact-pending human re-review. Legacy `not-approved` is equivalent; approval revalidates the target, while a PR URL is only navigation.
 - Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
 - Transcribe chat responses before use; rename the live file whenever timing changes.

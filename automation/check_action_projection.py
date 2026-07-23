@@ -19,6 +19,7 @@ from markdown_semantics import (
     normalized_action_tokens,
     rendered_human_text,
     semantic_text,
+    strip_default_ignorable_characters,
     strip_indented_code,
     strip_inline_code,
     visible_markdown_link_source,
@@ -48,6 +49,10 @@ HEADING_RE = re.compile(
 LIST_ITEM_RE = re.compile(
     r"^(?P<indent>[ ]{0,3})(?P<marker>[-+*]|\d+[.)])"
     r"(?P<spacing>[ \t]+)"
+)
+TASK_LIST_ITEM_RE = re.compile(
+    r"^[ ]{0,3}(?:[-+*]|\d+[.)])[ \t]+"
+    r"\[(?P<state>[ xX])\](?=[ \t]|$)"
 )
 NO_ACTION_TEXT_BY_ACTOR = {
     "needs-human": "No human action requested.",
@@ -554,6 +559,30 @@ def strip_action_list_markers(text):
     )
 
 
+def unchecked_task_list_item(text):
+    """Return whether visible Markdown contains an explicit pending task."""
+    return any(
+        matched and matched.group("state") == " "
+        for matched in (
+            TASK_LIST_ITEM_RE.match(line)
+            for line in (text or "").split("\n")
+        )
+    )
+
+
+def strip_checked_task_list_items(text):
+    """Blank completed task-list lines before ordinary command classification."""
+    output = []
+    for line in (text or "").split("\n"):
+        matched = TASK_LIST_ITEM_RE.match(line)
+        output.append(
+            ""
+            if matched and matched.group("state").casefold() == "x"
+            else line
+        )
+    return "\n".join(output)
+
+
 def declarative_action_request(clean):
     """Recognize narrow declarative/courtesy requests, excluding local negation."""
     for pattern in (
@@ -590,8 +619,18 @@ def summary_followed_by_command(clean):
     )
 
 
-def action_like_clean_text(clean):
+def action_like_clean_text(clean, strip_leading_symbols=False):
     """Classify already-visible prose with the deterministic action grammar."""
+    clean = strip_default_ignorable_characters(clean)
+    if unchecked_task_list_item(clean):
+        return True
+    clean = strip_checked_task_list_items(clean)
+    clean = strip_action_list_markers(clean)
+    if strip_leading_symbols:
+        clean = "\n".join(
+            re.sub(r"^[^\w]+", "", line)
+            for line in clean.split("\n")
+        )
     if question_mark_count(clean) or TODO_RE.search(clean):
         return True
     return any(
@@ -616,7 +655,6 @@ def action_like_prose(text):
     """
     clean = strip_prose_quote_markers(semantic_text(text))
     clean = strip_indented_code(strip_inline_code(clean))
-    clean = strip_action_list_markers(clean)
     clean = MARKDOWN_LINK_RE.sub(
         lambda matched: matched.group("label"),
         clean,
@@ -627,19 +665,16 @@ def action_like_prose(text):
 def action_like_plain_prose(text):
     """Recognize actions in provider text that has no Markdown semantics."""
     clean = strip_prose_quote_markers(text or "")
-    clean = strip_action_list_markers(clean)
-    clean = "\n".join(
-        re.sub(r"^[^\w]+", "", line)
-        for line in clean.split("\n")
+    return action_like_clean_text(
+        strip_action_emphasis(clean),
+        strip_leading_symbols=True,
     )
-    return action_like_clean_text(strip_action_emphasis(clean))
 
 
 def action_like_rendered_prose(text):
     """Recognize asks exposed by rendered HTML without granting it structure."""
     clean = strip_prose_quote_markers(rendered_human_text(text or ""))
     clean = strip_indented_code(strip_inline_code(clean))
-    clean = strip_action_list_markers(clean)
     clean = MARKDOWN_LINK_RE.sub(
         lambda matched: matched.group("label"),
         clean,
@@ -702,20 +737,8 @@ def additional_action_like_prose(text):
     """Recognize a second action in prose surrounding an owning queue link."""
     clean = strip_prose_quote_markers(semantic_text(text))
     clean = strip_indented_code(strip_inline_code(clean))
-    clean = strip_action_list_markers(clean)
     clean = strip_action_emphasis(clean)
-    return bool(
-        question_mark_count(clean)
-        or TODO_RE.search(clean)
-        or any(
-            DIRECTIVE_RE.search(variant)
-            or ADDITIONAL_DIRECTIVE_RE.search(variant)
-            or declarative_action_request(variant)
-            or BOUNDARY_UNTIL_HUMAN_ACTION_RE.search(variant)
-            or summary_followed_by_command(variant)
-            for variant in action_prose_variants(clean)
-        )
-    )
+    return action_like_clean_text(clean)
 
 
 def label_projects_action(
@@ -1135,6 +1158,48 @@ def material_external_action_state(value):
     return external_action_state_count(value) > 0
 
 
+def external_assignment_state_counts(values):
+    """Count provider-neutral assignments by their canonical next actor.
+
+    Every input is a JSON array of objects with a non-empty opaque `identity`
+    and an exact `actor` of `needs-human` or `needs-agent`. Provider adapters
+    own the mapping from their actor types into this closed canonical shape.
+    """
+    counts = {actor: 0 for actor in QUEUE_ACTORS}
+    for input_number, value in enumerate(values, start=1):
+        try:
+            assignments = json.loads(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"external assignment input {input_number} must be valid JSON"
+            ) from error
+        if not isinstance(assignments, list):
+            raise ValueError(
+                f"external assignment input {input_number} must be a JSON array"
+            )
+        for assignment_number, assignment in enumerate(assignments, start=1):
+            if not isinstance(assignment, dict):
+                raise ValueError(
+                    f"external assignment input {input_number}, entry "
+                    f"{assignment_number} must be an object"
+                )
+            actor = assignment.get("actor")
+            if actor not in QUEUE_ACTORS:
+                raise ValueError(
+                    f"external assignment input {input_number}, entry "
+                    f"{assignment_number} has unknown actor {actor!r}; "
+                    "expected `needs-human` or `needs-agent`"
+                )
+            identity = assignment.get("identity")
+            if not isinstance(identity, str) or not identity.strip():
+                raise ValueError(
+                    f"external assignment input {input_number}, entry "
+                    f"{assignment_number} needs a non-empty string identity"
+                )
+            counts[actor] += 1
+    return counts
+
+
 def projection_findings(
     text,
     titles,
@@ -1144,11 +1209,21 @@ def projection_findings(
     require_all_live=True,
     candidate_revision=None,
     external_actions=(),
+    external_assignments=(),
     additional_prose=(),
     allow_missing_action_section_if_no_action=False,
     queue_actor="needs-human",
+    required_queue_actor=None,
 ):
     queue_actor = normalized_queue_actor(queue_actor)
+    required_queue_actor = normalized_queue_actor(
+        required_queue_actor or queue_actor
+    )
+    if not allowed_queue_actors(required_queue_actor).issubset(
+            allowed_queue_actors(queue_actor)):
+        raise ValueError(
+            "required queue actor must be allowed by the projection queue actor"
+        )
     no_action_text = NO_ACTION_TEXT_BY_ACTOR[queue_actor]
     actor_description = (
         "human" if queue_actor == "needs-human"
@@ -1181,7 +1256,7 @@ def projection_findings(
     )
     required_paths = required_queue_paths(
         task_id=task_id,
-        queue_actor=queue_actor,
+        queue_actor=required_queue_actor,
         repo=repo,
         require_all_live=require_all_live,
         candidate_revision=candidate_revision,
@@ -1199,9 +1274,31 @@ def projection_findings(
                 f"additional prose input {input_number} contains an action-like "
                 "question or directive outside the declared action section"
             )
-    external_action_count = sum(
+    legacy_external_action_count = sum(
         external_action_state_count(value) for value in external_actions
     )
+    if queue_actor == "any" and legacy_external_action_count:
+        raise ValueError(
+            "directionless external action state cannot be used with queue actor "
+            "`any`; pass provider-neutral external assignments with actor and "
+            "identity"
+        )
+    external_action_counts = external_assignment_state_counts(
+        external_assignments
+    )
+    if queue_actor in QUEUE_ACTORS:
+        external_action_counts[queue_actor] += legacy_external_action_count
+    disallowed_external_actors = [
+        actor for actor, count in external_action_counts.items()
+        if count and actor not in allowed_queue_actors(queue_actor)
+    ]
+    if disallowed_external_actors:
+        raise ValueError(
+            "external assignments require actor(s) not allowed by the "
+            "projection queue actor: "
+            + ", ".join(disallowed_external_actors)
+        )
+    external_action_count = sum(external_action_counts.values())
     has_external_actions = external_action_count > 0
     if not sections:
         if allow_missing_action_section_if_no_action \
@@ -1388,13 +1485,23 @@ def projection_findings(
         findings.append(
             "a no-action acknowledgement cannot appear beside listed actions"
         )
-    if not saw_no_action and len(linked_paths) < external_action_count:
-        findings.append(
-            "externally assigned action state contains "
-            f"{external_action_count} action(s), but the declared action "
-            f"section projects only {len(linked_paths)} distinct live "
-            "canonical queue action(s)"
-        )
+    if not saw_no_action:
+        linked_action_counts = {
+            actor: sum(
+                queue_item_actor(path) == actor for path in linked_paths
+            )
+            for actor in QUEUE_ACTORS
+        }
+        for actor, external_count in external_action_counts.items():
+            linked_count = linked_action_counts[actor]
+            if linked_count < external_count:
+                findings.append(
+                    "externally assigned action state for "
+                    f"{actor} contains {external_count} action(s), but the "
+                    "declared action section projects only "
+                    f"{linked_count} distinct live {actor} canonical queue "
+                    "action(s)"
+                )
     missing = sorted(required_paths - linked_paths)
     if missing and not saw_no_action and not invalid_projection:
         findings.append(
@@ -1455,7 +1562,17 @@ def main(argv=None):
             "require distinct queue-linked projections for named external "
             "action state: each material top-level JSON array element counts "
             "once, each material object/scalar counts once, and repeated "
-            "inputs add their counts"
+            "inputs add their counts; direction inherits a concrete queue actor"
+        ),
+    )
+    parser.add_argument(
+        "--external-assignment-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "require actor-preserving external assignment projections from a "
+            "JSON array of objects with exact actor and opaque identity fields"
         ),
     )
     parser.add_argument(
@@ -1465,6 +1582,14 @@ def main(argv=None):
         help=(
             "who must act next: constrain links to needs-human or needs-agent, "
             "or let each canonical path select either actor with any"
+        ),
+    )
+    parser.add_argument(
+        "--required-queue-actor",
+        choices=QUEUE_ACTOR_CHOICES,
+        help=(
+            "optionally narrow which live queue actions task/global scope "
+            "requires while allowing a broader projection actor set"
         ),
     )
     parser.add_argument(
@@ -1502,6 +1627,7 @@ def main(argv=None):
     try:
         text = read_input(args)
         external_actions = read_env_values(args.external_action_env)
+        external_assignments = read_env_values(args.external_assignment_env)
         additional_prose = read_env_values(args.additional_prose_env)
         task_id = args.task_id
         require_all_live = True
@@ -1518,11 +1644,13 @@ def main(argv=None):
             require_all_live=require_all_live,
             candidate_revision=args.candidate_revision,
             external_actions=external_actions,
+            external_assignments=external_assignments,
             additional_prose=additional_prose,
             allow_missing_action_section_if_no_action=(
                 args.allow_missing_action_section_if_no_action
             ),
             queue_actor=args.queue_actor,
+            required_queue_actor=args.required_queue_actor,
         )
     except (RuntimeError, ValueError) as error:
         print(f"action-projection: input error: {error}", file=sys.stderr)

@@ -15,6 +15,10 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Resolution evidence:** `<durable file completion will create or change>`
 <!-- Add **Request kind:** task-pickup only for the canonical pickup request of one
 unclaimed backlog task. Other request kinds may define their own explicit value. -->
+<!-- A changes-requested review successor also adds **Supersedes:** `<old review path>`
+and **Follow-up review:** `<new human review path>`. The follow-up is a distinct
+awaiting-artifact judgment with **Depends on:** `<this request path>`; do not repeat
+this request's repair Action as the review Action. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

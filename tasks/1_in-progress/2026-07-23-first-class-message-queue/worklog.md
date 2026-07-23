@@ -310,3 +310,61 @@
   adapter tests; `py_compile` and `git diff --check` passed.
 - Session handover:
   `history/conversations/2026-07-23-1131PDT-repair-provider-action-cardinality/handover.md`.
+
+## 2026-07-23 — requested-change actor routing (codex subagent)
+
+- Routed every `changes-requested` and legacy `not-approved` resolution through one
+  newly introduced, same-timing `needs-agent` repair action. The repair alone owns the
+  concrete `Action`, stable `Full context`, dependency boundary, and non-queue
+  `Resolution evidence`, and points back to the resolved review with `Supersedes`.
+- Preserved the unaccepted review boundary by requiring the repair to link one distinct
+  newly introduced human review item. It starts `awaiting-artifact`, depends on
+  the repair, retains the same context and timing, and cannot duplicate the repair
+  action.
+- Added regressions for a human-only successor, an agent-only successor that drops
+  re-review, missing action/evidence, preclaimed repair, changed boundary/context,
+  preexisting successor, legacy outcome, and duplicate repair/review actions.
+- Recorded the correction in
+  `memory/decisions/2026-07-23-requested-review-changes-route-through-agent-repair.md`;
+  the prior decided ADR remains byte-for-byte unchanged.
+- Six focused lifecycle test methods passed, then all 208 queue/history tests passed in
+  98.178 seconds. `py_compile`, `git diff --check`, and the reconciler also passed with
+  zero findings.
+- Session handover:
+  `history/conversations/2026-07-23-1200PDT-repair-requested-change-actor-routing/handover.md`.
+
+## 2026-07-23 — final provider-projection gap repair (codex subagent)
+
+- Treated every visible unchecked Markdown task-list item as an explicit pending
+  action, independent of its verb. Checked historical items and task syntax inside
+  fenced, inline, or indented code remain non-actions; existing noun-summary and
+  third-person negatives remain accepted.
+- Normalized detection-only visible prose with Unicode NFKC and removed format/default-
+  ignorable characters after Markdown destinations and code were excluded. This closes
+  the exact `Rev<U+200B>iew this change.` bypass without changing structural evidence
+  or literal examples.
+- Added provider-neutral external assignment envelopes with exact `needs-human` or
+  `needs-agent` direction and opaque identity. Per-actor cardinality now requires one
+  distinct actor-matching canonical queue link per assignment; directionless state on
+  a mixed-actor surface fails closed.
+- Updated the GitHub adapter to map `User` accounts and requested teams to
+  `needs-human`, map `Bot` accounts such as
+  `copilot-pull-request-reviewer[bot]` to `needs-agent`, and fail unknown account
+  types or missing identities closed. PR task scope still requires its existing human
+  actions, while the mixed surface uses exact `No queued action requested.` when empty.
+- Updated provider guidance and added unchecked/checked task, Unicode
+  obfuscation/literal, mixed assignment, malformed actor, distinct-cardinality,
+  task-scope, command-line, and workflow mapping regressions.
+- `python3 -m unittest automation.tests.test_check_action_projection
+  automation.tests.test_github_action_projection_workflow` passed all 87 tests
+  (79 projection and eight provider-adapter tests) in 27.777 seconds. System Python
+  3.7 `py_compile`, Ruby workflow YAML parsing, exact jq actor mapping, and
+  `git diff --check` also passed.
+- Direct strict-handover validation returned no entry problems, projected the exact
+  six-of-six live human queue paths in canonical order, and found no action prose
+  outside the projection sections. The full reconciler could not read either untracked
+  new handover from its Git candidate snapshot because this repair was required to
+  remain unstaged; full reconciler evidence therefore belongs to the later staged
+  integration snapshot.
+- Session handover:
+  `history/conversations/2026-07-23-1200PDT-repair-final-projection-gaps/handover.md`.

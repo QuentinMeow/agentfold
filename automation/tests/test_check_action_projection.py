@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -77,9 +78,11 @@ class ActionProjectionTests(unittest.TestCase):
         task_id=None,
         candidate_revision=None,
         external_actions=(),
+        external_assignments=(),
         additional_prose=(),
         allow_missing_action_section_if_no_action=False,
         queue_actor="needs-human",
+        required_queue_actor=None,
         require_all_live=True,
     ):
         return PROJECTION.projection_findings(
@@ -90,11 +93,13 @@ class ActionProjectionTests(unittest.TestCase):
             task_id=task_id,
             candidate_revision=candidate_revision,
             external_actions=external_actions,
+            external_assignments=external_assignments,
             additional_prose=additional_prose,
             allow_missing_action_section_if_no_action=(
                 allow_missing_action_section_if_no_action
             ),
             queue_actor=queue_actor,
+            required_queue_actor=required_queue_actor,
             require_all_live=require_all_live,
         )
 
@@ -756,6 +761,98 @@ class ActionProjectionTests(unittest.TestCase):
                     allow_missing_action_section_if_no_action=True,
                 ),
             )
+
+    def test_visible_unchecked_task_list_is_an_action_without_verb_hardcoding(self):
+        pending = (
+            "- [ ] Migrate the database before release.\n",
+            "1. [ ] Rehydrate the archive before release.\n",
+            "> - [ ] Calibrate the unknown provider before release.\n",
+        )
+        completed_or_literal = (
+            "- [x] Migrate the database before release.\n",
+            "- [X] Review this change.\n",
+            "`- [ ] Migrate the database before release.`\n",
+            "```\n- [ ] Migrate the database before release.\n```\n",
+            "    - [ ] Migrate the database before release.\n",
+            "The migration guide shows `- [ ]` as its template syntax.\n",
+            "Adds support for database migrations.\n",
+            "The service migrates the database before release.\n",
+        )
+        with self.repo() as root:
+            for body in pending:
+                with self.subTest(kind="pending", body=body):
+                    findings = self.findings(
+                        root,
+                        body,
+                        allow_missing_action_section_if_no_action=True,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+            for body in completed_or_literal:
+                with self.subTest(kind="non-action", body=body):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            body,
+                            allow_missing_action_section_if_no_action=True,
+                        ),
+                    )
+
+    def test_default_ignorable_characters_cannot_obfuscate_visible_actions(self):
+        asks = (
+            "Rev\u200biew this change.\n",
+            "Re\u2060view this change.\n",
+            "Rev\ufe0fiew this change.\n",
+            "Ｒｅｖｉｅｗ this change.\n",
+            "[Rev\u200biew this change.](https://example.invalid/context)\n",
+            "<span>Rev&#x200b;iew this change.</span>\n",
+        )
+        literal_or_structural = (
+            "`Rev\u200biew this change.`\n",
+            "```\nRev\u200biew this change.\n```\n",
+            "    Rev\u200biew this change.\n",
+            (
+                "[Migration reference]"
+                "(https://example.invalid/Rev\u200biew-this-change)\n"
+            ),
+        )
+        with self.repo() as root:
+            for body in asks:
+                with self.subTest(kind="visible", body=body):
+                    findings = self.findings(
+                        root,
+                        body,
+                        allow_missing_action_section_if_no_action=True,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+            for body in literal_or_structural:
+                with self.subTest(kind="literal", body=body):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            body,
+                            allow_missing_action_section_if_no_action=True,
+                        ),
+                    )
+            findings = self.findings(
+                root,
+                "Routine compatibility update.\n",
+                additional_prose=("Rev\u200biew this change.",),
+                allow_missing_action_section_if_no_action=True,
+            )
+            self.assertEqual(2, len(findings))
+            self.assertTrue(any(
+                "additional prose input" in finding for finding in findings
+            ))
 
     def test_no_action_marker_fails_closed_when_live_human_items_exist(self):
         with self.repo() as root:
@@ -1724,6 +1821,214 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_external_assignments_preserve_actor_direction_and_cardinality(self):
+        with self.repo() as root:
+            human = self.queue_item(
+                root,
+                action="Review the human-facing migration.",
+            )
+            agent = self.queue_item(
+                root,
+                name="non-blocking-review-automated-migration.md",
+                action="Review the automated migration.",
+                actor="needs-agent",
+            )
+            second_agent = self.queue_item(
+                root,
+                name="non-blocking-review-second-automated-migration.md",
+                action="Review the second automated migration.",
+                actor="needs-agent",
+            )
+            self.git(root, "add", ".")
+            human_path = human.relative_to(root).as_posix()
+            agent_path = agent.relative_to(root).as_posix()
+            second_agent_path = second_agent.relative_to(root).as_posix()
+            human_link = (
+                "## What to review\n\n"
+                f"1. [Review the human-facing migration.]({human_path})\n"
+            )
+            agent_link = (
+                "## What to review\n\n"
+                f"1. [Review the automated migration.]({agent_path})\n"
+            )
+            both_links = (
+                human_link
+                + f"2. [Review the automated migration.]({agent_path})\n"
+            )
+            bot_assignment = json.dumps([{
+                "actor": "needs-agent",
+                "identity": "copilot-pull-request-reviewer[bot]",
+            }])
+            mixed_assignments = json.dumps([
+                {"actor": "needs-human", "identity": "alice"},
+                {
+                    "actor": "needs-agent",
+                    "identity": "copilot-pull-request-reviewer[bot]",
+                },
+            ])
+
+            findings = self.findings(
+                root,
+                human_link,
+                external_assignments=(bot_assignment,),
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("for needs-agent", findings[0])
+            self.assertIn("only 0 distinct", findings[0])
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    agent_link,
+                    external_assignments=(bot_assignment,),
+                    queue_actor="any",
+                    require_all_live=False,
+                ),
+            )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    both_links,
+                    external_assignments=(mixed_assignments,),
+                    queue_actor="any",
+                    require_all_live=False,
+                ),
+            )
+
+            duplicate_bots = json.dumps([
+                {"actor": "needs-agent", "identity": "same-bot"},
+                {"actor": "needs-agent", "identity": "same-bot"},
+            ])
+            findings = self.findings(
+                root,
+                agent_link,
+                external_assignments=(duplicate_bots,),
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("contains 2 action(s)", findings[0])
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    agent_link
+                    + (
+                        "2. [Review the second automated migration.]"
+                        f"({second_agent_path})\n"
+                    ),
+                    external_assignments=(duplicate_bots,),
+                    queue_actor="any",
+                    require_all_live=False,
+                ),
+            )
+
+    def test_external_assignment_shape_and_direction_fail_closed(self):
+        malformed = (
+            "{}",
+            '[{"actor": "needs-agent"}]',
+            '[{"actor": "needs-agent", "identity": ""}]',
+            '[{"actor": "any", "identity": "reviewer"}]',
+            '[{"actor": "Bot", "identity": "reviewer"}]',
+            '["needs-agent"]',
+        )
+        with self.repo() as root:
+            for assignments in malformed:
+                with self.subTest(assignments=assignments), self.assertRaises(
+                        ValueError):
+                    self.findings(
+                        root,
+                        "## What to review\n\nNo queued action requested.\n",
+                        external_assignments=(assignments,),
+                        queue_actor="any",
+                        require_all_live=False,
+                    )
+            with self.assertRaisesRegex(
+                    ValueError, "directionless external action state"):
+                self.findings(
+                    root,
+                    "## What to review\n\nNo queued action requested.\n",
+                    external_actions=('[{"login": "reviewer"}]',),
+                    queue_actor="any",
+                    require_all_live=False,
+                )
+
+    def test_required_actor_can_preserve_human_task_scope_on_mixed_surface(self):
+        task_id = "2026-07-23-mixed-assignment-scope"
+        with self.repo() as root:
+            human = self.queue_item(
+                root,
+                action="Review the human-facing migration.",
+            )
+            agent = self.queue_item(
+                root,
+                name="non-blocking-review-automated-migration.md",
+                action="Review the automated migration.",
+                actor="needs-agent",
+            )
+            human_path = human.relative_to(root).as_posix()
+            agent_path = agent.relative_to(root).as_posix()
+            self.task_record(
+                root,
+                task_id,
+                f"`{human_path}`, `{agent_path}`",
+            )
+            self.git(root, "add", ".")
+            body = (
+                "## What to review\n\n"
+                f"1. [Review the human-facing migration.]({human_path})\n"
+            )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    body,
+                    task_id=task_id,
+                    queue_actor="any",
+                    required_queue_actor="needs-human",
+                ),
+            )
+            findings = self.findings(
+                root,
+                body,
+                task_id=task_id,
+                queue_actor="any",
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn(agent_path, findings[0])
+
+    def test_mixed_pr_surface_uses_queued_no_action_marker(self):
+        task_id = "2026-07-23-no-pr-actions"
+        with self.repo() as root:
+            self.task_record(root, task_id, "none")
+            self.git(root, "add", ".")
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    "## What to review\n\nNo queued action requested.\n",
+                    task_id=task_id,
+                    queue_actor="any",
+                    required_queue_actor="needs-human",
+                ),
+            )
+            findings = self.findings(
+                root,
+                "## What to review\n\nNo human action requested.\n",
+                task_id=task_id,
+                queue_actor="any",
+                required_queue_actor="needs-human",
+            )
+            self.assertTrue(findings)
+            self.assertTrue(any(
+                "no queue-linked action" in finding
+                or "top-level action list" in finding
+                for finding in findings
+            ))
+
     def test_additional_plain_prose_cannot_hide_an_action(self):
         no_action = "## What to review\n\nNo human action requested.\n"
         with self.repo() as root:
@@ -1824,6 +2129,39 @@ class ActionProjectionTests(unittest.TestCase):
                     PROJECTION.main([
                         *args,
                         "--queue-actor", "needs-agent",
+                    ]),
+                )
+
+    def test_cli_reads_actor_preserving_external_assignments(self):
+        with self.repo() as root:
+            agent_item = self.queue_item(
+                root,
+                name="non-blocking-review-automated-migration.md",
+                action="Review the automated migration.",
+                actor="needs-agent",
+            )
+            self.git(root, "add", ".")
+            path = agent_item.relative_to(root).as_posix()
+            env = {
+                "BODY": (
+                    "## What to review\n\n"
+                    f"1. [Review the automated migration.]({path})\n"
+                ),
+                "ASSIGNMENTS": json.dumps([{
+                    "actor": "needs-agent",
+                    "identity": "copilot-pull-request-reviewer[bot]",
+                }]),
+            }
+            with mock.patch.dict(os.environ, env), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--external-assignment-env", "ASSIGNMENTS",
+                        "--queue-actor", "any",
+                        "--branch", "feature/provider-neutral",
                     ]),
                 )
 

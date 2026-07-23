@@ -2220,7 +2220,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual(rejected, bool(findings))
 
-    def test_not_approved_review_requires_same_boundary_successor(self):
+    def test_not_approved_review_requires_same_boundary_agent_successor(self):
         for creates_successor, rejected in ((False, True), (True, False)):
             with self.subTest(creates_successor=creates_successor), self.repo() as root:
                 self.init_git(root)
@@ -2238,8 +2238,12 @@ class ReconcileQueueTests(unittest.TestCase):
                     "future-blocking-review.md"
                 )
                 successor_path = (
+                    "message-queue/needs-agent/requests/"
+                    "future-blocking-repair-review.md"
+                )
+                followup_path = (
                     "message-queue/needs-human/reviews/"
-                    "future-blocking-review-revision-two.md"
+                    "future-blocking-review-repaired-artifact.md"
                 )
                 item = self.write(
                     root,
@@ -2272,16 +2276,34 @@ class ReconcileQueueTests(unittest.TestCase):
                     self.write(
                         root,
                         successor_path,
-                        "# Review revision two\n\n"
+                        "# Repair the reviewed artifact\n\n"
+                        "**Status:** open\n"
+                        "**Filed:** 2026-07-23\n"
+                        "**Action:** repair the exact bytes requested by review\n"
+                        "**Full context:** `docs/source.md`\n"
+                        "**Resolution evidence:** `docs/source.md`\n"
+                        f"**Supersedes:** `{old_path}`\n"
+                        f"**Follow-up review:** `{followup_path}`\n"
+                        "**Blocks at:** transition:merge\n"
+                        "**Until then:** revise the artifact\n"
+                        "\n## What you need to know\n\n"
+                        "The review requested a concrete repair.\n\n"
+                        "## Done when\n\nThe reviewed bytes are repaired.\n",
+                    )
+                    self.write(
+                        root,
+                        followup_path,
+                        "# Review repaired artifact\n\n"
                         "**Status:** awaiting-artifact\n"
                         "**Filed:** 2026-07-23\n"
-                        "**Action:** review revised bytes\n"
+                        "**Action:** review the repaired artifact\n"
                         "**Full context:** `docs/source.md`\n"
                         "**Review target:** pending\n"
                         "**Review revision:** pending\n"
                         "**Reviewed revision:** ______\n"
                         "**Review outcome:** pending\n"
                         f"**Supersedes:** `{old_path}`\n"
+                        f"**Depends on:** `{successor_path}`\n"
                         "**Blocks at:** transition:merge\n"
                         "**Until then:** revise the artifact\n"
                         "**Your review:** ______\n",
@@ -2320,7 +2342,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     "future-blocking-security.md"
                 )
                 successor_path = (
-                    "message-queue/needs-human/reviews/"
+                    "message-queue/needs-agent/requests/"
                     "future-blocking-logging.md"
                 )
                 old = self.write(
@@ -2345,19 +2367,15 @@ class ReconcileQueueTests(unittest.TestCase):
                     self.write(
                         root,
                         successor_path,
-                        "# Review unrelated logging\n\n"
-                        "**Status:** awaiting-artifact\n"
+                        "# Repair unrelated logging\n\n"
+                        "**Status:** open\n"
                         "**Filed:** 2026-07-23\n"
-                        "**Action:** review an unrelated logging design\n"
+                        "**Action:** repair an unrelated logging design\n"
                         "**Full context:** `docs/logging.md`\n"
-                        "**Review target:** pending\n"
-                        "**Review revision:** pending\n"
-                        "**Reviewed revision:** ______\n"
-                        "**Review outcome:** pending\n"
+                        "**Resolution evidence:** `docs/logging.md`\n"
                         f"**Supersedes:** `{old_path}`\n"
                         "**Blocks at:** transition:merge\n"
                         "**Until then:** continue implementation\n"
-                        "**Your review:** ______\n",
                     )
 
                 if preexisting:
@@ -2384,6 +2402,325 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual(1, len(findings))
                 self.assertIn(expected, findings[0].message)
+
+    def test_changes_requested_rejects_human_only_successor(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            old_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review.md"
+            )
+            successor_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-revision-two.md"
+            )
+            old = self.write(
+                root,
+                old_path,
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review exact bytes\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** changes-requested\n"
+                f"**Successor action:** `{successor_path}`\n"
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** revise the artifact\n"
+                "**Your review:** repair the boundary handling\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record requested changes")
+            old.write_text(
+                old.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", old_path)
+            self.git(root, "commit", "-m", "claim review response")
+            self.write(
+                root,
+                successor_path,
+                "# Review revision two\n\n"
+                "**Status:** awaiting-artifact\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review revised bytes\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** pending\n"
+                "**Review revision:** pending\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                f"**Supersedes:** `{old_path}`\n"
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** revise the artifact\n"
+                "**Your review:** ______\n",
+            )
+            old.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("needs-agent", findings[0].message)
+
+    def test_changes_requested_agent_successor_preserves_action_contract(self):
+        cases = (
+            ("valid", "open", "repair the reviewed bytes",
+             "**Resolution evidence:** `docs/source.md`\n",
+             "transition:merge", None),
+            ("unclaimed", "in-repair", "repair the reviewed bytes",
+             "**Resolution evidence:** `docs/source.md`\n",
+             "transition:merge", "open needs-agent"),
+            ("missing-action", "open", "",
+             "**Resolution evidence:** `docs/source.md`\n",
+             "transition:merge", "concrete **Action:**"),
+            ("missing-evidence", "open", "repair the reviewed bytes", "",
+             "transition:merge", "**Resolution evidence:**"),
+            ("wrong-boundary", "open", "repair the reviewed bytes",
+             "**Resolution evidence:** `docs/source.md`\n",
+             "transition:publish", "**Blocks at:**"),
+        )
+        for (
+            name,
+            status,
+            action,
+            evidence,
+            boundary,
+            expected,
+        ) in cases:
+            with self.subTest(name=name), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                old_path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review.md"
+                )
+                successor_path = (
+                    "message-queue/needs-agent/requests/"
+                    "future-blocking-repair-review.md"
+                )
+                followup_path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-repaired-artifact.md"
+                )
+                old = self.write(
+                    root,
+                    old_path,
+                    "# Review\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** review exact bytes\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Review target:** `docs/source.md`\n"
+                    f"**Review revision:** {digest}\n"
+                    f"**Reviewed revision:** {digest}\n"
+                    "**Review outcome:** changes-requested\n"
+                    f"**Successor action:** `{successor_path}`\n"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** revise the artifact\n"
+                    "**Your review:** repair the reviewed bytes\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record requested changes")
+                old.write_text(
+                    old.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", old_path)
+                self.git(root, "commit", "-m", "claim review response")
+                self.write(
+                    root,
+                    successor_path,
+                    "# Repair reviewed bytes\n\n"
+                    f"**Status:** {status}\n"
+                    "**Filed:** 2026-07-23\n"
+                    f"**Action:** {action}\n"
+                    "**Full context:** `docs/source.md`\n"
+                    f"{evidence}"
+                    f"**Supersedes:** `{old_path}`\n"
+                    f"**Follow-up review:** `{followup_path}`\n"
+                    f"**Blocks at:** {boundary}\n"
+                    "**Until then:** revise the artifact\n",
+                )
+                self.write(
+                    root,
+                    followup_path,
+                    "# Review repaired artifact\n\n"
+                    "**Status:** awaiting-artifact\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** review the repaired artifact\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Review target:** pending\n"
+                    "**Review revision:** pending\n"
+                    "**Reviewed revision:** ______\n"
+                    "**Review outcome:** pending\n"
+                    f"**Supersedes:** `{old_path}`\n"
+                    f"**Depends on:** `{successor_path}`\n"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** revise the artifact\n"
+                    "**Your review:** ______\n",
+                )
+                old.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                if expected is None:
+                    self.assertEqual([], findings, self.messages(findings))
+                else:
+                    self.assertEqual(
+                        1, len(findings), self.messages(findings)
+                    )
+                    self.assertIn(expected, findings[0].message)
+
+    def test_changes_requested_requires_distinct_followup_review(self):
+        for mode, rejected in (
+            ("valid", False),
+            ("missing", True),
+            ("duplicate", True),
+        ):
+            with self.subTest(mode=mode), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                old_path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review.md"
+                )
+                repair_path = (
+                    "message-queue/needs-agent/requests/"
+                    "future-blocking-repair-review.md"
+                )
+                followup_path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-repaired-artifact.md"
+                )
+                old = self.write(
+                    root,
+                    old_path,
+                    "# Review\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** review exact bytes\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Review target:** `docs/source.md`\n"
+                    f"**Review revision:** {digest}\n"
+                    f"**Reviewed revision:** {digest}\n"
+                    "**Review outcome:** changes-requested\n"
+                    f"**Successor action:** `{repair_path}`\n"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** revise the artifact\n"
+                    "**Your review:** repair the reviewed bytes\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record requested changes")
+                old.write_text(
+                    old.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", old_path)
+                self.git(root, "commit", "-m", "claim review response")
+                repair_action = "repair the reviewed bytes"
+                followup_field = (
+                    ""
+                    if mode == "missing"
+                    else f"**Follow-up review:** `{followup_path}`\n"
+                )
+                self.write(
+                    root,
+                    repair_path,
+                    "# Repair reviewed bytes\n\n"
+                    "**Status:** open\n"
+                    "**Filed:** 2026-07-23\n"
+                    f"**Action:** {repair_action}\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/source.md`\n"
+                    f"**Supersedes:** `{old_path}`\n"
+                    f"{followup_field}"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** revise the artifact\n",
+                )
+                followup_action = (
+                    repair_action
+                    if mode == "duplicate"
+                    else "review the repaired artifact"
+                )
+                if mode != "missing":
+                    self.write(
+                        root,
+                        followup_path,
+                        "# Review repaired artifact\n\n"
+                        "**Status:** awaiting-artifact\n"
+                        "**Filed:** 2026-07-23\n"
+                        f"**Action:** {followup_action}\n"
+                        "**Full context:** `docs/source.md`\n"
+                        "**Why-you-might-care:** The repair still needs judgment.\n"
+                        "**If-you-do-nothing:** The merge boundary stays closed.\n"
+                        "**Review target:** pending\n"
+                        "**Review revision:** pending\n"
+                        "**Reviewed revision:** ______\n"
+                        "**Review outcome:** pending\n"
+                        f"**Supersedes:** `{old_path}`\n"
+                        f"**Depends on:** `{repair_path}`\n"
+                        "**Blocks at:** transition:merge\n"
+                        "**Until then:** revise the artifact\n"
+                        "**Your review:** ______\n",
+                    )
+                old.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(
+                    rejected, bool(findings), self.messages(findings)
+                )
+                if rejected:
+                    expected = (
+                        "preserve the review boundary"
+                        if mode == "missing"
+                        else "duplicates"
+                    )
+                    self.assertIn(expected, findings[0].message)
 
     def test_terminal_review_outcomes_close_without_successors(self):
         for outcome in ("approved", "rejected", "abandoned"):

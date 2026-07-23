@@ -71,6 +71,19 @@ RAW_HTML_TOKEN_RE = re.compile(
     r"<(?:!--|!\[CDATA\[|\?|![A-Za-z]|/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>]))",
     re.I,
 )
+DEFAULT_IGNORABLE_NONFORMAT_RANGES = (
+    (0x034F, 0x034F),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180D),
+    (0x180F, 0x180F),
+    (0x2065, 0x2065),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0xE0000, 0xE0FFF),
+)
 
 
 def commonmark_lines(text):
@@ -392,6 +405,28 @@ def rendered_human_text(text):
         " " if unicodedata.category(character) == "Zs" else character
         for character in "".join(parser.output)
     )
+
+
+def strip_default_ignorable_characters(text):
+    """Remove invisible Unicode controls from an already isolated prose view.
+
+    Format controls and the non-format characters in Unicode's
+    Default_Ignorable_Code_Point set can split an otherwise visible command word.
+    Callers must first remove Markdown destinations and code so this detection-only
+    normalization cannot change structural evidence or literal examples.
+    """
+    output = []
+    normalized = unicodedata.normalize("NFKC", text or "")
+    for character in normalized:
+        codepoint = ord(character)
+        if unicodedata.category(character) == "Cf":
+            continue
+        if any(
+                start <= codepoint <= end
+                for start, end in DEFAULT_IGNORABLE_NONFORMAT_RANGES):
+            continue
+        output.append(character)
+    return "".join(output)
 
 
 def inline_code_spans(text):

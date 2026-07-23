@@ -20,10 +20,14 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
 
 <!-- approved accepts the bound revision and is terminal with no successor.
-changes-requested continues the review: before deleting, add **Successor action:**
-`<new queue path>` here and **Supersedes:** `<this queue path>` to a new same-timing
-successor. rejected declines the proposal and abandoned ends pursuit; both are terminal.
-Legacy **Review outcome:** not-approved remains accepted as changes-requested. -->
+changes-requested preserves the boundary. Before deleting, add **Successor action:**
+`<new needs-agent queue path>` here. That new same-timing open action owns the repair
+in Action, keeps Full context, predeclares non-queue Resolution evidence, and points
+back with Supersedes. It must also link one distinct same-timing **Follow-up review:**
+that is newly awaiting-artifact, points back with Supersedes, and names the repair in
+Depends on. The follow-up Action is the later judgment, never a copy of the repair.
+rejected declines the proposal and abandoned ends pursuit; both are terminal. Legacy
+**Review outcome:** not-approved remains accepted as changes-requested. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

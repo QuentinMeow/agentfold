@@ -2139,22 +2139,25 @@ def review_successor_problem(path, text, prior_revision, revision):
     successor_path = candidates[0]
     successor_parts = Path(successor_path).parts
     if successor_path == path or not valid_queue_item_path(successor_path) \
-            or successor_parts[1:3] != ("needs-human", "reviews"):
-        return "review successor is not a distinct canonical human review action"
+            or successor_parts[1] != "needs-agent":
+        return "review successor is not a distinct canonical needs-agent action"
     successor_bytes = candidate_artifact_bytes(successor_path, revision)
     if successor_bytes is None:
         return "review successor is not live in the deletion candidate"
     if git_artifact_bytes_at(prior_revision, successor_path) is not None:
         return "review successor was not introduced by the resolution edge"
-    successor = text_fields(decode_utf8_artifact(
+    successor_text = decode_utf8_artifact(
         successor_bytes, f"`{successor_path}` in the deletion candidate"
-    ))
+    )
+    successor = text_fields(successor_text)
     if path not in context_path_candidates(successor.get("Supersedes", "")):
         return "review successor does not point back with **Supersedes:**"
-    if successor.get("Status", "").strip() not in {
-        "awaiting-artifact", "waiting"
-    }:
-        return "review successor is not awaiting a review"
+    if successor.get("Status", "").strip() != "open":
+        return "review successor is not an open needs-agent action"
+    if not has_concrete_value(successor.get("Action", "")):
+        return "review successor has no concrete **Action:**"
+    if not resolution_evidence_paths(successor_text):
+        return "review successor has no non-queue **Resolution evidence:**"
     if delivery_class(Path(successor_path).name) != delivery_class(Path(path).name):
         return "review successor changes the dependency timing"
     timing = delivery_class(Path(path).name)
@@ -2165,6 +2168,55 @@ def review_successor_problem(path, text, prior_revision, revision):
         "Full context", ""
     ).strip():
         return "review successor changes the stable **Full context:** lineage"
+    followup_value = successor.get("Follow-up review", "")
+    if not has_concrete_value(followup_value):
+        return (
+            "review successor must preserve the review boundary with one "
+            "**Follow-up review:**"
+        )
+    followups = context_path_candidates(followup_value)
+    if len(followups) != 1:
+        return "review successor needs exactly one canonical **Follow-up review:**"
+    followup_path = followups[0]
+    followup_parts = Path(followup_path).parts
+    if followup_path in {path, successor_path} \
+            or not valid_queue_item_path(followup_path) \
+            or followup_parts[1:3] != ("needs-human", "reviews"):
+        return "follow-up review is not a distinct canonical human review action"
+    followup_bytes = candidate_artifact_bytes(followup_path, revision)
+    if followup_bytes is None:
+        return "follow-up review is not live in the deletion candidate"
+    if git_artifact_bytes_at(prior_revision, followup_path) is not None:
+        return "follow-up review was not introduced by the resolution edge"
+    followup = text_fields(decode_utf8_artifact(
+        followup_bytes, f"`{followup_path}` in the deletion candidate"
+    ))
+    if followup.get("Status", "").strip() != "awaiting-artifact":
+        return "follow-up review is not awaiting its repaired artifact"
+    if not has_concrete_value(followup.get("Action", "")):
+        return "follow-up review has no concrete **Action:**"
+    if followup.get("Action", "").strip() == successor.get(
+        "Action", ""
+    ).strip():
+        return "follow-up review duplicates the needs-agent repair action"
+    if path not in context_path_candidates(followup.get("Supersedes", "")):
+        return "follow-up review does not point back with **Supersedes:**"
+    dependencies = context_path_candidates(followup.get("Depends on", ""))
+    if dependencies != [successor_path]:
+        return "follow-up review does not name the repair with **Depends on:**"
+    if delivery_class(Path(followup_path).name) != timing:
+        return "follow-up review changes the dependency timing"
+    for key in QUEUE_TIMING_FIELDS.get(timing, ()):
+        if followup.get(key, "").strip() != got.get(key, "").strip():
+            return f"follow-up review changes **{key}:**"
+    if followup.get("Full context", "").strip() != got.get(
+        "Full context", ""
+    ).strip():
+        return "follow-up review changes the stable **Full context:** lineage"
+    if followup.get("Review target", "").strip() != "pending" \
+            or followup.get("Review revision", "").strip() != "pending" \
+            or not unanswered_review(followup):
+        return "follow-up review must await an unbound repaired artifact"
     return None
 
 
