@@ -1135,6 +1135,8 @@ class ActionProjectionTests(unittest.TestCase):
             "Reviewers must carefully assess the migration.",
             "You must never merge this branch.",
             "Reviewers must not disclose credentials.",
+            "The security guild needs to sanity-check this before merge.",
+            "The release circle must validate this before release.",
         )
         descriptions = (
             "The bot should not update the snapshot.",
@@ -1145,6 +1147,10 @@ class ActionProjectionTests(unittest.TestCase):
             "The reviewer must be able to assess changes offline.",
             "The reviewer must always be able to assess changes offline.",
             "Reviewers should see failure reasons inline.",
+            "The old report says the security guild needs to sanity-check this.",
+            "The security guild needed to sanity-check this yesterday.",
+            "The security guild needs to be able to sanity-check this before merge.",
+            "The parser should validate input offline.",
         )
         for action in actions:
             with self.subTest(action=action):
@@ -1165,6 +1171,49 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, len(findings))
             self.assertIn("missing a declared action section", findings[0])
+
+    def test_self_answered_explanatory_question_is_not_a_hidden_action(self):
+        explanation = (
+            "Why this approach? It keeps queue ownership provider-neutral."
+        )
+        self.assertFalse(PROJECTION.action_like_plain_prose(explanation))
+        self.assertFalse(PROJECTION.action_like_summary_prose(explanation))
+
+        with self.repo() as root:
+            body = (
+                "## Goal\n\n"
+                f"{explanation}\n\n"
+                "## What to review\n\nNo human action requested.\n"
+            )
+            self.assertEqual([], self.findings(root, body))
+
+            for ask in (
+                "Why this approach?\n",
+                "Does the boundary work? It should be checked before merge.\n",
+                "Why did you choose this approach? It keeps ownership neutral.\n",
+                "Why should we merge? It appears ready.\n",
+                "Why this approach? Please review the fallback.\n",
+                (
+                    "Why this approach? It keeps ownership neutral. "
+                    "Should we merge?\n"
+                ),
+                (
+                    "Why this approach? Maintainer approval is still "
+                    "required.\n"
+                ),
+            ):
+                with self.subTest(ask=ask):
+                    findings = self.findings(
+                        root,
+                        "## Goal\n\n"
+                        f"{ask}\n"
+                        "## What to review\n\nNo human action requested.\n",
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "outside the declared action section",
+                        findings[0],
+                    )
 
     def test_modal_requests_to_named_people_and_groups_are_actions(self):
         actions = (

@@ -516,3 +516,20 @@
   required exact-revision review.
 - Session handover:
   `history/conversations/2026-07-23-1544PDT-repair-freeform-modal-addressees/handover.md`.
+
+## 2026-07-23 — hard obligation and explanatory-question repair (codex)
+
+- The first reviewer of `bdbc3a94` found two opposed contract failures: a hard
+  pre-merge obligation addressed to “the security guild” could remain issue-only, while
+  a self-answered “Why this approach?” explanation was rejected as a human action.
+- Added a bounded free-form fallback only for present hard obligations with a recognized
+  action and an explicit lifecycle deadline. It excludes soft design language,
+  capabilities, negation, past tense, and reported speech.
+- Added a narrow exemption for immediately self-answered `how`/`what`/`why` explanations
+  with non-action explanatory predicates. The answer remains in the classifier, so a
+  later directive, approval requirement, decision question, or additional question
+  still requires queue projection.
+- All 100 projection tests passed, including both exact reviewer reproductions and the
+  focused positive/negative matrix. The block invalidated the entire panel.
+- Session handover:
+  `history/conversations/2026-07-23-1612PDT-repair-obligation-explanation-boundary/handover.md`.

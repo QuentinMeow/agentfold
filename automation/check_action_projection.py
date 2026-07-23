@@ -208,6 +208,11 @@ FREEFORM_ADDRESSEE_TOKEN_PATTERN = (
 FREEFORM_ADDRESSEE_PATTERN = (
     rf"(?:{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{1,6}}?"
 )
+FREEFORM_OBLIGATION_SUBJECT_PATTERN = (
+    r"(?:(?!(?:are|been|did|do|does|had|has|have|is|must|needs?|never|"
+    r"not|previously|requested|should|was|were)\b)"
+    rf"{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{1,6}}?"
+)
 AUTOMATION_ACTOR_PATTERN = (
     r"(?:(?:a|an|the)[ \t]+)?"
     r"(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+){0,3}"
@@ -266,6 +271,17 @@ TODO_RE = re.compile(r"\bTODO\b", re.I)
 QUESTION_MARK_RE = re.compile(r"""\?(?=$|[\s)\]}>.,!;:'"’”])""")
 QUOTED_QUESTION_LITERAL_RE = re.compile(
     r"""(?:'\?'|"\?"|‘\?’|“\?”)"""
+)
+SELF_ANSWERED_EXPLANATORY_QUESTION_RE = re.compile(
+    r"^[ \t]*(?:how|what|why)\b"
+    r"(?!(?:[^?!\n]{0,120}\b"
+    r"(?:could|must|need(?:s)?|should|you|we|will|would)\b))"
+    r"[^?!\n]{0,120}\?"
+    r"(?=[ \t]+(?:because\b|"
+    r"(?:(?:it|that|this)|the[ \t]+[A-Za-z][A-Za-z'-]*)[ \t]+"
+    r"(?:are|avoids?|documents?|explains?|is|keeps?|means?|preserves?|"
+    r"records?|uses?)\b))",
+    re.I | re.M,
 )
 EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3})")
 FULL_OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
@@ -332,6 +348,20 @@ AUTOMATION_ACTOR_OBLIGATION_RE = re.compile(
     r"(?!(?:not|never)\b)"
     rf"{REQUEST_WORK_VERB_PATTERN}\b",
     re.I,
+)
+FREEFORM_ACTOR_OBLIGATION_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    r"(?![^.!?\n]*\b(?:explained|explains|reported|said|says|stated|wrote)\b)"
+    rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
+    r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
+    r"(?:must|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
+    r"requested[ \t]+to)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!(?:not|never)\b)"
+    rf"{ACTION_VERB_PATTERN}\b"
+    r"[^.!?\n]{0,120}\b(?:before|by|prior[ \t]+to)[ \t]+"
+    r"(?:deployment|merge|publication|release|shipping)\b",
+    re.I | re.M,
 )
 ACTOR_HARD_PROHIBITION_RE = re.compile(
     rf"\b(?:{ACTION_SOURCE_PATTERN}|{AUTOMATION_ACTOR_PATTERN})\b[ \t]+"
@@ -826,6 +856,7 @@ def declarative_action_request(clean):
         NAMED_ASSIGNMENT_RE,
         ACTOR_OBLIGATION_RE,
         AUTOMATION_ACTOR_OBLIGATION_RE,
+        FREEFORM_ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
@@ -873,6 +904,7 @@ def action_like_clean_text(
     clean,
     strip_leading_symbols=False,
     summary_context=False,
+    allow_self_answered_explanations=False,
 ):
     """Classify already-visible prose with the deterministic action grammar."""
     clean = strip_default_ignorable_characters(clean)
@@ -884,6 +916,11 @@ def action_like_clean_text(
         clean = "\n".join(
             re.sub(r"^[^\w]+", "", line)
             for line in clean.split("\n")
+        )
+    if allow_self_answered_explanations:
+        clean = SELF_ANSWERED_EXPLANATORY_QUESTION_RE.sub(
+            lambda matched: matched.group(0)[:-1] + ".",
+            clean,
         )
     if question_mark_count(clean) or TODO_RE.search(clean):
         return True
@@ -907,7 +944,7 @@ def action_like_clean_text(
     )
 
 
-def action_like_prose(text):
+def action_like_prose(text, allow_self_answered_explanations=False):
     """Recognize deterministic human-action grammar in visible Markdown prose.
 
     A fragment is action-like when it contains question punctuation, a standalone
@@ -915,7 +952,9 @@ def action_like_prose(text):
     or a narrow present-tense declaration that human approval/review/confirmation
     is requested or required. Query-token prefixes such as `?foo` are not question
     punctuation. Markdown destinations and code are not prose; callers inspect link
-    labels separately. Ordinary descriptive prose remains accepted.
+    labels separately. In explanatory regions outside a declared action section,
+    callers may allow a short `how`/`what`/`why` question that is immediately answered;
+    explicit directives and obligation grammar still apply to that prose.
     """
     clean = strip_prose_quote_markers(semantic_text(text))
     clean = strip_indented_code(strip_inline_code(clean))
@@ -923,7 +962,10 @@ def action_like_prose(text):
         lambda matched: matched.group("label"),
         clean,
     )
-    return action_like_clean_text(strip_action_emphasis(clean))
+    return action_like_clean_text(
+        strip_action_emphasis(clean),
+        allow_self_answered_explanations=allow_self_answered_explanations,
+    )
 
 
 def action_like_plain_prose(text):
@@ -932,6 +974,7 @@ def action_like_plain_prose(text):
     return action_like_clean_text(
         strip_action_emphasis(clean),
         strip_leading_symbols=True,
+        allow_self_answered_explanations=True,
     )
 
 
@@ -942,6 +985,7 @@ def action_like_summary_prose(text):
         strip_action_emphasis(clean),
         strip_leading_symbols=True,
         summary_context=True,
+        allow_self_answered_explanations=True,
     )
 
 
@@ -953,7 +997,10 @@ def action_like_rendered_prose(text):
         lambda matched: matched.group("label"),
         clean,
     )
-    return action_like_clean_text(strip_action_emphasis(clean))
+    return action_like_clean_text(
+        strip_action_emphasis(clean),
+        allow_self_answered_explanations=True,
+    )
 
 
 def question_mark_count(text):
@@ -1781,7 +1828,10 @@ def projection_findings(
     saw_no_action = False
     invalid_projection = False
     outside_action_prose = visible_outside_action_sections(text, titles)
-    if action_like_prose(outside_action_prose):
+    if action_like_prose(
+        outside_action_prose,
+        allow_self_answered_explanations=True,
+    ):
         invalid_projection = True
         findings.append(
             "visible action-like question or directive exists outside the "
