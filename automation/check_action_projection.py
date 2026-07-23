@@ -261,6 +261,11 @@ QUEUE_EXTERNAL_ASSIGNMENT_RE = re.compile(
     r"(?P<binding>\S(?:.*\S)?)[ \t]*$",
     re.M,
 )
+QUEUE_EXTERNAL_SOURCE_RE = re.compile(
+    r"^\*\*External source:\*\*[ \t]*"
+    r"(?P<binding>\S(?:.*\S)?)[ \t]*$",
+    re.M,
+)
 DECLARATIVE_ACTION_RE = re.compile(
     r"\b"
     r"(?:(?:explicit|additional|separate|formal|manual)[ \t]+)*"
@@ -419,7 +424,8 @@ PASSIVE_WORK_APPRECIATION_RE = re.compile(
     r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,4}"
     r"[A-Za-z][A-Za-z'-]*[ \t]+would[ \t]+be[ \t]+"
     r"(?:(?:especially|greatly|much|really|very)[ \t]+)?"
-    r"(?:appreciated|helpful|valued|welcome)"
+    r"(?:appreciated|better|good|great|helpful|ideal|nice|preferable|"
+    r"useful|valued|welcome)"
     r"(?:[ \t]+(?:before|if|when)[ \t]+[^.!?\n]{1,80})?"
     r"[ \t]*[.!]?[ \t]*(?=$|\n)",
     re.I | re.M,
@@ -428,7 +434,8 @@ IMPERSONAL_WORK_APPRECIATION_RE = re.compile(
     r"(?:^|\n)[ \t]*it[ \t]+would[ \t]+"
     r"(?P<negation>not[ \t]+)?be[ \t]+"
     r"(?:(?:especially|greatly|much|really|very)[ \t]+)?"
-    r"(?:appreciated|helpful|valued|welcome)[ \t]+"
+    r"(?:appreciated|better|good|great|helpful|ideal|nice|preferable|"
+    r"useful|valued|welcome)[ \t]+"
     r"(?:if|when)[ \t]+"
     r"(?:you|(?:(?:a|an|the)[ \t]+)?"
     rf"{HUMAN_ACTOR_PATTERN})[ \t]+"
@@ -1324,6 +1331,24 @@ def canonical_queue_external_assignment(
     return matches[0].strip() if len(matches) == 1 else None
 
 
+def canonical_queue_external_source(
+    path,
+    repo=REPO,
+    candidate_revision=None,
+):
+    """Return one exact opaque provider-source binding, if declared."""
+    matches = QUEUE_EXTERNAL_SOURCE_RE.findall(
+        semantic_text(
+            candidate_text(
+                path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            )
+        )
+    )
+    return matches[0].strip() if len(matches) == 1 else None
+
+
 def task_queue_paths(
     task_id,
     queue_actor="needs-human",
@@ -1507,6 +1532,90 @@ def external_assignment_states(values):
                     f"{assignment_number} needs a non-empty string identity"
                 )
             states.append((actor, identity.strip()))
+    return states
+
+
+def external_action_source_states(value):
+    """Validate provider-neutral durable action sources.
+
+    Each source carries the next actor, an opaque provider identity, rendered
+    provider prose, and an optional force flag for provider states that require
+    disposition even without prose (for example, changes requested).
+    """
+    try:
+        sources = json.loads(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "external action sources must be valid JSON"
+        ) from error
+    if not isinstance(sources, list):
+        raise ValueError("external action sources must be a JSON array")
+    states = []
+    seen = set()
+    for source_number, source in enumerate(sources, start=1):
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"external action source {source_number} must be an object"
+            )
+        allowed_keys = {"actor", "identity", "body", "force", "url"}
+        unknown = sorted(set(source) - allowed_keys)
+        if unknown:
+            raise ValueError(
+                f"external action source {source_number} has unknown field(s): "
+                + ", ".join(unknown)
+            )
+        actor = source.get("actor")
+        if actor not in QUEUE_ACTORS:
+            raise ValueError(
+                f"external action source {source_number} has unknown actor "
+                f"{actor!r}; expected `needs-human` or `needs-agent`"
+            )
+        identity = source.get("identity")
+        if not isinstance(identity, str) or not identity.strip():
+            raise ValueError(
+                f"external action source {source_number} needs a non-empty "
+                "string identity"
+            )
+        identity = identity.strip()
+        if any(ord(character) < 32 or ord(character) == 127
+               for character in identity):
+            raise ValueError(
+                f"external action source {source_number} identity must be "
+                "a control-free single line"
+            )
+        key = (actor, identity)
+        if key in seen:
+            raise ValueError(
+                f"external action source {source_number} duplicates "
+                f"`{identity}` for {actor}"
+            )
+        seen.add(key)
+        body = source.get("body", "")
+        if not isinstance(body, str):
+            raise ValueError(
+                f"external action source {source_number} body must be a string"
+            )
+        force = source.get("force", False)
+        if not isinstance(force, bool):
+            raise ValueError(
+                f"external action source {source_number} force must be boolean"
+            )
+        url = source.get("url", "")
+        if not isinstance(url, str) or any(
+            ord(character) < 32 or ord(character) == 127
+            for character in url
+        ):
+            raise ValueError(
+                f"external action source {source_number} url must be a "
+                "control-free single-line string"
+            )
+        states.append({
+            "actor": actor,
+            "identity": identity,
+            "body": body,
+            "force": force,
+            "url": url.strip(),
+        })
     return states
 
 
@@ -1868,7 +1977,97 @@ def projection_findings(
     return findings
 
 
+def external_action_source_findings(
+    value,
+    titles,
+    repo=REPO,
+    allowed_url_prefixes=(),
+    candidate_revision=None,
+):
+    """Require each active provider source to project or bind one queue action."""
+    states = external_action_source_states(value)
+    if candidate_revision is not None:
+        candidate_revision = candidate_revision_oid(
+            candidate_revision, repo=repo
+        )
+    if candidate_revision is None:
+        if not (repo / "message-queue").exists():
+            return []
+    elif not candidate_paths(
+            "message-queue",
+            repo=repo,
+            candidate_revision=candidate_revision,
+    ):
+        return []
+
+    all_paths = live_queue_paths(
+        "any",
+        repo=repo,
+        candidate_revision=candidate_revision,
+    )
+    findings = []
+    for source_number, source in enumerate(states, start=1):
+        if not (
+            source["force"]
+            or action_like_rendered_prose(source["body"])
+        ):
+            continue
+        direct_findings = projection_findings(
+            source["body"],
+            titles,
+            repo=repo,
+            allowed_url_prefixes=allowed_url_prefixes,
+            candidate_revision=candidate_revision,
+            external_actions=("true",) if source["force"] else (),
+            allow_missing_action_section_if_no_action=True,
+            queue_actor=source["actor"],
+            require_all_live=False,
+        )
+        if not direct_findings:
+            continue
+        matching_paths = sorted(
+            path for path in all_paths
+            if canonical_queue_external_source(
+                path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            ) == source["identity"]
+        )
+        actor_matches = [
+            path for path in matching_paths
+            if queue_item_actor(path) == source["actor"]
+        ]
+        context = (
+            f" ({json.dumps(source['url'])})" if source["url"] else ""
+        )
+        if actor_matches and len(actor_matches) == len(matching_paths):
+            continue
+        if matching_paths:
+            findings.append(
+                f"external action source {source_number} "
+                f"`{source['identity']}`{context} must bind one or more live "
+                f"{source['actor']} queue items and no other actor; found: "
+                + ", ".join(matching_paths)
+            )
+        else:
+            findings.append(
+                f"external action source {source_number} "
+                f"`{source['identity']}`{context} is not projected: either "
+                "put one canonical queue link in its declared action section "
+                f"or add one or more live {source['actor']} queue items with "
+                f"`**External source:** {source['identity']}`"
+            )
+    return findings
+
+
 def read_input(args):
+    if args.external_action_sources_file is not None:
+        try:
+            return Path(args.external_action_sources_file).read_text(
+                encoding="utf-8"
+            )
+        except (OSError, UnicodeError) as error:
+            raise ValueError(str(error)) from error
     if args.from_env is not None:
         if args.from_env not in os.environ:
             raise ValueError(f"environment variable {args.from_env!r} is not set")
@@ -1896,6 +2095,15 @@ def main(argv=None):
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--from-env", metavar="NAME")
     source.add_argument("--file", metavar="PATH|-")
+    source.add_argument(
+        "--external-action-sources-file",
+        metavar="JSON_PATH",
+        help=(
+            "check provider-neutral durable action sources from one JSON array; "
+            "each active source must project a queue link or have one exact "
+            "opaque External source binding"
+        ),
+    )
     parser.add_argument(
         "--action-section", action="append", required=True, metavar="TITLE"
     )
@@ -2014,6 +2222,38 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         text = read_input(args)
+        if args.external_action_sources_file is not None:
+            incompatible = (
+                args.external_action_env
+                or args.external_assignment_env
+                or args.additional_prose_env
+                or args.additional_summary_env
+                or args.task_id
+                or args.branch
+                or args.unscoped
+                or args.base_revision
+            )
+            if incompatible:
+                raise ValueError(
+                    "--external-action-sources-file cannot be combined with "
+                    "ordinary prose, assignment, or task-scope inputs"
+                )
+            if not args.candidate_revision:
+                raise ValueError(
+                    "--external-action-sources-file requires "
+                    "--candidate-revision"
+                )
+            findings = external_action_source_findings(
+                text,
+                args.action_section,
+                repo=REPO,
+                allowed_url_prefixes=args.allowed_url_prefix,
+                candidate_revision=args.candidate_revision,
+            )
+            for finding in findings:
+                print(f"[action-projection] {args.label}: {finding}")
+            print(f"action-projection: {len(findings)} finding(s)")
+            return 1 if findings else 0
         external_actions = read_env_values(args.external_action_env)
         external_assignments = read_env_values(args.external_assignment_env)
         additional_prose = read_env_values(args.additional_prose_env)

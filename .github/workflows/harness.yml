@@ -10,12 +10,13 @@ on:
   issue_comment:
     types: [created, edited]
   pull_request_review:
-    types: [submitted, edited]
+    types: [submitted, edited, dismissed]
   pull_request_review_comment:
-    types: [created, edited]
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   reconcile-and-test:
@@ -198,6 +199,32 @@ jobs:
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-description
+      - name: Collect current formal reviews and unresolved diff threads
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_GRAPHQL_URL: ${{ github.graphql_url }}
+        run: |
+          python3 .github/scripts/collect_review_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --pull-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --graphql-url "$ACTION_PROJECTION_GRAPHQL_URL" \
+            --output "$RUNNER_TEMP/agentfold-review-actions.json"
+      - name: Action projection — current review state
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-review-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-current-pull-request-review-state
       - name: Action projection — issue body and assignment state
         if: ${{ github.event_name == 'issues' }}
         env:
@@ -280,24 +307,26 @@ jobs:
             --label github-pull-request-conversation-comment
 
   # GitHub has no pull_request_review_target or pull_request_review_comment_target.
-  # These checks run read-only base code when dispatched, but a PR may alter the
-  # event workflow before dispatch. They are useful diagnostics, not admission proof.
-  advisory-review-action-projection:
-    name: Advisory only — review and review-comment action projection
+  # This candidate-context job replays current review state on direct events and
+  # every PR update, closing ordinary push-after-failure bypasses. Hostile-workflow
+  # assurance still needs a separately controlled provider gate for direct events.
+  review-state-action-projection:
+    name: Current review-state action projection
     if: >-
       ${{
+        github.event_name == 'pull_request' ||
         github.event_name == 'pull_request_review' ||
         github.event_name == 'pull_request_review_comment'
       }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR-base projection gate for best-effort review
+      - name: Checkout PR-base projection gate for review state
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha }}
       - name: Fetch event-bound PR merge candidate without checking it out
-        id: advisory-pr-candidate
+        id: review-state-pr-candidate
         env:
           ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
           ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.sha }}
@@ -311,37 +340,27 @@ jobs:
             "$ACTION_PROJECTION_EXPECTED_REVISION"
           printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             >> "$GITHUB_OUTPUT"
-      - name: Advisory action projection — PR review body
-        if: ${{ github.event_name == 'pull_request_review' }}
+      - name: Collect current formal reviews and unresolved diff threads
         env:
-          ACTION_PROJECTION_BODY: ${{ github.event.review.body }}
-          ACTION_PROJECTION_CHANGES_REQUESTED: ${{ github.event.review.state == 'changes_requested' && github.event.review.state || '' }}
-          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
-          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_GRAPHQL_URL: ${{ github.graphql_url }}
+        run: |
+          python3 .github/scripts/collect_review_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --pull-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --graphql-url "$ACTION_PROJECTION_GRAPHQL_URL" \
+            --output "$RUNNER_TEMP/agentfold-review-actions.json"
+      - name: Action projection — current review state
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.review-state-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.review-state-pr-candidate.outputs.revision }}
         run: |
           python3 automation/check_action_projection.py \
-            --from-env ACTION_PROJECTION_BODY \
-            --external-action-env ACTION_PROJECTION_CHANGES_REQUESTED \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-review-actions.json" \
             --action-section "What to review" \
-            --allow-missing-action-section-if-no-action \
-            --queue-actor needs-agent \
-            --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
-            --label github-pull-request-review
-      - name: Advisory action projection — PR review comment
-        if: ${{ github.event_name == 'pull_request_review_comment' }}
-        env:
-          ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}
-          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.advisory-pr-candidate.outputs.revision }}
-          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.advisory-pr-candidate.outputs.revision }}
-        run: |
-          python3 automation/check_action_projection.py \
-            --from-env ACTION_PROJECTION_BODY \
-            --action-section "What to review" \
-            --allow-missing-action-section-if-no-action \
-            --queue-actor needs-agent \
-            --unscoped \
-            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
-            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
-            --label github-pull-request-review-comment
+            --label github-current-pull-request-review-state

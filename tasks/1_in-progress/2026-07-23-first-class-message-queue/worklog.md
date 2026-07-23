@@ -468,3 +468,23 @@
   exact-case recheck passed.
 - Session handover:
   `history/conversations/2026-07-23-1437PDT-repair-human-judgment-vocabulary/handover.md`.
+
+## 2026-07-23 — review-event and courtesy-request repair (codex)
+
+- Extended indirect-request detection so evaluative phrasing such as “it would be
+  great/useful if …” cannot leave a durable action only in provider prose.
+- A bounded recheck found that a failed review-event job could be bypassed by pushing
+  an unrelated candidate because the next run did not replay earlier review state.
+  Replaced one-event checking with current-state replay on direct events and every PR
+  update, plus a trusted base-owned replay on PR target updates.
+- Added opaque, content-versioned `External source` bindings so an agent can transcribe
+  uneditable human review prose into one or more queue items. Effective formal reviews
+  and unresolved diff threads remain active until provider state resolves them; the
+  GitHub adapter paginates and fails closed using only its ephemeral workflow token.
+- The workflow, automation contract, Git guidance, and task design state the remaining
+  trust ceiling: candidate-context direct-event checks are not evidence against hostile
+  workflow tampering without a separately controlled provider gate.
+- Added exact request-phrasing and workflow-contract regressions. The focused suite
+  passed 101 tests, Python compilation, Ruby workflow parsing, and `git diff --check`.
+- Session handover:
+  `history/conversations/2026-07-23-1445PDT-repair-review-state-replay/handover.md`.

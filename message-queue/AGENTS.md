@@ -37,10 +37,10 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 
 ## Lifecycle and content
 
-- Copy the matching template; never write a schema from memory. Human items expose
-  the projection fields, zero-context differences, example, source, and response slot
-  required by `handbook/human-action-guide.md`. A provider assignment also records
-  its adapter's exact opaque role-and-identity `External assignment` binding.
+- Copy the matching template; human item projection, context, example, source, and
+  response fields follow `handbook/human-action-guide.md`. Record an adapter's opaque
+  `External assignment` for assignments or versioned `External source` for transcribed
+  prose; keep a source-bound action live until that provider source resolves.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing

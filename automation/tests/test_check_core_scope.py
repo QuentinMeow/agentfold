@@ -72,7 +72,15 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/agent_bug.md"))
 
     def test_only_registered_provider_adapter_is_core(self):
-        registered = {".github/workflows/harness.yml", ".gitlab-ci.yml", "CLAUDE.md"}
+        registered = {
+            ".github/scripts/collect_review_actions.py",
+            ".github/workflows/harness.yml",
+            ".gitlab-ci.yml",
+            "CLAUDE.md",
+        }
+        self.assertTrue(SCOPE.is_core_path(
+            ".github/scripts/collect_review_actions.py", registered
+        ))
         self.assertTrue(SCOPE.is_core_path(".github/workflows/harness.yml", registered))
         self.assertTrue(SCOPE.is_core_path(".gitlab-ci.yml", registered))
         self.assertTrue(SCOPE.is_core_path("CLAUDE.md", registered))

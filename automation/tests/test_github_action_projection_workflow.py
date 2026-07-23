@@ -37,7 +37,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
 
-    def test_event_matrix_registers_authoritative_and_advisory_surfaces(self):
+    def test_event_matrix_registers_authoritative_and_review_surfaces(self):
         on_block = self.workflow.partition("on:\n")[2].partition(
             "\npermissions:"
         )[0]
@@ -56,10 +56,13 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "issue_comment:\n    types: [created, edited]", on_block
         )
         self.assertIn(
-            "pull_request_review:\n    types: [submitted, edited]", on_block
+            "pull_request_review:\n"
+            "    types: [submitted, edited, dismissed]",
+            on_block,
         )
         self.assertIn(
-            "pull_request_review_comment:\n    types: [created, edited]",
+            "pull_request_review_comment:\n"
+            "    types: [created, edited, deleted]",
             on_block,
         )
 
@@ -203,27 +206,41 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             self.assertNotIn("--additional-prose-env", step)
             self.assertNotIn("--external-action-env", step)
 
-    def test_review_surfaces_are_explicitly_advisory_and_read_only(self):
+    def test_review_surfaces_enforce_actions_with_honest_trust_ceiling(self):
         self.assertIn("permissions:\n  contents: read", self.workflow)
+        self.assertIn("  pull-requests: read", self.workflow)
         self.assertIn(
             "# GitHub has no pull_request_review_target or "
             "pull_request_review_comment_target.",
             self.workflow,
         )
-        job = self.job("advisory-review-action-projection")
         self.assertIn(
-            "name: Advisory only — review and review-comment action projection",
+            "# every PR update, closing ordinary push-after-failure bypasses.",
+            self.workflow,
+        )
+        self.assertIn(
+            "separately controlled provider gate",
+            self.workflow,
+        )
+        job = self.job("review-state-action-projection")
+        self.assertIn(
+            "name: Current review-state action projection",
             job,
         )
+        self.assert_contains_all(job, (
+            "github.event_name == 'pull_request'",
+            "github.event_name == 'pull_request_review'",
+            "github.event_name == 'pull_request_review_comment'",
+        ))
         checkout = self.step(
-            "advisory-review-action-projection",
-            "Checkout PR-base projection gate for best-effort review",
+            "review-state-action-projection",
+            "Checkout PR-base projection gate for review state",
         )
         self.assertIn(
             "ref: ${{ github.event.pull_request.base.sha }}", checkout
         )
         fetch = self.step(
-            "advisory-review-action-projection",
+            "review-state-action-projection",
             "Fetch event-bound PR merge candidate without checking it out",
         )
         self.assert_contains_all(fetch, (
@@ -235,40 +252,55 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "ref: ${{ github.event.pull_request.head.sha }}", job
         )
 
-    def test_changes_requested_is_agent_action_but_neutral_reviews_may_pass(self):
-        review = self.step(
-            "advisory-review-action-projection",
-            "Advisory action projection — PR review body",
+    def test_current_review_state_replays_in_target_and_candidate_contexts(self):
+        target_collect = self.step(
+            "authoritative-external-action-projection",
+            "Collect current formal reviews and unresolved diff threads",
         )
-        self.assert_contains_all(review, (
-            "ACTION_PROJECTION_BODY: ${{ github.event.review.body }}",
-            "github.event.review.state == 'changes_requested'",
-            "--external-action-env ACTION_PROJECTION_CHANGES_REQUESTED",
-            "--queue-actor needs-agent",
-            "--unscoped",
-            "--allow-missing-action-section-if-no-action",
-            "steps.advisory-pr-candidate.outputs.revision",
-        ))
-        self.assertNotIn("github.event.pull_request.head.ref", review)
-        comment = self.step(
-            "advisory-review-action-projection",
-            "Advisory action projection — PR review comment",
+        candidate_collect = self.step(
+            "review-state-action-projection",
+            "Collect current formal reviews and unresolved diff threads",
         )
-        self.assert_contains_all(comment, (
-            "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
-            "--queue-actor needs-agent",
-            "--unscoped",
-            "--allow-missing-action-section-if-no-action",
-            "steps.advisory-pr-candidate.outputs.revision",
+        for step in (target_collect, candidate_collect):
+            self.assert_contains_all(step, (
+                "GITHUB_TOKEN: ${{ github.token }}",
+                "ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}",
+                "github.event.pull_request.number",
+                "ACTION_PROJECTION_GRAPHQL_URL: ${{ github.graphql_url }}",
+                "python3 .github/scripts/collect_review_actions.py",
+                '--output "$RUNNER_TEMP/agentfold-review-actions.json"',
+            ))
+        self.assertIn(
+            "if: ${{ github.event_name == 'pull_request_target' }}",
+            target_collect,
+        )
+
+        target_projection = self.step(
+            "authoritative-external-action-projection",
+            "Action projection — current review state",
+        )
+        candidate_projection = self.step(
+            "review-state-action-projection",
+            "Action projection — current review state",
+        )
+        self.assert_contains_all(target_projection, (
+            "steps.authoritative-pr-candidate.outputs.revision",
+            "--external-action-sources-file",
+            "--candidate-revision",
+            "--allowed-url-prefix",
         ))
-        self.assertNotIn("--external-action-env", comment)
-        self.assertNotIn("github.event.pull_request.head.ref", comment)
+        self.assert_contains_all(candidate_projection, (
+            "steps.review-state-pr-candidate.outputs.revision",
+            "--external-action-sources-file",
+            "--candidate-revision",
+            "--allowed-url-prefix",
+        ))
 
     def test_no_untrusted_candidate_is_ever_checked_out(self):
         for forbidden in (
             "ref: ${{ github.event.pull_request.head.sha }}",
             "ref: ${{ steps.authoritative-pr-candidate.outputs.revision }}",
-            "ref: ${{ steps.advisory-pr-candidate.outputs.revision }}",
+            "ref: ${{ steps.review-state-pr-candidate.outputs.revision }}",
             "ref: refs/pull/",
         ):
             with self.subTest(forbidden=forbidden):

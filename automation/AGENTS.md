@@ -34,11 +34,12 @@ Rules:
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned
-  queue actions with exact opaque adapter bindings. Inbound comments use explicit
-  unscoped mode: their own asks remain
-  enforceable, but they do not claim to represent a task. Summary mode allows ordinary
-  change-title work verbs while still rejecting questions, TODOs, obligations, and
-  authority requests.
+  queue actions with exact opaque adapter bindings. Inbound sources are unscoped:
+  their own asks remain enforceable without claiming to represent a task. Versioned
+  source bindings let an agent transcribe uneditable provider prose; current review
+  state is replayed on direct events and every candidate update. Summary mode allows
+  ordinary change titles while rejecting asks. Candidate-context direct-event checks
+  are not hostile-workflow evidence without a separately controlled provider gate.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository

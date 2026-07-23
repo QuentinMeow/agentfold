@@ -67,10 +67,19 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   `needs-human`, map `Bot` accounts to `needs-agent`, and fail closed on unknown account
   types or missing identities. These inbound comments are explicitly unscoped: they
   must project their own asks but cannot stand in for a task's complete action set.
-  Formal review bodies project `needs-agent/` actions individually.
+  Current formal reviews and unresolved diff threads enforce `needs-agent/` actions.
+  Provider-authored prose may carry canonical links directly; otherwise an agent
+  transcribes it into one or more live items with the adapter's exact versioned
+  `External source` binding. Editing the source creates a new identity. A bound item
+  stays live until the effective review is superseded/dismissed or the thread resolves.
   `pull_request_target`, issue, and issue-comment checks run trusted default/base
-  workflow code; direct review and diff-comment event checks are advisory because
-  GitHub has no trusted target-context variant for them.
+  workflow code and replay current review state on every PR target update. The
+  candidate-context review job also replays that state on direct review events and
+  every PR update, so pushing an unrelated commit cannot clear an unqueued request.
+  It uses only the ephemeral workflow token, never a developer's local CLI login.
+  Direct review events have no target-context variant, so a separately controlled
+  provider gate is still required before claiming resistance to hostile workflow
+  tampering between target updates.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 

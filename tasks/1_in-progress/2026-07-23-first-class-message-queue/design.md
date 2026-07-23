@@ -102,16 +102,24 @@ portable adoption:
   Whole queue-service removal remains modular only when its edge erases no live action.
 - External action prose crosses a provider-neutral projection gate. Outbound task PR
   descriptions require immutable task-scope evidence and project every `needs-human`
-  action in `Queue actions`; inbound formal
-  reviews project only the `needs-agent` actions carried by that surface; issues and
+  action in `Queue actions`; inbound review sources project only the `needs-agent`
+  actions carried by that surface; issues and
   conversation comments may link either actor because the path owns direction. Allowed
   absolute links bind to an adapter-supplied immutable prefix. A provider assignment
   requires a distinct actor-correct queue item whose opaque binding preserves provider,
-  role, actor kind, and identity; body headings are classified as visible prose.
-  GitHub's default/base
-  context makes PR-description, issue, and conversation checks authoritative; direct
-  review-event checks are explicitly advisory because GitHub has no target-context
-  variant whose workflow definition is base-owned.
+  role, actor kind, and identity; body headings are classified as visible prose. When
+  provider prose cannot be edited by the receiving agent, one or more queue items may
+  instead copy its exact opaque, versioned `External source` binding. Those items stay
+  live while the source remains effective; an edit changes identity, a superseding or
+  dismissed formal review removes the old source, and resolving a diff thread removes
+  that source. This binding proves routing and version continuity, not semantic
+  completeness of an agent-authored transcription; artifact review owns that judgment.
+  GitHub's default/base context makes PR-description, issue, conversation, and
+  PR-update review-state checks authoritative. A candidate-context job also replays
+  current formal reviews and unresolved diff threads on direct events and every PR
+  update, preventing an unrelated push from clearing a failure. GitHub has no
+  target-context review event, so hostile direct-event tampering still requires a
+  separately controlled provider gate.
 
 The live queue owns unresolved delivery state even though its background stays
 elsewhere. The correcting ADR is
@@ -132,6 +140,8 @@ Refined actor-correct resolution lifecycle:
 **Why AgentFold core:** interaction delivery is a framework lifecycle concern, not personal configuration or product behavior
 **Thin adapter:** canonical=automation/check_action_projection.py; optional=yes; policy=none; writes=repo-only
 
-The registered `.github/workflows/harness.yml` adapter only maps GitHub event context
-and Markdown to those canonical gates; it owns no queue policy and does not claim that
-an advisory review-event run is repository-admission evidence.
+The registered `.github/` adapter only maps GitHub event/API context into those
+canonical gates; it owns no queue policy, uses an ephemeral workflow token rather than
+developer authentication, never executes candidate files from trusted target context,
+and does not claim that a candidate-context review-event run resists hostile workflow
+tampering.

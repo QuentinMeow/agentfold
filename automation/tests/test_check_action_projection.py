@@ -49,6 +49,7 @@ class ActionProjectionTests(unittest.TestCase):
         actor="needs-human",
         leaf=None,
         external_assignment=None,
+        external_source=None,
     ):
         leaf = leaf or ("reviews" if actor == "needs-human" else "requests")
         path = root / "message-queue" / actor / leaf / name
@@ -57,9 +58,13 @@ class ActionProjectionTests(unittest.TestCase):
             f"**External assignment:** {external_assignment}\n"
             if external_assignment is not None else ""
         )
+        source_field = (
+            f"**External source:** {external_source}\n"
+            if external_source is not None else ""
+        )
         path.write_text(
             f"# Review\n\n**Action:** {action}\n"
-            f"{assignment_field}",
+            f"{assignment_field}{source_field}",
             encoding="utf-8",
         )
         return path
@@ -1214,6 +1219,8 @@ class ActionProjectionTests(unittest.TestCase):
             "More test coverage would be very helpful.",
             "This migration repair would be welcome.",
             "It would be appreciated if you fixed the race.",
+            "It would be great if you fixed the login race.",
+            "It would be useful if a reviewer checked the migration.",
         )
         descriptions = (
             "A fix would not be appreciated.",
@@ -2377,6 +2384,238 @@ class ActionProjectionTests(unittest.TestCase):
                     external_assignments=assignment,
                 ),
             )
+
+    def test_external_action_source_accepts_projection_or_opaque_binding(self):
+        identity = "provider:review-thread:opaque-42"
+        with self.repo() as root:
+            linked = self.queue_item(
+                root,
+                name="future-blocking-request-fix-login-race.md",
+                action="Fix the login race.",
+                actor="needs-agent",
+            )
+            bound = self.queue_item(
+                root,
+                name="future-blocking-request-address-review-thread.md",
+                action="Address the external review thread.",
+                actor="needs-agent",
+                external_source=identity,
+            )
+            linked_path = linked.relative_to(root).as_posix()
+            self.git(root, "add", ".")
+            sources = json.dumps([{
+                "actor": "needs-agent",
+                "identity": identity,
+                "body": "It would be great if you fixed the login race.",
+                "url": "https://provider.invalid/review/42",
+            }])
+            self.assertEqual(
+                [],
+                PROJECTION.external_action_source_findings(
+                    sources,
+                    ("What to review",),
+                    repo=root,
+                ),
+            )
+            self.queue_item(
+                root,
+                name="future-blocking-request-address-second-review-ask.md",
+                action="Address the second ask in the external review thread.",
+                actor="needs-agent",
+                external_source=identity,
+            )
+            self.git(root, "add", ".")
+            self.assertEqual(
+                [],
+                PROJECTION.external_action_source_findings(
+                    sources,
+                    ("What to review",),
+                    repo=root,
+                ),
+            )
+            bound.unlink()
+            (
+                root / "message-queue/needs-agent/requests/"
+                "future-blocking-request-address-second-review-ask.md"
+            ).unlink()
+            self.git(root, "add", "-u")
+            findings = PROJECTION.external_action_source_findings(
+                sources,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("is not projected", findings[0])
+            sources = json.dumps([{
+                "actor": "needs-agent",
+                "identity": "provider:review:linked",
+                "body": (
+                    "## What to review\n\n"
+                    f"- [Fix the login race.]({linked_path})\n"
+                ),
+            }])
+            self.assertEqual(
+                [],
+                PROJECTION.external_action_source_findings(
+                    sources,
+                    ("What to review",),
+                    repo=root,
+                ),
+            )
+
+    def test_external_action_source_rejects_missing_or_wrong_actor_binding(self):
+        identity = "provider:review-thread:opaque-43"
+        with self.repo() as root:
+            self.queue_item(
+                root,
+                external_source=identity,
+                actor="needs-human",
+            )
+            self.git(root, "add", ".")
+            sources = json.dumps([{
+                "actor": "needs-agent",
+                "identity": identity,
+                "body": "Please fix the login race.",
+            }])
+            findings = PROJECTION.external_action_source_findings(
+                sources,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("must bind one or more live needs-agent", findings[0])
+            self.assertIn("needs-human", findings[0])
+
+            self.queue_item(
+                root,
+                name="future-blocking-request-unrelated.md",
+                action="Address the external review.",
+                actor="needs-agent",
+            )
+            self.git(root, "add", ".")
+            missing = json.dumps([{
+                "actor": "needs-agent",
+                "identity": "provider:review:missing",
+                "body": "Please fix the login race.",
+            }])
+            findings = PROJECTION.external_action_source_findings(
+                missing,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn(
+                "**External source:** provider:review:missing",
+                findings[0],
+            )
+
+    def test_external_action_source_force_and_passive_semantics(self):
+        identity = "provider:review:changes-requested"
+        with self.repo() as root:
+            self.git(root, "add", ".")
+            passive = json.dumps([{
+                "actor": "needs-agent",
+                "identity": "provider:review:passive",
+                "body": "The migration now has deterministic coverage.",
+            }])
+            self.assertEqual(
+                [],
+                PROJECTION.external_action_source_findings(
+                    passive,
+                    ("What to review",),
+                    repo=root,
+                ),
+            )
+            forced = json.dumps([{
+                "actor": "needs-agent",
+                "identity": identity,
+                "body": "",
+                "force": True,
+            }])
+            findings = PROJECTION.external_action_source_findings(
+                forced,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn(identity, findings[0])
+            self.queue_item(
+                root,
+                name="future-blocking-request-handle-review.md",
+                action="Handle the changes-requested review.",
+                actor="needs-agent",
+                external_source=identity,
+            )
+            self.git(root, "add", ".")
+            self.assertEqual(
+                [],
+                PROJECTION.external_action_source_findings(
+                    forced,
+                    ("What to review",),
+                    repo=root,
+                ),
+            )
+
+    def test_external_action_source_input_is_closed_and_unique(self):
+        invalid_values = (
+            "{}",
+            json.dumps([{"actor": "unknown", "identity": "one"}]),
+            json.dumps([{
+                "actor": "needs-agent",
+                "identity": "one",
+                "body": 42,
+            }]),
+            json.dumps([{
+                "actor": "needs-agent",
+                "identity": "one",
+                "unknown": True,
+            }]),
+            json.dumps([{
+                "actor": "needs-agent",
+                "identity": "one\nforged",
+            }]),
+            json.dumps([{
+                "actor": "needs-agent",
+                "identity": "one",
+                "url": "https://provider.invalid/\u001b[31m",
+            }]),
+            json.dumps([
+                {"actor": "needs-agent", "identity": "one"},
+                {"actor": "needs-agent", "identity": "one"},
+            ]),
+        )
+        for value in invalid_values:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                PROJECTION.external_action_source_states(value)
+
+    def test_cli_external_action_source_reads_immutable_candidate(self):
+        identity = "provider:review-thread:candidate-44"
+        with self.repo() as root:
+            self.queue_item(
+                root,
+                name="future-blocking-request-review-thread.md",
+                action="Address the external review thread.",
+                actor="needs-agent",
+                external_source=identity,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind external review source")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            source_file = root / "review-sources.json"
+            source_file.write_text(json.dumps([{
+                "actor": "needs-agent",
+                "identity": identity,
+                "body": "Please address this review.",
+            }]), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    PROJECTION.main([
+                        "--external-action-sources-file", str(source_file),
+                        "--action-section", "What to review",
+                        "--candidate-revision", candidate,
+                    ]),
+                )
 
     def test_mixed_pr_surface_uses_queued_no_action_marker(self):
         task_id = "2026-07-23-no-pr-actions"

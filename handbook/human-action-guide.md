@@ -59,6 +59,18 @@ when neither a human nor an agent/bot assignment exposes an action. Each provide
 assignment gets a distinct queue item whose `External assignment` field exactly copies
 the adapter's opaque provider, role, actor-kind, and identity binding; an existing
 generic review cannot stand in for a new assignee or requested reviewer.
+When a person writes an actionable review or diff thread without a queue link, the
+receiving agent transcribes it instead of asking that person to rewrite their words.
+Each resulting `needs-agent/` item copies the adapter's opaque, content-versioned
+`External source`; one source may bind several items when it contains several asks.
+Keep those items live while the provider still reports the source as current—on
+GitHub, an effective formal review or unresolved diff thread. An edit gets a new
+source identity, while a superseded/dismissed review or resolved thread leaves the
+active snapshot and permits normal queue resolution. Example: “Please fix both the
+race and its missing regression” may become two request files with the same source
+binding and separate `Action` fields. The binding proves durable routing and source
+version, not that an agent's transcription captured every nuance; ordinary review still
+judges that semantic fidelity.
 Chat answers are first transcribed into the item. Task and handover projections never
 carry a second status or answer slot.
 
