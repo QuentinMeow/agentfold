@@ -31,7 +31,7 @@ RAW_HTML_TYPE7_START_RE = re.compile(
     r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/]).*>[ \t]*$", re.I
 )
 MARKDOWN_LINK_RE = re.compile(
-    r"""(?<!!)(?<!\\)\[(?:\\.|[^\]\\])*\](?<!\\)
+    r"""(?<!!)(?<!\\)\[(?P<label>(?:\\.|[^\]\\])*)\](?<!\\)
         \([ \t]*(?:<(?P<angle>[^<>\r\n]*)>|(?P<bare>[^()\s]+))
         (?:[ \t]+(?:"(?:\\"|[^"])*"|'(?:\\'|[^'])*'|\((?:\\\)|[^)])*\)))?
         [ \t]*\)""",
@@ -49,40 +49,84 @@ def commonmark_lines(text):
     return lines
 
 
+def strip_block_quote_markers(line, limit=None):
+    """Return explicit block-quote depth and content after at most `limit` markers."""
+    cursor = line
+    depth = 0
+    while limit is None or depth < limit:
+        marker = re.match(r"^[ ]{0,3}>[ \t]?", cursor)
+        if not marker:
+            break
+        cursor = cursor[marker.end():]
+        depth += 1
+    return depth, cursor
+
+
 def semantic_text(text):
     """Blank fenced and raw-HTML blocks while preserving source line boundaries."""
     output = []
     fence_char = None
     fence_length = 0
+    fence_quote_depth = 0
     html_end = None
+    html_quote_depth = 0
     html_until_blank = False
+    html_until_blank_quote_depth = 0
     inline_comment = False
 
     for line in commonmark_lines(text):
         candidate = line[:-1] if line.endswith("\n") else line
         blank = "\n" if line.endswith("\n") else ""
+        quote_depth, syntax_candidate = strip_block_quote_markers(candidate)
 
         if fence_char:
-            if re.fullmatch(
-                rf"[ ]{{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
-                candidate,
-            ):
+            if quote_depth < fence_quote_depth and candidate.strip():
                 fence_char = None
                 fence_length = 0
-            output.append(blank)
-            continue
+                fence_quote_depth = 0
+            else:
+                _, closing_candidate = strip_block_quote_markers(
+                    candidate, limit=fence_quote_depth
+                )
+                if re.fullmatch(
+                    rf"[ ]{{0,3}}{re.escape(fence_char)}"
+                    rf"{{{fence_length},}}[ \t]*",
+                    closing_candidate,
+                ):
+                    fence_char = None
+                    fence_length = 0
+                    fence_quote_depth = 0
+                output.append(blank)
+                continue
 
         if html_end:
-            if html_end.search(candidate):
+            if quote_depth < html_quote_depth and candidate.strip():
                 html_end = None
-            output.append(blank)
-            continue
+                html_quote_depth = 0
+            else:
+                _, html_candidate = strip_block_quote_markers(
+                    candidate, limit=html_quote_depth
+                )
+                if html_end.search(html_candidate):
+                    html_end = None
+                    html_quote_depth = 0
+                output.append(blank)
+                continue
 
         if html_until_blank:
-            if re.fullmatch(r"[ \t]*", candidate):
+            if quote_depth < html_until_blank_quote_depth \
+                    and candidate.strip():
                 html_until_blank = False
-            output.append(blank)
-            continue
+                html_until_blank_quote_depth = 0
+            else:
+                _, html_candidate = strip_block_quote_markers(
+                    candidate, limit=html_until_blank_quote_depth
+                )
+                if re.fullmatch(r"[ \t]*", html_candidate):
+                    html_until_blank = False
+                    html_until_blank_quote_depth = 0
+                output.append(blank)
+                continue
 
         if inline_comment:
             comment_end = candidate.find("-->")
@@ -92,15 +136,16 @@ def semantic_text(text):
             candidate = " " * (comment_end + 3) + candidate[comment_end + 3:]
             inline_comment = False
 
-        opening = FENCE_OPEN_RE.match(candidate)
+        opening = FENCE_OPEN_RE.match(syntax_candidate)
         if opening and opening.group("fence").startswith("`"):
-            info = candidate[opening.end("fence"):]
+            info = syntax_candidate[opening.end("fence"):]
             if "`" in info:
                 opening = None
         if opening:
             marker = opening.group("fence")
             fence_char = marker[0]
             fence_length = len(marker)
+            fence_quote_depth = quote_depth
             output.append(blank)
             continue
 
@@ -111,14 +156,16 @@ def semantic_text(text):
             (HTML_DECLARATION_START_RE, re.compile(r">")),
             (HTML_CDATA_START_RE, re.compile(r"\]\]>")),
         ):
-            if start.match(candidate):
-                html_end = None if end.search(candidate) else end
+            if start.match(syntax_candidate):
+                html_end = None if end.search(syntax_candidate) else end
+                html_quote_depth = quote_depth if html_end else 0
                 output.append(blank)
                 break
         else:
-            if RAW_HTML_TYPE6_START_RE.match(candidate) \
-                    or RAW_HTML_TYPE7_START_RE.match(candidate):
+            if RAW_HTML_TYPE6_START_RE.match(syntax_candidate) \
+                    or RAW_HTML_TYPE7_START_RE.match(syntax_candidate):
                 html_until_blank = True
+                html_until_blank_quote_depth = quote_depth
                 output.append(blank)
             else:
                 while "<!--" in candidate:
@@ -194,5 +241,19 @@ def markdown_link_destinations(text):
         matched.group("angle")
         if matched.group("angle") is not None
         else matched.group("bare")
+        for matched in MARKDOWN_LINK_RE.finditer(clean)
+    ]
+
+
+def markdown_links(text):
+    """Return visible CommonMark inline-link `(label, destination)` pairs."""
+    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
+    return [
+        (
+            matched.group("label"),
+            matched.group("angle")
+            if matched.group("angle") is not None
+            else matched.group("bare"),
+        )
         for matched in MARKDOWN_LINK_RE.finditer(clean)
     ]

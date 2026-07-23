@@ -45,7 +45,11 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
 - A PR description may summarize human actions only by linking their live canonical
-  `message-queue/needs-human/` items; editing PR prose never creates or resolves an ask.
+  `message-queue/needs-human/` items. Its declared “What to review” section is checked at
+  the provider boundary: one top-level entry and one queue link per action, including
+  every live human path in the task's `Queue actions`. Use the exact
+  `No human action requested.` acknowledgement only when that task—or an explicitly
+  non-task branch—has no human ask. Editing PR prose never creates or resolves an ask.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 
@@ -55,6 +59,7 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - A bad coordination commit: `git revert <sha>`; if the file was deleted queue state,
   restore with `git checkout <sha>^ -- <path>`.
 - A misfiled queue item is moved with every live link updated. A stale item is
-  re-surfaced, reclassified, or explicitly resolved; delete it only after folding a
-  response or recording why the action is duplicate or moot. Git history can recover
-  an accidental deletion, but is not a substitute for live delivery state.
+  re-surfaced, reclassified, or explicitly resolved. Delete only after a one-line claim
+  and changed durable evidence; approved reviews revalidate their target, and
+  not-approved reviews leave a same-boundary successor. Verified pickup/retry exceptions
+  stay atomic. Git history can recover accidents, not replace live delivery state.

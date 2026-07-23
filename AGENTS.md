@@ -51,9 +51,9 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
    relevant requests/retries, or convert a request to a task; delete only with the
    completed action or an explicit in-file rejection.
 2. Scan recursively under `message-queue/needs-human/` for filled `**Your answer:**` or
-   `**Your review:**` lines. Claim first with a one-line `**Status:** folding` commit,
-   fold the response into its durable source (and an ADR for decisions), then delete
-   the item in the resolving commit.
+   `**Your review:**` lines. The response is committed while status is `waiting`; claim
+   it next with a one-line `**Status:** folding` commit, fold it into its durable source
+   (and an ADR for decisions), then delete the item in the resolving commit.
 3. Before assigning any human action or durable cross-session agent action, create its
    canonical queue item from `templates/queue/`. PRs, issues, chat, tasks, and handovers
    only summarize and link that item; an answer heard in chat is transcribed before use.

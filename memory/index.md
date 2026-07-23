@@ -20,6 +20,7 @@
 - [Task status is the folder the task sits in](decisions/2026-07-22-task-status-as-folders.md) — tasks/0_backlog…4_done folders ARE the status; no status field exists to drift
 - [Skills live in a visible skills/ dir; agent dirs are generated symlinks](decisions/2026-07-22-visible-skills-dir-with-symlinks.md) — skills/ is canonical; install.py symlinks it into .claude/, .cursor/, .agents/; symlinks are git-ignored
 - [The queue owns pending actions and filenames expose dependency timing](decisions/2026-07-23-queue-owns-pending-actions-and-timing.md) — Every pending human or durable cross-session agent action has one canonical queue item; its filename says when unresolved work blocks
+- [Queue resolution is proven by Git evidence, not a terminal label](decisions/2026-07-23-queue-resolution-is-git-evidence.md) — Queue actions resolve through committed claims and boundary-specific Git evidence; external asks are checked projections
 - [Unresolved queue delivery state is not regenerable](decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md) — Durable background can be reconstructed, but deleting an unresolved queue item loses its canonical action identity and delivery state
 
 ## lessons

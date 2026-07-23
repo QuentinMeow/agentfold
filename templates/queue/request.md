@@ -8,10 +8,11 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 
 # <What you want, one line>
 
-**Status:** open
+**Status:** <open | in-repair>
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <the concrete action the receiving agent should take>
 **Full context:** [<complete source>](<repo-relative path>)
+**Resolution evidence:** `<durable file completion will create or change>`
 <!-- Add **Request kind:** task-pickup only for the canonical pickup request of one
 unclaimed backlog task. Other request kinds may define their own explicit value. -->
 

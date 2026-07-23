@@ -1,0 +1,723 @@
+#!/usr/bin/env python3
+"""Require external human-action sections to project live queue items."""
+import argparse
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+AUTOMATION = Path(__file__).resolve().parent
+if str(AUTOMATION) not in sys.path:
+    sys.path.insert(0, str(AUTOMATION))
+
+from markdown_semantics import (
+    MARKDOWN_LINK_RE,
+    markdown_links,
+    semantic_text,
+    strip_indented_code,
+    strip_inline_code,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+QUEUE_ITEM_RE = re.compile(
+    r"^message-queue/needs-human/[a-z0-9][a-z0-9-]*/"
+    r"(?:blocking|future-blocking|non-blocking)-"
+    r"[a-z0-9][a-z0-9-]*\.md$"
+)
+QUEUE_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])"
+    r"message-queue/(?:needs-human|needs-agent)/[a-z0-9][a-z0-9-]*/"
+    r"(?:blocking|future-blocking|non-blocking)-"
+    r"[a-z0-9][a-z0-9-]*\.md"
+    r"(?![A-Za-z0-9_.-])"
+)
+TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
+HEADING_RE = re.compile(
+    r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
+    r"(?P<title>.*?)[ \t]*#*[ \t]*$"
+)
+LIST_ITEM_RE = re.compile(
+    r"^(?P<indent>[ ]{0,3})(?P<marker>[-+*]|\d+[.)])"
+    r"(?P<spacing>[ \t]+)"
+)
+NO_ACTION_TEXT = "No human action requested."
+ACTION_VERB_RE = re.compile(
+    r"\b(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
+    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    re.I,
+)
+DIRECTIVE_RE = re.compile(
+    r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:(?:also[ \t]+)?please[ \t]+|also[ \t]+)?"
+    r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
+    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    re.I | re.M,
+)
+ADDITIONAL_DIRECTIVE_RE = re.compile(
+    r"(?:^|[.!;:—][ \t]+)"
+    r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:(?:and|also|then)[ \t]+|please[ \t]+)*"
+    r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
+    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    re.I | re.M,
+)
+TODO_RE = re.compile(r"\bTODO\b", re.I)
+FULL_OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
+
+
+def normalized_title(value):
+    return " ".join((value or "").strip().casefold().split())
+
+
+def quote_depth(line):
+    matched = re.match(r"^(?P<quote>(?:>[ \t]?)*)", line)
+    return matched.group("quote").count(">") if matched else 0
+
+
+def strip_quote(line, depth):
+    cursor = line
+    for _ in range(depth):
+        matched = re.match(r"^>[ \t]?", cursor)
+        if not matched:
+            break
+        cursor = cursor[matched.end():]
+    return cursor
+
+
+def action_section_spans(text, titles):
+    """Return visible configured ATX action sections as `(start, end, body)`."""
+    lines = semantic_text(text).splitlines()
+    wanted = {normalized_title(title) for title in titles}
+    sections = []
+    for index, line in enumerate(lines):
+        heading = HEADING_RE.match(line)
+        if not heading or normalized_title(heading.group("title")) not in wanted:
+            continue
+        depth = heading.group("quote").count(">")
+        level = len(heading.group("level"))
+        body = []
+        for following in lines[index + 1:]:
+            if following.strip() and quote_depth(following) < depth:
+                break
+            visible = strip_quote(following, depth)
+            next_heading = HEADING_RE.match(following)
+            if next_heading \
+                    and next_heading.group("quote").count(">") <= depth \
+                    and len(next_heading.group("level")) <= level:
+                break
+            body.append(visible)
+        sections.append((index, index + len(body) + 1, "\n".join(body).strip()))
+    return sections
+
+
+def action_sections(text, titles):
+    """Return visible bodies of every configured ATX action heading."""
+    return [body for _start, _end, body in action_section_spans(text, titles)]
+
+
+def visible_outside_action_sections(text, titles):
+    """Return visible prose outside every configured action section."""
+    lines = semantic_text(text).splitlines()
+    for start, end, _body in action_section_spans(text, titles):
+        for index in range(start, min(end, len(lines))):
+            lines[index] = ""
+    return "\n".join(lines)
+
+
+def indentation_width(value):
+    """Return leading indentation in CommonMark columns."""
+    width = 0
+    for character in value:
+        if character == " ":
+            width += 1
+        elif character == "\t":
+            width += 4 - (width % 4)
+        else:
+            break
+    return width
+
+
+def section_entries(body):
+    """Return strict top-level actions and any content outside their list.
+
+    Wrapped prose and nested lists must be indented under their owning action. This
+    intentionally rejects a second, unlisted ask after a linked list item.
+    """
+    lines = body.splitlines()
+    entries = []
+    current = []
+    current_content_indent = None
+    top_level_indent = None
+    outside = []
+    for line in lines:
+        item = LIST_ITEM_RE.match(line)
+        item_indent = (
+            indentation_width(item.group("indent")) if item else None
+        )
+        if item and (
+            top_level_indent is None or item_indent == top_level_indent
+        ):
+            if current:
+                entries.append("\n".join(current).strip())
+            if top_level_indent is None:
+                top_level_indent = item_indent
+            current = [line]
+            current_content_indent = (
+                item_indent
+                + len(item.group("marker"))
+                + indentation_width(item.group("spacing"))
+            )
+        elif not line.strip():
+            if current:
+                current.append(line)
+        elif current and indentation_width(line) >= current_content_indent:
+            current.append(line)
+        else:
+            outside.append(line)
+    if current:
+        entries.append("\n".join(current).strip())
+    return entries, "\n".join(outside).strip()
+
+
+def prose_without_links(entry):
+    """Return visible prose outside Markdown links and code examples."""
+    clean = strip_indented_code(strip_inline_code(semantic_text(entry)))
+    return MARKDOWN_LINK_RE.sub("", clean)
+
+
+def action_like_prose(text):
+    """Recognize deterministic human-action grammar in visible prose.
+
+    A fragment is action-like when it contains a question mark, a standalone TODO,
+    or an authority verb in command position at the start of a line/list item.
+    Markdown destinations and code are not prose; callers inspect link labels
+    separately. Ordinary declarative prose with an authority verb mid-sentence is
+    therefore accepted.
+    """
+    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
+    clean = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"),
+        clean,
+    )
+    return bool("?" in clean or TODO_RE.search(clean) or DIRECTIVE_RE.search(clean))
+
+
+def link_label_action_count(label):
+    """Count authority actions in a short link label conservatively."""
+    verbs = len(ACTION_VERB_RE.findall(label or ""))
+    questions = (label or "").count("?")
+    todos = len(TODO_RE.findall(label or ""))
+    return max(verbs, questions, todos)
+
+
+def additional_action_like_prose(text):
+    """Recognize a second action in prose surrounding an owning queue link."""
+    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
+    return bool(
+        "?" in clean
+        or TODO_RE.search(clean)
+        or ADDITIONAL_DIRECTIVE_RE.search(clean)
+    )
+
+
+def normalized_url_prefix(value, candidate_revision=None):
+    """Validate and normalize one explicitly trusted HTTPS repository prefix."""
+    parsed = urlsplit((value or "").strip())
+    if parsed.scheme.casefold() != "https" or not parsed.netloc:
+        raise ValueError("allowed URL prefixes must be absolute HTTPS URLs")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("allowed URL prefixes cannot contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("allowed URL prefixes cannot contain a query or fragment")
+    path = unquote(parsed.path).rstrip("/")
+    if ".." in Path(path).parts:
+        raise ValueError("allowed URL prefixes cannot contain `..` path segments")
+    if candidate_revision is not None and candidate_revision.casefold() not in {
+        part.casefold() for part in Path(path).parts
+    }:
+        raise ValueError(
+            "allowed URL prefixes must contain the exact candidate revision"
+        )
+    return parsed.scheme.casefold(), parsed.netloc.casefold(), path
+
+
+def queue_path_from_destination(destination, allowed_url_prefixes=()):
+    """Resolve one unambiguous canonical queue path from a link destination."""
+    destination = (destination or "").strip()
+    parsed = urlsplit(destination)
+    candidates = []
+    if parsed.scheme:
+        if (
+            parsed.scheme.casefold() != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return None
+        path = unquote(parsed.path)
+        if ".." in Path(path).parts:
+            return None
+        remainders = [
+            path[len(prefix_path) + 1:]
+            for scheme, netloc, prefix_path in allowed_url_prefixes
+            if parsed.scheme.casefold() == scheme
+            and parsed.netloc.casefold() == netloc
+            and path.startswith(prefix_path + "/")
+        ]
+        if len(remainders) != 1:
+            return None
+        candidates = remainders
+    else:
+        if parsed.netloc:
+            return None
+        raw = unquote(destination.split("#", 1)[0].split("?", 1)[0])
+        while raw.startswith("./"):
+            raw = raw[2:]
+        path = Path(raw)
+        if path.is_absolute() or ".." in path.parts:
+            return None
+        candidates = [path.as_posix()]
+    valid = [candidate for candidate in candidates if QUEUE_ITEM_RE.fullmatch(candidate)]
+    return valid[0] if len(valid) == 1 and len(candidates) == 1 else None
+
+
+def git_output(args, repo=REPO):
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            result.stderr.decode("utf-8", errors="replace").strip()
+            or "could not inspect the Git candidate"
+        )
+    return result.stdout
+
+
+def candidate_revision_oid(value, repo=REPO):
+    """Resolve one explicitly full commit object id without replacement refs."""
+    revision = (value or "").strip()
+    if not FULL_OBJECT_ID_RE.fullmatch(revision):
+        raise ValueError("candidate revision must be one full Git object id")
+    output = git_output(
+        ["--no-replace-objects", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        repo=repo,
+    ).decode("ascii", errors="replace").strip()
+    if output.casefold() != revision.casefold():
+        raise ValueError("candidate revision must name its exact commit object")
+    return output
+
+
+def candidate_record(path, repo=REPO, candidate_revision=None):
+    if candidate_revision is None:
+        output = git_output(["ls-files", "--stage", "-z", "--", path], repo=repo)
+    else:
+        output = git_output(
+            [
+                "--no-replace-objects", "ls-tree", "-z",
+                candidate_revision, "--", path,
+            ],
+            repo=repo,
+        )
+    records = [record for record in output.split(b"\0") if record]
+    if len(records) != 1:
+        return None
+    metadata, separator, encoded_path = records[0].partition(b"\t")
+    parts = metadata.decode("ascii", errors="replace").split()
+    if not (
+        separator
+        and encoded_path.decode("utf-8", errors="surrogateescape") == path
+        and len(parts) == 3
+    ):
+        return None
+    if candidate_revision is not None and parts[1] != "blob":
+        return None
+    return parts
+
+
+def tracked_regular_file(path, repo=REPO, candidate_revision=None):
+    parts = candidate_record(
+        path, repo=repo, candidate_revision=candidate_revision
+    )
+    if not parts or parts[0] not in ("100644", "100755"):
+        return False
+    if candidate_revision is None and parts[2] != "0":
+        return False
+    object_id = parts[2] if candidate_revision is not None else parts[1]
+    size = git_output(
+        ["--no-replace-objects", "cat-file", "-s", object_id],
+        repo=repo,
+    )
+    try:
+        return int(size.strip()) > 0
+    except ValueError as error:
+        raise RuntimeError("Git returned an invalid candidate object size") from error
+
+
+def candidate_paths(prefix, repo=REPO, candidate_revision=None):
+    if candidate_revision is None:
+        output = git_output(["ls-files", "-z", "--", prefix], repo=repo)
+    else:
+        output = git_output(
+            [
+                "--no-replace-objects", "ls-tree", "-r", "--name-only", "-z",
+                candidate_revision, "--", prefix,
+            ],
+            repo=repo,
+        )
+    return [
+        record.decode("utf-8", errors="surrogateescape")
+        for record in output.split(b"\0")
+        if record
+    ]
+
+
+def live_human_queue_paths(repo=REPO, candidate_revision=None):
+    return {
+        path
+        for path in candidate_paths(
+            "message-queue/needs-human",
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
+        if QUEUE_ITEM_RE.fullmatch(path)
+        and tracked_regular_file(
+            path, repo=repo, candidate_revision=candidate_revision
+        )
+    }
+
+
+def normalized_task_id(value):
+    task_id = (value or "").strip()
+    if task_id.startswith("task/"):
+        task_id = task_id[len("task/"):]
+    if not TASK_ID_RE.fullmatch(task_id):
+        raise ValueError(
+            "task id must be YYYY-MM-DD-kebab-slug or task/<that-id>"
+        )
+    return task_id
+
+
+def candidate_text(path, repo=REPO, candidate_revision=None):
+    object_name = f":{path}" if candidate_revision is None \
+        else f"{candidate_revision}:{path}"
+    output = git_output(
+        ["--no-replace-objects", "show", object_name],
+        repo=repo,
+    )
+    try:
+        return output.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError(f"`{path}` is not valid UTF-8") from error
+
+
+def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
+    task_id = normalized_task_id(task_id)
+    task_paths = [
+        path for path in candidate_paths(
+            "tasks", repo=repo, candidate_revision=candidate_revision
+        )
+        if Path(path).parts[:1] == ("tasks",)
+        and len(Path(path).parts) == 4
+        and Path(path).parts[2] == task_id
+        and Path(path).parts[3] == "task.md"
+        and tracked_regular_file(
+            path, repo=repo, candidate_revision=candidate_revision
+        )
+    ]
+    if len(task_paths) != 1:
+        raise RuntimeError(
+            f"expected one live task record for `{task_id}`, found {len(task_paths)}"
+        )
+    task_path = task_paths[0]
+    matched = re.search(
+        r"^\*\*Queue actions:\*\*[ \t]*(.*)$",
+        candidate_text(
+            task_path, repo=repo, candidate_revision=candidate_revision
+        ),
+        flags=re.M,
+    )
+    if not matched:
+        raise RuntimeError(f"`{task_path}` has no Queue actions field")
+    value = matched.group(1).strip()
+    queue_paths = set(QUEUE_PATH_RE.findall(value))
+    if value.casefold() == "none":
+        return set()
+    if not queue_paths:
+        raise RuntimeError(f"`{task_path}` has an invalid Queue actions field")
+    human_paths = {path for path in queue_paths if QUEUE_ITEM_RE.fullmatch(path)}
+    non_live = sorted(
+        path for path in human_paths
+        if not tracked_regular_file(
+            path, repo=repo, candidate_revision=candidate_revision
+        )
+    )
+    if non_live:
+        raise RuntimeError(
+            f"`{task_path}` links non-live human queue item(s): "
+            + ", ".join(non_live)
+        )
+    return human_paths
+
+
+def required_human_queue_paths(
+    task_id=None,
+    repo=REPO,
+    require_all_live=True,
+    candidate_revision=None,
+):
+    if task_id is not None:
+        return task_human_queue_paths(
+            task_id, repo=repo, candidate_revision=candidate_revision
+        )
+    return (
+        live_human_queue_paths(
+            repo=repo, candidate_revision=candidate_revision
+        )
+        if require_all_live else set()
+    )
+
+
+def projection_findings(
+    text,
+    titles,
+    repo=REPO,
+    allowed_url_prefixes=(),
+    task_id=None,
+    require_all_live=True,
+    candidate_revision=None,
+):
+    if candidate_revision is not None:
+        candidate_revision = candidate_revision_oid(
+            candidate_revision, repo=repo
+        )
+    if candidate_revision is None:
+        if not (repo / "message-queue").exists():
+            return []
+    elif not candidate_paths(
+            "message-queue",
+            repo=repo,
+            candidate_revision=candidate_revision,
+    ):
+        return []
+    normalized_prefixes = tuple(
+        normalized_url_prefix(
+            prefix, candidate_revision=candidate_revision
+        )
+        for prefix in allowed_url_prefixes
+    )
+    required_paths = required_human_queue_paths(
+        task_id=task_id,
+        repo=repo,
+        require_all_live=require_all_live,
+        candidate_revision=candidate_revision,
+    )
+    section_spans = action_section_spans(text, titles)
+    sections = [body for _start, _end, body in section_spans]
+    if not sections:
+        return [
+            "missing a declared action section; add `What to review` with "
+            f"queue-linked actions or exactly `{NO_ACTION_TEXT}`"
+        ]
+    findings = []
+    linked_paths = set()
+    saw_entries = False
+    saw_no_action = False
+    invalid_projection = False
+    outside_action_prose = visible_outside_action_sections(text, titles)
+    if action_like_prose(outside_action_prose):
+        invalid_projection = True
+        findings.append(
+            "visible action-like question or directive exists outside the "
+            "declared action section"
+        )
+    for section_number, body in enumerate(sections, start=1):
+        if not body:
+            invalid_projection = True
+            findings.append(f"action section {section_number} is empty")
+            continue
+        if body.strip() == NO_ACTION_TEXT:
+            saw_no_action = True
+            if required_paths:
+                findings.append(
+                    f"action section {section_number} claims no human action "
+                    "but scoped live queue item(s) exist: "
+                    + ", ".join(sorted(required_paths))
+                )
+            continue
+        entries, outside = section_entries(body)
+        if outside:
+            invalid_projection = True
+            findings.append(
+                f"action section {section_number} contains content outside "
+                "the top-level action list; make every action a list item and "
+                "indent wrapped explanation under it"
+            )
+        if not entries:
+            invalid_projection = True
+            if not outside:
+                findings.append(
+                    f"action section {section_number} has no queue-linked action"
+                )
+            continue
+        saw_entries = True
+        for entry_number, entry in enumerate(entries, start=1):
+            links = markdown_links(entry)
+            queue_looking = [
+                (label, destination)
+                for label, destination in links
+                if "message-queue/" in unquote(destination)
+            ]
+            paths = [
+                queue_path_from_destination(
+                    destination,
+                    allowed_url_prefixes=normalized_prefixes,
+                )
+                for _label, destination in queue_looking
+            ]
+            if len(queue_looking) != 1 \
+                    or any(path is None for path in paths):
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "must contain exactly one valid canonical needs-human queue link"
+                )
+                continue
+            queue_label = queue_looking[0][0]
+            if link_label_action_count(queue_label) > 1:
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "contains multiple actions in its queue-link label"
+                )
+                continue
+            supporting_action_labels = [
+                label for label, destination in links
+                if destination != queue_looking[0][1]
+                and link_label_action_count(label)
+            ]
+            if supporting_action_labels:
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "contains an action-like supporting link; every action needs "
+                    "its own canonical queue link"
+                )
+                continue
+            if additional_action_like_prose(prose_without_links(entry)):
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "contains an additional unlinked question or decision request; "
+                    "put the single action in the queue-link label and keep "
+                    "surrounding prose declarative"
+                )
+                continue
+            dead = [
+                path for path in paths
+                if not tracked_regular_file(
+                    path,
+                    repo=repo,
+                    candidate_revision=candidate_revision,
+                )
+            ]
+            if dead:
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "links non-live queue item(s): " + ", ".join(dead)
+                )
+                continue
+            linked_paths.update(paths)
+    if saw_no_action and saw_entries:
+        invalid_projection = True
+        findings.append(
+            "a no-action acknowledgement cannot appear beside listed actions"
+        )
+    missing = sorted(required_paths - linked_paths)
+    if missing and not saw_no_action and not invalid_projection:
+        findings.append(
+            "action sections omit scoped live queue item(s): " + ", ".join(missing)
+        )
+    return findings
+
+
+def read_input(args):
+    if args.from_env is not None:
+        if args.from_env not in os.environ:
+            raise ValueError(f"environment variable {args.from_env!r} is not set")
+        return os.environ[args.from_env]
+    if args.file == "-":
+        return sys.stdin.read()
+    try:
+        return Path(args.file).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ValueError(str(error)) from error
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--from-env", metavar="NAME")
+    source.add_argument("--file", metavar="PATH|-")
+    parser.add_argument(
+        "--action-section", action="append", required=True, metavar="TITLE"
+    )
+    parser.add_argument(
+        "--allowed-url-prefix",
+        action="append",
+        default=[],
+        metavar="HTTPS_URL",
+        help="allow absolute queue links only below this repository URL prefix",
+    )
+    parser.add_argument(
+        "--candidate-revision",
+        metavar="FULL_OBJECT_ID",
+        help="read queue and task state from this exact commit instead of the index",
+    )
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--task-id",
+        metavar="ID|task/ID",
+        help="scope required human queue links to one canonical task record",
+    )
+    scope.add_argument(
+        "--branch",
+        metavar="NAME",
+        help="derive task scope from task/<id>; other branches stay unscoped",
+    )
+    parser.add_argument("--label", default="external projection")
+    args = parser.parse_args(argv)
+    try:
+        text = read_input(args)
+        task_id = args.task_id
+        require_all_live = True
+        if args.branch and args.branch.startswith("task/"):
+            task_id = args.branch
+        elif args.branch:
+            require_all_live = False
+        findings = projection_findings(
+            text,
+            args.action_section,
+            repo=REPO,
+            allowed_url_prefixes=args.allowed_url_prefix,
+            task_id=task_id,
+            require_all_live=require_all_live,
+            candidate_revision=args.candidate_revision,
+        )
+    except (RuntimeError, ValueError) as error:
+        print(f"action-projection: input error: {error}", file=sys.stderr)
+        return 2
+    for finding in findings:
+        print(f"[action-projection] {args.label}: {finding}")
+    print(f"action-projection: {len(findings)} finding(s)")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

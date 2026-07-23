@@ -51,11 +51,14 @@ not determine the prefix.
 
 ## Project without forking the action
 
-Every other channel links the same live item. A PR “What to review” section may summarize
-the action and source, but cannot add a new reviewer question. A chat answer is first
-transcribed into the item. A task's `Queue actions` field and a handover's “Needs your
-attention” section link it; neither carries a second status or answer slot.
+Every other channel links the same live item. A PR “What to review” entry links its
+canonical item; one entry carries one link and keeps any surrounding explanation
+declarative. The checked no-action acknowledgement is for PRs with no human ask.
+Chat answers are first transcribed into the item. Task and handover projections never
+carry a second status or answer slot.
 
-After a response, claim the item, fold the answer into its durable source, record an ADR
-when it decides architecture or policy, and delete the item in the same resolving commit.
-Git history archives delivery; the durable source preserves the result.
+Commit the response while status is `waiting`, then claim it in a separate one-line
+`Status: folding` commit. Fold into the predeclared `Resolution evidence` file(s);
+deletion requires those files to change in that commit. Approved reviews revalidate the
+bound target. A not-approved review instead leaves a same-timing successor. Git history
+archives delivery; the changed durable source preserves the result.

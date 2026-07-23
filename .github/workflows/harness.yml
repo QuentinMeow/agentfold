@@ -2,6 +2,7 @@ name: harness
 on:
   push:
   pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
 
 jobs:
   reconcile-and-test:
@@ -23,6 +24,14 @@ jobs:
           QUEUE_TASK_BRANCH: ${{ github.head_ref }}
           QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
         run: python3 automation/reconcile/reconcile.py --check --at-transition merge --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
+      - name: Action projection — pull-request questions are queued
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.pull_request.body }}
+          ACTION_PROJECTION_BRANCH: ${{ github.head_ref }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+        run: python3 automation/check_action_projection.py --from-env ACTION_PROJECTION_BODY --action-section "What to review" --branch "$ACTION_PROJECTION_BRANCH" --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" --label pull-request-description
       - name: Reconciler — every harness invariant holds
         if: github.event_name == 'push'
         env:

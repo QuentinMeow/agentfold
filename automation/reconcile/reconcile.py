@@ -14,6 +14,7 @@ every check no-ops if its folder is absent so adopters can pick pieces.
 Registry: CHECKS at the bottom. Adding a check = one function + one entry.
 """
 import argparse
+import contextlib
 import datetime
 import hashlib
 import re
@@ -34,6 +35,7 @@ QUEUE = REPO / "message-queue"
 RETRIES = QUEUE / "needs-agent" / "retries"
 TASKS = REPO / "tasks"
 TASK_STATUSES = ["0_backlog", "1_in-progress", "2_blocked", "3_in-review", "4_done"]
+TASK_LIFECYCLE_TRANSITIONS = {"start", "review", "complete"}
 CONVERSATIONS = REPO / "history" / "conversations"
 MEMORY = REPO / "memory"
 MEMORY_ZONES = ["facts", "decisions", "lessons", "known-issues"]
@@ -109,6 +111,11 @@ QUEUE_TIMING_FIELDS = {
     "blocking": ("Blocks now",),
     "future-blocking": ("Blocks at", "Until then"),
     "non-blocking": ("If unanswered",),
+}
+QUEUE_ROOT_DOCUMENT_PATHS = {
+    "message-queue/AGENTS.md",
+    "message-queue/README.md",
+    "message-queue/CLAUDE.md",
 }
 PLACEHOLDER_RE = re.compile(
     r"^(?:_+|<[^>]*>|tbd|todo|none|n/?a|unknown)$", re.I
@@ -451,22 +458,141 @@ def git_head_paths(prefix):
     return set(result.stdout.splitlines()) if result.returncode == 0 else set()
 
 
+def validate_range_candidate(change_range):
+    """Bind --range checks to the captured head or its exact synthetic merge."""
+    if not change_range:
+        return
+    if not (REPO / ".git").exists() or not _GIT_HEAD_OID:
+        raise GitSnapshotError("--range requires a committed Git candidate")
+    if change_range.startswith("root:"):
+        base = None
+        range_head = change_range[len("root:"):]
+    else:
+        base, range_head = change_range.split("...", 1)
+    for label, revision in (("base", base), ("head", range_head)):
+        if revision is None:
+            continue
+        commit = subprocess.run(
+            [
+                "git", "--no-replace-objects", "cat-file", "-e",
+                f"{revision}^{{commit}}",
+            ],
+            cwd=REPO,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if commit.returncode:
+            detail = commit.stderr.decode(
+                "utf-8", errors="replace"
+            ).strip() if commit.stderr else ""
+            raise GitSnapshotError(
+                detail or f"--range {label} is not an available commit"
+            )
+    if base is not None:
+        common = subprocess.run(
+            ["git", "--no-replace-objects", "merge-base", base, range_head],
+            cwd=REPO,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if common.returncode or not common.stdout.strip():
+            raise GitSnapshotError(git_failure(
+                common, "--range base and head have no merge base"
+            ))
+    if _GIT_HEAD_OID != range_head:
+        ancestry = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", _GIT_HEAD_OID],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if ancestry.returncode:
+            raise GitSnapshotError(
+                ancestry.stderr.strip()
+                or "could not inspect the candidate commit parents"
+            )
+        parents = ancestry.stdout.split()[1:]
+        if base is None or len(parents) != 2 \
+                or set(parents) != {base, range_head}:
+            raise GitSnapshotError(
+                "captured candidate is neither the --range head nor an exact "
+                "base+head synthetic merge"
+            )
+    staged = subprocess.run(
+        ["git", "diff-index", "--cached", "--quiet", _GIT_HEAD_OID, "--"],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if staged.returncode == 1:
+        raise GitSnapshotError(
+            "--range candidate has staged changes beyond its captured commit"
+        )
+    if staged.returncode:
+        detail = staged.stderr.decode(
+            "utf-8", errors="replace"
+        ).strip() if staged.stderr else ""
+        raise GitSnapshotError(detail or "could not compare the candidate index")
+    unstaged = subprocess.run(
+        ["git", "diff-files", "--quiet", "--ignore-submodules=all", "--"],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if unstaged.returncode == 1:
+        raise GitSnapshotError(
+            "--range candidate has unstaged changes beyond its captured commit"
+        )
+    if unstaged.returncode:
+        detail = unstaged.stderr.decode(
+            "utf-8", errors="replace"
+        ).strip() if unstaged.stderr else ""
+        raise GitSnapshotError(detail or "could not compare the candidate worktree")
+    untracked = subprocess.run(
+        [
+            "git", "ls-files", "--others",
+            "--exclude-per-directory=.gitignore", "-z",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if untracked.returncode:
+        raise GitSnapshotError(git_failure(
+            untracked, "could not inspect untracked candidate paths"
+        ))
+    if untracked.stdout:
+        raise GitSnapshotError(
+            "--range candidate contains untracked files outside the commit"
+        )
+
+
 def live_queue_items():
     indexed = git_index_entries("message-queue")
     committed = git_head_paths("message-queue")
     seen = set()
     for name in sorted(indexed):
         item = REPO / name
-        if item.name in ("README.md", "AGENTS.md", "CLAUDE.md"):
+        if queue_document_path(name):
             continue
         seen.add(name)
         yield item
+    if CHANGE_RANGE is not None:
+        return
     if QUEUE.is_dir():
         for item in sorted(QUEUE.rglob("*")):
-            if not (item.is_file() or item.is_symlink()) \
-                    or item.name in ("README.md", "AGENTS.md", "CLAUDE.md"):
+            if not (item.is_file() or item.is_symlink()):
                 continue
             name = item.relative_to(REPO).as_posix()
+            if queue_document_path(name):
+                continue
             if name not in seen and name not in committed:
                 yield item
 
@@ -482,6 +608,8 @@ def live_markdown_files():
             continue
         seen.add(name)
         yield REPO / path
+    if CHANGE_RANGE is not None:
+        return
     for path in sorted(REPO.rglob("*.md")):
         rel = path.relative_to(REPO)
         if rel.parts[0].startswith(".") or not path.is_file() or path.is_symlink():
@@ -739,6 +867,1096 @@ def blocking_task_ids(value):
     return boundary_task_ids(blocking_boundary_tokens(value))
 
 
+def valid_queue_item_path(path):
+    parts = Path(path).parts
+    return bool(
+        len(parts) == 4
+        and parts[0] == "message-queue"
+        and parts[1] in ("needs-human", "needs-agent")
+        and SLUG_RE.fullmatch(parts[2])
+        and QUEUE_ITEM_RE.fullmatch(parts[3])
+    )
+
+
+def queue_document_path(path):
+    """Recognize only root contracts and typed-leaf README documentation."""
+    normalized = Path(path).as_posix()
+    if normalized in QUEUE_ROOT_DOCUMENT_PATHS:
+        return True
+    parts = Path(normalized).parts
+    return bool(
+        len(parts) == 4
+        and parts[0] == "message-queue"
+        and parts[1] in ("needs-human", "needs-agent")
+        and SLUG_RE.fullmatch(parts[2])
+        and parts[3] == "README.md"
+    )
+
+
+def governed_queue_path(path):
+    """Return whether a path can carry action state, even when malformed."""
+    parts = Path(path).parts
+    return bool(
+        len(parts) >= 2
+        and parts[0] == "message-queue"
+        and not queue_document_path(path)
+    )
+
+
+def queue_action_slug(path):
+    name = Path(path).name
+    return re.sub(
+        r"^(?:blocking|future-blocking|non-blocking)-", "", name
+    )
+
+
+def name_status_records(data):
+    """Parse NUL-delimited Git --name-status output."""
+    tokens = data.split(b"\0")
+    records = []
+    offset = 0
+    while offset < len(tokens) and tokens[offset]:
+        status = tokens[offset].decode("ascii", errors="replace")
+        offset += 1
+        if status.startswith(("R", "C")):
+            if offset + 1 >= len(tokens):
+                raise GitSnapshotError("Git returned a truncated rename record")
+            source = tokens[offset].decode(
+                "utf-8", errors="surrogateescape"
+            )
+            destination = tokens[offset + 1].decode(
+                "utf-8", errors="surrogateescape"
+            )
+            offset += 2
+            records.append((status, source, destination))
+            continue
+        if offset >= len(tokens):
+            raise GitSnapshotError("Git returned a truncated name-status record")
+        name = tokens[offset].decode("utf-8", errors="surrogateescape")
+        offset += 1
+        records.append((status, name, name))
+    return records
+
+
+def identity_preserving_queue_move(source, destination):
+    """Allow timing moves and malformed-to-canonical path normalization."""
+    if not valid_queue_item_path(destination) \
+            or queue_action_slug(source) != queue_action_slug(destination):
+        return False
+    if not valid_queue_item_path(source):
+        return governed_queue_path(source)
+    source_parts = Path(source).parts
+    destination_parts = Path(destination).parts
+    return source_parts[1:3] == destination_parts[1:3]
+
+
+def deleted_queue_paths_from_name_status(data):
+    """Treat only identity-preserving queue-to-queue renames as moves."""
+    paths = []
+    for status, source, destination in name_status_records(data):
+        if status.startswith("R"):
+            if governed_queue_path(source) \
+                    and not identity_preserving_queue_move(
+                        source, destination
+                    ):
+                paths.append(source)
+        elif status == "D" and governed_queue_path(source):
+            paths.append(source)
+    return paths
+
+
+def mutated_queue_paths_from_name_status(data):
+    """Return governed in-place changes and identity-preserving moves."""
+    paths = []
+    for status, source, destination in name_status_records(data):
+        if status.startswith("R"):
+            if governed_queue_path(source) \
+                    and identity_preserving_queue_move(source, destination):
+                paths.append((source, destination))
+        elif status in {"M", "T"} and governed_queue_path(source):
+            paths.append((source, destination))
+    return paths
+
+
+def git_artifact_bytes_at(revision, path):
+    """Read one regular repository file at an exact commit, or return absent."""
+    tree = subprocess.run(
+        ["git", "--no-replace-objects", "ls-tree", "-z", revision, "--", path],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not inspect `{path}` at {revision}"
+        ))
+    entries = parse_git_tree_records(tree.stdout)
+    if entries.get(path) not in ("100644", "100755"):
+        return None
+    artifact = subprocess.run(
+        ["git", "--no-replace-objects", "show", f"{revision}:{path}"],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if artifact.returncode:
+        raise GitSnapshotError(git_failure(
+            artifact, f"could not read `{path}` at {revision}"
+        ))
+    return artifact.stdout
+
+
+def decode_utf8_artifact(artifact, label):
+    try:
+        return artifact.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise GitSnapshotError(
+            f"{label} is not valid UTF-8: {error}"
+        ) from error
+
+
+def git_text_at(revision, path):
+    artifact = git_artifact_bytes_at(revision, path)
+    if artifact is None:
+        raise GitSnapshotError(
+            f"could not read `{path}` from {revision}"
+        )
+    return decode_utf8_artifact(artifact, f"`{path}` at {revision}")
+
+
+def queue_resolution_enabled():
+    contract = repo_artifact_bytes(QUEUE / "AGENTS.md")
+    return bool(
+        contract is not None
+        and text_fields(decode_utf8_artifact(
+            contract, "candidate `message-queue/AGENTS.md`"
+        )).get(
+            "Queue resolution schema", ""
+        ).strip() == "v1"
+    )
+
+
+def queue_resolution_activation_commit(head):
+    if not head:
+        return None
+    history = subprocess.run(
+        [
+            "git", "--no-replace-objects", "log",
+            "--reverse", "--format=%H", head, "--",
+            "message-queue/AGENTS.md",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if history.returncode:
+        raise GitSnapshotError(
+            history.stderr.strip()
+            or "could not inspect queue-resolution activation history"
+        )
+    for commit in history.stdout.splitlines():
+        try:
+            text = git_text_at(commit, "message-queue/AGENTS.md")
+        except GitSnapshotError:
+            continue
+        if text_fields(text).get("Queue resolution schema", "").strip() == "v1":
+            return commit
+    return None
+
+
+def deleted_paths_between(parent, child):
+    deleted = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status",
+            "-z", "-M", "--diff-filter=DR", parent, child, "--",
+            "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if deleted.returncode:
+        raise GitSnapshotError(git_failure(
+            deleted, f"could not inspect queue deletions in {child}"
+        ))
+    return deleted_queue_paths_from_name_status(deleted.stdout)
+
+
+def mutated_paths_between(parent, child):
+    changed = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status",
+            "-z", "-M", "--diff-filter=MRT", parent, child, "--",
+            "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, f"could not inspect queue mutations in {child}"
+        ))
+    return mutated_queue_paths_from_name_status(changed.stdout)
+
+
+def staged_deleted_queue_paths():
+    if not _GIT_HEAD_OID:
+        return []
+    deleted = subprocess.run(
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            "--diff-filter=DR", _GIT_HEAD_OID, "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if deleted.returncode:
+        raise GitSnapshotError(git_failure(
+            deleted, "could not inspect staged queue deletions"
+        ))
+    return deleted_queue_paths_from_name_status(deleted.stdout)
+
+
+def staged_mutated_queue_paths():
+    if not _GIT_HEAD_OID:
+        return []
+    changed = subprocess.run(
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            "--diff-filter=MRT", _GIT_HEAD_OID, "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, "could not inspect staged queue mutations"
+        ))
+    return mutated_queue_paths_from_name_status(changed.stdout)
+
+
+def queue_revision_edges(activation):
+    """Yield every governed parent/candidate edge in the staged or range view."""
+    if CHANGE_RANGE is None:
+        if _GIT_HEAD_OID:
+            yield _GIT_HEAD_OID, None
+        return
+    if CHANGE_RANGE.startswith("root:"):
+        range_head = CHANGE_RANGE[len("root:"):]
+        revision_range = range_head
+    else:
+        base, range_head = CHANGE_RANGE.split("...", 1)
+        merge_base = subprocess.run(
+            ["git", "--no-replace-objects", "merge-base", base, range_head],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if merge_base.returncode or not merge_base.stdout.strip():
+            raise GitSnapshotError(
+                merge_base.stderr.strip()
+                or "could not find the queue-deletion range merge base"
+            )
+        revision_range = f"{merge_base.stdout.strip()}..{range_head}"
+
+    revisions = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list",
+            "--reverse", "--topo-order", revision_range,
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if revisions.returncode:
+        raise GitSnapshotError(
+            revisions.stderr.strip()
+            or "could not enumerate queue-deletion commits"
+        )
+    commits = revisions.stdout.splitlines()
+    if _GIT_HEAD_OID != range_head:
+        commits.append(_GIT_HEAD_OID)
+    for commit in commits:
+        governed = subprocess.run(
+            [
+                "git", "--no-replace-objects", "merge-base",
+                "--is-ancestor", activation, commit,
+            ],
+            cwd=REPO,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if governed.returncode != 0:
+            continue
+        ancestry = subprocess.run(
+            [
+                "git", "--no-replace-objects", "rev-list",
+                "--parents", "-n", "1", commit,
+            ],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if ancestry.returncode:
+            raise GitSnapshotError(
+                ancestry.stderr.strip()
+                or f"could not inspect parents of {commit}"
+            )
+        for parent in ancestry.stdout.split()[1:]:
+            yield parent, commit
+
+
+def queue_deletion_events(activation):
+    """Yield prior/candidate revisions for every governed queue deletion."""
+    for parent, revision in queue_revision_edges(activation):
+        deleted = (
+            staged_deleted_queue_paths()
+            if revision is None
+            else deleted_paths_between(parent, revision)
+        )
+        for path in deleted:
+            yield path, git_text_at(parent, path), parent, revision
+
+
+def queue_mutation_events(activation):
+    """Yield both sides of every governed action modification or move."""
+    for parent, revision in queue_revision_edges(activation):
+        mutated = (
+            staged_mutated_queue_paths()
+            if revision is None
+            else mutated_paths_between(parent, revision)
+        )
+        for source, destination in mutated:
+            before = git_text_at(parent, source)
+            after_bytes = (
+                repo_artifact_bytes(REPO / destination)
+                if revision is None
+                else git_artifact_bytes_at(revision, destination)
+            )
+            if after_bytes is None:
+                raise GitSnapshotError(
+                    f"could not read queue mutation destination `{destination}`"
+                )
+            after = decode_utf8_artifact(
+                after_bytes,
+                f"`{destination}` in the queue mutation candidate",
+            )
+            yield source, destination, before, after, parent, revision
+
+
+def pickup_task_path(text):
+    candidates = [
+        path for path in context_path_candidates(
+            text_fields(text).get("Full context", "")
+        )
+        if re.fullmatch(
+            r"tasks/0_backlog/"
+            r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/task\.md",
+            path,
+        )
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def task_incarnations_at(revision, task_id):
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", revision, "--", "tasks",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(
+            tree.stderr.strip()
+            or f"could not inspect task state in {revision}"
+        )
+    paths = tree.stdout.splitlines()
+    return [
+        name for name in paths
+        if re.fullmatch(
+            rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+            + re.escape(task_id)
+            + r"/task\.md",
+            name,
+        )
+    ]
+
+
+def pickup_completed(path, text, prior_revision, revision):
+    got = text_fields(text)
+    if got.get("Request kind", "").strip() != "task-pickup" \
+            or got.get("Status", "").strip() != "open":
+        return False
+    backlog = pickup_task_path(text)
+    if backlog is None:
+        return False
+    task_id = Path(backlog).parts[2]
+    current = f"tasks/1_in-progress/{task_id}/task.md"
+    prior_incarnations = task_incarnations_at(prior_revision, task_id)
+    prior_artifact = git_artifact_bytes_at(prior_revision, backlog)
+    if prior_incarnations != [backlog] or prior_artifact is None:
+        return False
+    prior_task = text_fields(decode_utf8_artifact(
+        prior_artifact, f"`{backlog}` at {prior_revision}"
+    ))
+    if prior_task.get("Claimed-by", "").strip() != "unclaimed" \
+            or path not in task_queue_paths(
+                prior_task.get("Queue actions", "")
+            ):
+        return False
+    if revision is None:
+        entries = git_index_entries("tasks")
+        incarnations = [
+            name for name in entries
+            if re.fullmatch(
+                rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+                + re.escape(task_id)
+                + r"/task\.md",
+                name,
+            )
+        ]
+        artifact = repo_artifact_bytes(REPO / current)
+        backlog_absent = backlog not in entries
+    else:
+        incarnations = task_incarnations_at(revision, task_id)
+        artifact = git_artifact_bytes_at(revision, current)
+        backlog_absent = backlog not in incarnations
+    if len(incarnations) != 1 or incarnations[0] != current \
+            or artifact is None or not backlog_absent:
+        return False
+    task = text_fields(decode_utf8_artifact(
+        artifact, f"`{current}` in the pickup candidate"
+    ))
+    claimant = task.get("Claimed-by", "").strip()
+    return bool(
+        has_concrete_value(claimant)
+        and claimant != "unclaimed"
+        and path not in task_queue_paths(task.get("Queue actions", ""))
+    )
+
+
+def normalize_claim_status(text):
+    return re.sub(
+        r"^(\*\*Status:\*\*)[ \t]*.*$",
+        r"\1 <claimed-status>",
+        text,
+        count=1,
+        flags=re.M,
+    )
+
+
+def claim_identity(text, actor, leaf):
+    got = text_fields(text)
+    keys = {
+        "Filed", "Action", "Full context", "Resolution evidence",
+    }
+    if actor == "needs-human":
+        keys.update({
+            "Your answer", "Your review", "Review target",
+            "Review revision", "Reviewed revision", "Review outcome",
+            "Successor action",
+        })
+    else:
+        keys.update({
+            "Request kind", "Check", "Subject",
+            "Generated by", "Finding identity",
+        })
+    return tuple((key, got.get(key, "").strip()) for key in sorted(keys))
+
+
+MUTABLE_ACTION_FIELDS = {
+    "Status",
+    "Your answer",
+    "Your review",
+    "Review target",
+    "Review revision",
+    "Reviewed revision",
+    "Review outcome",
+    "Successor action",
+    "Blocks now",
+    "Blocks at",
+    "Until then",
+    "If unanswered",
+}
+
+
+def immutable_action_text(text):
+    """Return action-defining visible text with lifecycle state removed."""
+    clean = semantic_text(text)
+    clean = re.sub(
+        r"^## Agent notes\s*\n.*?(?=^##(?:\s|$)|\Z)",
+        "",
+        clean,
+        flags=re.M | re.S,
+    )
+    lines = []
+    for line in clean.splitlines():
+        matched = FIELD_RE.fullmatch(line)
+        if matched and matched.group(1) in MUTABLE_ACTION_FIELDS:
+            continue
+        lines.append(line.rstrip())
+    return "\n".join(lines).strip()
+
+
+def retry_action_identity(path, text):
+    item = REPO / path
+    if not (
+        reconciler_owned_retry(item, text)
+        or legacy_reconciler_retry(item, text)
+    ):
+        return None
+    got = text_fields(text)
+    return (
+        "generated-retry",
+        got.get("Check", "").strip(),
+        got.get("Subject", "").strip().strip("`"),
+    )
+
+
+def queue_action_identity(path, text):
+    retry = retry_action_identity(path, text)
+    return retry if retry is not None else (
+        "ordinary-action",
+        immutable_action_text(text),
+    )
+
+
+def human_response_fields(text):
+    got = text_fields(text)
+    return {
+        key: got.get(key, "").strip()
+        for key in (
+            "Your answer",
+            "Your review",
+            "Review target",
+            "Review revision",
+            "Reviewed revision",
+            "Review outcome",
+        )
+    }
+
+
+def first_concrete_response(fields):
+    for key in ("Your answer", "Your review"):
+        if has_concrete_value(fields.get(key, "")):
+            return key
+    return None
+
+
+def queue_mutation_problem(source, destination, before, after):
+    """Reject action replacement while permitting lifecycle-only updates."""
+    if queue_action_identity(source, before) != queue_action_identity(
+        destination, after
+    ):
+        return "action identity changed while the queue item remained live"
+
+    source_parts = Path(source).parts
+    destination_parts = Path(destination).parts
+    actor = (
+        destination_parts[1]
+        if len(destination_parts) > 1
+        and destination_parts[1] in {"needs-human", "needs-agent"}
+        else source_parts[1]
+        if len(source_parts) > 1
+        and source_parts[1] in {"needs-human", "needs-agent"}
+        else ""
+    )
+    if actor == "needs-human":
+        prior_response = human_response_fields(before)
+        response_key = first_concrete_response(prior_response)
+        if response_key is not None:
+            current_response = human_response_fields(after)
+            if current_response != prior_response:
+                return (
+                    "human response or its immutable review binding changed "
+                    "after the first concrete response"
+                )
+
+    source_timing = delivery_class(Path(source).name)
+    destination_timing = delivery_class(Path(destination).name)
+    prior_timing = tuple(
+        (key, text_fields(before).get(key, "").strip())
+        for keys in QUEUE_TIMING_FIELDS.values()
+        for key in keys
+    )
+    current_timing = tuple(
+        (key, text_fields(after).get(key, "").strip())
+        for keys in QUEUE_TIMING_FIELDS.values()
+        for key in keys
+    )
+    if source_timing == destination_timing and prior_timing != current_timing:
+        return "dependency timing changed without a matching timing-prefix rename"
+    return None
+
+
+def revision_parents(revision, label):
+    ancestry = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list",
+            "--parents", "-n", "1", revision,
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if ancestry.returncode:
+        raise GitSnapshotError(
+            ancestry.stderr.strip() or f"could not inspect {label}"
+        )
+    return ancestry.stdout.split()[1:]
+
+
+def matching_lineage_paths(revision, path, slug, identity):
+    """Find this action in one parent, following an identity-preserving rename."""
+    same_path = git_artifact_bytes_at(revision, path)
+    if same_path is not None:
+        text = decode_utf8_artifact(
+            same_path, f"`{path}` at {revision}"
+        )
+        # Preserve the current incarnation even when its action bytes changed; the
+        # claim check then reports that rewrite instead of losing the receipt.
+        return [(path, text)]
+
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "-z", revision, "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not follow queue action lineage at {revision}"
+        ))
+    matches = []
+    for candidate, mode in parse_git_tree_records(tree.stdout).items():
+        if mode not in ("100644", "100755") \
+                or not governed_queue_path(candidate) \
+                or queue_action_slug(candidate) != slug:
+            continue
+        artifact = git_artifact_bytes_at(revision, candidate)
+        if artifact is None:
+            continue
+        candidate_text = decode_utf8_artifact(
+            artifact, f"`{candidate}` at {revision}"
+        )
+        if queue_action_identity(candidate, candidate_text) == identity:
+            matches.append((candidate, candidate_text))
+    if len(matches) > 1:
+        raise GitSnapshotError(
+            f"queue action lineage is ambiguous at {revision}: "
+            + ", ".join(path for path, _text in matches)
+        )
+    return matches
+
+
+def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
+    """Require a committed status-only claim, even across a later timing rename."""
+    claimed = "folding" if actor == "needs-human" else "in-repair"
+    initial = "waiting" if actor == "needs-human" else "open"
+    identity = queue_action_identity(path, text)
+    slug = queue_action_slug(path)
+    final_identity = claim_identity(text, actor, leaf)
+    stack = [(prior_revision, path, text)]
+    seen = set()
+    while stack:
+        revision, current_path, current = stack.pop()
+        state = (revision, current_path)
+        if state in seen:
+            continue
+        seen.add(state)
+        predecessors = []
+        for parent in revision_parents(
+            revision, f"claim history for `{current_path}`"
+        ):
+            predecessors.extend(
+                (parent, previous_path, previous)
+                for previous_path, previous in matching_lineage_paths(
+                    parent, current_path, slug, identity
+                )
+            )
+        if text_fields(current).get("Status", "").strip() == claimed:
+            for _parent, previous_path, previous in predecessors:
+                if previous_path != current_path:
+                    continue  # a claim commit changes only the status line
+                if text_fields(previous).get("Status", "").strip() != initial:
+                    continue
+                if normalize_claim_status(previous) != normalize_claim_status(current):
+                    continue
+                if claim_identity(current, actor, leaf) != final_identity:
+                    return "action identity or response changed after it was claimed"
+                return None
+        stack.extend(predecessors)
+    return (
+        f"no committed one-line {initial} -> {claimed} claim transition exists"
+    )
+
+
+def resolution_evidence_paths(text):
+    value = text_fields(text).get("Resolution evidence", "")
+    paths = context_path_candidates(value)
+    if not paths or any(
+        path == "message-queue" or path.startswith("message-queue/")
+        for path in paths
+    ):
+        return []
+    return paths
+
+
+def resolution_evidence_problem(text, prior_revision, revision):
+    paths = resolution_evidence_paths(text)
+    if not paths:
+        return "missing non-queue **Resolution evidence:** file path"
+    unchanged = []
+    for path in paths:
+        before = git_artifact_bytes_at(prior_revision, path)
+        after = (
+            repo_artifact_bytes(REPO / path)
+            if revision is None
+            else git_artifact_bytes_at(revision, path)
+        )
+        if after is None or after == before:
+            unchanged.append(path)
+    if unchanged:
+        return (
+            "resolution evidence was not created or changed in the deletion commit: "
+            + ", ".join(f"`{path}`" for path in unchanged)
+        )
+    return None
+
+
+@contextlib.contextmanager
+def git_revision_candidate(revision):
+    """Temporarily expose one committed tree through the candidate-read helpers."""
+    global CHANGE_RANGE, _GIT_SNAPSHOT_CACHE_ACTIVE
+    global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
+    global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
+    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
+
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "-z", revision,
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not capture historical candidate {revision}"
+        ))
+    modes = {}
+    oids = {}
+    all_paths = set()
+    for record in tree.stdout.split(b"\0"):
+        metadata, separator, encoded_name = record.partition(b"\t")
+        if not separator:
+            continue
+        parts = metadata.decode("ascii", errors="replace").split()
+        if len(parts) != 3:
+            raise GitSnapshotError(
+                f"Git returned malformed tree data for {revision}"
+            )
+        mode, kind, oid = parts
+        name = encoded_name.decode("utf-8", errors="surrogateescape")
+        all_paths.add(name)
+        if kind == "blob":
+            modes[name] = mode
+            oids[name] = oid
+
+    saved = (
+        CHANGE_RANGE,
+        _GIT_SNAPSHOT_CACHE_ACTIVE,
+        _GIT_INDEX_CACHE,
+        _GIT_INDEX_OID_CACHE,
+        _GIT_INDEX_ALL_PATHS_CACHE,
+        _GIT_HEAD_PATHS_CACHE,
+        _GIT_HEAD_OID,
+        _GIT_ARTIFACT_CACHE,
+        _GIT_BLOB_CACHE,
+    )
+    close_git_cat_file()
+    CHANGE_RANGE = f"root:{revision}"
+    _GIT_SNAPSHOT_CACHE_ACTIVE = True
+    _GIT_INDEX_CACHE = modes
+    _GIT_INDEX_OID_CACHE = oids
+    _GIT_INDEX_ALL_PATHS_CACHE = all_paths
+    _GIT_HEAD_PATHS_CACHE = all_paths
+    _GIT_HEAD_OID = revision
+    _GIT_ARTIFACT_CACHE = {}
+    _GIT_BLOB_CACHE = {}
+    try:
+        yield
+    finally:
+        close_git_cat_file()
+        (
+            CHANGE_RANGE,
+            _GIT_SNAPSHOT_CACHE_ACTIVE,
+            _GIT_INDEX_CACHE,
+            _GIT_INDEX_OID_CACHE,
+            _GIT_INDEX_ALL_PATHS_CACHE,
+            _GIT_HEAD_PATHS_CACHE,
+            _GIT_HEAD_OID,
+            _GIT_ARTIFACT_CACHE,
+            _GIT_BLOB_CACHE,
+        ) = saved
+
+
+def generated_retry_clear(text, revision=None):
+    got = text_fields(text)
+    check = got.get("Check", "").strip()
+    subject = got.get("Subject", "").strip().strip("`")
+    if not check or not subject or check == "queue-resolution":
+        return False
+    checker = CHECKS.get(check)
+    if checker is None:
+        return False
+    context = (
+        contextlib.nullcontext()
+        if revision is None
+        else git_revision_candidate(revision)
+    )
+    with context:
+        return not any(
+            finding.check == check and str(finding.subject) == subject
+            for finding in checker()
+        )
+
+
+def candidate_artifact_bytes(path, revision):
+    return (
+        repo_artifact_bytes(REPO / path)
+        if revision is None
+        else git_artifact_bytes_at(revision, path)
+    )
+
+
+def review_candidate_problem(text, revision):
+    got = text_fields(text)
+    target = review_target(got.get("Review target", ""))
+    review_revision = got.get("Review revision", "").strip()
+    if target is None or not REVIEW_REVISION_RE.fullmatch(review_revision):
+        return "review target or immutable revision is malformed"
+    if got.get("Reviewed revision", "").strip() != review_revision:
+        return "review response was not bound to its immutable revision"
+    kind, value = target
+    if kind == "local":
+        artifact = candidate_artifact_bytes(value, revision)
+        if artifact is None:
+            return "reviewed local target is absent from the deletion candidate"
+        expected = "sha256:" + hashlib.sha256(artifact).hexdigest()
+        if review_revision != expected:
+            return "reviewed local target changed after the bound review"
+    elif kind == "git":
+        if value != review_revision or git_review_revision_problems(
+            review_revision
+        ):
+            return "reviewed Git target is no longer the bound artifact"
+    return None
+
+
+def review_successor_problem(path, text, prior_revision, revision):
+    got = text_fields(text)
+    candidates = context_path_candidates(got.get("Successor action", ""))
+    if len(candidates) != 1:
+        return "not-approved review needs exactly one **Successor action:**"
+    successor_path = candidates[0]
+    successor_parts = Path(successor_path).parts
+    if successor_path == path or not valid_queue_item_path(successor_path) \
+            or successor_parts[1:3] != ("needs-human", "reviews"):
+        return "review successor is not a distinct canonical human review action"
+    successor_bytes = candidate_artifact_bytes(successor_path, revision)
+    if successor_bytes is None:
+        return "review successor is not live in the deletion candidate"
+    if git_artifact_bytes_at(prior_revision, successor_path) is not None:
+        return "review successor was not introduced by the resolution edge"
+    successor = text_fields(decode_utf8_artifact(
+        successor_bytes, f"`{successor_path}` in the deletion candidate"
+    ))
+    if path not in context_path_candidates(successor.get("Supersedes", "")):
+        return "review successor does not point back with **Supersedes:**"
+    if successor.get("Status", "").strip() not in {
+        "awaiting-artifact", "waiting"
+    }:
+        return "review successor is not awaiting a review"
+    if delivery_class(Path(successor_path).name) != delivery_class(Path(path).name):
+        return "review successor changes the dependency timing"
+    timing = delivery_class(Path(path).name)
+    for key in QUEUE_TIMING_FIELDS.get(timing, ()):
+        if successor.get(key, "").strip() != got.get(key, "").strip():
+            return f"review successor changes **{key}:**"
+    if successor.get("Full context", "").strip() != got.get(
+        "Full context", ""
+    ).strip():
+        return "review successor changes the stable **Full context:** lineage"
+    return None
+
+
+def queue_deletion_problem(path, text, prior_revision, revision):
+    got = text_fields(text)
+    parts = Path(path).parts
+    actor = parts[1] if len(parts) > 1 else ""
+    leaf = parts[2] if len(parts) > 2 else ""
+    status = got.get("Status", "").strip()
+    if actor not in {"needs-human", "needs-agent"}:
+        return (
+            "malformed queue actor cannot establish resolution authority; "
+            "normalize the live item to a canonical actor path first"
+        )
+    if actor == "needs-human":
+        response_keys = (
+            ("Your review",)
+            if leaf == "reviews"
+            else ("Your answer", "Your review")
+        )
+        response = next(
+            (got.get(key, "") for key in response_keys if key in got),
+            "",
+        )
+        if status != "folding" or not has_concrete_value(response):
+            return (
+                "human action was not committed as folding with a concrete response"
+            )
+        if leaf == "reviews":
+            # The response disposition is write-once evidence, not pending delivery
+            # state. Older live reviews may omit it until a response is recorded.
+            outcome = got.get("Review outcome", "pending").strip()
+            if outcome not in {"approved", "not-approved"}:
+                return "review has no terminal **Review outcome:**"
+        lifecycle = claimed_lifecycle_problem(
+            path, text, prior_revision, actor, leaf
+        )
+        if lifecycle:
+            return lifecycle
+        if leaf == "reviews":
+            target_problem = review_candidate_problem(text, revision)
+            if target_problem:
+                return target_problem
+            return (
+                None
+                if got.get("Review outcome", "").strip() == "approved"
+                else review_successor_problem(
+                    path, text, prior_revision, revision
+                )
+            )
+        return resolution_evidence_problem(text, prior_revision, revision)
+    item = REPO / path
+    if actor == "needs-agent" and leaf == "retries" \
+            and reconciler_owned_retry(item, text):
+        check = got.get("Check", "").strip()
+        if generated_retry_clear(text, revision):
+            return None
+        if check in CHECKS and check != "queue-resolution":
+            return "generated retry identity is not cleared in the deletion candidate"
+    if actor == "needs-agent" and leaf == "requests" \
+            and got.get("Request kind", "").strip() == "task-pickup":
+        return (
+            None
+            if pickup_completed(path, text, prior_revision, revision)
+            else "task pickup was not atomically claimed and moved"
+        )
+    if status != "in-repair":
+        return "agent action was not committed as in-repair before deletion"
+    lifecycle = claimed_lifecycle_problem(
+        path, text, prior_revision, actor, leaf
+    )
+    return lifecycle or resolution_evidence_problem(
+        text, prior_revision, revision
+    )
+
+
+def check_queue_resolution():
+    if not (REPO / ".git").exists():
+        return
+    activation = queue_resolution_activation_commit(_GIT_HEAD_OID)
+    enabled = queue_resolution_enabled()
+    if activation is None and not enabled:
+        return
+    if activation is not None and not enabled:
+        yield Finding(
+            "queue-resolution",
+            Path("message-queue/AGENTS.md"),
+            "queue-resolution v1 was removed after activation",
+            "restore **Queue resolution schema:** v1 before changing queue state",
+        )
+    if activation is None:
+        activation = _GIT_HEAD_OID
+    reported = set()
+    for (
+        source,
+        destination,
+        before,
+        after,
+        _prior_revision,
+        _revision,
+    ) in queue_mutation_events(activation):
+        problem = queue_mutation_problem(
+            source, destination, before, after
+        )
+        if not problem:
+            continue
+        identity = (source, destination, problem)
+        if identity in reported:
+            continue
+        reported.add(identity)
+        yield Finding(
+            "queue-resolution",
+            Path(destination),
+            f"live queue action was rewritten: {problem}",
+            "preserve the action and response identity; file a distinct "
+            "successor action when the requested work changes",
+        )
+    for path, text, prior_revision, revision in queue_deletion_events(
+        activation
+    ):
+        problem = queue_deletion_problem(
+            path, text, prior_revision, revision
+        )
+        if problem:
+            identity = (path, problem)
+            if identity in reported:
+                continue
+            reported.add(identity)
+            yield Finding(
+                "queue-resolution",
+                Path(path),
+                f"deleted unresolved queue item: {problem}",
+                "commit the required claim/response evidence before deleting it",
+            )
+
+
 # ---------------------------------------------------------------- checks
 
 def check_queue_name():
@@ -824,6 +2042,19 @@ def check_queue_schema():
                 " with optional task: tokens",
                 "remove prose and name a machine-readable future boundary",
             )
+        if timing == "future-blocking" and "Blocks at" in got:
+            tokens = future_boundary_tokens(got["Blocks at"])
+            internal = boundary_transitions(tokens).intersection(
+                TASK_LIFECYCLE_TRANSITIONS
+            )
+            if internal and not boundary_task_ids(tokens):
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "task lifecycle transition requires at least one task:<id> token: "
+                    + ",".join(sorted(internal)),
+                    "append every affected task:<id> after the transition token",
+                )
         unexpected = set(QUEUE_TIMING_FIELDS["blocking"])
         unexpected.update(QUEUE_TIMING_FIELDS["future-blocking"])
         unexpected.update(QUEUE_TIMING_FIELDS["non-blocking"])
@@ -850,6 +2081,21 @@ def check_queue_schema():
         text = repo_text(item)
         clean = semantic_text(text)
         got = text_fields(text)
+        status = got.get("Status", "").strip()
+        allowed_statuses = (
+            {"awaiting-artifact", "waiting", "folding"}
+            if actor == "needs-human" and leaf == "reviews"
+            else {"waiting", "folding"}
+            if actor == "needs-human"
+            else {"open", "in-repair"}
+        )
+        if "Status" in got and status not in allowed_statuses:
+            yield Finding(
+                "queue-schema",
+                item.relative_to(REPO),
+                f"**Status:** must be one of: {', '.join(sorted(allowed_statuses))}",
+                "use the actor lifecycle defined by the matching queue template",
+            )
         for key, count in sorted(field_counts(text).items()):
             if count > 1:
                 yield Finding(
@@ -885,6 +2131,18 @@ def check_queue_schema():
         )
         moving_task_paths = task_status_references(text)
         is_repair_record = actor == "needs-agent" and leaf == "retries"
+        needs_resolution_evidence = (
+            actor == "needs-human" and leaf != "reviews"
+        ) or (
+            actor == "needs-agent" and not (is_pickup or is_repair_record)
+        )
+        if needs_resolution_evidence and not resolution_evidence_paths(text):
+            yield Finding(
+                "queue-schema",
+                item.relative_to(REPO),
+                "ordinary action needs non-queue **Resolution evidence:** file path(s)",
+                "name the durable file(s) that completion will create or change",
+            )
         if moving_task_paths and not (is_pickup or is_repair_record):
             yield Finding(
                 "queue-schema",
@@ -930,6 +2188,9 @@ def check_queue_schema():
             target = got["Review target"].strip()
             revision = got.get("Review revision", "").strip()
             reviewed_revision = got.get("Reviewed revision", "").strip()
+            # Pending delivery predates this response-classification field. Treat
+            # omission as pending; a concrete response still requires a terminal value.
+            outcome = got.get("Review outcome", "pending").strip()
             parsed_target = review_target(target)
             local_candidates = (
                 [parsed_target[1]]
@@ -973,6 +2234,13 @@ def check_queue_schema():
                         item.relative_to(REPO),
                         "review response and binding cannot exist before the artifact",
                         "leave Your review and Reviewed revision blank until status is waiting",
+                    )
+                if outcome != "pending":
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        "awaiting-artifact review must have **Review outcome:** pending",
+                        "leave the outcome pending until the bound response exists",
                     )
             else:
                 if not target_available:
@@ -1034,12 +2302,26 @@ def check_queue_schema():
                             "review response is not bound to the requested revision",
                             "copy Review revision into Reviewed revision with the response",
                         )
+                    if outcome not in {"approved", "not-approved"}:
+                        yield Finding(
+                            "queue-schema",
+                            item.relative_to(REPO),
+                            "review response needs **Review outcome:** approved or not-approved",
+                            "classify the response before claiming it for folding",
+                        )
                 elif has_concrete_value(reviewed_revision):
                     yield Finding(
                         "queue-schema",
                         item.relative_to(REPO),
                         "Reviewed revision exists without a concrete review response",
                         "clear the stale binding or record the corresponding response",
+                    )
+                elif outcome != "pending":
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        "review without a response must keep **Review outcome:** pending",
+                        "record a response and binding before setting a terminal outcome",
                     )
         summary = section_body(clean, "## What you need to know")
         if not has_concrete_value(summary):
@@ -1452,7 +2734,7 @@ def check_task_structure():
         )
     reported_invalid = set()
     reported_loose = set()
-    if TASKS.is_dir():
+    if TASKS.is_dir() and CHANGE_RANGE is None:
         for entry in sorted(TASKS.iterdir()):
             if entry.name in ("AGENTS.md", "README.md", "CLAUDE.md") \
                     or entry.name.startswith("."):
@@ -1725,6 +3007,8 @@ def live_handover_paths():
                 and CONVERSATION_RE.fullmatch(path.parts[2]) \
                 and path.parts[3] == "handover.md":
             paths.add(path)
+    if CHANGE_RANGE is not None:
+        return paths
     if CONVERSATIONS.is_dir():
         for handover in CONVERSATIONS.glob("*/handover.md"):
             if not handover.is_file() or handover.is_symlink():
@@ -2336,6 +3620,17 @@ def check_handover_queue_projection():
 
 
 def memory_entries():
+    if (REPO / ".git").exists():
+        for name, mode in sorted(git_index_entries("memory").items()):
+            path = Path(name)
+            if mode in ("100644", "100755") \
+                    and len(path.parts) >= 3 \
+                    and path.parts[0] == "memory" \
+                    and path.parts[1] in MEMORY_ZONES \
+                    and path.suffix == ".md" \
+                    and path.name != "README.md":
+                yield path.parts[1], REPO / path
+        return
     for zone in MEMORY_ZONES:
         folder = MEMORY / zone
         if folder.is_dir():
@@ -2374,9 +3669,8 @@ def generated_index():
     lines = ["<!-- GENERATED by reconcile.py --fix-index — edit the memory files, never this index -->",
              "# Memory index", ""]
     superseded = set()
-    decisions = MEMORY / "decisions"
-    if decisions.is_dir():
-        for decision in decisions.rglob("*.md"):
+    for zone, decision in memory_entries():
+        if zone == "decisions":
             superseded.update(context_files(fields(decision).get("Supersedes", "")))
     for zone in MEMORY_ZONES:
         entries = [(z, e) for z, e in memory_entries() if z == zone]
@@ -2384,7 +3678,7 @@ def generated_index():
             continue
         lines.append(f"## {zone}")
         for _, entry in entries:
-            text = entry.read_text(encoding="utf-8")
+            text = repo_text(entry)
             title = next((l[2:] for l in text.splitlines() if l.startswith("# ")), entry.stem)
             metadata = fields(entry)
             status = ""
@@ -2403,7 +3697,9 @@ def check_memory_index():
     index = MEMORY / "index.md"
     if not MEMORY.is_dir():
         return
-    if not index.is_file() or index.read_text(encoding="utf-8") != generated_index():
+    artifact = repo_artifact_bytes(index)
+    if artifact is None \
+            or artifact.decode("utf-8") != generated_index():
         yield Finding("memory-index", index.relative_to(REPO),
                       "index does not match the memory files",
                       "run: python3 automation/reconcile/reconcile.py --fix-index")
@@ -2485,8 +3781,20 @@ def check_roadmap_fresh():
     if not current.is_file() or not done.is_dir():
         return
     updated = parse_date(fields(current).get("Last-updated", ""))
-    newest = max((parse_date(t.name) for t in done.iterdir()
-                  if t.is_dir() and parse_date(t.name)), default=None)
+    if (REPO / ".git").exists():
+        done_ids = {
+            Path(name).parts[2]
+            for name in git_index_entries("tasks/4_done")
+            if len(Path(name).parts) >= 4
+            and TASK_ID_RE.fullmatch(Path(name).parts[2])
+        }
+        newest = max(
+            (parse_date(task_id) for task_id in done_ids),
+            default=None,
+        )
+    else:
+        newest = max((parse_date(t.name) for t in done.iterdir()
+                      if t.is_dir() and parse_date(t.name)), default=None)
     if updated and newest and updated < newest:
         yield Finding("roadmap-fresh", "roadmap/current-state.md",
                       f"Last-updated {updated} predates the newest done task ({newest})",
@@ -2497,6 +3805,7 @@ CHECKS = {
     "queue-name": check_queue_name,
     "queue-location": check_queue_location,
     "queue-schema": check_queue_schema,
+    "queue-resolution": check_queue_resolution,
     "queue-boundary": check_active_queue_boundaries,
     "queue-task-reciprocity": check_queue_task_reciprocity,
     "stale-queue": check_stale_queue,
@@ -2515,10 +3824,15 @@ CHECKS = {
 
 # ---------------------------------------------------------- retry filing
 
+def finding_identity(check, subject):
+    return hashlib.sha256(
+        f"{check}\0{subject}".encode("utf-8")
+    ).hexdigest()
+
+
 def finding_key(f):
     slug = re.sub(r"[^a-z0-9]+", "-", str(f.subject).lower()).strip("-")
-    identity = f"{f.check}\0{f.subject}".encode("utf-8")
-    digest = hashlib.sha256(identity).hexdigest()[:10]
+    digest = finding_identity(f.check, f.subject)[:10]
     base = f"reconcile-{f.check}-{slug}"
     room = 80 - len(digest) - 1
     return f"{base[:room].rstrip('-')}-{digest}"
@@ -2578,6 +3892,7 @@ def retry_text(f):
         f"**Status:** open\n"
         f"**Filed:** {TODAY}, by reconciler\n"
         f"**Generated by:** {RETRY_GENERATOR}\n"
+        f"**Finding identity:** sha256:{finding_identity(f.check, f.subject)}\n"
         f"**Check:** {f.check}\n"
         f"**Subject:** `{f.subject}`\n"
         f"**Action:** {retry_action(f)}\n"
@@ -2589,8 +3904,34 @@ def retry_text(f):
 
 def reconciler_owned_retry(path, text):
     got = text_fields(text)
-    if got.get("Generated by", "").strip() == RETRY_GENERATOR:
-        return True
+    check = got.get("Check", "").strip()
+    subject = got.get("Subject", "").strip().strip("`")
+    identity = got.get("Finding identity", "").strip()
+    filed = got.get("Filed", "")
+    if not (
+        got.get("Generated by", "").strip() == RETRY_GENERATOR
+        and check
+        and subject
+        and identity == f"sha256:{finding_identity(check, subject)}"
+        and re.search(r"(?:^|,\s*)by reconciler(?:\s*$|,)", filed)
+        and text.count(RETRY_PROJECTION_START) == 1
+        and text.count(RETRY_PROJECTION_END) == 1
+        and "## Broken invariant" in text
+        and "## Fix" in text
+    ):
+        return False
+    unprefixed = re.sub(
+        r"^(?:blocking|future-blocking|non-blocking)-", "", path.name
+    )
+    expected = finding_key(Finding(check, Path(subject), "", ""))
+    return bool(re.fullmatch(
+        re.escape(expected) + r"(?:-[0-9]+)?\.md",
+        unprefixed,
+    ))
+
+
+def legacy_reconciler_retry(path, text):
+    got = text_fields(text)
     unprefixed = re.sub(
         r"^(?:blocking|future-blocking|non-blocking)-", "", path.name
     )
@@ -2619,6 +3960,11 @@ def refresh_retry_text(text, finding, timing="blocking"):
     additions = []
     if "Generated by" not in got:
         additions.append(f"**Generated by:** {RETRY_GENERATOR}")
+    desired_identity = (
+        f"sha256:{finding_identity(finding.check, finding.subject)}"
+    )
+    if got.get("Finding identity", "").strip() != desired_identity:
+        additions.append(f"**Finding identity:** {desired_identity}")
     if timing == "blocking" and "Blocks now" not in got:
         additions.append("**Blocks now:** transition:merge")
     subject_line = re.search(r"^\*\*Subject:\*\*.*$", text, flags=re.M)
@@ -2695,7 +4041,10 @@ def retry_destination(key, finding):
                     or not candidate.is_file() or candidate.is_symlink():
                 continue
             text = candidate.read_text(encoding="utf-8")
-            if reconciler_owned_retry(candidate, text) \
+            if (
+                reconciler_owned_retry(candidate, text)
+                or legacy_reconciler_retry(candidate, text)
+            ) \
                     and retry_identity_matches(text, finding):
                 return candidate
 
@@ -2706,7 +4055,10 @@ def retry_destination(key, finding):
         if not candidate.is_file() or candidate.is_symlink():
             continue
         text = candidate.read_text(encoding="utf-8")
-        if reconciler_owned_retry(candidate, text) \
+        if (
+            reconciler_owned_retry(candidate, text)
+            or legacy_reconciler_retry(candidate, text)
+        ) \
                 and retry_identity_matches(text, finding):
             return candidate
 
@@ -2723,13 +4075,15 @@ def file_retries(findings):
     RETRIES.mkdir(parents=True, exist_ok=True)
     wanted = aggregate_findings(findings)
     active_paths = set()
+    removed = 0
     for f in wanted:
         key = finding_key(f)
         desired = retry_destination(key, f)
         active_paths.add(desired)
         if desired.is_file() and not desired.is_symlink():
             text = desired.read_text(encoding="utf-8")
-            if reconciler_owned_retry(desired, text):
+            if reconciler_owned_retry(desired, text) \
+                    or legacy_reconciler_retry(desired, text):
                 refreshed = refresh_retry_text(
                     text, f, delivery_class(desired.name)
                 )
@@ -2745,7 +4099,10 @@ def file_retries(findings):
             if not legacy.is_file() or legacy.is_symlink():
                 continue
             text = legacy.read_text(encoding="utf-8")
-            if not reconciler_owned_retry(legacy, text) \
+            if not (
+                reconciler_owned_retry(legacy, text)
+                or legacy_reconciler_retry(legacy, text)
+            ) \
                     or not retry_identity_matches(text, f):
                 continue
             desired.write_text(
@@ -2754,18 +4111,22 @@ def file_retries(findings):
                 ),
                 encoding="utf-8",
             )
+            legacy.unlink()
+            removed += 1
             migrated = True
             break
         if migrated:
             continue
         desired.write_text(retry_text(f), encoding="utf-8")
-    removed = 0
     generated = set(RETRIES.glob("*.md"))
     for item in generated:
         if item.is_symlink() or not item.is_file():
             continue
         text = item.read_text(encoding="utf-8")
         if not reconciler_owned_retry(item, text):
+            continue
+        check = text_fields(text).get("Check", "").strip()
+        if check not in CHECKS or check == "queue-resolution":
             continue
         if item not in active_paths:
             item.unlink()
@@ -2817,6 +4178,7 @@ def reconcile(argv=None):
         )
     ACTIVE_TRANSITIONS = set(args.at_transition)
     CHANGE_RANGE = args.range
+    validate_range_candidate(CHANGE_RANGE)
     if args.task_id:
         task_id = args.task_id
         if task_id.startswith("task/"):

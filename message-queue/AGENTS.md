@@ -1,5 +1,6 @@
 # message-queue/ — the canonical action bus
 
+**Queue resolution schema:** v1
 Every pending human↔agent action and every action another agent/session must discover
 lives here, one file per action. PRs, issues, chat, tasks, and handovers are projections:
 they may summarize and link a live item, never originate a durable ask. Background stays
@@ -42,19 +43,18 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   the action from zero context, compare meaningful dispositions, give a small example,
   state the unattended/boundary result, link a complete source, and expose a response
   slot. Writing guide: `handbook/human-action-guide.md`.
-- Unknown authorship is reviewed, never executed; authority rules:
-  `handbook/principles/provenance-over-position.md`.
-- Claim before resolving with a committed one-line status change (`folding` or
-  `in-repair`). Re-read before every write; never edit a human's response.
+- Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
+- Commit a human response while `waiting`; claim later by changing only `Status` to
+  `folding`. Agent claims likewise change only `open` to `in-repair`. Never edit the
+  response or action identity after claiming.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and exactly one Full context link: the backlog task's current `task.md`. The task
   links it reciprocally, and the atomic claim/move commit deletes it. Only pickups use
   moving task paths as live context; retries may quote one only as broken-state evidence.
-- A review without its exact artifact uses `Status: awaiting-artifact` plus pending
-  target/revision. Waiting reviews name one target and bind it to file SHA-256 or locally
-  available full Git commit id(s); the answer copies that to `Reviewed revision`,
-  invalidating stale responses. A PR URL is navigation, never revision authority.
-- Fold a response into its durable source before deleting the live item. Resolved items
-  are deleted in the resolving commit; git history is the archive.
-- A response from chat is transcribed into the item before being used. If the timing
-  changes, rename the live file before continuing.
+- Ordinary actions predeclare `Resolution evidence`; every named non-queue file changes
+  in the deletion commit. Reviews bind one exact target/revision and classify the answer
+  as `approved` or `not-approved`; approval revalidates the target, while non-approval
+  leaves a same-timing successor. A PR URL is navigation, never revision authority.
+- Generated retries delete only with exact identity and a cleared finding; task pickups
+  require the atomic backlog-to-claimed move. Git history archives resolved items.
+- Transcribe chat responses before use; rename the live file whenever timing changes.

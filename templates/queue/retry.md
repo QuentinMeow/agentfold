@@ -8,11 +8,12 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 
 # <The broken invariant, one line>
 
-**Status:** open
+**Status:** <open | in-repair>
 **Filed:** <YYYY-MM-DD>, by <reconciler | agent/session — link>
 **Action:** <repair or explicitly reject the finding>
 **Check:** <reconciler check id, or "manual">
 **Subject:** <file/folder the invariant is about — link>
+**Resolution evidence:** `<durable file completion will create or change>`
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

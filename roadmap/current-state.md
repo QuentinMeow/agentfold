@@ -12,13 +12,18 @@ What is true today, mapped to the desired-state lines.
   schemas, queue timing names/fields, task↔queue links, new handover projections, link
   targets, line budgets (AGENTS.md, SKILL.md, root README), memory expiry, and
   dependency-aware stale items. Visible CommonMark is the evidence boundary; task
-  status and task-scoped admission enforce named transitions. It files collision-safe,
-  aggregated retry projections while preserving actor notes. A separate Git boundary gate requires
+  status and task-scoped admission enforce named transitions. Queue deletion is bound
+  to Git history, one-line claims, changed resolution evidence, review successors, and
+  checked pickup/retry exceptions. It files collision-safe, aggregated retry
+  projections while preserving actor notes. A separate Git boundary gate requires
   substitution evidence for core diffs and rejects obvious user-global access in
   tracked executables. Its token-expensive independent review mode is manually invoked
   outside the gate; `--require-review` validates a revision-bound receipt, while
   pre-commit and CI report that the manual review was not invoked by default. They still
-  run repository tests across services, skills, and automation. No template↔check drift
+  run repository tests across services, skills, and automation. A provider-neutral
+  external-action gate binds PR prose to an immutable candidate, makes each declared
+  action entry link one live human queue item, and rejects action-like prose outside
+  that section; the GitHub workflow is a thin event adapter. No template↔check drift
   detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the

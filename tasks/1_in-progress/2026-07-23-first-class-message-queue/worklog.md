@@ -9,8 +9,9 @@
 - Found the first concrete gap: the original queue item requested only a generic
   acknowledgement, while later PR-only questions introduced new judgments without the
   choice explanations, examples, or canonical queue links required by the decision guide.
-- Transcribed the owner's answers into three queue items, claimed them before folding,
-  and pushed those coordination commits directly to `main`.
+- Transcribed the owner's answers into three queue items while they were waiting,
+  claimed them in separate status-only commits before folding, and pushed those
+  coordination commits directly to `main`.
 - Completed independent audits of the historical agent reasoning, live-action surfaces,
   and naming/check blast radius. The “blocking claims” question was an agent-owned
   consistency audit; the other jargon-heavy prompt was at least three separate reviews.
@@ -53,3 +54,33 @@
   legitimate active-task follow-ups, response revision binding, and exact new-handover
   projection. The full repository test runner passed 4/4 files (55 core-scope tests
   with one skip, 50 queue tests, 5 quote-api tests, and 3 quote-cli tests).
+- Later adversarial rounds found that range checks were not bound to the checked-out
+  candidate and that queue deletion trusted only the final label. Range mode now
+  accepts only its exact head or exact two-parent synthetic merge, requires a clean
+  candidate, and reads a captured index/HEAD snapshot.
+- Made queue-resolution activation sticky and history-aware. Ordinary actions require
+  a committed one-line claim plus changed non-queue evidence; review approval
+  revalidates the target, non-approval leaves a same-boundary successor, pickups prove
+  the atomic backlog move, and generated retries prove both exact identity and a
+  cleared named finding. Malformed paths and unreadable historical state fail closed.
+- Added the provider-neutral external action-projection gate and a thin GitHub adapter
+  that reruns on PR-description edits. A missing “What to review” acknowledgement,
+  an orphan question, a hidden link, or a dead/wrong-actor queue link now fails CI.
+- Updated the personal `write-github-pr-summary` skill outside AgentFold so repositories
+  that require an explicit no-action acknowledgement receive one; the repo contains no
+  Codex-specific policy.
+- Final hostile passes reproduced action-rewrite, response-rewrite, unrelated-successor,
+  premature retry deletion, reserved-basename, projection-link, and timing-rename
+  failures. The lifecycle now checks every committed mutation edge, follows a claim
+  across identity-preserving timing renames, freezes the first response and review
+  binding, requires a newly introduced same-context successor, and evaluates retry
+  clearance at the exact deletion commit.
+- The external projection gate now reads task and queue bytes from one explicit
+  immutable candidate, accepts repo-relative links or explicitly bound absolute links,
+  rejects hidden fenced/HTML evidence and action-like prose outside its declared
+  section, and permits declarative context without treating it as another ask.
+- Preserved adoption flexibility: custom typed-leaf `README.md` files remain
+  documentation, non-task branches do not inherit unrelated actions, pending legacy
+  reviews need no eager migration, and every action mechanism remains filesystem- and
+  Git-based. The full runner passed 5/5 files: 33 projection tests, 55 core-scope tests
+  (one skipped), 146 queue tests, 5 quote-api tests, and 3 quote-cli tests.

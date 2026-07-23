@@ -21,7 +21,7 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   convention applies only outside core until its backlog task defines a safe path.
 - Reference tasks by id, never by full path — paths change with status. Find one with
   `ls tasks/*/<task-id>`. The sole exception is a `task-pickup` request: it links the
-  backlog path and is deleted atomically when that same commit moves the task.
+  backlog path; its verified claim/move is the sole open-status queue deletion.
 - `task.md` declares `**Queue actions:** none` or every live queue action the task
   projects. Tasks do not originate asks; the linked queue files own delivery/status.
   A queue item naming `task:<id>` or using that task as its pickup context must link
@@ -37,8 +37,8 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   while an agent is actively repairing a dependency; move it only when no work can
   proceed.
 - A task cannot cross `transition:start`, `transition:review`, or
-  `transition:complete` while a linked `future-blocking-*` item remains. Git/provider
-  admission invokes the reconciler with its external boundary, such as merge.
+  `transition:complete` while a linked `future-blocking-*` item remains; its boundary
+  names `task:<id>`. Git/provider admission supplies external boundaries such as merge.
   A non-task branch uses changed task records and commit `task: <id>` tags to infer scope;
   without either it checks only global boundaries.
 - `4_done` requires `verification.md` with real command output — the reconciler checks

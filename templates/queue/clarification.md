@@ -8,10 +8,11 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 
 # <The clarification, one sentence>
 
-**Status:** waiting
+**Status:** <waiting | folding>
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <answer the question or correct the stated understanding>
 **Full context:** [<complete source>](<repo-relative path>)
+**Resolution evidence:** `<durable file that folding this answer will change>`
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

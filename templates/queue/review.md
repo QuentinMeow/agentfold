@@ -8,13 +8,18 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 
 # <The review judgment needed, one line>
 
-**Status:** <awaiting-artifact | waiting>
+**Status:** <awaiting-artifact | waiting | folding>
 **Filed:** <YYYY-MM-DD>, by <who>, from task <task id>
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
 **Review target:** <pending | one repo file | git:<full id or base...head> | one HTTPS artifact>
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
+**Review outcome:** <pending | approved | not-approved>
+
+<!-- A not-approved review is resolved only by a new live review action. Before
+deleting this item, add **Successor action:** `<new queue path>` here and
+**Supersedes:** `<this queue path>` to the same-timing successor. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

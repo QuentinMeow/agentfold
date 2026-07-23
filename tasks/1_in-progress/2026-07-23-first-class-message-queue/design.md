@@ -11,6 +11,14 @@ generic queue review had been resolved. Current contracts require surfaced queue
 to appear in replies, but do not require the converse: every human ask to originate as
 a queue item.
 
+History explains the phrasing, but does not excuse it. The agent compressed its own
+end-of-design audit into reviewer prompts: one prompt was actually a consistency check
+the agent should have completed itself, while the others assumed the reader already
+knew vocabulary introduced deep in the design. Optimizing the PR body for a short
+reviewer checklist erased the alternatives, concrete consequences, and source pointers.
+Because the generic queue review was already closed, treating GitHub as a separate
+discussion channel also let those new asks bypass the queue entirely.
+
 ## Options considered
 
 ### Option A — Improve prose only
@@ -72,6 +80,16 @@ portable adoption:
   Existing records remain stable, so later queue resolution does not rewrite history.
 - Reconciler retries aggregate by full check/subject identity, use collision-safe names,
   and refresh a marked machine projection without overwriting actor status or notes.
+- Queue resolution is a Git-backed lifecycle, not a status label: an answered/open item
+  is claimed in a separate one-line commit, ordinary deletion changes predeclared
+  evidence files, approved reviews revalidate the exact target, and non-approval leaves
+  a same-boundary successor. Pickup and generated-retry exceptions prove their own
+  state transitions, and activation cannot be removed to disable history checks.
+- External action prose crosses a provider-neutral projection gate. Every declared PR
+  review entry carries exactly one live human queue link and declarative context; task
+  PRs project every human action in `Queue actions`, or use an explicit no-action
+  acknowledgement when none exists. Allowed absolute links bind to an adapter-supplied
+  immutable prefix. The GitHub workflow only passes event data to the generic gate.
 
 The live queue owns unresolved delivery state even though its background stays
 elsewhere. The correcting ADR is
@@ -87,7 +105,7 @@ Accepted decision:
 **Repository substitution:** pass — any adopted repository needs durable human and agent action routing
 **User-global writes:** none
 **Why AgentFold core:** interaction delivery is a framework lifecycle concern, not personal configuration or product behavior
-**Thin adapter:** canonical=automation/reconcile/reconcile.py; optional=yes; policy=none; writes=repo-only
+**Thin adapter:** canonical=automation/check_action_projection.py; optional=yes; policy=none; writes=repo-only
 
 The registered `.github/workflows/harness.yml` adapter only maps GitHub event context
-to those canonical arguments; it owns no queue policy.
+and PR Markdown to those canonical gates; it owns no queue policy.
