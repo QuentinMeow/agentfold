@@ -28,14 +28,15 @@ if str(AUTOMATION) not in sys.path:
 
 from check_action_projection import (
     LIST_ITEM_RE,
-    normalized_action_tokens,
     prose_without_links,
     section_entries,
 )
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
+    contains_raw_html,
     markdown_link_destinations,
     markdown_links,
+    normalized_action_tokens,
     rendered_human_text,
     semantic_text,
 )
@@ -713,6 +714,16 @@ def level_two_section_body(text, heading):
     return matched.group(1).strip() if matched else None
 
 
+def raw_level_two_section_body(text, heading):
+    """Return raw section source for fail-closed syntax validation only."""
+    matched = re.search(
+        r"^" + re.escape(heading) + r"\s*\n(.*?)(?=^##(?:\s|$)|\Z)",
+        text,
+        flags=re.M | re.S,
+    )
+    return matched.group(1).strip() if matched else None
+
+
 def context_files(value):
     candidates = context_path_candidates(value)
     found = []
@@ -1100,14 +1111,14 @@ def queue_resolution_enabled():
     )
 
 
-def queue_resolution_activation_commit(head):
+def schema_activation_commits(head, path, field):
+    """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
-        return None
+        return (), None
     history = subprocess.run(
         [
             "git", "--no-replace-objects", "log",
-            "--reverse", "--format=%H", head, "--",
-            "message-queue/AGENTS.md",
+            "--full-history", "--reverse", "--format=%H", head, "--", path,
         ],
         cwd=REPO,
         text=True,
@@ -1116,18 +1127,54 @@ def queue_resolution_activation_commit(head):
         check=False,
     )
     if history.returncode:
-        raise GitSnapshotError(
-            history.stderr.strip()
-            or "could not inspect queue-resolution activation history"
+        return (), history.stderr.strip() or (
+            f"could not inspect {field} activation history"
         )
+    activations = []
     for commit in history.stdout.splitlines():
-        try:
-            text = git_text_at(commit, "message-queue/AGENTS.md")
-        except GitSnapshotError:
+        artifact = git_artifact_bytes_at(commit, path)
+        if artifact is None:
             continue
-        if text_fields(text).get("Queue resolution schema", "").strip() == "v1":
-            return commit
-    return None
+        text = decode_utf8_artifact(artifact, f"`{path}` at {commit}")
+        if text_fields(text).get(field, "").strip() == "v1":
+            activations.append(commit)
+    return tuple(activations), None
+
+
+def queue_resolution_activation_commits(head):
+    activations, error = schema_activation_commits(
+        head,
+        "message-queue/AGENTS.md",
+        "Queue resolution schema",
+    )
+    if error:
+        raise GitSnapshotError(error)
+    return activations
+
+
+def descended_from_any(revision, ancestors):
+    """Return whether revision descends from any ancestor, failing Git errors closed."""
+    for ancestor in ancestors:
+        relationship = subprocess.run(
+            [
+                "git", "--no-replace-objects", "merge-base",
+                "--is-ancestor", ancestor, revision,
+            ],
+            cwd=REPO,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if relationship.returncode == 0:
+            return True, None
+        if relationship.returncode != 1:
+            detail = relationship.stderr.decode(
+                "utf-8", errors="replace"
+            ).strip() if relationship.stderr else ""
+            return False, detail or (
+                f"could not compare activation {ancestor} to {revision}"
+            )
+    return False, None
 
 
 def deleted_paths_between(parent, child):
@@ -1210,7 +1257,7 @@ def staged_mutated_queue_paths():
     return mutated_queue_paths_from_name_status(changed.stdout)
 
 
-def queue_revision_edges(activation):
+def queue_revision_edges(activations):
     """Yield every governed parent/candidate edge in the staged or range view."""
     if CHANGE_RANGE is None:
         if _GIT_HEAD_OID:
@@ -1256,17 +1303,12 @@ def queue_revision_edges(activation):
     if _GIT_HEAD_OID != range_head:
         commits.append(_GIT_HEAD_OID)
     for commit in commits:
-        governed = subprocess.run(
-            [
-                "git", "--no-replace-objects", "merge-base",
-                "--is-ancestor", activation, commit,
-            ],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+        governed, governance_error = descended_from_any(
+            commit, activations
         )
-        if governed.returncode != 0:
+        if governance_error:
+            raise GitSnapshotError(governance_error)
+        if not governed:
             continue
         ancestry = subprocess.run(
             [
@@ -1288,9 +1330,9 @@ def queue_revision_edges(activation):
             yield parent, commit
 
 
-def queue_deletion_events(activation):
+def queue_deletion_events(activations):
     """Yield prior/candidate revisions for every governed queue deletion."""
-    for parent, revision in queue_revision_edges(activation):
+    for parent, revision in queue_revision_edges(activations):
         deleted = (
             staged_deleted_queue_paths()
             if revision is None
@@ -1300,9 +1342,9 @@ def queue_deletion_events(activation):
             yield path, git_text_at(parent, path), parent, revision
 
 
-def queue_mutation_events(activation):
+def queue_mutation_events(activations):
     """Yield both sides of every governed action modification or move."""
-    for parent, revision in queue_revision_edges(activation):
+    for parent, revision in queue_revision_edges(activations):
         mutated = (
             staged_mutated_queue_paths()
             if revision is None
@@ -1504,15 +1546,8 @@ def claim_identity(text, actor, leaf):
     return tuple((key, got.get(key, "").strip()) for key in sorted(keys))
 
 
-MUTABLE_ACTION_FIELDS = {
+LIFECYCLE_MUTABLE_FIELDS = {
     "Status",
-    "Your answer",
-    "Your review",
-    "Review target",
-    "Review revision",
-    "Reviewed revision",
-    "Review outcome",
-    "Successor action",
     "Blocks now",
     "Blocks at",
     "Until then",
@@ -1520,8 +1555,16 @@ MUTABLE_ACTION_FIELDS = {
 }
 
 
-def immutable_action_text(text):
+def immutable_action_text(text, actor, leaf):
     """Return action-defining visible text with lifecycle state removed."""
+    mutable_fields = set(LIFECYCLE_MUTABLE_FIELDS)
+    if actor == "needs-human" and leaf == "reviews":
+        mutable_fields.update({
+            "Your review", "Review target", "Review revision",
+            "Reviewed revision", "Review outcome", "Successor action",
+        })
+    elif actor == "needs-human":
+        mutable_fields.update({"Your answer", "Your review"})
     clean = semantic_text(text)
     clean = re.sub(
         r"^## Agent notes\s*\n.*?(?=^##(?:\s|$)|\Z)",
@@ -1532,7 +1575,7 @@ def immutable_action_text(text):
     lines = []
     for line in clean.splitlines():
         matched = FIELD_RE.fullmatch(line)
-        if matched and matched.group(1) in MUTABLE_ACTION_FIELDS:
+        if matched and matched.group(1) in mutable_fields:
             continue
         lines.append(line.rstrip())
     return "\n".join(lines).strip()
@@ -1555,9 +1598,12 @@ def retry_action_identity(path, text):
 
 def queue_action_identity(path, text):
     retry = retry_action_identity(path, text)
+    parts = Path(path).parts
+    actor = parts[1] if len(parts) > 1 else ""
+    leaf = parts[2] if len(parts) > 2 else ""
     return retry if retry is not None else (
         "ordinary-action",
-        immutable_action_text(text),
+        immutable_action_text(text, actor, leaf),
     )
 
 
@@ -1612,11 +1658,14 @@ def queue_mutation_problem(source, destination, before, after):
     if actor == "needs-human":
         prior_response = human_response_fields(before)
         current_response = human_response_fields(after)
+        prior_status = text_fields(before).get("Status", "").strip()
+        current_status = text_fields(after).get("Status", "").strip()
         source_leaf = source_parts[2] if len(source_parts) > 2 else ""
         destination_leaf = (
             destination_parts[2] if len(destination_parts) > 2 else ""
         )
-        if "reviews" in {source_leaf, destination_leaf}:
+        is_review = "reviews" in {source_leaf, destination_leaf}
+        if is_review:
             binding_keys = ("Review target", "Review revision")
             prior_binding = tuple(
                 prior_response[key] for key in binding_keys
@@ -1624,8 +1673,6 @@ def queue_mutation_problem(source, destination, before, after):
             current_binding = tuple(
                 current_response[key] for key in binding_keys
             )
-            prior_status = text_fields(before).get("Status", "").strip()
-            current_status = text_fields(after).get("Status", "").strip()
             publication_transition = (
                 prior_status == "awaiting-artifact"
                 and current_status == "waiting"
@@ -1649,13 +1696,15 @@ def queue_mutation_problem(source, destination, before, after):
                     "unanswered waiting -> awaiting-artifact retraction or "
                     "awaiting-artifact -> waiting publication transition"
                 )
-        response_key = first_concrete_response(prior_response)
-        if response_key is not None:
-            if current_response != prior_response:
-                return (
-                    "human response or its immutable review binding changed "
-                    "after the first concrete response"
-                )
+        response_changed = current_response != prior_response
+        if first_concrete_response(prior_response) is not None \
+                and response_changed:
+            return (
+                "human response or its immutable review binding changed "
+                "after the first concrete response"
+            )
+        if current_status == "folding" and response_changed:
+            return "the waiting -> folding claim changed more than status"
 
     source_timing = delivery_class(Path(source).name)
     destination_timing = delivery_class(Path(destination).name)
@@ -2068,17 +2117,17 @@ def check_queue_resolution():
     if not (REPO / ".git").exists():
         return
     queue_present = bool(git_index_entries("message-queue"))
-    activation = queue_resolution_activation_commit(_GIT_HEAD_OID)
+    activations = queue_resolution_activation_commits(_GIT_HEAD_OID)
     enabled = queue_resolution_enabled()
     continuity_edge = displaced_tip_edge()
-    displaced_activation = (
-        queue_resolution_activation_commit(continuity_edge[0])
+    displaced_activations = (
+        queue_resolution_activation_commits(continuity_edge[0])
         if continuity_edge is not None
-        else None
+        else ()
     )
-    if activation is None and not enabled and displaced_activation is None:
+    if not activations and not enabled and not displaced_activations:
         return
-    if (activation is not None or displaced_activation is not None) \
+    if (activations or displaced_activations) \
             and queue_present and not enabled:
         yield Finding(
             "queue-resolution",
@@ -2086,18 +2135,18 @@ def check_queue_resolution():
             "queue-resolution v1 was removed after activation",
             "restore **Queue resolution schema:** v1 before changing queue state",
         )
-    if activation is None:
-        activation = _GIT_HEAD_OID if enabled else None
+    if not activations and enabled and _GIT_HEAD_OID:
+        activations = (_GIT_HEAD_OID,)
     reported = set()
     mutation_event_groups = []
     deletion_event_groups = []
-    if activation is not None:
-        mutation_event_groups.append(queue_mutation_events(activation))
+    if activations:
+        mutation_event_groups.append(queue_mutation_events(activations))
         deletion_event_groups.append((
-            queue_deletion_events(activation),
+            queue_deletion_events(activations),
             False,
         ))
-    if continuity_edge is not None and displaced_activation is not None:
+    if continuity_edge is not None and displaced_activations:
         parent, revision = continuity_edge
         mutation_event_groups.append(
             committed_queue_mutation_events(parent, revision)
@@ -2327,10 +2376,14 @@ def check_queue_schema():
         )
         moving_task_paths = task_status_references(text)
         is_repair_record = actor == "needs-agent" and leaf == "retries"
+        is_generated_retry = is_repair_record and (
+            reconciler_owned_retry(item, text)
+            or legacy_reconciler_retry(item, text)
+        )
         needs_resolution_evidence = (
             actor == "needs-human" and leaf != "reviews"
         ) or (
-            actor == "needs-agent" and not (is_pickup or is_repair_record)
+            actor == "needs-agent" and not (is_pickup or is_generated_retry)
         )
         if needs_resolution_evidence and not resolution_evidence_paths(text):
             yield Finding(
@@ -3296,37 +3349,19 @@ def live_handover_paths():
     return paths
 
 
-def projection_schema_activation_commit(
+def projection_schema_activation_commits(
     head, field="Queue projection schema"
 ):
-    history = subprocess.run(
-        [
-            "git", "log", "--reverse", "--format=%H", head, "--",
-            "history/AGENTS.md",
-        ],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+    activations, error = schema_activation_commits(
+        head,
+        "history/AGENTS.md",
+        field,
     )
-    if history.returncode:
-        return None, history.stderr.strip() or "git log failed"
-    for commit in history.stdout.splitlines():
-        artifact = subprocess.run(
-            ["git", "show", f"{commit}:history/AGENTS.md"],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if artifact.returncode == 0 \
-                and text_fields(artifact.stdout).get(
-                    field, ""
-                ).strip() == "v1":
-            return commit, None
-    return None, f"could not find the v1 {field} activation commit"
+    if error:
+        return (), error
+    if activations:
+        return activations, None
+    return (), f"could not find a v1 {field} activation commit"
 
 
 def handover_action_entry_enabled():
@@ -3345,35 +3380,35 @@ def history_service_present():
     return (REPO / "history").is_dir()
 
 
-def handover_action_entry_activation():
-    """Return a committed strict-entry activation, if one exists."""
+def handover_action_entry_activations():
+    """Return committed strict-entry activations, including merged branches."""
     revision = committed_candidate_revision()
     if revision is None:
-        return None
-    activation, _error = projection_schema_activation_commit(
+        return ()
+    activations, _error = projection_schema_activation_commits(
         revision,
         field="Queue action-entry schema",
     )
-    return activation
+    return activations
 
 
-def handover_projection_activation():
-    """Return a committed queue-projection activation, if one exists."""
+def handover_projection_activations():
+    """Return committed queue-projection activations, including merged branches."""
     revision = committed_candidate_revision()
     if revision is None:
-        return None
-    activation, _error = projection_schema_activation_commit(
+        return ()
+    activations, _error = projection_schema_activation_commits(
         revision,
         field="Queue projection schema",
     )
-    return activation
+    return activations
 
 
 def strict_handover_entries_governed(rel):
     """Return whether this handover was created after strict-entry activation."""
     current_activation = handover_action_entry_enabled()
-    committed_activation = handover_action_entry_activation()
-    if not current_activation and committed_activation is None:
+    committed_activations = handover_action_entry_activations()
+    if not current_activation and not committed_activations:
         return False, None
     if CHANGE_RANGE is None:
         return True, None
@@ -3385,28 +3420,18 @@ def strict_handover_entries_governed(rel):
         if CHANGE_RANGE.startswith("root:")
         else CHANGE_RANGE.rsplit("...", 1)[-1]
     )
-    activation = committed_activation
-    if activation is None:
-        activation, activation_error = projection_schema_activation_commit(
+    activations = committed_activations
+    if not activations:
+        activations, activation_error = projection_schema_activation_commits(
             _GIT_HEAD_OID or range_head,
             field="Queue action-entry schema",
         )
         if activation_error:
             return False, activation_error
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", activation, created_at],
-        cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
+    governed, governance_error = descended_from_any(
+        created_at, activations
     )
-    if ancestor.returncode == 0:
-        return True, None
-    if ancestor.returncode == 1:
-        return False, None
-    return False, ancestor.stderr.decode(
-        "utf-8", errors="replace"
-    ).strip() or "could not compare action-entry activation and handover creation"
+    return governed, governance_error
 
 
 def newly_added_handovers():
@@ -3487,7 +3512,8 @@ def newly_added_handovers():
                 continue
             latest = subprocess.run(
                 [
-                    "git", "log", "--no-renames", "-1", "--format=%H",
+                    "git", "--no-replace-objects", "log",
+                    "--no-renames", "-1", "--format=%H",
                     "--diff-filter=A", head, "--", candidate.as_posix(),
                 ],
                 cwd=REPO,
@@ -3516,7 +3542,7 @@ def newly_added_handovers():
             else CHANGE_RANGE.rsplit("...", 1)[-1]
         )
         candidate_head = _GIT_HEAD_OID or range_head
-        activation, activation_error = projection_schema_activation_commit(
+        activations, activation_error = projection_schema_activation_commits(
             candidate_head
         )
         if activation_error:
@@ -3525,7 +3551,8 @@ def newly_added_handovers():
         for path in paths:
             creation = subprocess.run(
                 [
-                    "git", "log", "--no-renames", "--reverse", "--format=%H",
+                    "git", "--no-replace-objects", "log",
+                    "--no-renames", "--reverse", "--format=%H",
                     "--diff-filter=A",
                     (
                         range_head
@@ -3546,14 +3573,12 @@ def newly_added_handovers():
                     f"could not find a creation commit for {path}"
                 )
                 return set(), detail
-            ancestor = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", activation, commits[-1]],
-                cwd=REPO,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
+            is_governed, governance_error = descended_from_any(
+                commits[-1], activations
             )
-            if ancestor.returncode == 0:
+            if governance_error:
+                return set(), governance_error
+            if is_governed:
                 governed.add(path)
         paths = governed
     return paths, None
@@ -3608,7 +3633,8 @@ def handover_creation_commit(rel):
     )
     history = subprocess.run(
         [
-            "git", "log", "--no-renames", "--format=%H", "--reverse",
+            "git", "--no-replace-objects", "log",
+            "--no-renames", "--format=%H", "--reverse",
             "--diff-filter=A", history_range, "--", rel.as_posix(),
         ],
         cwd=REPO,
@@ -3723,7 +3749,8 @@ def handover_current_incarnation_text(rel):
     revision = _GIT_HEAD_OID or "HEAD"
     history = subprocess.run(
         [
-            "git", "log", "--no-renames", "-1", "--format=%H",
+            "git", "--no-replace-objects", "log",
+            "--no-renames", "-1", "--format=%H",
             "--diff-filter=A", revision, "--", rel.as_posix(),
         ],
         cwd=REPO,
@@ -3768,7 +3795,14 @@ def new_handover_queue_target(handover, target, actor="needs-human"):
     return relative if pattern.fullmatch(relative) else None
 
 
-def handover_projection_entries(rel, handover, body, actor, live_paths):
+def handover_projection_entries(
+    rel,
+    handover,
+    body,
+    actor,
+    live_paths,
+    raw_body=None,
+):
     """Validate strict action-owned list entries in a new v1 handover."""
     actor_label = "human" if actor == "needs-human" else "agent"
     entries, outside = section_entries(body)
@@ -3783,7 +3817,17 @@ def handover_projection_entries(rel, handover, body, actor, live_paths):
         problems.append("has no top-level queue-linked action entries")
         return projected, problems
 
+    raw_entries, _raw_outside = section_entries(
+        body if raw_body is None else raw_body
+    )
     for index, entry in enumerate(entries, start=1):
+        raw_entry = raw_entries[index - 1] if index <= len(raw_entries) else ""
+        if contains_raw_html(raw_entry):
+            problems.append(
+                f"entry {index} contains raw HTML; strict handover action "
+                "entries permit only the sole Markdown queue link and fixed "
+                "plain-text context"
+            )
         links = markdown_links(entry)
         queue_looking = [
             (label, destination)
@@ -3898,9 +3942,9 @@ def handover_projection_entries(rel, handover, body, actor, live_paths):
 def check_handover_queue_projection():
     if not history_service_present():
         return
-    projection_activation = handover_projection_activation()
-    entry_activation = handover_action_entry_activation()
-    if projection_activation is not None \
+    projection_activations = handover_projection_activations()
+    entry_activations = handover_action_entry_activations()
+    if projection_activations \
             and not handover_projection_enabled():
         yield Finding(
             "handover-queue-projection",
@@ -3908,7 +3952,7 @@ def check_handover_queue_projection():
             "Queue projection schema v1 was removed after activation",
             "restore **Queue projection schema:** v1 while history remains",
         )
-    if entry_activation is not None \
+    if entry_activations \
             and not handover_action_entry_enabled():
         yield Finding(
             "handover-queue-projection",
@@ -3916,7 +3960,7 @@ def check_handover_queue_projection():
             "Queue action-entry schema v1 was removed after activation",
             "restore **Queue action-entry schema:** v1 while history remains",
         )
-    if not handover_projection_enabled() and projection_activation is None:
+    if not handover_projection_enabled() and not projection_activations:
         return
     added, diff_error = newly_added_handovers()
     if diff_error:
@@ -4044,6 +4088,9 @@ def check_handover_queue_projection():
                             next_body or "",
                             "needs-agent",
                             live_agent,
+                            raw_body=raw_level_two_section_body(
+                                text, "## Next steps"
+                            ),
                         )
                     )
                     for problem in entry_problems:
@@ -4134,6 +4181,9 @@ def check_handover_queue_projection():
                 body,
                 "needs-human",
                 live_human,
+                raw_body=raw_level_two_section_body(
+                    text, "## Needs your attention"
+                ),
             )
             for problem in entry_problems:
                 yield Finding(

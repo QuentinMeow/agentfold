@@ -73,6 +73,8 @@ class ActionProjectionTests(unittest.TestCase):
         allowed_url_prefixes=(),
         task_id=None,
         candidate_revision=None,
+        external_actions=(),
+        additional_prose=(),
     ):
         return PROJECTION.projection_findings(
             body,
@@ -81,6 +83,8 @@ class ActionProjectionTests(unittest.TestCase):
             allowed_url_prefixes=allowed_url_prefixes,
             task_id=task_id,
             candidate_revision=candidate_revision,
+            external_actions=external_actions,
+            additional_prose=additional_prose,
         )
 
     def test_orphan_what_to_review_question_is_rejected(self):
@@ -307,6 +311,74 @@ class ActionProjectionTests(unittest.TestCase):
                             f"## What to review\n\n1. [{label}]({path})\n",
                         ),
                     )
+
+    def test_inline_code_subject_is_preserved_in_action_label_binding(self):
+        self.assertNotEqual(
+            PROJECTION.normalized_action_tokens(
+                "Review `[deploy](staging)`."
+            ),
+            PROJECTION.normalized_action_tokens(
+                "Review `[deploy](production)`."
+            ),
+        )
+        self.assertEqual(
+            PROJECTION.normalized_action_tokens(
+                "Review [deploy](staging)."
+            ),
+            PROJECTION.normalized_action_tokens(
+                "Review [deploy](production)."
+            ),
+        )
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Review the `staging` deployment.",
+            )
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            for label in (
+                "Review the staging deployment",
+                "Review the `staging` deployment",
+            ):
+                with self.subTest(label=label):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            f"## What to review\n\n1. [{label}]({path})\n",
+                        ),
+                    )
+            findings = self.findings(
+                root,
+                "## What to review\n\n"
+                f"1. [Review the `production` deployment]({path})\n",
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("canonical `Action`", findings[0])
+
+    def test_exact_unseen_action_verb_label_is_accepted_but_prefix_is_not(self):
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Calibrate the boundary precisely.",
+            )
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    "## What to review\n\n"
+                    f"1. [Calibrate the boundary precisely]({path})\n",
+                ),
+            )
+            findings = self.findings(
+                root,
+                "## What to review\n\n"
+                f"1. [Calibrate the boundary]({path})\n",
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("canonical `Action`", findings[0])
 
     def test_hidden_or_duplicate_canonical_action_field_is_rejected(self):
         contents = (
@@ -638,6 +710,61 @@ class ActionProjectionTests(unittest.TestCase):
                 self.assertEqual(1, len(findings))
                 self.assertIn("additional unlinked", findings[0])
 
+    def test_ordinary_courtesy_and_open_verb_requests_are_rejected(self):
+        asks = (
+            "Let me know whether the fallback should ship.",
+            "Let us know if the Linux build is acceptable.",
+            "Please benchmark the fallback before merge.",
+            "Please test the Linux build before merge.",
+            "Please run the release check before merge.",
+            "Please fix the deployment note before merge.",
+            "Please update the compatibility table before merge.",
+            "Please triage the failed job before merge.",
+            "Please reproduce the timeout before merge.",
+            "Please investigate the timeout before merge.",
+            "Would you benchmark the fallback before merge.",
+            "Can the maintainer investigate the timeout before merge.",
+            "I need you to benchmark the fallback before merge.",
+            "Keep me posted on the release decision.",
+            "Please do not merge yet.",
+            "Could you not delete production yet.",
+            "I need you not to merge the fallback yet.",
+        )
+        for ask in asks:
+            with self.subTest(location="outside", ask=ask), self.repo() as root:
+                findings = self.findings(
+                    root,
+                    f"## Goal\n\n{ask}\n\n"
+                    "## What to review\n\nNo human action requested.\n",
+                )
+                self.assertEqual(1, len(findings))
+                self.assertIn("outside the declared action section", findings[0])
+
+            with self.subTest(location="inside", ask=ask), self.repo() as root:
+                item = self.queue_item(root)
+                self.git(root, "add", ".")
+                findings = self.findings(
+                    root,
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]"
+                    f"({item.relative_to(root).as_posix()}). {ask}\n",
+                )
+                self.assertEqual(1, len(findings))
+                self.assertIn("additional unlinked", findings[0])
+
+    def test_benchmark_and_notification_descriptions_or_negations_are_accepted(self):
+        with self.repo() as root:
+            body = (
+                "## Goal\n\n"
+                "Benchmark results are recorded in the report.\n"
+                "The test runner updates the compatibility table.\n"
+                "This alert lets me know whether the build completed.\n"
+                "We do not need you to reproduce the archived timeout.\n\n"
+                "The release alert keeps me posted on completed jobs.\n\n"
+                "## What to review\n\nNo human action requested.\n"
+            )
+            self.assertEqual([], self.findings(root, body))
+
     def test_rendered_html_asks_outside_and_inside_action_section_are_rejected(self):
         outside_asks = (
             "<p>Maintainer approval is requested before merge.</p>",
@@ -653,6 +780,13 @@ class ActionProjectionTests(unittest.TestCase):
             "<script></script>Please reply before merge.",
             "<!-- archived -->Please reply before merge.",
             "> <p>Please reply before merge.</p>",
+            "<img alt='Please approve production'>",
+            "<input value='Please benchmark production'>",
+            "<input placeholder='Please benchmark production'>",
+            "<button aria-label='Please approve production'></button>",
+            "<span title='Please approve production'></span>",
+            "<textarea placeholder='Please review production'></textarea>",
+            "<textarea>Please approve production</textarea>",
         )
         for ask in outside_asks:
             with self.subTest(location="outside", ask=ask), self.repo() as root:
@@ -679,6 +813,12 @@ class ActionProjectionTests(unittest.TestCase):
                     f"1. [Review the boundary]({path}). "
                     "<span>Please reply before merge.</span>\n"
                 ),
+                (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]({path})\n"
+                    "   <a href='https://example.invalid/delete'>"
+                    "<img alt='Please delete production now'></a>\n"
+                ),
             )
             for body in bodies:
                 with self.subTest(location="inside", body=body[-48:]):
@@ -703,6 +843,7 @@ class ActionProjectionTests(unittest.TestCase):
             ),
             '<p style="display:\n none">Please reply before merge.</p>',
             '<p style="display:/**/none">Please reply before merge.</p>',
+            "<input type='hidden' value='Please approve production'>",
             "<code>Maintainer approval is requested before merge.</code>",
             "```\n<p>Maintainer approval is requested before merge.</p>\n```",
         )
@@ -741,7 +882,6 @@ class ActionProjectionTests(unittest.TestCase):
                 "You do not need to review the generated report.\n\n"
                 "Feedback from a maintainer is not required before merge.\n"
                 "No comments are requested for this archived release.\n"
-                "Please do not reply to the archived notification.\n"
                 "The maintainer responded to feedback on the prior release.\n"
                 "Approval from a maintainer was required by the old process.\n\n"
                 "Reply metadata remains in the archived audit record.\n"
@@ -912,6 +1052,74 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertEqual(1, len(findings))
             self.assertIn("exactly one", findings[0])
 
+    def test_external_action_state_requires_at_least_one_queue_projection(self):
+        no_action = "## What to review\n\nNo human action requested.\n"
+        empty_states = ("", "[]", "{}", '[""]')
+        with self.repo() as root:
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    no_action,
+                    external_actions=empty_states,
+                ),
+            )
+            findings = self.findings(
+                root,
+                no_action,
+                external_actions=(
+                    "[]",
+                    '[{"login": "reviewer"}]',
+                    "{}",
+                ),
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("externally assigned human-action state", findings[0])
+
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            body = (
+                "## What to review\n\n"
+                f"1. [Review the boundary]"
+                f"({item.relative_to(root).as_posix()})\n"
+            )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    body,
+                    external_actions=(
+                        "[]",
+                        '[{"slug": "release-team"}]',
+                    ),
+                ),
+            )
+
+    def test_additional_plain_prose_cannot_hide_an_action(self):
+        no_action = "## What to review\n\nNo human action requested.\n"
+        with self.repo() as root:
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    no_action,
+                    additional_prose=("Compatibility notes for this release",),
+                ),
+            )
+            for title in (
+                "Should the fallback ship?",
+                "Please benchmark the fallback before merge",
+                "`Please reproduce the timeout before merge`",
+            ):
+                with self.subTest(title=title):
+                    findings = self.findings(
+                        root,
+                        no_action,
+                        additional_prose=(title,),
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn("additional prose input", findings[0])
+
     def test_cli_reads_shell_metacharacters_as_environment_data(self):
         with self.repo() as root, mock.patch.dict(
             os.environ,
@@ -929,6 +1137,51 @@ class ActionProjectionTests(unittest.TestCase):
                     "--action-section", "What to review",
                 ]),
             )
+
+    def test_cli_reads_multiple_generic_external_state_and_prose_envs(self):
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            env = {
+                "BODY": (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]({path})\n"
+                ),
+                "REVIEWERS": "[]",
+                "TEAMS": '[{"slug": "release-team"}]',
+                "ASSIGNEES": "[]",
+                "TITLE": "Compatibility notes for this release",
+            }
+            with mock.patch.dict(os.environ, env), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--external-action-env", "REVIEWERS",
+                        "--external-action-env", "TEAMS",
+                        "--external-action-env", "ASSIGNEES",
+                        "--additional-prose-env", "TITLE",
+                        "--branch", "feature/provider-neutral",
+                    ]),
+                )
+                os.environ["BODY"] = (
+                    "## What to review\n\nNo human action requested.\n"
+                )
+                self.assertEqual(
+                    1,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--external-action-env", "REVIEWERS",
+                        "--external-action-env", "TEAMS",
+                        "--external-action-env", "ASSIGNEES",
+                        "--additional-prose-env", "TITLE",
+                        "--branch", "feature/provider-neutral",
+                    ]),
+                )
 
     def test_cli_keeps_non_task_branches_unscoped(self):
         with self.repo() as root, mock.patch.dict(
@@ -968,9 +1221,42 @@ class ActionProjectionTests(unittest.TestCase):
         workflow = (
             MODULE_PATH.parents[1] / ".github/workflows/harness.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("edited", workflow)
+        for event in (
+            "edited",
+            "review_requested",
+            "review_request_removed",
+            "assigned",
+            "unassigned",
+        ):
+            with self.subTest(event=event):
+                self.assertIn(event, workflow)
         self.assertIn(
             "ACTION_PROJECTION_BODY: ${{ github.event.pull_request.body }}",
+            workflow,
+        )
+        self.assertIn(
+            "ACTION_PROJECTION_TITLE: ${{ github.event.pull_request.title }}",
+            workflow,
+        )
+        for env_name, field in (
+            ("ACTION_PROJECTION_REQUESTED_REVIEWERS", "requested_reviewers"),
+            ("ACTION_PROJECTION_REQUESTED_TEAMS", "requested_teams"),
+            ("ACTION_PROJECTION_ASSIGNEES", "assignees"),
+        ):
+            with self.subTest(env_name=env_name):
+                self.assertIn(
+                    env_name
+                    + ": ${{ toJSON(github.event.pull_request."
+                    + field
+                    + ") }}",
+                    workflow,
+                )
+                self.assertIn(
+                    f"--external-action-env {env_name}",
+                    workflow,
+                )
+        self.assertIn(
+            "--additional-prose-env ACTION_PROJECTION_TITLE",
             workflow,
         )
         self.assertIn(
@@ -988,7 +1274,11 @@ class ActionProjectionTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "check_action_projection.py --from-env ACTION_PROJECTION_BODY",
+            "python3 automation/check_action_projection.py",
+            workflow,
+        )
+        self.assertIn(
+            "--from-env ACTION_PROJECTION_BODY",
             workflow,
         )
         self.assertIn(

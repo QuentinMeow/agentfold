@@ -44,3 +44,6 @@ each. Make the distinction concrete enough that the reader knows what they are c
 <One small scenario showing how the alternatives produce different behavior or work.>
 
 **Your answer:** ______
+
+<!-- A concrete response is immutable. If it is a counter-question, fold the answer into
+Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->

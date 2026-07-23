@@ -54,3 +54,6 @@ that changes; do not merely repeat the option labels.>
 <A or B, one sentence why.>
 
 **Your answer:** ______
+
+<!-- A concrete response is immutable. If it is a counter-question, fold the answer into
+Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->

@@ -42,17 +42,17 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   the choice from zero context, compare dispositions, give an example, link a source,
   and expose a response slot (`handbook/human-action-guide.md`).
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
-- Commit a human response while `waiting`; claim later with a status-only change to
-  `folding`; that committed edge proves active folding. An unanswered review may retract
-  a stale binding in one `waiting` → `awaiting-artifact` commit that restores pending/blank response fields;
-  publish its replacement in a later `awaiting-artifact` → `waiting` commit. Neither edge
-  may add a response; the first response freezes the binding.
+- Commit the first human response while `waiting`; it is immutable. Treat a counter-question
+  as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
+  successor that names the old item in `Supersedes`. The later `waiting` → `folding`
+  claim changes only status and freezes action. An unanswered review binding may retract
+  to `awaiting-artifact`/pending, then publish its replacement; neither edge may add a response.
 - Agent claims change only `open` to `in-repair`; that committed edge proves active repair, and action identity never changes afterward.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one Full context link to the backlog `task.md`; the task links it reciprocally.
   Its atomic claim/move deletes it. Only pickups use moving task paths as live context;
   retries may quote one only as broken-state evidence.
-- Ordinary actions predeclare `Resolution evidence`; every named non-queue file changes
+- Ordinary actions, including manual retries, predeclare `Resolution evidence`; every named non-queue file changes
   in the deletion commit. Reviews bind one target/revision: `approved`, `rejected`, and
   `abandoned` end the action; `changes-requested` requires a new same-timing successor.
   Legacy `not-approved` means `changes-requested`. Approval revalidates the target; a PR URL is navigation, never revision authority.

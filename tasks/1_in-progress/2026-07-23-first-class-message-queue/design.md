@@ -85,8 +85,10 @@ portable adoption:
   later-resolved records remain immutable history.
 - Reconciler retries aggregate by full check/subject identity, use collision-safe names,
   and refresh a marked machine projection without overwriting actor status or notes.
-- Queue resolution is a Git-backed lifecycle, not a status label: an answered/open item
-  is claimed in a separate one-line commit, ordinary deletion changes predeclared
+- Queue resolution is a Git-backed lifecycle, not a status label: the first concrete
+  human response is immutable. A counter-question is folded into durable evidence and
+  continued in a new same-timing item that names its predecessor; agents never rewrite
+  human text. An answered/open item is claimed separately; ordinary deletion changes predeclared
   evidence files, approved reviews revalidate the exact target, requested changes leave
   a same-boundary successor, and approval/rejection/abandonment forbid one. An
   unanswered stale binding retracts to pending before a separate republication. Pickup

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Require external human-action sections to project live queue items."""
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -16,6 +16,7 @@ if str(AUTOMATION) not in sys.path:
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
     markdown_links,
+    normalized_action_tokens,
     rendered_human_text,
     semantic_text,
     strip_indented_code,
@@ -53,11 +54,22 @@ CLEAR_ACTION_VERB_PATTERN = (
     r"release|review|select|"
     r"sign[ \t]+off|tell|verify|vote)"
 )
+LET_KNOW_PATTERN = r"let[ \t]+(?:me|us)[ \t]+know"
+KEEP_POSTED_PATTERN = (
+    r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)"
+)
+REQUEST_ACTION_VERB_PATTERN = (
+    r"(?:benchmark|check|fix|reproduce|run|test|triage|update)"
+)
 ACTION_VERB_PATTERN = (
-    rf"(?:{CLEAR_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
+    rf"(?:{CLEAR_ACTION_VERB_PATTERN}|{LET_KNOW_PATTERN}|"
+    rf"{KEEP_POSTED_PATTERN}|"
+    rf"{REQUEST_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
 )
 DIRECTIVE_ACTION_PATTERN = (
     rf"(?:{CLEAR_ACTION_VERB_PATTERN}"
+    rf"|{LET_KNOW_PATTERN}"
+    rf"|{KEEP_POSTED_PATTERN}"
     r"|answer(?="
     r"[.!?;,:)]|$|[ \t]+(?:how|that|the|this|what|when|whether|which|"
     r"who|why|with)\b)"
@@ -69,6 +81,13 @@ DIRECTIVE_ACTION_PATTERN = (
     r"promptly|tomorrow|when)\b))"
 )
 DIRECTIVE_PREFIX_PATTERN = r"(?:(?:and|also|then)[ \t]+)*"
+OPEN_COMMAND_WORD_PATTERN = r"[A-Za-z][A-Za-z'-]*"
+PLEASE_COMMAND_PATTERN = (
+    rf"{DIRECTIVE_PREFIX_PATTERN}please"
+    r"(?:[ \t]*,[ \t]*|[ \t]+)"
+    rf"{DIRECTIVE_PREFIX_PATTERN}"
+    rf"{OPEN_COMMAND_WORD_PATTERN}"
+)
 HUMAN_ACTION_NOUN_PATTERN = (
     r"(?:approval|authorization|choice|clarification|comments?|confirmation|"
     r"decision|feedback|input|repl(?:y|ies)|responses?|review|"
@@ -88,8 +107,7 @@ ACTION_VERB_RE = re.compile(
 DIRECTIVE_RE = re.compile(
     r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{DIRECTIVE_PREFIX_PATTERN}please[ \t]+"
-    rf"{DIRECTIVE_PREFIX_PATTERN}{ACTION_VERB_PATTERN}"
+    rf"{PLEASE_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
     r")\b",
@@ -99,8 +117,7 @@ ADDITIONAL_DIRECTIVE_RE = re.compile(
     r"(?:^|[,.!;:—][ \t]+)"
     r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{DIRECTIVE_PREFIX_PATTERN}please[ \t]+"
-    rf"{DIRECTIVE_PREFIX_PATTERN}{ACTION_VERB_PATTERN}"
+    rf"{PLEASE_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
     r")\b",
@@ -156,7 +173,15 @@ FIRST_PERSON_VERB_REQUEST_RE = re.compile(
     r"(?P<negation>do[ \t]+not[ \t]+)?"
     r"(?:ask|need|request|require)[ \t]+(?:that[ \t]+)?"
     rf"{ACTION_SOURCE_PATTERN}[ \t]+(?:to[ \t]+)?"
-    rf"{ACTION_VERB_PATTERN}\b",
+    rf"{OPEN_COMMAND_WORD_PATTERN}\b",
+    re.I,
+)
+MODAL_ACTOR_REQUEST_RE = re.compile(
+    r"\b(?:can|could|will|would)[ \t]+"
+    rf"{ACTION_SOURCE_PATTERN}[ \t]+"
+    r"(?:please[ \t]+)?"
+    r"(?P<negation>)(?:(?:not|never)[ \t]+)?"
+    rf"{OPEN_COMMAND_WORD_PATTERN}\b",
     re.I,
 )
 COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|review)"
@@ -380,6 +405,7 @@ def declarative_action_request(clean):
         FIRST_PERSON_REQUEST_RE,
         ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
+        MODAL_ACTOR_REQUEST_RE,
         FIRST_PERSON_COURTESY_REQUEST_RE,
         PASSIVE_COURTESY_REQUEST_RE,
     ):
@@ -398,8 +424,20 @@ def declarative_action_request(clean):
     return False
 
 
+def action_like_clean_text(clean):
+    """Classify already-visible prose with the deterministic action grammar."""
+    if "?" in clean or TODO_RE.search(clean):
+        return True
+    return any(
+        DIRECTIVE_RE.search(variant)
+        or ADDITIONAL_DIRECTIVE_RE.search(variant)
+        or declarative_action_request(variant)
+        for variant in action_prose_variants(clean)
+    )
+
+
 def action_like_prose(text):
-    """Recognize deterministic human-action grammar in visible prose.
+    """Recognize deterministic human-action grammar in visible Markdown prose.
 
     A fragment is action-like when it contains a question mark, a standalone TODO,
     an authority verb in command position at the start of a line/list item, or a
@@ -413,15 +451,17 @@ def action_like_prose(text):
         lambda matched: matched.group("label"),
         clean,
     )
-    clean = strip_action_emphasis(clean)
-    if "?" in clean or TODO_RE.search(clean):
-        return True
-    return any(
-        DIRECTIVE_RE.search(variant)
-        or ADDITIONAL_DIRECTIVE_RE.search(variant)
-        or declarative_action_request(variant)
-        for variant in action_prose_variants(clean)
+    return action_like_clean_text(strip_action_emphasis(clean))
+
+
+def action_like_plain_prose(text):
+    """Recognize actions in provider text that has no Markdown semantics."""
+    clean = strip_prose_quote_markers(text or "")
+    clean = "\n".join(
+        re.sub(r"^[^\w]+", "", line)
+        for line in clean.split("\n")
     )
+    return action_like_clean_text(strip_action_emphasis(clean))
 
 
 def link_label_action_count(label):
@@ -448,17 +488,6 @@ def additional_action_like_prose(text):
     )
 
 
-def normalized_action_tokens(text):
-    """Normalize visible action prose without erasing or stemming its meaning."""
-    clean = strip_inline_code(semantic_text(text or ""))
-    clean = MARKDOWN_LINK_RE.sub(
-        lambda matched: matched.group("label"),
-        clean,
-    )
-    normalized = unicodedata.normalize("NFKC", clean).casefold()
-    return tuple(re.findall(r"[a-z0-9]+", normalized))
-
-
 def label_projects_action(label, canonical_action, queue_path):
     """Bind a projected label to one Action without fuzzy semantic borrowing.
 
@@ -475,6 +504,8 @@ def label_projects_action(label, canonical_action, queue_path):
         leaf, set()
     )
     if label_tokens in generic_labels:
+        return True
+    if label_tokens == action_tokens:
         return True
     return (
         len(ACTION_VERB_RE.findall(label or "")) == 1
@@ -758,6 +789,34 @@ def required_human_queue_paths(
     )
 
 
+def material_external_action_state(value):
+    """Treat empty serialized containers as no assignment, without provider policy."""
+    text = (value or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return True
+
+    def material(candidate):
+        if candidate is None:
+            return False
+        if isinstance(candidate, str):
+            return bool(candidate.strip())
+        if isinstance(candidate, bool):
+            return candidate
+        if isinstance(candidate, (int, float)):
+            return candidate != 0
+        if isinstance(candidate, list):
+            return any(material(item) for item in candidate)
+        if isinstance(candidate, dict):
+            return any(material(item) for item in candidate.values())
+        return True
+
+    return material(parsed)
+
+
 def projection_findings(
     text,
     titles,
@@ -766,6 +825,8 @@ def projection_findings(
     task_id=None,
     require_all_live=True,
     candidate_revision=None,
+    external_actions=(),
+    additional_prose=(),
 ):
     if candidate_revision is not None:
         candidate_revision = candidate_revision_oid(
@@ -798,12 +859,22 @@ def projection_findings(
         rendered_action_section_body(text, start, end)
         for start, end, _body in section_spans
     ]
+    findings = []
+    for input_number, prose in enumerate(additional_prose, start=1):
+        if action_like_plain_prose(prose):
+            findings.append(
+                f"additional prose input {input_number} contains an action-like "
+                "question or directive outside the declared action section"
+            )
     if not sections:
-        return [
+        findings.append(
             "missing a declared action section; add `What to review` with "
             f"queue-linked actions or exactly `{NO_ACTION_TEXT}`"
-        ]
-    findings = []
+        )
+        return findings
+    has_external_actions = any(
+        material_external_action_state(value) for value in external_actions
+    )
     linked_paths = set()
     saw_entries = False
     saw_no_action = False
@@ -839,6 +910,12 @@ def projection_findings(
                     f"action section {section_number} claims no human action "
                     "but scoped live queue item(s) exist: "
                     + ", ".join(sorted(required_paths))
+                )
+            elif has_external_actions:
+                findings.append(
+                    f"action section {section_number} claims no human action "
+                    "but externally assigned human-action state is non-empty; "
+                    "project at least one live canonical queue link"
                 )
             continue
         entries, outside = section_entries(body)
@@ -974,6 +1051,16 @@ def read_input(args):
         raise ValueError(str(error)) from error
 
 
+def read_env_values(names):
+    """Read explicitly named environment inputs without evaluating their contents."""
+    values = []
+    for name in names:
+        if name not in os.environ:
+            raise ValueError(f"environment variable {name!r} is not set")
+        values.append(os.environ[name])
+    return values
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -994,6 +1081,26 @@ def main(argv=None):
         metavar="FULL_OBJECT_ID",
         help="read queue and task state from this exact commit instead of the index",
     )
+    parser.add_argument(
+        "--external-action-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "require a queue-linked projection when any named external "
+            "human-action state is non-empty"
+        ),
+    )
+    parser.add_argument(
+        "--additional-prose-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "reject action-like questions or directives in additional "
+            "provider prose outside the declared action section"
+        ),
+    )
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument(
         "--task-id",
@@ -1009,6 +1116,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         text = read_input(args)
+        external_actions = read_env_values(args.external_action_env)
+        additional_prose = read_env_values(args.additional_prose_env)
         task_id = args.task_id
         require_all_live = True
         if args.branch and args.branch.startswith("task/"):
@@ -1023,6 +1132,8 @@ def main(argv=None):
             task_id=task_id,
             require_all_live=require_all_live,
             candidate_revision=args.candidate_revision,
+            external_actions=external_actions,
+            additional_prose=additional_prose,
         )
     except (RuntimeError, ValueError) as error:
         print(f"action-projection: input error: {error}", file=sys.stderr)

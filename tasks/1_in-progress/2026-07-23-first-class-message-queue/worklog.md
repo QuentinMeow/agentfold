@@ -139,3 +139,41 @@
   marker-removal, whole-service-removal, terminal-outcome, and active-claim regressions.
   The action-projection suite passed 49 tests, the queue suite passed 177 tests, the
   full runner passed 5/5 files, and the reconciler reported 0 findings.
+
+## 2026-07-23 — merge-history and retry lifecycle hardening (codex subagent)
+
+- Made queue-resolution and handover-schema activation discovery traverse full merge
+  history and retain every incomparable marker-bearing activation. Each mutation or
+  handover creation is governed when any activation is its ancestor, so an independently
+  adopted side branch cannot escape while pre-adoption commits stay grandfathered.
+- Kept merge simplification for handover `--diff-filter=A` incarnation selection and
+  added `--no-replace-objects`; full-history there can select bytes from an unmerged
+  competing add. Added a competing-add regression that preserves the selected lineage.
+- Preserved first-response immutability. A human counter-question is claimed and folded
+  into durable evidence, then continued through a new same-timing item whose
+  `Supersedes` points to the resolved action; the folding claim remains status-only.
+- Required every manual retry to declare non-queue `Resolution evidence` while live.
+  Recognized reconciler-generated and legacy retries keep their finding-clearance
+  exception, and a claimed manual retry resolves only with changed named evidence.
+- Added independent-activation and exact TREESAME v1-to-v0 merge regressions for queue
+  deletions, orphan handovers, and sticky marker removal. Nine focused regressions and
+  the complete queue suite passed: 185 tests in 41.951 seconds. The system `python3`
+  was Python 3.7 and could not parse an existing walrus expression, so verification
+  used `/Users/quentinmiao/.local/bin/python3.13`.
+
+## 2026-07-23 — external action-projection hardening (codex subagent)
+
+- Moved action-token normalization into shared Markdown semantics. Inline-code
+  contents, Unicode words, and symbols now survive normalization; only structural
+  Markdown links lose their destinations, so `staging` cannot bind to `production`.
+- Broadened orphan-action detection to ordinary `please <verb>`, let-me-know,
+  keep-me-posted, modal, and first-person requests while preserving declarative and
+  request-predicate-negated prose.
+- Made rendered HTML detection include human-visible control and accessibility
+  attributes. Strict handovers additionally reject raw HTML in action entries from
+  the raw section source instead of interpreting arbitrary markup.
+- Added provider-neutral external-action and additional-prose environment inputs.
+  The thin workflow adapter now validates the pull-request title, requested reviewers,
+  requested teams, and assignees on assignment and review-request state changes.
+- `python3 -m unittest automation.tests.test_check_action_projection` passed 56 tests;
+  seven focused strict-handover tests passed, and Ruby parsed the workflow YAML.

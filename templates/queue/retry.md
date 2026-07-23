@@ -13,7 +13,7 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Action:** <repair or explicitly reject the finding>
 **Check:** <reconciler check id, or "manual">
 **Subject:** <file/folder the invariant is about — link>
-**Resolution evidence:** `<durable file completion will create or change>`
+**Resolution evidence:** `<required for manual retries: durable non-queue file completion will create or change; generated retries use finding clearance>`
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:

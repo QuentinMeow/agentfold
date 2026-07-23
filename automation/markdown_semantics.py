@@ -54,7 +54,7 @@ P_IMPLICIT_CLOSE_START_TAGS = {
 }
 NON_PROSE_HTML_TAGS = {
     "code", "head", "iframe", "kbd", "object", "pre", "samp", "script",
-    "style", "template", "textarea",
+    "style", "template",
 }
 HIDDEN_STYLE_RE = re.compile(
     r"(?:^|;)[ \t]*"
@@ -67,6 +67,10 @@ HIDDEN_STYLE_RE = re.compile(
     re.I,
 )
 CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+RAW_HTML_TOKEN_RE = re.compile(
+    r"<(?:!--|!\[CDATA\[|\?|![A-Za-z]|/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>]))",
+    re.I,
+)
 
 
 def commonmark_lines(text):
@@ -244,7 +248,11 @@ class _RenderedHumanHTMLParser(HTMLParser):
             (name or "").casefold(): value
             for name, value in attrs
         }
-        if tag in NON_PROSE_HTML_TAGS or "hidden" in values:
+        if tag in NON_PROSE_HTML_TAGS or "hidden" in values \
+                or (
+                    tag == "input"
+                    and (values.get("type") or "").strip().casefold() == "hidden"
+                ):
             return True
         aria_hidden = (values.get("aria-hidden") or "").strip().casefold()
         if aria_hidden in {"1", "true"}:
@@ -252,6 +260,25 @@ class _RenderedHumanHTMLParser(HTMLParser):
         style = CSS_COMMENT_RE.sub(" ", values.get("style") or "")
         style = re.sub(r"[ \t\r\n\f]+", " ", style)
         return bool(HIDDEN_STYLE_RE.search(style))
+
+    @staticmethod
+    def visible_attribute_text(tag, attrs):
+        """Return conservative text exposed visually or accessibly by a tag."""
+        values = {
+            (name or "").casefold(): value
+            for name, value in attrs
+        }
+        names = ("alt", "aria-label", "title")
+        if tag in {"input", "textarea"}:
+            names = (*names, "placeholder")
+        if tag == "input":
+            names = (*names, "value")
+        visible = []
+        for name in names:
+            value = values.get(name)
+            if isinstance(value, str) and value.strip():
+                visible.append(value.strip())
+        return " ".join(visible)
 
     def close_implicit_element(self, tag):
         targets = set()
@@ -274,6 +301,17 @@ class _RenderedHumanHTMLParser(HTMLParser):
                 del self.stack[index:]
                 break
 
+    def append_visible_attribute_text(self, value):
+        if not value:
+            return
+        previous = next(
+            (piece[-1] for piece in reversed(self.output) if piece),
+            "",
+        )
+        if previous and not previous.isspace():
+            self.output.append(" ")
+        self.output.extend((value, " "))
+
     def handle_starttag(self, tag, attrs):
         tag = tag.casefold()
         self.close_implicit_element(tag)
@@ -282,6 +320,9 @@ class _RenderedHumanHTMLParser(HTMLParser):
         if tag in HTML_BREAK_TAGS:
             self.output.append(" ")
         hidden = self.hidden or self.element_is_hidden(tag, attrs)
+        attribute_text = self.visible_attribute_text(tag, attrs)
+        if attribute_text and not hidden:
+            self.append_visible_attribute_text(attribute_text)
         if tag not in HTML_VOID_TAGS:
             self.stack.append((tag, hidden))
 
@@ -292,8 +333,11 @@ class _RenderedHumanHTMLParser(HTMLParser):
         self.output.append(_line_endings_only(raw))
         if tag in HTML_BREAK_TAGS:
             self.output.append(" ")
+        hidden = self.hidden or self.element_is_hidden(tag, attrs)
+        attribute_text = self.visible_attribute_text(tag, attrs)
+        if attribute_text and not hidden:
+            self.append_visible_attribute_text(attribute_text)
         if tag not in HTML_VOID_TAGS:
-            hidden = self.hidden or self.element_is_hidden(tag, attrs)
             self.stack.append((tag, hidden))
 
     def handle_endtag(self, tag):
@@ -350,37 +394,81 @@ def rendered_human_text(text):
     )
 
 
-def strip_inline_code(text):
-    """Blank CommonMark code spans while preserving line boundaries."""
-    output = list(text or "")
+def inline_code_spans(text):
+    """Return the source ranges occupied by closed CommonMark code spans."""
+    source = text or ""
+    spans = []
     index = 0
-    while index < len(output):
-        if output[index] != "`":
+    while index < len(source):
+        if source[index] != "`":
             index += 1
             continue
         opening = index
-        while index < len(output) and output[index] == "`":
+        while index < len(source) and source[index] == "`":
             index += 1
         width = index - opening
         cursor = index
         closing = None
-        while cursor < len(output):
-            if output[cursor] != "`":
+        while cursor < len(source):
+            if source[cursor] != "`":
                 cursor += 1
                 continue
             run_start = cursor
-            while cursor < len(output) and output[cursor] == "`":
+            while cursor < len(source) and source[cursor] == "`":
                 cursor += 1
             if cursor - run_start == width:
                 closing = cursor
                 break
         if closing is None:
             continue
+        spans.append((opening, closing))
+        index = closing
+    return spans
+
+
+def strip_inline_code(text):
+    """Blank CommonMark code spans while preserving line boundaries."""
+    output = list(text or "")
+    for opening, closing in inline_code_spans(text):
         for position in range(opening, closing):
             if output[position] not in ("\n", "\r"):
                 output[position] = " "
-        index = closing
     return "".join(output)
+
+
+def render_inline_code(text):
+    """Remove code-span delimiters while retaining their rendered text."""
+    source = text or ""
+    output = []
+    cursor = 0
+    for opening, closing in inline_code_spans(source):
+        width = 1
+        while opening + width < closing \
+                and source[opening + width] == "`":
+            width += 1
+        content = source[opening + width:closing - width]
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        content = content.replace("\n", " ")
+        if content.startswith(" ") and content.endswith(" ") \
+                and content.strip(" "):
+            content = content[1:-1]
+        output.extend((source[cursor:opening], content))
+        cursor = closing
+    output.append(source[cursor:])
+    return "".join(output)
+
+
+def contains_raw_html(text):
+    """Conservatively detect raw HTML outside fenced and inline code.
+
+    Callers that require a closed Markdown shape can fail closed on this signal
+    instead of trying to reproduce a browser's handling of arbitrary tags and
+    attributes.
+    """
+    clean = strip_inline_code(
+        _semantic_text(text or "", preserve_visible_html=True)
+    )
+    return bool(RAW_HTML_TOKEN_RE.search(clean))
 
 
 def strip_indented_code(text):
@@ -396,23 +484,57 @@ def strip_indented_code(text):
     return "".join(output)
 
 
+def visible_markdown_link_source(text):
+    """Return semantic source and structural links outside code spans."""
+    clean = strip_indented_code(semantic_text(text))
+    code_spans = inline_code_spans(clean)
+    matches = []
+    for matched in MARKDOWN_LINK_RE.finditer(clean):
+        label_start = matched.start("label")
+        label_end = matched.end("label")
+        invalid_overlap = any(
+            start < matched.end()
+            and end > matched.start()
+            and not (label_start <= start and end <= label_end)
+            for start, end in code_spans
+        )
+        if not invalid_overlap:
+            matches.append(matched)
+    return clean, matches
+
+
+def visible_markdown_link_matches(text):
+    """Return structural links, preserving code spans rendered inside labels."""
+    return visible_markdown_link_source(text)[1]
+
+
+def replace_markdown_links_with_labels(text):
+    """Replace only structural link syntax, leaving link-like code untouched."""
+    clean, matches = visible_markdown_link_source(text)
+    output = []
+    cursor = 0
+    for matched in matches:
+        output.extend((clean[cursor:matched.start()], matched.group("label")))
+        cursor = matched.end()
+    output.append(clean[cursor:])
+    return "".join(output)
+
+
 def markdown_link_destinations(text):
     """Return visible CommonMark inline-link destinations.
 
     The angle-bracket form intentionally supports repository paths containing spaces.
     """
-    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
     return [
         matched.group("angle")
         if matched.group("angle") is not None
         else matched.group("bare")
-        for matched in MARKDOWN_LINK_RE.finditer(clean)
+        for matched in visible_markdown_link_matches(text)
     ]
 
 
 def markdown_links(text):
     """Return visible CommonMark inline-link `(label, destination)` pairs."""
-    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
     return [
         (
             matched.group("label"),
@@ -420,5 +542,27 @@ def markdown_links(text):
             if matched.group("angle") is not None
             else matched.group("bare"),
         )
-        for matched in MARKDOWN_LINK_RE.finditer(clean)
+        for matched in visible_markdown_link_matches(text)
     ]
+
+
+def normalized_action_tokens(text):
+    """Normalize visible action words and symbols without dropping code contents."""
+    clean = replace_markdown_links_with_labels(text or "")
+    clean = render_inline_code(clean)
+    normalized = unicodedata.normalize("NFKC", clean).casefold()
+    tokens = []
+    word = []
+    for character in normalized:
+        category = unicodedata.category(character)
+        if character.isalnum() or category.startswith("M"):
+            word.append(character)
+            continue
+        if word:
+            tokens.append("".join(word))
+            word = []
+        if category.startswith("S"):
+            tokens.append(character)
+    if word:
+        tokens.append("".join(word))
+    return tuple(tokens)
