@@ -5,6 +5,7 @@
 **Filed:** 2026-07-22, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
+**Queue actions:** none
 
 ## Goal
 
@@ -33,3 +34,4 @@ change belongs in this repository before implementation reaches review.
 - Root contracts: `AGENTS.md`, `skills/AGENTS.md`, and `automation/AGENTS.md`
 - Portability decision: `memory/decisions/2026-07-22-core-portability-review-is-manually-selected.md`
 - Enforcement principle: `handbook/principles/systems-over-instructions.md`
+- Merged implementation: https://github.com/QuentinMeow/agentfold/pull/6

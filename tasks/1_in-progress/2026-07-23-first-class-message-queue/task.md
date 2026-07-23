@@ -5,7 +5,7 @@
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/reviews/future-blocking-confirm-template-first-adoption.md`; `message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md`; `message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md`; `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`; `message-queue/needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md`; `message-queue/needs-human/reviews/future-blocking-review-sensitive-data-recovery.md`
+**Queue actions:** `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`
 
 ## Goal
 
@@ -18,18 +18,18 @@ or never blocks.
 
 ## Acceptance criteria
 
-- [ ] Every live queue message, except folder documentation, uses exactly one
+- [x] Every live queue message, except folder documentation, uses exactly one
       `blocking-`, `future-blocking-`, or `non-blocking-` filename prefix with defined
       transition semantics.
-- [ ] Queue templates give a zero-context reader the distinction, a concrete example,
+- [x] Queue templates give a zero-context reader the distinction, a concrete example,
       the unattended outcome, and a link to complete context.
-- [ ] Root and leaf contracts make `message-queue/` canonical for human↔agent and
+- [x] Root and leaf contracts make `message-queue/` canonical for human↔agent and
       durable agent↔agent action; no PR, chat, issue, or task-only ask is valid.
-- [ ] The reconciler rejects invalid queue names, prefix/schema contradictions, and a
-      blocked task without a live immediately-blocking human item.
-- [ ] Relevant portable and personal skills cannot generate orphan human-review
+- [x] The reconciler rejects invalid queue names, prefix/schema contradictions, and a
+      blocked task without a reciprocal live immediately-blocking human or agent item.
+- [x] Relevant portable and personal skills cannot generate orphan human-review
       questions and instead surface links to queue items.
-- [ ] The owner's answers about guard modes and review clarity are folded into durable
+- [x] The owner's answers about guard modes and review clarity are folded into durable
       design/decision records through the queue lifecycle.
 - [ ] Repository checks and an independent adversarial review pass with real evidence.
 

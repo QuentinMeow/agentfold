@@ -1,10 +1,11 @@
 # Queue items are regenerable projections, not sources
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-22
 **Decided-by:** human (directed in chat; transcribed by agent — chat leaves no trace)
 **Description:** A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe
 **Review-by:** 2027-01-18
+**Superseded-by:** `memory/decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md`
 
 ## Context
 

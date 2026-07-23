@@ -60,3 +60,8 @@
   branch.
 - Forward-tested and validated the skill, read both published bodies back exactly, and
   confirmed their remote heads, bases, file totals, draft state, and green checks.
+
+## 2026-07-23 — merge confirmation (codex)
+
+- Confirmed the exact reviewed heads and GitHub merge commits for PRs #4 and #6 are
+  ancestors of `main`, then moved this completed task from review to done.

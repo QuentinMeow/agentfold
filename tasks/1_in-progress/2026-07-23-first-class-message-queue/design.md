@@ -1,6 +1,6 @@
 # Design notes — Make the message queue the first-class interaction surface
 
-**Status:** chosen
+**Status:** decided
 
 ## Problem
 
@@ -50,14 +50,44 @@ Human messages compare meaningful dispositions, show a concrete example, state t
 unattended result, and link the durable source. This structure constrains delivery and
 evidence, not how a future agent completes the work.
 
+## Hardening after independent review
+
+The first adversarial pass found that authority also requires conservative parsing and
+portable adoption:
+
+- Queue evidence is read from visible CommonMark, never fenced examples or HTML
+  comments; angle-bracket link destinations preserve valid paths containing spaces.
+- Standard message leaves have specialized schemas, while any repository may add a
+  one-level typed leaf that inherits the actor's generic schema.
+- Handover projection enforcement activates from a repository-local schema and exact
+  legacy folder, not an AgentFold calendar date.
+- Unclaimed backlog tasks have reciprocal, explicitly typed non-blocking pickup
+  messages; ordinary follow-up requests may still link active tasks.
+  Task status enforces start/review/complete boundaries; Git admission names external
+  boundaries such as merge and scopes them to the task being admitted.
+- A review is unanswerable while its artifact is pending. A waiting review binds to
+  exact file bytes or full Git object ids, and the response repeats that revision;
+  mutable PR URLs remain navigation only.
+- Every newly added handover must exactly project the complete live human queue.
+  Existing records remain stable, so later queue resolution does not rewrite history.
+- Reconciler retries aggregate by full check/subject identity, use collision-safe names,
+  and refresh a marked machine projection without overwriting actor status or notes.
+
+The live queue owns unresolved delivery state even though its background stays
+elsewhere. The correcting ADR is
+`memory/decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md`.
+
 Accepted decision:
 `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
 
-## Core fit (required when changing AgentFold core)
+## Core fit
 
 **Agent substitution:** pass — files, links, and deterministic checks work with any agent runtime
-**Provider substitution:** not-applicable — the queue contract does not depend on a hosted provider
+**Provider substitution:** pass — any provider can forward branch, immutable diff, and reached-transition context into the canonical local reconciler
 **Repository substitution:** pass — any adopted repository needs durable human and agent action routing
 **User-global writes:** none
 **Why AgentFold core:** interaction delivery is a framework lifecycle concern, not personal configuration or product behavior
-**Thin adapter:** none
+**Thin adapter:** canonical=automation/reconcile/reconcile.py; optional=yes; policy=none; writes=repo-only
+
+The registered `.github/workflows/harness.yml` adapter only maps GitHub event context
+to those canonical arguments; it owns no queue policy.

@@ -122,3 +122,16 @@ The skipped scope canary creates a real SHA-256 Git repository and runs only whe
 installed Git supports that object format. Full 40- and 64-character receipt parsing is
 covered in every run; the exact resolved-object check remains active regardless of
 repository format.
+
+## Merge confirmation
+
+```
+$ git merge-base --is-ancestor 19ba6b0a659fc7601047a18c0834ba3afa082fd5 main; printf 'PR4_HEAD_ON_MAIN=%s\n' "$?"
+PR4_HEAD_ON_MAIN=0
+$ git merge-base --is-ancestor 379c30920e75f66f230c5829e46587d948efbc70 main; printf 'PR6_HEAD_ON_MAIN=%s\n' "$?"
+PR6_HEAD_ON_MAIN=0
+$ git merge-base --is-ancestor 999a6c4992c29cd1ccdca6ed797c9dcd847ac90d main; printf 'PR4_MERGE_ON_MAIN=%s\n' "$?"
+PR4_MERGE_ON_MAIN=0
+$ git merge-base --is-ancestor 9e244784c003cd96954ddbdc31e9aab1da5143d3 main; printf 'PR6_MERGE_ON_MAIN=%s\n' "$?"
+PR6_MERGE_ON_MAIN=0
+```

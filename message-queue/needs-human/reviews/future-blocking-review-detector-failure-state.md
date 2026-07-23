@@ -4,13 +4,16 @@
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the separate failure state and its mode-dependent transition behavior, or describe the desired alternative.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
+**Reviewed revision:** ______
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Treat the verifier as attack surface” and “Detector assurance”
 **Why-you-might-care:** A crashed or incomplete scanner must not accidentally become evidence that content is safe.
 **If-you-do-nothing:** Guardrail implementation waits at its start boundary; the separate failure state remains a proposal.
 
-## Context
+## What you need to know
 
 The design distinguishes clean, finding, incomplete coverage, runtime error, and not
 applicable. Mode then determines transition behavior; the detector result itself does
@@ -30,5 +33,8 @@ not change merely because a repository prefers less friction.
 If a scan expected 20 files but processed zero, the run is incomplete. In `hard` the
 commit waits for repair or authenticated break-glass; in `soft` the agent sees the
 incomplete report and may continue, without claiming the content was clean.
+
+When answering here, copy `Review revision` into `Reviewed revision` so the answer
+stays bound to the exact design bytes.
 
 **Your review:** ______

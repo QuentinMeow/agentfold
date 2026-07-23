@@ -1,6 +1,7 @@
 # Design notes — protect AgentFold core portability
 
 **Status:** decided
+**Implemented:** merged in PR #6 on 2026-07-23
 
 ## Problem
 

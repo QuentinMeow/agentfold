@@ -5,6 +5,7 @@
 **Filed:** 2026-07-22, by codex, from chat
 **Parent:** none
 **Repository scope:** core
+**Queue actions:** none
 
 ## Goal
 

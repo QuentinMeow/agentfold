@@ -10,3 +10,5 @@
       record exact evidence and move the task to review.
 - [x] 5. Publish a clean replacement draft PR based on the guardrails-design branch and
       link it from the closed incident-specific draft.
+- [x] 6. Confirm the reviewed head and merge commit are ancestors of `main`, then close
+      the task lifecycle.

@@ -4,6 +4,7 @@
 **Filed:** 2026-07-22, by claude (design review; owner directed in chat — report: `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md`)
 **Parent:** none
 **Repository scope:** core
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-severity-tiers-for-reconciler-findings.md`
 
 ## Goal
 
