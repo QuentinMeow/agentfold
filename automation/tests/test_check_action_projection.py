@@ -48,12 +48,18 @@ class ActionProjectionTests(unittest.TestCase):
         action="Review the boundary.",
         actor="needs-human",
         leaf=None,
+        external_assignment=None,
     ):
         leaf = leaf or ("reviews" if actor == "needs-human" else "requests")
         path = root / "message-queue" / actor / leaf / name
         path.parent.mkdir(parents=True, exist_ok=True)
+        assignment_field = (
+            f"**External assignment:** {external_assignment}\n"
+            if external_assignment is not None else ""
+        )
         path.write_text(
-            f"# Review\n\n**Action:** {action}\n",
+            f"# Review\n\n**Action:** {action}\n"
+            f"{assignment_field}",
             encoding="utf-8",
         )
         return path
@@ -1019,6 +1025,8 @@ class ActionProjectionTests(unittest.TestCase):
             "Chime in with feedback.",
             "Weigh in on the fallback.",
             "Ping me with any concerns.",
+            "Assigned to Alice: squash the login race before merge.",
+            "Assignee: @alice — squash the login race before merge.",
         )
         for ask in asks:
             with self.subTest(ask=ask), self.repo() as root:
@@ -1050,6 +1058,18 @@ class ActionProjectionTests(unittest.TestCase):
                 f"1. [Review the boundary]({item.relative_to(root).as_posix()})\n"
             )
             self.assertEqual([], self.findings(root, body))
+
+    def test_absent_or_historical_assignment_prose_is_not_an_action(self):
+        descriptions = (
+            "Assigned to nobody.",
+            "The issue was assigned to Alice last week.",
+            "Previously assigned to Alice.",
+        )
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_prose(description)
+                )
 
     def test_appreciative_orphan_ask_outside_linked_section_is_rejected(self):
         with self.repo() as root:
@@ -2093,18 +2113,21 @@ class ActionProjectionTests(unittest.TestCase):
             human = self.queue_item(
                 root,
                 action="Review the human-facing migration.",
+                external_assignment="alice",
             )
             agent = self.queue_item(
                 root,
                 name="non-blocking-review-automated-migration.md",
                 action="Review the automated migration.",
                 actor="needs-agent",
+                external_assignment="copilot-pull-request-reviewer[bot]",
             )
             second_agent = self.queue_item(
                 root,
                 name="non-blocking-review-second-automated-migration.md",
                 action="Review the second automated migration.",
                 actor="needs-agent",
+                external_assignment="copilot-pull-request-reviewer[bot]",
             )
             self.git(root, "add", ".")
             human_path = human.relative_to(root).as_posix()
@@ -2141,9 +2164,11 @@ class ActionProjectionTests(unittest.TestCase):
                 queue_actor="any",
                 require_all_live=False,
             )
-            self.assertEqual(1, len(findings))
-            self.assertIn("for needs-agent", findings[0])
-            self.assertIn("only 0 distinct", findings[0])
+            self.assertTrue(any(
+                "for needs-agent" in finding
+                and "only 0 distinct" in finding
+                for finding in findings
+            ), findings)
             self.assertEqual(
                 [],
                 self.findings(
@@ -2166,8 +2191,14 @@ class ActionProjectionTests(unittest.TestCase):
             )
 
             duplicate_bots = json.dumps([
-                {"actor": "needs-agent", "identity": "same-bot"},
-                {"actor": "needs-agent", "identity": "same-bot"},
+                {
+                    "actor": "needs-agent",
+                    "identity": "copilot-pull-request-reviewer[bot]",
+                },
+                {
+                    "actor": "needs-agent",
+                    "identity": "copilot-pull-request-reviewer[bot]",
+                },
             ])
             findings = self.findings(
                 root,
@@ -2176,8 +2207,10 @@ class ActionProjectionTests(unittest.TestCase):
                 queue_actor="any",
                 require_all_live=False,
             )
-            self.assertEqual(1, len(findings))
-            self.assertIn("contains 2 action(s)", findings[0])
+            self.assertTrue(any(
+                "contains 2 action(s)" in finding
+                for finding in findings
+            ), findings)
             self.assertEqual(
                 [],
                 self.findings(
@@ -2275,26 +2308,70 @@ class ActionProjectionTests(unittest.TestCase):
                 name="non-blocking-review-unrelated-bot-work.md",
                 action="Review unrelated bot work.",
                 actor="needs-agent",
+                external_assignment="review-bot",
+            )
+            wrong = self.queue_item(
+                root,
+                name="non-blocking-review-wrong-bot-work.md",
+                action="Review wrong bot work.",
+                actor="needs-agent",
+            )
+            matching = self.queue_item(
+                root,
+                name="non-blocking-review-assigned-bot-work.md",
+                action="Review assigned bot work.",
+                actor="needs-agent",
+                external_assignment="review-bot",
             )
             unrelated_path = unrelated.relative_to(root).as_posix()
-            self.task_record(root, task_id, "none")
-            self.git(root, "add", ".")
-            findings = self.findings(
+            wrong_path = wrong.relative_to(root).as_posix()
+            matching_path = matching.relative_to(root).as_posix()
+            self.task_record(
                 root,
-                (
-                    "## What to review\n\n"
-                    f"1. [Review unrelated bot work.]({unrelated_path})\n"
-                ),
-                task_id=task_id,
-                queue_actor="any",
-                required_queue_actor="needs-human",
-                external_assignments=(json.dumps([{
-                    "actor": "needs-agent",
-                    "identity": "review-bot",
-                }]),),
+                task_id,
+                f"`{wrong_path}`, `{matching_path}`",
             )
-            self.assertEqual(1, len(findings))
-            self.assertIn("only 0 distinct", findings[0])
+            self.git(root, "add", ".")
+            assignment = (json.dumps([{
+                "actor": "needs-agent",
+                "identity": "review-bot",
+            }]),)
+            cases = (
+                ("Review unrelated bot work.", unrelated_path),
+                ("Review wrong bot work.", wrong_path),
+            )
+            for label, path in cases:
+                with self.subTest(path=path):
+                    findings = self.findings(
+                        root,
+                        (
+                            "## What to review\n\n"
+                            f"1. [{label}]({path})\n"
+                        ),
+                        task_id=task_id,
+                        queue_actor="any",
+                        required_queue_actor="needs-human",
+                        external_assignments=assignment,
+                    )
+                    self.assertTrue(any(
+                        "External assignment" in finding
+                        for finding in findings
+                    ), findings)
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    (
+                        "## What to review\n\n"
+                        "1. [Review assigned bot work.]"
+                        f"({matching_path})\n"
+                    ),
+                    task_id=task_id,
+                    queue_actor="any",
+                    required_queue_actor="needs-human",
+                    external_assignments=assignment,
+                ),
+            )
 
     def test_mixed_pr_surface_uses_queued_no_action_marker(self):
         task_id = "2026-07-23-no-pr-actions"
@@ -2435,6 +2512,7 @@ class ActionProjectionTests(unittest.TestCase):
                 name="non-blocking-review-automated-migration.md",
                 action="Review the automated migration.",
                 actor="needs-agent",
+                external_assignment="copilot-pull-request-reviewer[bot]",
             )
             self.git(root, "add", ".")
             path = agent_item.relative_to(root).as_posix()

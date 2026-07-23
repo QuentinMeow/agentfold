@@ -94,15 +94,21 @@ portable adoption:
   approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
   and generated-retry exceptions prove their own state transitions, and activation
-  cannot be removed to disable history checks.
+  cannot be removed to disable history checks. A governed v1 handover path has one
+  immutable incarnation; deletion is allowed, but correction or parallel re-entry uses
+  a new conversation path.
 - Force-ref admission names the displaced old tip explicitly, so continuity compares it
   with the new range head without treating ordinary PR divergence as a force push.
   Whole queue-service removal remains modular only when its edge erases no live action.
 - External action prose crosses a provider-neutral projection gate. Outbound task PR
-  descriptions project every `needs-human` action in `Queue actions`; inbound formal
+  descriptions require immutable task-scope evidence and project every `needs-human`
+  action in `Queue actions`; inbound formal
   reviews project only the `needs-agent` actions carried by that surface; issues and
   conversation comments may link either actor because the path owns direction. Allowed
-  absolute links bind to an adapter-supplied immutable prefix. GitHub's default/base
+  absolute links bind to an adapter-supplied immutable prefix. A provider assignment
+  requires a distinct actor-correct queue item whose opaque binding preserves provider,
+  role, actor kind, and identity; body headings are classified as visible prose.
+  GitHub's default/base
   context makes PR-description, issue, and conversation checks authoritative; direct
   review-event checks are explicitly advisory because GitHub has no target-context
   variant whose workflow definition is base-owned.

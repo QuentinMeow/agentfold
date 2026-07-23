@@ -38,9 +38,9 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 ## Lifecycle and content
 
 - Copy the matching template; never write a schema from memory. Human items expose
-  `Action`, `Why-you-might-care`, and `If-you-do-nothing` projection fields, explain
-  the choice from zero context, compare dispositions, give an example, link a source,
-  and expose a response slot (`handbook/human-action-guide.md`).
+  the projection fields, zero-context differences, example, source, and response slot
+  required by `handbook/human-action-guide.md`. A provider assignment also records
+  its adapter's exact opaque role-and-identity `External assignment` binding.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing

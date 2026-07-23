@@ -12,6 +12,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <the concrete action the receiving agent should take>
 **Full context:** [<complete source>](<repo-relative path>)
+<!-- For a provider assignment, add exactly one **External assignment:** <opaque
+role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
 **Resolution evidence:** `<durable file completion will create or change>`
 <!-- Add **Request kind:** task-pickup only for the canonical pickup request of one
 unclaimed backlog task. Other request kinds may define their own explicit value. -->

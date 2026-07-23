@@ -255,6 +255,11 @@ QUEUE_ACTION_RE = re.compile(
     r"^\*\*Action:\*\*[ \t]*(?P<action>\S(?:.*\S)?)[ \t]*$",
     re.M,
 )
+QUEUE_EXTERNAL_ASSIGNMENT_RE = re.compile(
+    r"^\*\*External assignment:\*\*[ \t]*"
+    r"(?P<binding>\S(?:.*\S)?)[ \t]*$",
+    re.M,
+)
 DECLARATIVE_ACTION_RE = re.compile(
     r"\b"
     r"(?:(?:explicit|additional|separate|formal|manual)[ \t]+)*"
@@ -312,6 +317,15 @@ ACTOR_HARD_PROHIBITION_RE = re.compile(
     r"(?:not|never)[ \t]+"
     rf"{OPEN_COMMAND_WORD_PATTERN}\b",
     re.I,
+)
+NAMED_ASSIGNMENT_RE = re.compile(
+    r"(?:^|\n)[ \t]*"
+    r"(?:assigned[ \t]+to|assignee[ \t]*:)[ \t]+"
+    r"(?P<negation>nobody|no[ \t]+one)?"
+    r"(?(negation)|(?:@?[A-Za-z0-9][A-Za-z0-9_.-]*"
+    r"(?:[ \t]+[A-Za-z][A-Za-z'.-]*){0,3}))"
+    r"(?:[ \t]*[:—-][^\n]*)?[.!]?[ \t]*(?=$|\n)",
+    re.I | re.M,
 )
 BOUNDARY_VERB_PATTERN = (
     r"(?:continue|deploy(?:ed)?|merge(?:d)?|proceed|publish(?:ed)?|"
@@ -775,6 +789,7 @@ def declarative_action_request(clean):
         HUMAN_REQUEST_RE,
         FIRST_PERSON_REQUEST_RE,
         ACTOR_HARD_PROHIBITION_RE,
+        NAMED_ASSIGNMENT_RE,
         ACTOR_OBLIGATION_RE,
         AUTOMATION_ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
@@ -1290,6 +1305,24 @@ def canonical_queue_action(path, repo=REPO, candidate_revision=None):
     return matches[0].strip() if len(matches) == 1 else None
 
 
+def canonical_queue_external_assignment(
+    path,
+    repo=REPO,
+    candidate_revision=None,
+):
+    """Return one exact opaque provider-assignment binding, if declared."""
+    matches = QUEUE_EXTERNAL_ASSIGNMENT_RE.findall(
+        semantic_text(
+            candidate_text(
+                path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            )
+        )
+    )
+    return matches[0].strip() if len(matches) == 1 else None
+
+
 def task_queue_paths(
     task_id,
     queue_actor="needs-human",
@@ -1434,14 +1467,14 @@ def material_external_action_state(value):
     return external_action_state_count(value) > 0
 
 
-def external_assignment_state_counts(values):
-    """Count provider-neutral assignments by their canonical next actor.
+def external_assignment_states(values):
+    """Return provider-neutral assignments with actor and opaque binding.
 
     Every input is a JSON array of objects with a non-empty opaque `identity`
     and an exact `actor` of `needs-human` or `needs-agent`. Provider adapters
     own the mapping from their actor types into this closed canonical shape.
     """
-    counts = {actor: 0 for actor in QUEUE_ACTORS}
+    states = []
     for input_number, value in enumerate(values, start=1):
         try:
             assignments = json.loads(value)
@@ -1472,8 +1505,8 @@ def external_assignment_state_counts(values):
                     f"external assignment input {input_number}, entry "
                     f"{assignment_number} needs a non-empty string identity"
                 )
-            counts[actor] += 1
-    return counts
+            states.append((actor, identity.strip()))
+    return states
 
 
 def projection_findings(
@@ -1575,9 +1608,12 @@ def projection_findings(
             "`any`; pass provider-neutral external assignments with actor and "
             "identity"
         )
-    external_action_counts = external_assignment_state_counts(
+    external_assignment_state = external_assignment_states(
         external_assignments
     )
+    external_action_counts = {actor: 0 for actor in QUEUE_ACTORS}
+    for actor, _identity in external_assignment_state:
+        external_action_counts[actor] += 1
     if queue_actor in QUEUE_ACTORS:
         external_action_counts[queue_actor] += legacy_external_action_count
     disallowed_external_actors = [
@@ -1789,6 +1825,30 @@ def projection_findings(
             )
             for actor in QUEUE_ACTORS
         }
+        unmatched_assignment_paths = set(assignment_paths)
+        for actor, identity in external_assignment_state:
+            matches = sorted(
+                path for path in unmatched_assignment_paths
+                if queue_item_actor(path) == actor
+                and canonical_queue_external_assignment(
+                    path,
+                    repo=repo,
+                    candidate_revision=candidate_revision,
+                ) == identity
+            )
+            if matches:
+                unmatched_assignment_paths.remove(matches[0])
+            else:
+                findings.append(
+                    "external assignment "
+                    f"`{identity}` for {actor} has no distinct "
+                    "task-owned queue action with an exact "
+                    "`External assignment` binding"
+                    if task_all_paths is not None else
+                    "external assignment "
+                    f"`{identity}` for {actor} has no distinct live queue "
+                    "action with an exact `External assignment` binding"
+                )
         for actor, external_count in external_action_counts.items():
             linked_count = linked_action_counts[actor]
             if linked_count < external_count:

@@ -438,3 +438,22 @@
   and three quote CLI tests.
 - Session handover:
   `history/conversations/2026-07-23-1411PDT-repair-panel-ten-blockers/handover.md`.
+
+## 2026-07-23 — assignment identity binding repair (codex)
+
+- Preserved external assignment identity and role instead of reducing provider state
+  to actor cardinality. Every assignment now consumes one distinct queue item whose
+  `External assignment` field exactly matches the adapter's opaque binding.
+- Made the GitHub adapter distinguish pull-request reviewer, requested team, PR
+  assignee, and issue assignee bindings, including human/bot actor kind and login/slug.
+  The canonical gate remains provider-neutral and treats the binding as opaque data.
+- Classified present `Assigned to <identity>` and `Assignee: <identity>` prose as an
+  action while preserving nobody, historical, and previously-assigned descriptions.
+- Updated queue templates, contracts, human guidance, task design, workflow tests, and
+  projection regressions. The blocking reviewer's exact unrelated-assignment and
+  named-person prose cases passed bounded recheck; 93 projection and eight adapter
+  tests passed with Python compilation, workflow parsing, and diff checks. The full
+  runner then passed all six files, including 55 core-scope tests (one skip), 214
+  queue/history tests, and both quote-service suites.
+- Session handover:
+  `history/conversations/2026-07-23-1428PDT-repair-assignment-identity-binding/handover.md`.

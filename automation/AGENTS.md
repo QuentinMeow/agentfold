@@ -33,8 +33,9 @@ Rules:
   and an unavailable nonzero old tip fails closed.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
-  project the task completely. Scoped external assignments count only task-owned queue
-  actions. Inbound comments use explicit unscoped mode: their own asks remain
+  project the task completely. Scoped external assignments require distinct task-owned
+  queue actions with exact opaque adapter bindings. Inbound comments use explicit
+  unscoped mode: their own asks remain
   enforceable, but they do not claim to represent a task. Summary mode allows ordinary
   change-title work verbs while still rejecting questions, TODOs, obligations, and
   authority requests.

@@ -12,6 +12,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <who>, from task <task id>
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
+<!-- For a provider assignment, add exactly one **External assignment:** <opaque
+role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
 **Why-you-might-care:** <one sentence explaining the practical consequence>
 **If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
 **Review target:** <pending | one repo file | git:<full id or base...head> | one HTTPS artifact>

@@ -55,7 +55,10 @@ Every other channel links the same live item. A PR “What to review” entry li
 canonical item; one entry carries one link and keeps any surrounding explanation
 declarative. A provider's checked no-action acknowledgement covers its whole selected
 actor surface: GitHub PR descriptions use exact `No queued action requested.` only
-when neither a human nor an agent/bot assignment exposes an action.
+when neither a human nor an agent/bot assignment exposes an action. Each provider
+assignment gets a distinct queue item whose `External assignment` field exactly copies
+the adapter's opaque provider, role, actor-kind, and identity binding; an existing
+generic review cannot stand in for a new assignee or requested reviewer.
 Chat answers are first transcribed into the item. Task and handover projections never
 carry a second status or answer slot.
 

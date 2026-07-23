@@ -53,7 +53,8 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   conflicting, or ambiguous scope fails closed. External assignments retain direction:
   a human reviewer or assignee requires a distinct task-owned `needs-human/` link,
   while an assigned agent or bot requires a distinct task-owned `needs-agent/` link.
-  Use the exact
+  Each linked item must copy the adapter's opaque provider/role/identity binding, so
+  an unrelated task action cannot satisfy an assignment. Use the exact
   `No queued action requested.`
   acknowledgement only when neither task scope nor assignment exposes an action.
 - A provider title is change-summary metadata, so a conventional title such as

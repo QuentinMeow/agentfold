@@ -159,18 +159,29 @@ jobs:
                 then .
                 else error("external assignment has no identity")
                 end;
-              def account:
+              def account($role):
                 if .type == "User"
-                then {actor: "needs-human", identity: .login} | identified
+                then {
+                  actor: "needs-human",
+                  identity: ("github:pull-request:" + $role + ":user:" + .login)
+                } | identified
                 elif .type == "Bot"
-                then {actor: "needs-agent", identity: .login} | identified
+                then {
+                  actor: "needs-agent",
+                  identity: ("github:pull-request:" + $role + ":bot:" + .login)
+                } | identified
                 else error("unknown external account actor type")
                 end;
               [
-                ($reviewers[] | account),
+                ($reviewers[] | account("requested-reviewer")),
                 ($teams[] |
-                  {actor: "needs-human", identity: .slug} | identified),
-                ($assignees[] | account)
+                  {
+                    actor: "needs-human",
+                    identity: (
+                      "github:pull-request:requested-team:team:" + .slug
+                    )
+                  } | identified),
+                ($assignees[] | account("assignee"))
               ]
               '
           )"
@@ -209,9 +220,15 @@ jobs:
               [
                 $assignees[] |
                 if .type == "User"
-                then {actor: "needs-human", identity: .login} | identified
+                then {
+                  actor: "needs-human",
+                  identity: ("github:issue:assignee:user:" + .login)
+                } | identified
                 elif .type == "Bot"
-                then {actor: "needs-agent", identity: .login} | identified
+                then {
+                  actor: "needs-agent",
+                  identity: ("github:issue:assignee:bot:" + .login)
+                } | identified
                 else error("unknown external account actor type")
                 end
               ]
