@@ -7,9 +7,10 @@ reconciler) rather than by hoping agents follow instructions. This file is the r
 contract every agent reads before acting, and it is self-contained — acting correctly
 never requires the README. `README.md` is the human landing page: agents write it and
 may skim it for the big picture, but it never carries agent instructions (and no human
-usage guides live here). The README stays a short pitch + map: technical depth lives
-in `handbook/` and is linked, never restated (the reconciler budgets the README's
-lines like any contract).
+usage guides live here). The README stays a short pitch + map: current operating depth
+lives in `handbook/`, proposed technical designs live in `docs/designs/`, and both are
+linked rather than restated (the reconciler budgets the README's lines like any
+contract).
 
 **Collaboration mode:** `async` — see `handbook/collaboration-modes.md` for what each
 mode permits. A task file may override the mode for that task only.
@@ -31,6 +32,7 @@ mode permits. A task file may override the mode for that task only.
 | Path | What it is |
 |------|------------|
 | `handbook/` | Design principles, collaboration modes, git workflow, naming rules, adoption guide |
+| `docs/` | Durable software and harness designs; proposals, not accepted decisions |
 | `message-queue/` | Async human↔agent messages and mechanical repair queues; split by **who acts next** (`needs-human/`, `needs-agent/`) |
 | `tasks/` | Work items; a task's status **is** the folder it sits in (`0_backlog` … `4_done`) |
 | `history/` | One folder per conversation/session; each must contain a `handover.md` |
@@ -100,6 +102,7 @@ The `skills/session-handover/` skill walks through this.
 ## Router
 
 - Working under `message-queue/`? Read `message-queue/AGENTS.md` first.
+- Working under `docs/`? Read `docs/AGENTS.md` first.
 - Working under `tasks/`? Read `tasks/AGENTS.md` first.
 - Working under `memory/`? Read `memory/AGENTS.md` first.
 - Working under `history/`? Read `history/AGENTS.md` first.

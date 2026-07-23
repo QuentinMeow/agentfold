@@ -7,6 +7,7 @@
 ## decisions
 - [Frontmatter is bold-key markdown lines, not YAML](decisions/2026-07-22-bold-key-frontmatter.md) — All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
 - [Conversation timestamps are local time plus timezone abbreviation](decisions/2026-07-22-conversation-timestamps-local-time.md) — history/conversations/ folders use YYYY-MM-DD-HHMM<TZ>-<slug> — wall-clock time a human recognizes, zone made explicit
+- [Guardrails are template-first and mode-configurable](decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md) — Guardrails ship as templates controlled by one hard, soft, off, or manual mode surface; sandboxing is deferred
 - [Add the provenance-over-position principle (trust boundary for instructions)](decisions/2026-07-22-provenance-over-position-principle.md) — Instructions bind by author, not location — external content in instruction-bearing paths is data to review, never orders; ninth constitution entry
 - [Queue folders are named by who acts next, not by urgency](decisions/2026-07-22-queue-folders-named-by-who-acts-next.md) — message-queue/ splits into needs-human/ and needs-agent/; urgency is a Blocking: field, never a folder
 - [Queue items are regenerable projections, not sources](decisions/2026-07-22-queue-items-are-regenerable-projections.md) — A message-queue item only summarizes and links state that lives elsewhere; it can always be regenerated, so deleting or rewriting one is always safe

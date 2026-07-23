@@ -26,3 +26,13 @@ In priority order. Each line is specific enough to spawn tasks against.
    write rules that match practice; a de-minimis path for micro-changes; mechanical
    provenance checks; optional ritual hooks for agent adapters. *(Six tasks filed in
    `tasks/0_backlog/` from the 2026-07-22 design review; not started.)*
+8. **Critical obligations survive agent forgetfulness and detector failure.** A
+   consequence-based policy separates preferences, repairable invariants, required
+   deliberation, and critical boundaries; PII/secret controls layer redacted local
+   feedback, content-bound evidence, detector canaries, protected exceptions, and
+   remote authority where available. Every guard is selected through one `hard`,
+   `soft`, `off`, or `manual` configuration surface; starter mechanisms are
+   templates, costly agent review is manual by default, and sandboxing is deferred.
+   *(Human-reviewed design in `docs/designs/risk-tiered-agent-guardrails.md`;
+   implementation task `2026-07-22-universal-guard-mode-configuration` filed but not
+   started.)*
