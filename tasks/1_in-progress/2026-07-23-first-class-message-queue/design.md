@@ -72,18 +72,23 @@ portable adoption:
 - Unclaimed backlog tasks have reciprocal, explicitly typed non-blocking pickup
   messages; ordinary follow-up requests may still link active tasks.
   Task status enforces start/review/complete boundaries; Git admission names external
-  boundaries such as merge and scopes them to the task being admitted.
+  boundaries such as merge and scopes them to the task being admitted. A blocking task
+  remains in progress only after a committed agent repair or answered-action folding
+  claim proves that work is active.
 - A review is unanswerable while its artifact is pending. A waiting review binds to
   exact file bytes or full Git object ids, and the response repeats that revision;
   mutable PR URLs remain navigation only.
 - Every newly added handover must exactly project the complete live human queue.
-  Existing records remain stable, so later queue resolution does not rewrite history.
+  Post-activation human entries copy `Action`, `Why-you-might-care`, and
+  `If-you-do-nothing` from the creation snapshot; agent entries are Action-labeled
+  links only. Both repository-local schema markers are sticky, while pre-marker and
+  later-resolved records remain immutable history.
 - Reconciler retries aggregate by full check/subject identity, use collision-safe names,
   and refresh a marked machine projection without overwriting actor status or notes.
 - Queue resolution is a Git-backed lifecycle, not a status label: an answered/open item
   is claimed in a separate one-line commit, ordinary deletion changes predeclared
   evidence files, approved reviews revalidate the exact target, requested changes leave
-  a same-boundary successor, and explicit rejection/abandonment ends the action. An
+  a same-boundary successor, and approval/rejection/abandonment forbid one. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
   and generated-retry exceptions prove their own state transitions, and activation
   cannot be removed to disable history checks.

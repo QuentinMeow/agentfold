@@ -159,6 +159,33 @@ FIRST_PERSON_VERB_REQUEST_RE = re.compile(
     rf"{ACTION_VERB_PATTERN}\b",
     re.I,
 )
+COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|review)"
+FIRST_PERSON_COURTESY_REQUEST_RE = re.compile(
+    r"\b(?:we|i)"
+    r"(?:"
+    r"(?P<negation>"
+    r"(?:['’]d|[ \t]+would)[ \t]+not"
+    r"|[ \t]+wouldn['’]t"
+    r")"
+    r"|(?:['’]d|[ \t]+would)"
+    r")"
+    r"[ \t]+(?:appreciate|value|welcome)[ \t]+"
+    r"(?:(?:a|any|some|the|your)[ \t]+)?"
+    rf"{COURTESY_ACTION_NOUN_PATTERN}\b",
+    re.I,
+)
+PASSIVE_COURTESY_REQUEST_RE = re.compile(
+    r"\b(?:(?:any|some|your)[ \t]+)?"
+    rf"{COURTESY_ACTION_NOUN_PATTERN}[ \t]+"
+    r"(?:"
+    r"(?P<negation>"
+    r"(?:would[ \t]+not|wouldn['’]t)[ \t]+be"
+    r")"
+    r"|would[ \t]+be"
+    r")"
+    r"[ \t]+(?:appreciated|valued|welcome)\b",
+    re.I,
+)
 GENERIC_ACTION_LABELS = {
     ("action", "request"),
     ("human", "action"),
@@ -346,13 +373,15 @@ def strip_action_emphasis(text):
 
 
 def declarative_action_request(clean):
-    """Recognize narrow present-tense/passive requests, excluding local negation."""
+    """Recognize narrow declarative/courtesy requests, excluding local negation."""
     for pattern in (
         DECLARATIVE_ACTION_RE,
         HUMAN_REQUEST_RE,
         FIRST_PERSON_REQUEST_RE,
         ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
+        FIRST_PERSON_COURTESY_REQUEST_RE,
+        PASSIVE_COURTESY_REQUEST_RE,
     ):
         for matched in pattern.finditer(clean):
             if matched.group("negation"):

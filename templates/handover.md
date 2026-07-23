@@ -24,15 +24,15 @@ no shorthand invented mid-session.>
 ## Needs your attention
 
 <This is a projection of every open `message-queue/needs-human/` item, not a place to
-originate an ask. Order entries by filename class: `blocking-`, then
-`future-blocking-`, then `non-blocking-`. Never use a bare name: write a clickable
-markdown link plus enough context to act without opening anything —
-`[short name](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)` followed
-by 2–3 sentences explaining the choice, why it arose, and the named boundary or
-unattended outcome. New handovers must use a relative link that resolves to the exact
-queue file; an external URL or a path copied from another folder does not count. The
-queue file remains canonical and links to the full source. Repeat this section
-verbatim in the session's final chat reply. Write `None.` when no items are open.>
+originate an ask. Use one top-level bullet per live item, ordered by `blocking-`,
+`future-blocking-`, `non-blocking-`, then queue path. The bullet's first content is
+`[<the queue item's exact Action text>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)`.
+That is the bullet's only link. Append exactly
+` — Why-you-might-care: <copied field> || If-you-do-nothing: <copied field>`,
+copying both values from the same queue snapshot with only whitespace reflow allowed.
+No other prose can appear. The relative link must resolve to the exact live queue
+file. Repeat this section verbatim in the final chat reply. Write `None.` when no
+human items are open.>
 
 ## Dead ends
 
@@ -41,9 +41,11 @@ Failed approaches are exactly what compaction and chat lose. "None" is fine.>
 
 ## Next steps
 
-<What the next session should probably do first. Any action assigned to a human or
-another session must already have a canonical queue item linked here; do not create an
-orphan ask in a handover.>
+<Write `None.` or one top-level bullet per assigned `needs-agent/` action. Use the
+same strict link form as above, but make that one relative queue link the bullet's only
+content; its label exactly copies the item's `Action`. Do not add prose or another
+link. This section may project a scoped subset of live agent actions; it need not list
+unrelated global agent work.>
 
 ## Deep links
 

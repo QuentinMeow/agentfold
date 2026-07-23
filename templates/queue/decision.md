@@ -12,6 +12,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <choose one option, or state another choice>
 **Full context:** [<complete source>](<repo-relative path>)
+**Why-you-might-care:** <one sentence explaining the practical consequence>
+**If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
 **Resolution evidence:** `<durable file that folding this answer will change>`
 
 <!-- Replace this comment with exactly one block matching the filename:

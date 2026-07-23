@@ -26,7 +26,19 @@ AUTOMATION = Path(__file__).resolve().parents[1]
 if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
-from markdown_semantics import markdown_link_destinations, semantic_text
+from check_action_projection import (
+    LIST_ITEM_RE,
+    normalized_action_tokens,
+    prose_without_links,
+    section_entries,
+)
+from markdown_semantics import (
+    MARKDOWN_LINK_RE,
+    markdown_link_destinations,
+    markdown_links,
+    rendered_human_text,
+    semantic_text,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 TODAY = datetime.datetime.now(datetime.timezone.utc).date()
@@ -102,7 +114,7 @@ REVIEW_OUTCOMES = {
     "not-approved",  # legacy alias for changes-requested
 }
 REVIEW_SUCCESSOR_OUTCOMES = {"changes-requested", "not-approved"}
-REVIEW_TERMINAL_OUTCOMES = {"rejected", "abandoned"}
+REVIEW_TERMINAL_OUTCOMES = {"approved", "rejected", "abandoned"}
 GIT_RANGE_RE = re.compile(
     r"^(?:root:(?:[0-9a-f]{40}|[0-9a-f]{64})|"
     r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
@@ -2791,6 +2803,55 @@ def active_task_scope_matches(task_ids):
     return bool(ACTIVE_TASK_ID) and ACTIVE_TASK_ID in task_ids
 
 
+def committed_candidate_revision():
+    """Return the commit whose bytes must already contain an active claim."""
+    if _GIT_HEAD_OID:
+        return _GIT_HEAD_OID
+    if not (REPO / ".git").exists():
+        return None
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if head.returncode:
+        return None
+    revision = head.stdout.strip()
+    return revision if FULL_GIT_OID_RE.fullmatch(revision) else None
+
+
+def active_blocking_repair_problem(item):
+    """Explain why a blocker lacks a committed agent-owned repair claim."""
+    rel = item.relative_to(REPO).as_posix()
+    parts = Path(rel).parts
+    if len(parts) != 4:
+        return "queue path has no canonical actor and typed leaf"
+    actor, leaf = parts[1:3]
+    text = repo_text(item)
+    got = text_fields(text)
+    active_status = "folding" if actor == "needs-human" else "in-repair"
+    if actor not in {"needs-human", "needs-agent"}:
+        return "queue actor is malformed"
+    if got.get("Status", "").strip() != active_status:
+        return f"status is not {active_status}"
+    if actor == "needs-human" \
+            and first_concrete_response(human_response_fields(text)) is None:
+        return "folding has no concrete committed human response"
+    revision = committed_candidate_revision()
+    if revision is None:
+        return "active status is not present in a committed candidate"
+    committed = git_artifact_bytes_at(revision, rel)
+    candidate = repo_artifact_bytes(item)
+    if committed is None or committed != candidate:
+        return "active status is not yet committed"
+    return claimed_lifecycle_problem(
+        rel, text, revision, actor, leaf
+    )
+
+
 def check_active_queue_boundaries():
     if not ACTIVE_TRANSITIONS:
         return
@@ -2904,6 +2965,24 @@ def check_queue_task_reciprocity():
             if timing == "blocking" and task_id in blocking_task_ids(
                 got.get("Blocks now", "")
             ) and status != "2_blocked":
+                active_problem = (
+                    active_blocking_repair_problem(item)
+                    if status == "1_in-progress"
+                    else None
+                )
+                if status == "1_in-progress" and active_problem is None:
+                    continue
+                if status == "1_in-progress":
+                    yield Finding(
+                        "queue-task-reciprocity",
+                        item.relative_to(REPO),
+                        f"blocking task:{task_id} may remain in 1_in-progress "
+                        "only during a committed active repair/folding claim: "
+                        + active_problem,
+                        "move the stopped task to 2_blocked, or commit the "
+                        "queue claim before returning it to 1_in-progress",
+                    )
+                    continue
                 yield Finding(
                     "queue-task-reciprocity",
                     item.relative_to(REPO),
@@ -3217,7 +3296,9 @@ def live_handover_paths():
     return paths
 
 
-def projection_schema_activation_commit(head):
+def projection_schema_activation_commit(
+    head, field="Queue projection schema"
+):
     history = subprocess.run(
         [
             "git", "log", "--reverse", "--format=%H", head, "--",
@@ -3242,10 +3323,90 @@ def projection_schema_activation_commit(head):
         )
         if artifact.returncode == 0 \
                 and text_fields(artifact.stdout).get(
-                    "Queue projection schema", ""
+                    field, ""
                 ).strip() == "v1":
             return commit, None
-    return None, "could not find the v1 queue-projection activation commit"
+    return None, f"could not find the v1 {field} activation commit"
+
+
+def handover_action_entry_enabled():
+    contract = repo_artifact_bytes(REPO / "history" / "AGENTS.md")
+    return bool(
+        contract is not None
+        and text_fields(
+            contract.decode("utf-8")
+        ).get("Queue action-entry schema", "").strip() == "v1"
+    )
+
+
+def history_service_present():
+    if (REPO / ".git").exists():
+        return bool(git_index_entries("history"))
+    return (REPO / "history").is_dir()
+
+
+def handover_action_entry_activation():
+    """Return a committed strict-entry activation, if one exists."""
+    revision = committed_candidate_revision()
+    if revision is None:
+        return None
+    activation, _error = projection_schema_activation_commit(
+        revision,
+        field="Queue action-entry schema",
+    )
+    return activation
+
+
+def handover_projection_activation():
+    """Return a committed queue-projection activation, if one exists."""
+    revision = committed_candidate_revision()
+    if revision is None:
+        return None
+    activation, _error = projection_schema_activation_commit(
+        revision,
+        field="Queue projection schema",
+    )
+    return activation
+
+
+def strict_handover_entries_governed(rel):
+    """Return whether this handover was created after strict-entry activation."""
+    current_activation = handover_action_entry_enabled()
+    committed_activation = handover_action_entry_activation()
+    if not current_activation and committed_activation is None:
+        return False, None
+    if CHANGE_RANGE is None:
+        return True, None
+    created_at, creation_error = handover_creation_commit(rel)
+    if creation_error:
+        return False, creation_error
+    range_head = (
+        CHANGE_RANGE[len("root:"):]
+        if CHANGE_RANGE.startswith("root:")
+        else CHANGE_RANGE.rsplit("...", 1)[-1]
+    )
+    activation = committed_activation
+    if activation is None:
+        activation, activation_error = projection_schema_activation_commit(
+            _GIT_HEAD_OID or range_head,
+            field="Queue action-entry schema",
+        )
+        if activation_error:
+            return False, activation_error
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", activation, created_at],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if ancestor.returncode == 0:
+        return True, None
+    if ancestor.returncode == 1:
+        return False, None
+    return False, ancestor.stderr.decode(
+        "utf-8", errors="replace"
+    ).strip() or "could not compare action-entry activation and handover creation"
 
 
 def newly_added_handovers():
@@ -3436,25 +3597,10 @@ def split_live_queue_entries(entries):
     return live_human, live_agent
 
 
-def handover_creation_state(handover, rel):
-    """Read a new handover and queue from the snapshot that created the record."""
+def handover_creation_commit(rel):
+    """Return the commit that created the current handover incarnation."""
     if CHANGE_RANGE is None:
-        if not (REPO / ".git").exists():
-            return (
-                handover.read_text(encoding="utf-8"),
-                live_human_queue_paths(),
-                live_agent_queue_paths(),
-                None,
-            )
-        artifact = repo_artifact_bytes(handover)
-        if artifact is None:
-            return None, None, None, \
-                "could not read the staged handover snapshot"
-        live_human, live_agent = split_live_queue_entries(
-            git_index_entries("message-queue")
-        )
-        return artifact.decode("utf-8"), live_human, live_agent, None
-
+        return None, None
     history_range = (
         CHANGE_RANGE[len("root:"):]
         if CHANGE_RANGE.startswith("root:")
@@ -3476,8 +3622,32 @@ def handover_creation_state(handover, rel):
         detail = history.stderr.strip() or (
             "could not find the current handover's creation commit"
         )
-        return None, None, None, detail
-    created_at = commits[-1]
+        return None, detail
+    return commits[-1], None
+
+
+def handover_creation_state(handover, rel):
+    """Read a new handover and queue from the snapshot that created the record."""
+    if CHANGE_RANGE is None:
+        if not (REPO / ".git").exists():
+            return (
+                handover.read_text(encoding="utf-8"),
+                live_human_queue_paths(),
+                live_agent_queue_paths(),
+                None,
+            )
+        artifact = repo_artifact_bytes(handover)
+        if artifact is None:
+            return None, None, None, \
+                "could not read the staged handover snapshot"
+        live_human, live_agent = split_live_queue_entries(
+            git_index_entries("message-queue")
+        )
+        return artifact.decode("utf-8"), live_human, live_agent, None
+
+    created_at, creation_error = handover_creation_commit(rel)
+    if creation_error:
+        return None, None, None, creation_error
 
     artifact = subprocess.run(
         ["git", "show", f"{created_at}:{rel.as_posix()}"],
@@ -3507,6 +3677,37 @@ def handover_creation_state(handover, rel):
         parse_git_tree_records(tree.stdout)
     )
     return artifact.stdout, live_human, live_agent, None
+
+
+def handover_queue_fields_at_creation(rel, queue_path, required):
+    """Read projection fields from the handover's immutable creation snapshot."""
+    if CHANGE_RANGE is None:
+        artifact = repo_artifact_bytes(REPO / queue_path)
+    else:
+        created_at, creation_error = handover_creation_commit(rel)
+        if creation_error:
+            return None, creation_error
+        artifact = git_artifact_bytes_at(created_at, queue_path)
+    if artifact is None:
+        return None, f"`{queue_path}` is absent from the creation snapshot"
+    text = decode_utf8_artifact(
+        artifact, f"`{queue_path}` in the handover creation snapshot"
+    )
+    counts = field_counts(text)
+    got = text_fields(text)
+    projected = {}
+    for field in required:
+        if counts.get(field, 0) != 1:
+            return None, (
+                f"`{queue_path}` must contain exactly one **{field}:**"
+            )
+        value = got.get(field, "").strip()
+        if not has_concrete_value(value):
+            return None, (
+                f"`{queue_path}` has no concrete **{field}:**"
+            )
+        projected[field] = value
+    return projected, None
 
 
 def handover_candidate_text(rel):
@@ -3567,8 +3768,155 @@ def new_handover_queue_target(handover, target, actor="needs-human"):
     return relative if pattern.fullmatch(relative) else None
 
 
+def handover_projection_entries(rel, handover, body, actor, live_paths):
+    """Validate strict action-owned list entries in a new v1 handover."""
+    actor_label = "human" if actor == "needs-human" else "agent"
+    entries, outside = section_entries(body)
+    problems = []
+    projected = []
+    if outside:
+        problems.append(
+            "contains content outside the top-level action list; make every "
+            "projection a list item and indent wrapped context under its item"
+        )
+    if not entries:
+        problems.append("has no top-level queue-linked action entries")
+        return projected, problems
+
+    for index, entry in enumerate(entries, start=1):
+        links = markdown_links(entry)
+        queue_looking = [
+            (label, destination)
+            for label, destination in links
+            if "message-queue/" in destination
+        ]
+        if len(queue_looking) != 1:
+            problems.append(
+                f"entry {index} must contain exactly one canonical "
+                f"needs-{actor_label} queue link"
+            )
+            continue
+        if len(links) != 1:
+            problems.append(
+                f"entry {index} must contain only its exact Action-labeled "
+                f"needs-{actor_label} queue link"
+            )
+        label, destination = queue_looking[0]
+        canonical = new_handover_queue_target(
+            handover, destination, actor=actor
+        )
+        if canonical is None:
+            problems.append(
+                f"entry {index} has an invalid or wrong-actor "
+                f"needs-{actor_label} queue link"
+            )
+            continue
+
+        first_line = semantic_text(entry).splitlines()[0]
+        list_item = LIST_ITEM_RE.match(first_line)
+        first_link = (
+            MARKDOWN_LINK_RE.match(first_line, list_item.end())
+            if list_item else None
+        )
+        first_destination = (
+            first_link.group("angle")
+            if first_link and first_link.group("angle") is not None
+            else first_link.group("bare")
+            if first_link
+            else None
+        )
+        if first_destination != destination:
+            problems.append(
+                f"entry {index} must put its owning queue link first; "
+                "action prose cannot borrow a later link"
+            )
+
+        if canonical not in live_paths:
+            problems.append(
+                f"entry {index} links `{canonical}`, which was not live "
+                "at handover creation"
+            )
+            continue
+        projected.append(canonical)
+
+        required_fields = (
+            ("Action", "Why-you-might-care", "If-you-do-nothing")
+            if actor == "needs-human"
+            else ("Action",)
+        )
+        queue_fields, fields_error = handover_queue_fields_at_creation(
+            rel, canonical, required_fields
+        )
+        if fields_error:
+            problems.append(f"entry {index} {fields_error}")
+            continue
+        action = queue_fields["Action"]
+        if normalized_action_tokens(label) != normalized_action_tokens(action):
+            problems.append(
+                f"entry {index} link label must exactly project the linked "
+                f"queue item's **Action:** `{action}`"
+            )
+
+        expected_context = (
+            "— Why-you-might-care: "
+            + queue_fields["Why-you-might-care"]
+            + " || If-you-do-nothing: "
+            + queue_fields["If-you-do-nothing"]
+            if actor == "needs-human"
+            else ""
+        )
+        for context in (
+            prose_without_links(entry),
+            prose_without_links(rendered_human_text(entry)),
+        ):
+            marker = LIST_ITEM_RE.match(context)
+            if marker:
+                context = context[marker.end():]
+            if " ".join(context.split()) != " ".join(
+                expected_context.split()
+            ):
+                if actor == "needs-human":
+                    problems.append(
+                        f"entry {index} must copy the creation-snapshot "
+                        "Why-you-might-care and If-you-do-nothing fields "
+                        "using the fixed handover suffix"
+                    )
+                else:
+                    problems.append(
+                        f"entry {index} must contain only its exact "
+                        "Action-labeled needs-agent queue link"
+                    )
+                break
+
+    if len(projected) != len(set(projected)):
+        problems.append(
+            f"projects a needs-{actor_label} queue action more than once"
+        )
+    return projected, problems
+
+
 def check_handover_queue_projection():
-    if not handover_projection_enabled():
+    if not history_service_present():
+        return
+    projection_activation = handover_projection_activation()
+    entry_activation = handover_action_entry_activation()
+    if projection_activation is not None \
+            and not handover_projection_enabled():
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            "Queue projection schema v1 was removed after activation",
+            "restore **Queue projection schema:** v1 while history remains",
+        )
+    if entry_activation is not None \
+            and not handover_action_entry_enabled():
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            "Queue action-entry schema v1 was removed after activation",
+            "restore **Queue action-entry schema:** v1 while history remains",
+        )
+    if not handover_projection_enabled() and projection_activation is None:
         return
     added, diff_error = newly_added_handovers()
     if diff_error:
@@ -3595,6 +3943,7 @@ def check_handover_queue_projection():
             continue
         live_human = live_human_queue_paths()
         live_agent = live_agent_queue_paths()
+        strict_entries = False
         if is_new:
             text, live_human, live_agent, creation_error = handover_creation_state(
                 handover, rel
@@ -3608,6 +3957,17 @@ def check_handover_queue_projection():
                     "preserve the add commit and pass a range containing it",
                 )
                 continue
+            strict_entries, strict_error = strict_handover_entries_governed(
+                rel
+            )
+            if strict_error:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "could not verify strict action-entry activation: "
+                    + strict_error,
+                    "preserve the schema activation and handover creation commits",
+                )
         else:
             text = candidate_text
         has_v1 = text_fields(text).get("Queue projection", "").strip() == "v1"
@@ -3676,6 +4036,25 @@ def check_handover_queue_projection():
                         "`None.` must be the entire Next steps section",
                         "remove it when cross-session queue links are present",
                     )
+                if strict_entries:
+                    _agent_entries, entry_problems = (
+                        handover_projection_entries(
+                            rel,
+                            handover,
+                            next_body or "",
+                            "needs-agent",
+                            live_agent,
+                        )
+                    )
+                    for problem in entry_problems:
+                        yield Finding(
+                            "handover-queue-projection",
+                            rel,
+                            "Next steps " + problem,
+                            "use one top-level list entry per live agent action; "
+                            "make its exact Action-labeled queue link the "
+                            "entry's only content",
+                        )
                 agent_targets = []
                 invalid_agent_links = []
                 for target in markdown_link_destinations(next_body or ""):
@@ -3747,6 +4126,24 @@ def check_handover_queue_projection():
                 "`None.` must be the entire Needs your attention section",
                 "remove it when the section contains queue links",
             )
+        strict_human_entries = None
+        if strict_entries:
+            strict_human_entries, entry_problems = handover_projection_entries(
+                rel,
+                handover,
+                body,
+                "needs-human",
+                live_human,
+            )
+            for problem in entry_problems:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "Needs your attention " + problem,
+                    "use one top-level list entry per live human action; "
+                    "put an exact Action-labeled queue link first and "
+                    "keep context declarative",
+                )
         targets = markdown_link_destinations(body)
         classes = []
         invalid_human_links = []
@@ -3815,6 +4212,23 @@ def check_handover_queue_projection():
                 + "; ".join(detail),
                 "list every live needs-human item once; omit resolved or invented asks",
             )
+        if strict_entries and strict_human_entries is not None:
+            expected = sorted(
+                live_human,
+                key=lambda path: (
+                    order[delivery_class(Path(path).name)],
+                    path,
+                ),
+            )
+            if strict_human_entries != expected:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "new handover human entries are not in canonical "
+                    "timing-and-filename order",
+                    "order all live human actions by blocking, "
+                    "future-blocking, non-blocking, then queue path",
+                )
 
 
 def memory_entries():

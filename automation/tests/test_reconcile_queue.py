@@ -1921,7 +1921,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertIn(expected, findings[0].message)
 
     def test_terminal_review_outcomes_close_without_successors(self):
-        for outcome in ("rejected", "abandoned"):
+        for outcome in ("approved", "rejected", "abandoned"):
             with self.subTest(outcome=outcome), self.repo() as root:
                 self.init_git(root)
                 self.write(
@@ -1974,6 +1974,177 @@ class ReconcileQueueTests(unittest.TestCase):
                 finally:
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual([], findings)
+
+    def test_terminal_review_outcomes_reject_successor_fields(self):
+        for outcome in ("approved", "rejected", "abandoned"):
+            with self.subTest(outcome=outcome), self.repo() as root:
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                successor = (
+                    "message-queue/needs-human/reviews/"
+                    "blocking-unrelated-successor.md"
+                )
+                self.write(
+                    root,
+                    "message-queue/needs-human/reviews/"
+                    f"blocking-{outcome}-with-successor.md",
+                    "# Review proposal\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** review the proposal\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Review target:** `docs/source.md`\n"
+                    f"**Review revision:** {digest}\n"
+                    f"**Reviewed revision:** {digest}\n"
+                    f"**Review outcome:** {outcome}\n"
+                    f"**Successor action:** `{successor}`\n"
+                    "**Blocks now:** operation:publish\n\n"
+                    "## What you need to know\n\nReview one proposal.\n\n"
+                    "## Differences\n\nA terminal result closes this action.\n\n"
+                    "## Example\n\nApproval accepts these exact bytes.\n\n"
+                    f"**Your review:** {outcome}\n",
+                )
+
+                messages = self.messages(RECONCILE.check_queue_schema())
+                self.assertTrue(any(
+                    outcome in message and "Successor action" in message
+                    for message in messages
+                ), messages)
+
+    def test_range_rejects_approved_review_with_successor(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-approved-with-successor.md"
+            )
+            successor = (
+                "message-queue/needs-human/reviews/"
+                "blocking-unrelated-successor.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review proposal\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the proposal\n"
+                "**Full context:** `message-queue/AGENTS.md`\n"
+                "**Review target:** https://example.invalid/proposal\n"
+                f"**Review revision:** sha256:{'a' * 64}\n"
+                f"**Reviewed revision:** sha256:{'a' * 64}\n"
+                "**Review outcome:** approved\n"
+                f"**Successor action:** `{successor}`\n"
+                "**Blocks now:** operation:publish\n"
+                "**Your review:** approve\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record approved response")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim approved response")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve approved response")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("approved review is terminal", findings[0].message)
+
+    def test_synthetic_merge_rejects_approved_review_with_successor(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-approved-merge.md"
+            )
+            successor = (
+                "message-queue/needs-human/reviews/"
+                "blocking-unrelated-successor.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review proposal\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the proposal\n"
+                "**Full context:** `message-queue/AGENTS.md`\n"
+                "**Review target:** https://example.invalid/proposal\n"
+                f"**Review revision:** sha256:{'a' * 64}\n"
+                f"**Reviewed revision:** sha256:{'a' * 64}\n"
+                "**Review outcome:** approved\n"
+                f"**Successor action:** `{successor}`\n"
+                "**Blocks now:** operation:publish\n"
+                "**Your review:** approve\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record approved response")
+            trunk = self.git(root, "branch", "--show-current")
+
+            self.git(root, "checkout", "-b", "feature")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim approved response")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", trunk)
+            self.write(root, "base.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "advance base")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "feature")
+            self.git(root, "merge", "--no-ff", "--no-commit", trunk)
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "synthetic merge")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "approved review is terminal" in finding.message
+                for finding in findings
+            ), self.messages(findings))
 
     def test_changes_requested_outcome_requires_successor(self):
         with self.repo() as root:
@@ -3149,6 +3320,22 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         return conversation / "handover.md"
 
+    def activate_strict_handover_entries(self, root):
+        contract = root / "history/AGENTS.md"
+        contract.parent.mkdir(parents=True, exist_ok=True)
+        text = (
+            contract.read_text(encoding="utf-8")
+            if contract.is_file()
+            else "# History contract\n\n**Queue projection schema:** v1\n"
+        )
+        if "**Queue action-entry schema:** v1" not in text:
+            contract.write_text(
+                text.rstrip()
+                + "\n**Queue action-entry schema:** v1\n",
+                encoding="utf-8",
+            )
+        return contract
+
     def test_unmarked_legacy_handover_is_preserved(self):
         with self.repo() as root:
             self.make_handover(
@@ -3193,6 +3380,269 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertTrue(any("without a canonical needs-agent link" in message
                                 for message in messages))
+
+    def test_strict_handover_rejects_second_unlinked_human_ask(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why-you-might-care:** The docs control production behavior.\n"
+                "**If-you-do-nothing:** The review remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-extra-human-ask",
+                "- [review docs](../../../"
+                f"{queue_rel}) — Also decide whether to delete production?",
+            )
+            self.activate_strict_handover_entries(root)
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "fixed handover suffix" in message
+                for message in messages
+            ), messages)
+
+    def test_strict_handover_rejects_action_like_supporting_link(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why-you-might-care:** The docs control production behavior.\n"
+                "**If-you-do-nothing:** The review remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-supporting-action-link",
+                "- [review docs](../../../"
+                f"{queue_rel}) — [Approve production](https://example.invalid) "
+                "Why-you-might-care: The docs control production behavior. "
+                "|| If-you-do-nothing: The review remains pending.",
+            )
+            self.activate_strict_handover_entries(root)
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "only its exact Action-labeled needs-human queue link" in message
+                for message in messages
+            ), messages)
+
+    def test_strict_handover_rejects_agent_link_borrowing(self):
+        cases = (
+            (
+                "- Implement billing; [repair docs](../../../{path})",
+                "owning queue link first",
+            ),
+            (
+                "- [Implement billing](../../../{path}) — "
+                "The documentation is stale.",
+                "link label must exactly project",
+            ),
+            (
+                "- [repair docs](../../../{path}) — Implement billing.",
+                "only its exact Action-labeled needs-agent queue link",
+            ),
+        )
+        for next_step, expected in cases:
+            with self.subTest(expected=expected), self.repo() as root:
+                queue_rel = (
+                    "message-queue/needs-agent/requests/"
+                    "non-blocking-repair-docs.md"
+                )
+                self.write(
+                    root,
+                    queue_rel,
+                    "# Repair docs\n\n**Action:** repair docs\n",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-agent-link-borrowing",
+                    "None.",
+                )
+                handover.write_text(
+                    handover.read_text(encoding="utf-8").replace(
+                        "## Next steps\n\nNone.",
+                        "## Next steps\n\n"
+                        + next_step.format(path=queue_rel),
+                    ),
+                    encoding="utf-8",
+                )
+                self.activate_strict_handover_entries(root)
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    expected in message for message in messages
+                ), messages)
+
+    def test_staged_strict_handover_accepts_fixed_context_and_agent_subset(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate strict handovers")
+
+            human_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-boundary.md"
+            )
+            agent_rel = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-repair-docs.md"
+            )
+            unrelated_agent_rel = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-inspect-logs.md"
+            )
+            self.write(
+                root,
+                human_rel,
+                "# Review boundary\n\n"
+                "**Action:** review the boundary\n"
+                "**Why-you-might-care:** The choice is hard versus soft enforcement.\n"
+                "**If-you-do-nothing:** A failed scan blocks at transition:review.\n",
+            )
+            self.write(
+                root,
+                agent_rel,
+                "# Repair docs\n\n"
+                "**Action:** repair the docs\n",
+            )
+            self.write(
+                root,
+                unrelated_agent_rel,
+                "# Inspect logs\n\n"
+                "**Action:** inspect the logs\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-strict-valid",
+                "- [review the boundary](../../../"
+                f"{human_rel}) — Why-you-might-care: The choice is hard "
+                "versus soft enforcement. || If-you-do-nothing: A failed "
+                "scan blocks at transition:review.",
+            )
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "## Next steps\n\nNone.",
+                    "## Next steps\n\n"
+                    "- [repair the docs](../../../"
+                    f"{agent_rel})",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+
+            findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_strict_handover_rejects_two_queue_links_or_wrong_actor(self):
+        cases = (
+            (
+                "attention",
+                "- [review docs](../../../{human}) "
+                "[repair docs](../../../{agent})",
+                "exactly one canonical needs-human",
+            ),
+            (
+                "next",
+                "- [review docs](../../../{human})",
+                "wrong-actor needs-agent",
+            ),
+        )
+        for section, entry, expected in cases:
+            with self.subTest(section=section), self.repo() as root:
+                human_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-docs.md"
+                )
+                agent_rel = (
+                    "message-queue/needs-agent/requests/"
+                    "non-blocking-repair-docs.md"
+                )
+                self.write(
+                    root,
+                    human_rel,
+                    "# Review docs\n\n"
+                    "**Action:** review docs\n"
+                    "**Why-you-might-care:** The docs control behavior.\n"
+                    "**If-you-do-nothing:** The review remains pending.\n",
+                )
+                self.write(
+                    root,
+                    agent_rel,
+                    "# Repair docs\n\n**Action:** repair docs\n",
+                )
+                attention = (
+                    entry.format(human=human_rel, agent=agent_rel)
+                    if section == "attention"
+                    else "- [review docs](../../../"
+                    f"{human_rel}) — Why-you-might-care: The docs control "
+                    "behavior. || If-you-do-nothing: The review remains pending."
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-strict-link-shape",
+                    attention,
+                )
+                if section == "next":
+                    handover.write_text(
+                        handover.read_text(encoding="utf-8").replace(
+                            "## Next steps\n\nNone.",
+                            "## Next steps\n\n"
+                            + entry.format(
+                                human=human_rel, agent=agent_rel
+                            ),
+                        ),
+                        encoding="utf-8",
+                    )
+                self.activate_strict_handover_entries(root)
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    expected in message for message in messages
+                ), messages)
 
     def test_new_handover_rejects_duplicate_attention_sections(self):
         with self.repo() as root:
@@ -3351,6 +3801,107 @@ class ReconcileQueueTests(unittest.TestCase):
             (root / "message-queue").mkdir()
             self.assertEqual([], list(RECONCILE.check_handover_queue_projection()))
 
+    def test_action_entry_schema_is_sticky_after_activation(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed), self.repo() as root:
+                self.init_git(root)
+                contract = self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "# History\n\n"
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v1\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate strict handovers")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                contract.write_text(
+                    "# History\n\n**Queue projection schema:** v1\n",
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "history/AGENTS.md")
+                if committed:
+                    self.git(root, "commit", "-m", "remove strict marker")
+                    head = self.git(root, "rev-parse", "HEAD")
+                    context = mock.patch.object(
+                        RECONCILE,
+                        "CHANGE_RANGE",
+                        f"{base}...{head}",
+                    )
+                else:
+                    context = contextlib.nullcontext()
+
+                with context:
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "action-entry schema v1 was removed" in message
+                    for message in messages
+                ), messages)
+
+    def test_queue_projection_schema_is_sticky_after_activation(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed), self.repo() as root:
+                self.init_git(root)
+                contract = self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "# History\n\n"
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v1\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate handovers")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                contract.write_text(
+                    "# History\n\n"
+                    "**Queue action-entry schema:** v1\n",
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "history/AGENTS.md")
+                if committed:
+                    self.git(root, "commit", "-m", "remove projection marker")
+                    head = self.git(root, "rev-parse", "HEAD")
+                    context = mock.patch.object(
+                        RECONCILE,
+                        "CHANGE_RANGE",
+                        f"{base}...{head}",
+                    )
+                else:
+                    context = contextlib.nullcontext()
+
+                with context:
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "Queue projection schema v1 was removed" in message
+                    for message in messages
+                ), messages)
+
+    def test_action_entry_schema_allows_whole_history_service_removal(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate strict handovers")
+
+            contract.unlink()
+            contract.parent.rmdir()
+            self.git(root, "add", "-A")
+
+            findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
     def test_new_handover_must_project_every_live_human_action(self):
         with self.repo() as root:
             handover = self.make_handover(
@@ -3395,6 +3946,56 @@ class ReconcileQueueTests(unittest.TestCase):
                     [], list(RECONCILE.check_handover_queue_projection())
                 )
 
+    def test_strict_handover_requires_timing_then_path_order(self):
+        with self.repo() as root:
+            first_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-alpha.md"
+            )
+            second_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-zulu.md"
+            )
+            self.write(
+                root,
+                first_rel,
+                "# Alpha\n\n"
+                "**Action:** review alpha\n"
+                "**Why-you-might-care:** Alpha controls the first boundary.\n"
+                "**If-you-do-nothing:** Alpha remains pending.\n",
+            )
+            self.write(
+                root,
+                second_rel,
+                "# Zulu\n\n"
+                "**Action:** review zulu\n"
+                "**Why-you-might-care:** Zulu controls the last boundary.\n"
+                "**If-you-do-nothing:** Zulu remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-strict-order",
+                "- [review zulu](../../../"
+                f"{second_rel}) — Why-you-might-care: Zulu controls the last "
+                "boundary. || If-you-do-nothing: Zulu remains pending.\n"
+                "- [review alpha](../../../"
+                f"{first_rel}) — Why-you-might-care: Alpha controls the first "
+                "boundary. || If-you-do-nothing: Alpha remains pending.",
+            )
+            self.activate_strict_handover_entries(root)
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "timing-and-filename order" in message
+                for message in messages
+            ), messages)
+
     def test_new_handover_uses_its_creation_queue_snapshot(self):
         with self.repo() as root:
             queue_rel = (
@@ -3425,6 +4026,114 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(
                     [], list(RECONCILE.check_handover_queue_projection())
                 )
+
+    def test_range_strict_handover_binds_action_at_creation(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate strict handovers")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-original.md"
+            )
+            queue_item = self.write(
+                root,
+                queue_rel,
+                "# Review\n\n"
+                "**Action:** review the original boundary\n"
+                "**Why-you-might-care:** The original boundary controls release.\n"
+                "**If-you-do-nothing:** The original review remains pending.\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-action-snapshot",
+                "- [review the original boundary](../../../"
+                f"{queue_rel}) — Why-you-might-care: The original boundary "
+                "controls release. || If-you-do-nothing: The original review "
+                "remains pending.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add strict handover")
+
+            queue_item.write_text(
+                "# Review\n\n"
+                "**Action:** review a later boundary\n"
+                "**Why-you-might-care:** A later boundary controls release.\n"
+                "**If-you-do-nothing:** The later review remains pending.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", queue_rel)
+            self.git(root, "commit", "-m", "change later queue action")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_range_grandfathers_handover_before_action_entry_activation(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n**Queue projection schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue projection")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-legacy-shape.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review\n\n**Action:** review the legacy shape\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-pre-entry-schema",
+                "[Short legacy label](../../../"
+                f"{queue_rel}) — paragraph-shaped context.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add pre-entry handover")
+
+            contract = root / "history/AGENTS.md"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").rstrip()
+                + "\n**Queue action-entry schema:** v1\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "activate strict entries")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertEqual([], findings, self.messages(findings))
 
     def test_range_check_reads_queue_at_real_handover_creation_commit(self):
         with self.repo() as root, mock.patch.object(
@@ -4261,6 +4970,182 @@ class ReconcileQueueTests(unittest.TestCase):
             messages = self.messages(RECONCILE.check_task_structure())
             self.assertTrue(any("reciprocal live blocking-*" in message
                                 for message in messages))
+
+    def test_committed_agent_claim_allows_blocked_task_to_resume(self):
+        with self.repo() as root:
+            self.init_git(root)
+            queue_rel = (
+                "message-queue/needs-agent/requests/"
+                "blocking-repair-example.md"
+            )
+            item = self.write(
+                root,
+                queue_rel,
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** repair the dependency\n"
+                "**Full context:** `tasks/AGENTS.md`\n"
+                "**Blocks now:** task:2026-07-23-example\n",
+            )
+            task = self.make_task(
+                root, "2_blocked", f"`{queue_rel}`"
+            )
+            self.write(root, "tasks/AGENTS.md", "# Tasks\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record stopped task")
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** open", "**Status:** in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", queue_rel)
+            self.git(root, "commit", "-m", "claim dependency repair")
+
+            resumed = (
+                root / "tasks/1_in-progress/2026-07-23-example"
+            )
+            resumed.parent.mkdir(parents=True)
+            task.rename(resumed)
+            self.git(root, "add", "-A")
+
+            findings = list(RECONCILE.check_queue_task_reciprocity())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_committed_human_folding_claim_allows_blocked_task_to_resume(self):
+        with self.repo() as root:
+            self.init_git(root)
+            queue_rel = (
+                "message-queue/needs-human/decisions/"
+                "blocking-fold-example.md"
+            )
+            item = self.write(
+                root,
+                queue_rel,
+                "# Decide\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** choose the dependency boundary\n"
+                "**Full context:** `tasks/AGENTS.md`\n"
+                "**Blocks now:** task:2026-07-23-example\n"
+                "**Your answer:** use the repository boundary\n",
+            )
+            task = self.make_task(
+                root, "2_blocked", f"`{queue_rel}`"
+            )
+            self.write(root, "tasks/AGENTS.md", "# Tasks\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record answered blocker")
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", queue_rel)
+            self.git(root, "commit", "-m", "claim answer folding")
+
+            resumed = (
+                root / "tasks/1_in-progress/2026-07-23-example"
+            )
+            resumed.parent.mkdir(parents=True)
+            task.rename(resumed)
+            self.git(root, "add", "-A")
+
+            findings = list(RECONCILE.check_queue_task_reciprocity())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_uncommitted_or_unanswered_claim_cannot_resume_blocked_task(self):
+        cases = (
+            ("needs-agent/requests", "open", "in-repair", "repair"),
+            ("needs-human/decisions", "waiting", "folding", "fold"),
+        )
+        for endpoint, initial, active, slug in cases:
+            with self.subTest(endpoint=endpoint), self.repo() as root:
+                self.init_git(root)
+                queue_rel = (
+                    f"message-queue/{endpoint}/blocking-{slug}-example.md"
+                )
+                response = (
+                    "**Your answer:** ______\n"
+                    if endpoint.startswith("needs-human")
+                    else ""
+                )
+                item = self.write(
+                    root,
+                    queue_rel,
+                    "# Blocking action\n\n"
+                    f"**Status:** {initial}\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** repair the dependency\n"
+                    "**Full context:** `tasks/AGENTS.md`\n"
+                    "**Blocks now:** task:2026-07-23-example\n"
+                    + response,
+                )
+                task = self.make_task(
+                    root, "2_blocked", f"`{queue_rel}`"
+                )
+                self.write(root, "tasks/AGENTS.md", "# Tasks\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record stopped task")
+
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        f"**Status:** {initial}",
+                        f"**Status:** {active}",
+                    ),
+                    encoding="utf-8",
+                )
+                resumed = (
+                    root / "tasks/1_in-progress/2026-07-23-example"
+                )
+                resumed.parent.mkdir(parents=True)
+                task.rename(resumed)
+                self.git(root, "add", "-A")
+
+                messages = self.messages(
+                    RECONCILE.check_queue_task_reciprocity()
+                )
+                self.assertTrue(any(
+                    "committed active repair/folding claim" in message
+                    for message in messages
+                ), messages)
+
+    def test_waiting_or_open_blocker_requires_blocked_task_status(self):
+        cases = (
+            ("needs-agent/requests", "open"),
+            ("needs-human/decisions", "waiting"),
+        )
+        for endpoint, status in cases:
+            with self.subTest(endpoint=endpoint), self.repo() as root:
+                queue_rel = (
+                    f"message-queue/{endpoint}/blocking-stop-example.md"
+                )
+                self.write(
+                    root,
+                    queue_rel,
+                    "# Stop\n\n"
+                    f"**Status:** {status}\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** resolve the dependency\n"
+                    "**Full context:** `tasks/AGENTS.md`\n"
+                    "**Blocks now:** task:2026-07-23-example\n",
+                )
+                self.write(root, "tasks/AGENTS.md", "# Tasks\n")
+                self.make_task(
+                    root, "1_in-progress", f"`{queue_rel}`"
+                )
+
+                messages = self.messages(
+                    RECONCILE.check_queue_task_reciprocity()
+                )
+                self.assertTrue(any(
+                    "committed active repair/folding claim" in message
+                    for message in messages
+                ), messages)
 
     def test_backlog_task_requires_a_canonical_agent_pickup_request(self):
         with self.repo() as root:

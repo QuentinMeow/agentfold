@@ -541,6 +541,20 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual([], self.findings(root, body))
 
+    def test_appreciative_orphan_ask_outside_linked_section_is_rejected(self):
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            body = (
+                "## Goal\n\n"
+                "I'd appreciate your feedback on whether the fallback should ship.\n\n"
+                "## What to review\n\n"
+                f"1. [Review the boundary]({item.relative_to(root).as_posix()})\n"
+            )
+            findings = self.findings(root, body)
+            self.assertEqual(1, len(findings))
+            self.assertIn("outside the declared action section", findings[0])
+
     def test_clear_declarative_human_asks_outside_section_are_rejected(self):
         asks = (
             "Maintainer approval is requested before merge.",
@@ -584,6 +598,10 @@ class ActionProjectionTests(unittest.TestCase):
             "A reply from the owner is requested before merge.",
             "We request feedback from a maintainer.",
             "We ask a maintainer to comment on the deployment plan.",
+            "I’d appreciate your feedback on the fallback.",
+            "We'd value your input on the deployment plan.",
+            "We’d welcome a review of the release boundary.",
+            "Your feedback would be appreciated before merge.",
         )
         for ask in asks:
             with self.subTest(ask=ask), self.repo() as root:
@@ -603,6 +621,9 @@ class ActionProjectionTests(unittest.TestCase):
             "Please reply before merge.",
             "Please comment on the deployment plan.",
             "Approval from a maintainer is required before merge.",
+            "I'd appreciate your feedback on the fallback.",
+            "We’d value your input on the deployment plan.",
+            "Your review would be welcome before merge.",
         )
         for ask in asks:
             with self.subTest(ask=ask), self.repo() as root:
@@ -726,6 +747,10 @@ class ActionProjectionTests(unittest.TestCase):
                 "Reply metadata remains in the archived audit record.\n"
                 "Comment syntax is documented in the archived guide.\n\n"
                 "Answer formatting changed in this release.\n\n"
+                "Feedback is appreciated in the report.\n"
+                "I would not appreciate your feedback on the archived release.\n"
+                "We wouldn't value your input on the archived release.\n"
+                "We wouldn’t welcome your review of the archived release.\n\n"
                 "## What to review\n\nNo human action requested.\n"
             )
             self.assertEqual([], self.findings(root, body))
@@ -739,7 +764,8 @@ class ActionProjectionTests(unittest.TestCase):
                 f"1. [Review the boundary]"
                 f"({item.relative_to(root).as_posix()}). "
                 "Feedback from a maintainer is not required for the archived "
-                "release, and the prior reply remains in its audit record.\n"
+                "release. Feedback is appreciated in the report, and we "
+                "wouldn’t welcome your input on the archived release.\n"
             )
             self.assertEqual([], self.findings(root, body))
 

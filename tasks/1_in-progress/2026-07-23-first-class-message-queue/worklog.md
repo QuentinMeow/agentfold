@@ -118,3 +118,24 @@
 - Added focused lifecycle, outcome, force-push, adapter, and service-removal
   regressions. `python3 -m unittest automation.tests.test_reconcile_queue` passed all
   159 tests; Ruby parsed `.github/workflows/harness.yml` successfully.
+
+## 2026-07-23 — contract hardening round three (codex subagent)
+
+- Closed the terminal-review omission: `approved`, `rejected`, and `abandoned` now
+  reject `Successor action`, while `changes-requested` and legacy `not-approved`
+  require a same-timing successor. Staged schema, committed-range deletion, and exact
+  synthetic-merge regressions cover approval.
+- Added an independently activated, sticky handover action-entry schema. Human entries
+  copy the linked creation-snapshot `Action`, `Why-you-might-care`, and
+  `If-you-do-nothing` fields in a fixed suffix; agent entries contain only the exact
+  Action-labeled link. Pre-activation v1 records are grandfathered, both schema markers
+  resist partial removal, and deleting the whole history service still no-ops.
+- Reconciled task/blocker semantics with the task contract. A reciprocal blocking item
+  may remain linked to `1_in-progress` only after a committed one-line agent
+  `open` → `in-repair` claim or an answered human `waiting` → `folding` claim;
+  waiting, open, staged-only, preclaimed, and unanswered states still require
+  `2_blocked`.
+- Added creation-snapshot, link-borrowing, extra-ask, actor, duplicate, ordering,
+  marker-removal, whole-service-removal, terminal-outcome, and active-claim regressions.
+  The action-projection suite passed 49 tests, the queue suite passed 177 tests, the
+  full runner passed 5/5 files, and the reconciler reported 0 findings.

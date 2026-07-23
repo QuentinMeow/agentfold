@@ -37,17 +37,17 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 
 ## Lifecycle and content
 
-- Copy the matching template; never write a schema from memory. Human items explain
-  the action from zero context, compare dispositions, give an example, state the
-  unattended/boundary result, link a source, and expose a response slot
-  (`handbook/human-action-guide.md`).
+- Copy the matching template; never write a schema from memory. Human items expose
+  `Action`, `Why-you-might-care`, and `If-you-do-nothing` projection fields, explain
+  the choice from zero context, compare dispositions, give an example, link a source,
+  and expose a response slot (`handbook/human-action-guide.md`).
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit a human response while `waiting`; claim later with a status-only change to
-  `folding`. An unanswered review may retract a stale binding in one
-  `waiting` → `awaiting-artifact` commit that restores pending/blank response fields;
+  `folding`; that committed edge proves active folding. An unanswered review may retract
+  a stale binding in one `waiting` → `awaiting-artifact` commit that restores pending/blank response fields;
   publish its replacement in a later `awaiting-artifact` → `waiting` commit. Neither edge
   may add a response; the first response freezes the binding.
-- Agent claims change only `open` to `in-repair`; never edit action identity after claim.
+- Agent claims change only `open` to `in-repair`; that committed edge proves active repair, and action identity never changes afterward.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one Full context link to the backlog `task.md`; the task links it reciprocally.
   Its atomic claim/move deletes it. Only pickups use moving task paths as live context;

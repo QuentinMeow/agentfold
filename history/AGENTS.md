@@ -1,6 +1,7 @@
 # history/ — conversation record
 
 **Queue projection schema:** v1
+**Queue action-entry schema:** v1
 
 One folder per conversation/session that did work:
 `conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
@@ -26,6 +27,15 @@ handover's creation commit, so later queue additions or resolutions never rewrit
 Once committed, v1 handover bytes are immutable; record corrections in a new handover.
 `Next steps` is `None.` or links assigned work to live `needs-agent/` items; it never
 originates a cross-session action.
+
+The action-entry marker independently activates strict projection syntax. Each
+post-activation entry is one top-level bullet whose first content is
+`[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
+` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both values
+from that queue snapshot, and project the complete queue in timing-then-path order.
+Agent entries contain only the link and may project just work assigned here. Both
+schema markers are sticky while `history/` remains. Pre-marker v1 records retain their
+original creation-time contract.
 
 ## Other files in a conversation folder (optional)
 

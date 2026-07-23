@@ -33,9 +33,9 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   One agent per task; a rejected push means someone beat you — pick another.
 - One git branch per task: `task/<task-id>` (`handbook/git-workflow.md`).
 - `2_blocked` requires a live `blocking-*` human or agent item in `Queue actions`, with
-  that item reciprocally naming `task:<id>` in `Blocks now`. A task stays in progress
-  while an agent is actively repairing a dependency; move it only when no work can
-  proceed.
+  that item reciprocally naming `task:<id>` in `Blocks now`. `1_in-progress` is valid
+  only after a committed one-line `open` → `in-repair` agent claim, or an answered
+  `waiting` → `folding` human-action claim. Waiting/open blockers require `2_blocked`.
 - A task cannot cross `transition:start`, `transition:review`, or
   `transition:complete` while a linked `future-blocking-*` item remains; its boundary
   names `task:<id>`. Git/provider admission supplies external boundaries such as merge.

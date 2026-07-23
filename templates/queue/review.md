@@ -12,15 +12,17 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <who>, from task <task id>
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
+**Why-you-might-care:** <one sentence explaining the practical consequence>
+**If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
 **Review target:** <pending | one repo file | git:<full id or base...head> | one HTTPS artifact>
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
 **Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
 
-<!-- approved accepts the bound revision. changes-requested continues the review:
-before deleting, add **Successor action:** `<new queue path>` here and
-**Supersedes:** `<this queue path>` to a new same-timing successor. rejected declines
-the proposal and abandoned ends pursuit; both are terminal with no successor.
+<!-- approved accepts the bound revision and is terminal with no successor.
+changes-requested continues the review: before deleting, add **Successor action:**
+`<new queue path>` here and **Supersedes:** `<this queue path>` to a new same-timing
+successor. rejected declines the proposal and abandoned ends pursuit; both are terminal.
 Legacy **Review outcome:** not-approved remains accepted as changes-requested. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
