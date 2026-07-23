@@ -22,7 +22,7 @@ jobs:
         env:
           QUEUE_TASK_BRANCH: ${{ github.head_ref }}
           QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
-        run: python3 automation/reconcile/reconcile.py --check --at-transition merge --at-transition repository-admission --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
+        run: python3 automation/reconcile/reconcile.py --check --at-transition merge --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
       - name: Reconciler — every harness invariant holds
         if: github.event_name == 'push'
         env:
@@ -31,14 +31,25 @@ jobs:
           QUEUE_PUSH_BRANCH: ${{ github.ref_name }}
           QUEUE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          QUEUE_PUSH_BASE="$QUEUE_PUSH_BEFORE"
-          if [ "$QUEUE_PUSH_BASE" = "0000000000000000000000000000000000000000" ]; then
-            QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"
+          if [ "$QUEUE_PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            if [ "$QUEUE_PUSH_BRANCH" = "$QUEUE_DEFAULT_BRANCH" ]; then
+              QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
+            elif QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
+              QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
+            else
+              QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
+            fi
+          elif git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
+            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BEFORE...$QUEUE_PUSH_HEAD"
+          elif [ "$QUEUE_PUSH_BRANCH" != "$QUEUE_DEFAULT_BRANCH" ] && \
+              QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
+            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
+          else
+            QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
           fi
-          QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
           python3 automation/reconcile/reconcile.py --check \
-            --at-transition repository-admission \
             --branch "$QUEUE_PUSH_BRANCH" \
             --range "$QUEUE_CHANGE_RANGE"
       - name: Repository tests
+        if: ${{ always() }}
         run: python3 automation/run_tests.py

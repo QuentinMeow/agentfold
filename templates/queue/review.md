@@ -12,7 +12,7 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <who>, from task <task id>
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
-**Review target:** <pending while awaiting-artifact | exactly one repo file or HTTPS artifact>
+**Review target:** <pending | one repo file | git:<full id or base...head> | one HTTPS artifact>
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
 
@@ -21,7 +21,7 @@ blocking-*:
 **Blocks now:** <task:<id> | transition:<name> | operation:<name>>
 
 future-blocking-*:
-**Blocks at:** <YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 **Until then:** <the explicit safe path while work continues>
 
 non-blocking-*:

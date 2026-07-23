@@ -6,15 +6,17 @@ cheap to roll back.
 
 ## Two kinds of writes
 
-| | Coordination writes | Code writes |
+| | Live coordination writes | Reviewed system writes |
 |---|---|---|
-| What | `message-queue/`, `tasks/`, `history/`, `memory/`, `roadmap/` | `services/`, `skills/`, `automation/`, `handbook/` |
+| What | queue-item state; concrete task claims/status; new handovers; owner answers/decisions | contracts, templates, automation, skills, lessons, and state/docs tied to implementation |
 | Where | directly on `main` | branch `task/<task-id>` |
 | Commit size | tiny, single-purpose, immediate | logical milestones |
 | Why | other agents must see queue/task state **now**, not after a merge | code needs review before it's truth |
 
 Coordination commits use the prefix `harness:` (e.g. `harness: file decision on quote
-storage`). This split is what keeps the message queue real-time while code stays gated.
+storage`). A directory does not choose the lane: `tasks/AGENTS.md` is a reviewed system
+contract, while `tasks/1_in-progress/<id>/task.md` is live coordination. This split keeps
+the action bus real-time while behavioral and descriptive changes stay reviewable.
 
 ## Conflict avoidance (by construction, not by care)
 

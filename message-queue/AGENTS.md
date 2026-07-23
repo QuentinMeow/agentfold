@@ -15,7 +15,7 @@ not-yet-folded response. Principle: `handbook/principles/files-as-messages.md`.
 | Filename prefix | `blocking-`, `future-blocking-`, `non-blocking-` | when unresolved work stops |
 
 - `blocking-<slug>.md`: a named current task, transition, or operation cannot proceed.
-- `future-blocking-<slug>.md`: work continues until an explicit date, event, or
+- `future-blocking-<slug>.md`: work continues until an explicit UTC date, event, or
   transition; unresolved action stops there.
 - `non-blocking-<slug>.md`: the action never stops work and names the safe unattended
   outcome. Prefix is dependency timing, not risk severity.
@@ -48,8 +48,8 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   `in-repair`). Re-read before every write; never edit a human's response.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and exactly one Full context link: the backlog task's current `task.md`. The task
-  links it reciprocally, and the atomic claim/move commit deletes it. This is the only
-  queue case allowed to use a status-dependent task path.
+  links it reciprocally, and the atomic claim/move commit deletes it. Only pickups use
+  moving task paths as live context; retries may quote one only as broken-state evidence.
 - A review without its exact artifact uses `Status: awaiting-artifact` plus pending
   target/revision. Waiting reviews name one target and bind it to file SHA-256 or locally
   available full Git commit id(s); the answer copies that to `Reviewed revision`,

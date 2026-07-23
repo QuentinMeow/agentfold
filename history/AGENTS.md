@@ -23,6 +23,9 @@ project all live `message-queue/needs-human/` actions in filename-timing order. 
 originates an ask. Resolved targets may later disappear because git history archives
 past delivery. Range-based checks evaluate the handover and queue together at the
 handover's creation commit, so later queue additions or resolutions never rewrite it.
+Once committed, v1 handover bytes are immutable; record corrections in a new handover.
+`Next steps` is `None.` or links assigned work to live `needs-agent/` items; it never
+originates a cross-session action.
 
 ## Other files in a conversation folder (optional)
 

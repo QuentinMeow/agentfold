@@ -39,6 +39,8 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 - A task cannot cross `transition:start`, `transition:review`, or
   `transition:complete` while a linked `future-blocking-*` item remains. Git/provider
   admission invokes the reconciler with its external boundary, such as merge.
+  A non-task branch uses changed task records and commit `task: <id>` tags to infer scope;
+  without either it checks only global boundaries.
 - `4_done` requires `verification.md` with real command output — the reconciler checks
   it exists; the adversarial-review gate (mode-dependent) checks it's honest.
 - Done tasks are pruned by the memory gardener after ~90 days: durable learnings are

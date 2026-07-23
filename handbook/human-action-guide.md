@@ -22,25 +22,18 @@ remote?” is a human-reviewed security promise whose alternatives need explanat
 
 ## Give the reader a real choice
 
-Every human item must contain:
+Copy the endpoint's exact schema from `templates/queue/`; this guide does not restate
+its fields or headings. Fill that schema so a zero-context reader can identify one
+concrete response, follow one durable source for depth, understand the meaningful
+dispositions and their different consequences, see one small example, and know the
+boundary or safe unattended result.
 
-1. **Action:** the concrete response requested.
-2. **Full context:** a repo-relative link to the durable design, ADR, diff, or evidence.
-3. A zero-context explanation of why the action exists now.
-4. **Differences:** meaningful dispositions and the consequence that changes between
-   them; define unfamiliar terms rather than asking whether they “look right.”
-5. **Example:** one small scenario in which two responses produce different outcomes.
-6. The boundary or safe unattended result encoded by the filename and matching fields.
-7. A literal answer/review slot.
-
-For a review, link the exact diff, file, or artifact being judged and bind it to
-immutable bytes: SHA-256 for one local file, a full Git object id for a commit/tree, or
-full base and head ids for a diff. If it does not exist yet, use `awaiting-artifact`
-with pending target/revision. A PR URL is only navigation. When answering, the human
-copies `Review revision` into `Reviewed revision`; the reconciler rejects a stale or
-unbound response and Git ids that do not name available commit objects. Link exactly
-one review target. Task status paths move and are not durable context; only a
-`task-pickup` request may use one, because its claim commit deletes that request.
+For review-specific target and revision syntax, follow `templates/queue/review.md`.
+Conceptually, one exact Git commit/range, repository file, or HTTPS artifact is bound
+to immutable bytes; navigation is not revision authority, and an older response cannot
+apply after the target changes. Task status paths move and are not durable context;
+only a pickup may use one as live context because its claim commit deletes that request.
+Retry repair records may quote one only as evidence of broken state.
 
 The summary must be sufficient to act; the full-context link is for depth, not a missing
 prerequisite. A recommendation is evidence, not permission to hide an alternative.

@@ -22,7 +22,7 @@ Rules:
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. `stale-queue` age-checks `blocking-*`, never
   hard-stales `non-blocking-*`, and checks `future-blocking-*` only when `Blocks at`
-  starts with a reached `YYYY-MM-DD`; event boundaries require an actor to reclassify.
+  starts with a reached UTC `YYYY-MM-DD`; event boundaries require actor reclassification.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository

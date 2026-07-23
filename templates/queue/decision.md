@@ -18,7 +18,7 @@ blocking-*:
 **Blocks now:** <task:<id> | transition:<name> | operation:<name>>
 
 future-blocking-*:
-**Blocks at:** <YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 **Until then:** <the explicit safe path while work continues>
 
 non-blocking-*:
