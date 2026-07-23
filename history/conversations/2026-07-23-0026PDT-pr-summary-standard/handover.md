@@ -1,6 +1,6 @@
 # Handover — PR summary standard
 
-**Session:** 2026-07-23 00:26–00:34 PDT, codex
+**Session:** 2026-07-23 00:26–00:45 PDT, codex
 **Task:** 2026-07-22-protect-core-portability
 **Mode:** async
 
@@ -39,6 +39,9 @@ None.
 - The official skill validator could not run under the default Python because PyYAML
   was absent. A temporary dependency environment ran the unchanged validator instead;
   skipping validation was unnecessary.
+- GitHub briefly advanced the branch ref and direct comparison before its pull-request
+  tracking ref. The branch ancestry and 45-file comparison were authoritative; this
+  was an asynchronous PR synchronization delay, not an authentication failure.
 
 ## Next steps
 
