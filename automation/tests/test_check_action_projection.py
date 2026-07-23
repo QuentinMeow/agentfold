@@ -80,6 +80,7 @@ class ActionProjectionTests(unittest.TestCase):
         additional_prose=(),
         allow_missing_action_section_if_no_action=False,
         queue_actor="needs-human",
+        require_all_live=True,
     ):
         return PROJECTION.projection_findings(
             body,
@@ -94,6 +95,7 @@ class ActionProjectionTests(unittest.TestCase):
                 allow_missing_action_section_if_no_action
             ),
             queue_actor=queue_actor,
+            require_all_live=require_all_live,
         )
 
     def test_orphan_what_to_review_question_is_rejected(self):
@@ -334,6 +336,122 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual([], self.findings(root, body))
 
+    def test_declarative_reference_cue_exempts_supporting_link_title(self):
+        references = (
+            ("Source:", "Release notes"),
+            ("Context:", "Review status"),
+            ("Details:", "Merge strategy"),
+            ("Reference:", "Audit logs"),
+            ("For context:", "Run history"),
+            ("For context:", "Update behavior"),
+        )
+        with self.repo() as root:
+            item = self.queue_item(root, action="Review the diff.")
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            for cue, label in references:
+                with self.subTest(cue=cue, label=label):
+                    self.assertGreater(
+                        PROJECTION.link_label_action_count(label),
+                        0,
+                    )
+                    body = (
+                        "## What to review\n\n"
+                        f"1. [Review the diff]({path}). {cue} "
+                        f"[{label}](https://example.invalid/reference).\n"
+                    )
+                    self.assertEqual([], self.findings(root, body))
+
+    def test_imperative_or_unclosed_cue_cannot_exempt_supporting_action(self):
+        fragments = (
+            "See [Review code](https://example.invalid/reference).",
+            "then [Review code](https://example.invalid/reference).",
+            "Please see [Review code](https://example.invalid/reference).",
+            "Source: [Should we merge?](https://example.invalid/reference).",
+            (
+                "Source: [TODO approve production]"
+                "(https://example.invalid/reference)."
+            ),
+            (
+                "Source: [approve production]"
+                "(https://example.invalid/reference)."
+            ),
+            (
+                "Ignore this source: [Review code]"
+                "(https://example.invalid/reference)."
+            ),
+            (
+                "Source: [Review code](https://example.invalid/reference), "
+                "then fix it."
+            ),
+        )
+        with self.repo() as root:
+            item = self.queue_item(root, action="Review the diff.")
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            for fragment in fragments:
+                with self.subTest(fragment=fragment):
+                    body = (
+                        "## What to review\n\n"
+                        f"1. [Review the diff]({path}). {fragment}\n"
+                    )
+                    findings = self.findings(root, body)
+                    self.assertEqual(1, len(findings))
+                    self.assertTrue(
+                        "action-like supporting link" in findings[0]
+                        or "additional unlinked" in findings[0]
+                    )
+
+    def test_link_label_count_uses_command_grammar_and_keeps_multiplicity(self):
+        for label in (
+            "Release notes are attached",
+            "Review status is visible",
+            "Merge strategy is documented",
+            "Vote totals are shown",
+            "Audit logs are retained",
+            "Run history remains available",
+            "Update behavior is documented",
+            "Published review policy",
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(
+                    0,
+                    PROJECTION.link_label_action_count(label),
+                )
+        for label in (
+            "Review code",
+            "Run tests",
+            "Update docs that are stale",
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(
+                    1,
+                    PROJECTION.link_label_action_count(label),
+                )
+        self.assertEqual(
+            2,
+            PROJECTION.link_label_action_count(
+                "Review code and run tests"
+            ),
+        )
+        for label in (
+            "Release notes are attached and approve production",
+            "Review status is visible and merge the PR",
+            "Audit logs are retained and run tests",
+            "Update behavior is documented and fix the bug",
+        ):
+            with self.subTest(label=label):
+                self.assertGreater(
+                    PROJECTION.link_label_action_count(label),
+                    0,
+                )
+        self.assertEqual(
+            0,
+            PROJECTION.link_label_action_count(
+                "Agents review and approve"
+            ),
+        )
+
     def test_queue_link_label_cannot_hide_multiple_actions(self):
         with self.repo() as root:
             item = self.queue_item(root)
@@ -568,7 +686,7 @@ class ActionProjectionTests(unittest.TestCase):
     def test_missing_section_can_be_optional_only_for_nonaction_prose(self):
         cases = (
             (
-                "## Compatibility\n\nFix parsing of ?foo query strings.\n",
+                "## Compatibility\n\nFixes parsing of ?foo query strings.\n",
                 (),
                 (),
                 False,
@@ -844,6 +962,33 @@ class ActionProjectionTests(unittest.TestCase):
                     findings[0],
                 )
 
+    def test_boundary_until_human_review_is_an_action_request(self):
+        asks = (
+            "This cannot merge until the maintainer looks over the migration.",
+            "This cannot be merged until a reviewer has reviewed the migration.",
+            "Merge cannot proceed until the owner approves the migration.",
+            "Release is blocked until maintainer approval.",
+            "This task is blocked until owner confirmation.",
+            "Work cannot continue until a maintainer reviews it.",
+            "Implementation stops at merge until human review.",
+            "The release stays blocked until review by the owner.",
+            "The merge remains blocked pending maintainer approval.",
+            "The task will remain blocked until owner approval.",
+            "The release will be blocked pending review by a maintainer.",
+        )
+        for ask in asks:
+            with self.subTest(ask=ask), self.repo() as root:
+                body = (
+                    f"## Goal\n\n{ask}\n\n"
+                    "## What to review\n\nNo human action requested.\n"
+                )
+                findings = self.findings(root, body)
+                self.assertEqual(1, len(findings))
+                self.assertIn(
+                    "outside the declared action section",
+                    findings[0],
+                )
+
     def test_feedback_response_reply_and_comment_requests_are_rejected(self):
         asks = (
             "Please provide feedback on whether the fallback should ship.",
@@ -936,7 +1081,6 @@ class ActionProjectionTests(unittest.TestCase):
                 )
                 self.assertEqual(1, len(findings))
                 self.assertIn("outside the declared action section", findings[0])
-
             with self.subTest(location="inside", ask=ask), self.repo() as root:
                 item = self.queue_item(root)
                 self.git(root, "add", ".")
@@ -949,12 +1093,122 @@ class ActionProjectionTests(unittest.TestCase):
                 self.assertEqual(1, len(findings))
                 self.assertIn("additional unlinked", findings[0])
 
+    def test_base_form_work_commands_are_actions_but_summaries_are_not(self):
+        commands = (
+            "Investigate the production crash now.",
+            "Debug the release failure.",
+            "Fix parsing before merge.",
+            "Analyze the benchmark regression.",
+            "Audit the migration.",
+            "Review the migration.",
+            "Release this build.",
+            "Merge the pull request.",
+            "Vote on the proposal.",
+            "Review code before merge.",
+            "Merge PR 42.",
+            "Release v1.2.",
+            "Vote yes.",
+            "Audit dependencies.",
+            "Check logs.",
+            "Debug failures.",
+            "Document behavior.",
+            "Run tests.",
+            "Test Linux.",
+            "Update docs.",
+            "Update docs that are stale.",
+            "Audit logs that contain PII.",
+            "Run tests that are failing.",
+            "Review code that is security-sensitive.",
+        )
+        summaries = (
+            "Adds support for release channels.",
+            "Fixes parsing of query strings.",
+            "Investigates production crash reports.",
+            "The change fixes parsing of query strings.",
+        )
+        with self.repo() as root:
+            for command in commands:
+                with self.subTest(command=command):
+                    findings = self.findings(
+                        root,
+                        command,
+                        allow_missing_action_section_if_no_action=True,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+            for summary in summaries:
+                with self.subTest(summary=summary):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            summary,
+                            allow_missing_action_section_if_no_action=True,
+                        ),
+                    )
+
+    def test_summary_clause_cannot_hide_a_conjoined_command(self):
+        actions = (
+            "Release notes are attached and approve production.",
+            "Review status is visible and merge the PR.",
+            "Audit logs are retained and run tests.",
+            "Update behavior is documented and fix the bug.",
+        )
+        summaries = (
+            "Agents review and approve.",
+            "Audit logs are retained and run history remains available.",
+        )
+        with self.repo() as root:
+            for action in actions:
+                with self.subTest(action=action):
+                    findings = self.findings(
+                        root,
+                        action,
+                        allow_missing_action_section_if_no_action=True,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+            for summary in summaries:
+                with self.subTest(summary=summary):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            summary,
+                            allow_missing_action_section_if_no_action=True,
+                        ),
+                    )
+
     def test_benchmark_and_notification_descriptions_or_negations_are_accepted(self):
         with self.repo() as root:
             body = (
                 "## Goal\n\n"
                 "Benchmark results are recorded in the report.\n"
                 "The test runner updates the compatibility table.\n"
+                "Test coverage is 92 percent.\n"
+                "Update behavior is documented.\n"
+                "Audit logs are retained.\n"
+                "Profile names describe assurance ceilings.\n"
+                "Document metadata is immutable.\n"
+                "Address fields are redacted.\n"
+                "Trace output appears below.\n"
+                "Run history remains available.\n"
+                "The task was blocked until owner confirmation.\n"
+                "The release remained blocked until review by the owner.\n"
+                "The task is not blocked until owner confirmation.\n"
+                "The task no longer is blocked until owner confirmation.\n"
+                "The task will not be blocked until owner confirmation.\n"
+                "The task will no longer remain blocked until owner confirmation.\n"
+                "Release notes are attached.\n"
+                "Review status is visible.\n"
+                "Merge strategy is documented.\n"
+                "Vote totals are shown.\n"
                 "This alert lets me know whether the build completed.\n"
                 "We do not need you to reproduce the archived timeout.\n\n"
                 "The release alert keeps me posted on completed jobs.\n\n"
@@ -1313,6 +1567,163 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_external_action_cardinality_requires_distinct_queue_paths(self):
+        with self.repo() as root:
+            first = self.queue_item(
+                root,
+                "future-blocking-review-first-assignment.md",
+                action="Review the first assignment.",
+            )
+            second = self.queue_item(
+                root,
+                "future-blocking-review-second-assignment.md",
+                action="Review the second assignment.",
+            )
+            first_path = first.relative_to(root).as_posix()
+            second_path = second.relative_to(root).as_posix()
+            self.git(root, "add", ".")
+            one_link = (
+                "## What to review\n\n"
+                f"1. [Review the first assignment.]({first_path})\n"
+            )
+            two_links = (
+                one_link
+                + f"2. [Review the second assignment.]({second_path})\n"
+            )
+            duplicate_link = (
+                one_link
+                + f"2. [Review the first assignment.]({first_path})\n"
+            )
+
+            two_reviewers = (
+                '[{"login": "alice"}, {"login": "bob"}]',
+            )
+            findings = self.findings(
+                root,
+                one_link,
+                external_actions=two_reviewers,
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("contains 2 action(s)", findings[0])
+            self.assertIn("only 1 distinct", findings[0])
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    two_links,
+                    external_actions=two_reviewers,
+                    require_all_live=False,
+                ),
+            )
+            findings = self.findings(
+                root,
+                duplicate_link,
+                external_actions=two_reviewers,
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("only 1 distinct", findings[0])
+
+            repeated_envs = (
+                '{"login": "alice"}',
+                '[{"slug": "release-team"}]',
+            )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    two_links,
+                    external_actions=repeated_envs,
+                    require_all_live=False,
+                ),
+            )
+            duplicated_records = (
+                '[{"login": "alice"}, {"login": "alice"}]',
+            )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    two_links,
+                    external_actions=duplicated_records,
+                    require_all_live=False,
+                ),
+            )
+
+    def test_external_action_cardinality_handles_objects_scalars_and_nesting(self):
+        empty_states = (
+            "",
+            "[]",
+            "{}",
+            "false",
+            "0",
+            '["", null, false, 0, {}, [], {"team": []}]',
+            '{"reviewers": [], "teams": {"members": []}}',
+        )
+        for state in empty_states:
+            with self.subTest(state=state):
+                self.assertEqual(
+                    0,
+                    PROJECTION.external_action_state_count(state),
+                )
+
+        one_action_states = (
+            '{"login": "alice"}',
+            '{"reviewer": {"login": "alice"}}',
+            '{"alice": true, "bob": true}',
+            "changes_requested",
+            "true",
+            "1",
+            '[[{"login": "alice"}, {"login": "bob"}]]',
+        )
+        for state in one_action_states:
+            with self.subTest(state=state):
+                self.assertEqual(
+                    1,
+                    PROJECTION.external_action_state_count(state),
+                )
+
+        self.assertEqual(
+            2,
+            PROJECTION.external_action_state_count(
+                '[{"reviewer": {"login": "alice"}}, '
+                '[{"login": "bob"}], {}, []]'
+            ),
+        )
+
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Apply the requested review changes.",
+            )
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            body = (
+                "## What to review\n\n"
+                f"1. [Apply the requested review changes.]({path})\n"
+            )
+            for state in ("changes_requested", '{"login": "alice"}'):
+                with self.subTest(state=state):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            body,
+                            external_actions=(state,),
+                            require_all_live=False,
+                        ),
+                    )
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    "## What to review\n\nNo human action requested.\n",
+                    external_actions=empty_states,
+                    require_all_live=False,
+                ),
+            )
+
     def test_additional_plain_prose_cannot_hide_an_action(self):
         no_action = "## What to review\n\nNo human action requested.\n"
         with self.repo() as root:
@@ -1330,8 +1741,8 @@ class ActionProjectionTests(unittest.TestCase):
                     root,
                     no_action,
                     additional_prose=(
-                        "Fix parsing of ?foo query strings",
-                        "Fix parsing of '?' and \"?\" literals",
+                        "Fixes parsing of ?foo query strings",
+                        "Fixes parsing of '?' and \"?\" literals",
                     ),
                 ),
             )
@@ -1469,15 +1880,26 @@ class ActionProjectionTests(unittest.TestCase):
 
     def test_cli_reads_multiple_generic_external_state_and_prose_envs(self):
         with self.repo() as root:
-            item = self.queue_item(root)
+            item = self.queue_item(
+                root,
+                action="Review the first assignment.",
+            )
+            second = self.queue_item(
+                root,
+                "future-blocking-review-second-assignment.md",
+                action="Review the second assignment.",
+            )
             self.git(root, "add", ".")
             path = item.relative_to(root).as_posix()
+            second_path = second.relative_to(root).as_posix()
             env = {
                 "BODY": (
                     "## What to review\n\n"
-                    f"1. [Review the boundary]({path})\n"
+                    f"1. [Review the first assignment.]({path})\n"
                 ),
-                "REVIEWERS": "[]",
+                "REVIEWERS": (
+                    '[{"login": "alice"}, {"login": "bob"}]'
+                ),
                 "TEAMS": '[{"slug": "release-team"}]',
                 "ASSIGNEES": "[]",
                 "TITLE": "Compatibility notes for this release",
@@ -1485,7 +1907,7 @@ class ActionProjectionTests(unittest.TestCase):
             with mock.patch.dict(os.environ, env), \
                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(
-                    0,
+                    1,
                     PROJECTION.main([
                         "--from-env", "BODY",
                         "--action-section", "What to review",
@@ -1496,11 +1918,24 @@ class ActionProjectionTests(unittest.TestCase):
                         "--branch", "feature/provider-neutral",
                     ]),
                 )
-                os.environ["BODY"] = (
-                    "## What to review\n\nNo human action requested.\n"
+                os.environ["BODY"] += (
+                    f"2. [Review the second assignment.]({second_path})\n"
                 )
                 self.assertEqual(
                     1,
+                    PROJECTION.main([
+                        "--from-env", "BODY",
+                        "--action-section", "What to review",
+                        "--external-action-env", "REVIEWERS",
+                        "--external-action-env", "TEAMS",
+                        "--external-action-env", "ASSIGNEES",
+                        "--additional-prose-env", "TITLE",
+                        "--branch", "feature/provider-neutral",
+                    ]),
+                )
+                os.environ["TEAMS"] = "[]"
+                self.assertEqual(
+                    0,
                     PROJECTION.main([
                         "--from-env", "BODY",
                         "--action-section", "What to review",

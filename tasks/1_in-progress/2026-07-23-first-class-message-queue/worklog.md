@@ -270,3 +270,43 @@
   cases with one intentional skip, five quote-api tests, and three quote-cli tests.
 - Updated durable design and Git workflow guidance to distinguish actor direction and
   authoritative default/base-context checks from advisory direct-review event checks.
+
+## 2026-07-23 — repair claim lineage (codex subagent)
+
+- Preserved committed `open` → `in-repair` and `waiting` → `folding` receipts across a
+  later identity-preserving slug rename in the same actor and typed leaf.
+- Prevented a new identical action, an ambiguous duplicate, or a different merge parent
+  from lending its claim history: rename inference now requires a unique disappeared
+  path on a single-parent edge, while merge traversal follows exact paths only.
+- Reused the existing negative actor, typed-leaf, and content-rewrite tests and added
+  agent, human, duplicate, copy, and two-parent merge regressions. `py_compile`,
+  `git diff --check`, and all 205 queue/history tests passed.
+- Session handover:
+  `history/conversations/2026-07-23-1130PDT-repair-claim-lineage/handover.md`.
+
+## 2026-07-23 — provider action cardinality and command grammar (codex subagent)
+
+- Replaced the external-action boolean with provider-neutral cardinality. Each material
+  top-level array entry counts once, a material object or scalar counts once, and
+  repeated environment inputs add their counts; distinct canonical queue paths must
+  cover the result.
+- Made present human-dependent boundary statements action-like, including blocked,
+  pending, stop/wait, and cannot-continue forms with direct or reverse human-review
+  complements. Historical and explicitly negated boundary descriptions remain prose.
+- Recognized common base-form work imperatives on optional comment surfaces while
+  preserving noun-like and third-person summaries such as “Audit logs,” “Review
+  status,” “Adds support,” and “Fixes parsing.”
+- Added array, repeated-input, duplicate-record, duplicate-link, object, scalar,
+  nested-empty, two-reviewer CLI, boundary, imperative, and false-positive regressions.
+- Made supporting-link classification structural: only declarative `Source:`,
+  `Context:`, `Details:`, `Reference:`, or `For context:` fields whose link closes the
+  line may exempt one ambiguous noun title. Questions, TODOs, unambiguous commands,
+  imperative cues, and trailing actions remain queued actions.
+- Closed noun-summary conjunction hiding: a finite summary followed by `and` plus an
+  existing command is actionable, without treating plural-subject descriptions as
+  commands. Queue-link labels use the same grammar and preserve action multiplicity.
+- `python3 automation/tests/test_check_action_projection.py` passed all 72 tests;
+  `python3 automation/tests/test_github_action_projection_workflow.py` passed all seven
+  adapter tests; `py_compile` and `git diff --check` passed.
+- Session handover:
+  `history/conversations/2026-07-23-1131PDT-repair-provider-action-cardinality/handover.md`.

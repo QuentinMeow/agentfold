@@ -1685,6 +1685,277 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual([], findings)
 
+    def test_agent_claim_receipt_survives_later_slug_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            source = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-original-name.md",
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** repair the source\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks now:** transition:merge\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file action")
+            source.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    "**Status:** open", "**Status:** in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim action")
+            destination = source.with_name("blocking-clearer-name.md")
+            source.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "clarify action name")
+            evidence.write_text("# Repaired\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings)
+
+    def test_human_claim_receipt_survives_later_slug_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Original\n")
+            source = self.write(
+                root,
+                "message-queue/needs-human/decisions/"
+                "blocking-original-name.md",
+                "# Choose\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** choose the source disposition\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks now:** transition:merge\n"
+                "**Your answer:** approve\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record answer")
+            source.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim answer")
+            destination = source.with_name("blocking-clearer-name.md")
+            source.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "clarify decision name")
+            evidence.write_text("# Approved\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings)
+
+    def test_slug_rename_claim_lineage_fails_closed_for_duplicate_actions(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            action = (
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** repair the source\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks now:** transition:merge\n"
+            )
+            source = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-original-name.md",
+                action,
+            )
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-identical-action.md",
+                action,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file duplicate actions")
+            source.write_text(
+                action.replace("**Status:** open", "**Status:** in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim one action")
+            destination = source.with_name("blocking-clearer-name.md")
+            source.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "rename one action")
+            evidence.write_text("# Repaired\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with self.assertRaisesRegex(
+                    RECONCILE.GitSnapshotError,
+                    "queue action lineage is ambiguous",
+                ):
+                    list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+    def test_new_identical_action_cannot_borrow_another_claim_receipt(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            open_action = (
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** repair the source\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks now:** transition:merge\n"
+            )
+            claimed_action = open_action.replace(
+                "**Status:** open", "**Status:** in-repair"
+            )
+            original = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-original-action.md",
+                open_action,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file original action")
+            original.write_text(claimed_action, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim original action")
+            copy = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-identical-copy.md",
+                claimed_action,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add already claimed copy")
+            evidence.write_text("# Repaired\n", encoding="utf-8")
+            copy.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no committed one-line", findings[0].message)
+
+    def test_merge_cannot_borrow_claim_from_other_parent_slug(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            base = self.git(root, "rev-parse", "HEAD")
+            open_action = (
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** repair the source\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks now:** transition:merge\n"
+            )
+            claimed_action = open_action.replace(
+                "**Status:** open", "**Status:** in-repair"
+            )
+
+            self.git(root, "checkout", "-b", "right")
+            source = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-source-name.md",
+                open_action,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file right action")
+            source.write_text(claimed_action, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim right action")
+
+            self.git(root, "checkout", "-b", "left", base)
+            destination = self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-destination-name.md",
+                claimed_action,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add preclaimed left action")
+            self.git(root, "merge", "--no-ff", "--no-commit", "right")
+            source = (
+                root
+                / "message-queue/needs-agent/requests/"
+                "blocking-source-name.md"
+            )
+            source.unlink()
+            evidence.write_text("# Folded right action\n", encoding="utf-8")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge without right action")
+
+            evidence.write_text("# Repaired destination\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no committed one-line", findings[0].message)
+
     def test_staged_human_deletion_requires_folding_and_response(self):
         cases = (
             ("waiting", "______", True),

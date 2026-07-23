@@ -21,6 +21,7 @@ from markdown_semantics import (
     semantic_text,
     strip_indented_code,
     strip_inline_code,
+    visible_markdown_link_source,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -62,12 +63,52 @@ CLEAR_ACTION_VERB_PATTERN = (
     r"release|review|select|"
     r"sign[ \t]+off|tell|verify|vote)"
 )
+UNAMBIGUOUS_CLEAR_COMMAND_PATTERN = (
+    r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
+    r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|inspect|"
+    r"(?:add|leave)(?:[ \t]+(?:a|your))?[ \t]+comment|select|"
+    r"sign[ \t]+off|tell|verify)"
+)
 LET_KNOW_PATTERN = r"let[ \t]+(?:me|us)[ \t]+know"
 KEEP_POSTED_PATTERN = (
     r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)"
 )
 REQUEST_ACTION_VERB_PATTERN = (
-    r"(?:benchmark|check|fix|reproduce|run|test|triage|update)"
+    r"(?:address|analy[sz]e|audit|benchmark|bisect|check|debug|diagnose|"
+    r"document|examine|fix|implement|investigate|measure|profile|reproduce|"
+    r"resolve|retry|run|test|trace|triage|update)"
+)
+UNAMBIGUOUS_WORK_COMMAND_PATTERN = (
+    r"(?:analy[sz]e|bisect|diagnose|examine|fix|implement|investigate|"
+    r"reproduce|resolve)"
+)
+AMBIGUOUS_WORK_COMMAND_PATTERN = (
+    r"(?:address|audit|benchmark|check|debug|document|measure|profile|retry|"
+    r"run|test|trace|triage|update)"
+)
+SUMMARY_PREDICATE_PATTERN = (
+    r"(?:appears?|are|contains?|describes?|documents?|has|have|includes?|is|"
+    r"lists?|records?|remains?|shows?|tracks?|uses?|was|were)"
+)
+SUMMARY_SUBJECT_WORD_PATTERN = (
+    r"(?!(?:that|which|who)\b)[A-Za-z0-9][A-Za-z0-9_./#'-]*"
+)
+NONCOMMAND_SUMMARY_GUARD = (
+    rf"(?![ \t]+(?:{SUMMARY_SUBJECT_WORD_PATTERN}[ \t]+){{1,4}}"
+    rf"{SUMMARY_PREDICATE_PATTERN}\b)"
+)
+WORK_DIRECTIVE_PATTERN = (
+    rf"(?:{UNAMBIGUOUS_WORK_COMMAND_PATTERN}|"
+    rf"{AMBIGUOUS_WORK_COMMAND_PATTERN}{NONCOMMAND_SUMMARY_GUARD}"
+    r"(?=[.!?;,:)]|$|[ \t]+\S))"
+)
+AMBIGUOUS_CLEAR_COMMAND_PATTERN = (
+    rf"(?:(?:merge|release|review|vote){NONCOMMAND_SUMMARY_GUARD}"
+    r"(?=[.!?;,:)]|$|[ \t]+\S))"
+)
+CLEAR_DIRECTIVE_ACTION_PATTERN = (
+    rf"(?:{UNAMBIGUOUS_CLEAR_COMMAND_PATTERN}|"
+    rf"{AMBIGUOUS_CLEAR_COMMAND_PATTERN})"
 )
 ACTION_VERB_PATTERN = (
     rf"(?:{CLEAR_ACTION_VERB_PATTERN}|{LET_KNOW_PATTERN}|"
@@ -75,9 +116,10 @@ ACTION_VERB_PATTERN = (
     rf"{REQUEST_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
 )
 DIRECTIVE_ACTION_PATTERN = (
-    rf"(?:{CLEAR_ACTION_VERB_PATTERN}"
+    rf"(?:{CLEAR_DIRECTIVE_ACTION_PATTERN}"
     rf"|{LET_KNOW_PATTERN}"
     rf"|{KEEP_POSTED_PATTERN}"
+    rf"|{WORK_DIRECTIVE_PATTERN}"
     r"|answer(?="
     r"[.!?;,:)]|$|[ \t]+(?:how|that|the|this|what|when|whether|which|"
     r"who|why|with)\b)"
@@ -180,6 +222,45 @@ ACTOR_OBLIGATION_RE = re.compile(
     rf"{ACTION_VERB_PATTERN}\b",
     re.I,
 )
+BOUNDARY_VERB_PATTERN = (
+    r"(?:continue|deploy(?:ed)?|merge(?:d)?|proceed|publish(?:ed)?|"
+    r"release(?:d)?|ship(?:ped)?)"
+)
+BOUNDARY_SUBJECT_PATTERN = (
+    r"(?:change|deployment|implementation|merge|merging|pr|publication|"
+    r"pull[ \t]+request|release|shipping|task|work)"
+)
+HUMAN_COMPLETION_VERB_PATTERN = (
+    r"(?:approves?|confirms?|inspects?|looks?[ \t]+over|reviews?|"
+    r"signs?[ \t]+off|verif(?:y|ies))"
+)
+BOUNDARY_UNTIL_HUMAN_ACTION_RE = re.compile(
+    r"\b(?:"
+    r"(?:(?:can[ \t]*not|can['’]t|may[ \t]+not|must[ \t]+not|"
+    r"will[ \t]+not|won['’]t)[ \t]+(?:be[ \t]+)?"
+    rf"{BOUNDARY_VERB_PATTERN})"
+    rf"|(?:{BOUNDARY_SUBJECT_PATTERN}[ \t]+"
+    r"(?:(?:is|remains|stays)|will[ \t]+(?:be|remain|stay))"
+    r"[ \t]+blocked)"
+    rf"|(?:{BOUNDARY_SUBJECT_PATTERN}[ \t]+(?:stops|waits)"
+    r"(?:[ \t]+at[ \t]+(?:deployment|merge|release))?)"
+    r")"
+    r"[ \t]+(?:pending|until)[ \t]+"
+    r"(?:"
+    rf"{ACTION_SOURCE_PATTERN}[ \t]+"
+    r"(?:(?:has|have)[ \t]+)?"
+    rf"{HUMAN_COMPLETION_VERB_PATTERN}"
+    r"|"
+    r"(?:(?:a|an|the)[ \t]+)?"
+    rf"{HUMAN_ACTOR_PATTERN}(?:['’]s)?[ \t]+"
+    r"(?:approval|confirmation|review|sign[ -]?off)\b"
+    r"|"
+    r"(?:approval|confirmation|review|sign[ -]?off)"
+    r"[ \t]+by[ \t]+"
+    rf"{ACTION_SOURCE_PATTERN}\b"
+    r")",
+    re.I,
+)
 FIRST_PERSON_VERB_REQUEST_RE = re.compile(
     r"\b(?:we|i)[ \t]+"
     r"(?P<negation>do[ \t]+not[ \t]+)?"
@@ -230,6 +311,35 @@ ELLIPTICAL_COURTESY_REQUEST_RE = re.compile(
     r"(?:(?:is|are)[ \t]+(?P<negation>not[ \t]+)?)?"
     r"(?:appreciated|valued|welcome)[ \t]*[.!]?[ \t]*(?=$|\n)",
     re.I | re.M,
+)
+DECLARATIVE_REFERENCE_CUE_RE = re.compile(
+    r"(?:^|[\n.!?;])[ \t]*"
+    r"(?:(?:for[ \t]+)?context|details|reference|source)[ \t]*:[ \t]*$",
+    re.I,
+)
+REFERENCE_LINK_LINE_END_RE = re.compile(
+    r"^[ \t]*[,.!?:;]?[ \t]*(?:\n|$)"
+)
+AMBIGUOUS_COMMAND_WORD_PATTERN = (
+    rf"(?:{AMBIGUOUS_WORK_COMMAND_PATTERN}|merge|release|review|vote)"
+)
+SUMMARY_AND_COMMAND_RE = re.compile(
+    rf"(?:^|[.!?;:\n][ \t]+)(?:the[ \t]+)?"
+    rf"{AMBIGUOUS_COMMAND_WORD_PATTERN}\b[ \t]+"
+    rf"(?:{SUMMARY_SUBJECT_WORD_PATTERN}[ \t]+){{1,4}}"
+    rf"{SUMMARY_PREDICATE_PATTERN}\b"
+    r"[^.!?;:\n]*?\band[ \t]+(?P<command>[^.!?;:\n]+)",
+    re.I | re.M,
+)
+REFERENCE_TITLE_WORD_PATTERN = (
+    r"(?!(?:and|or|please|that|then|todo|which|who)\b)"
+    r"[A-Za-z0-9][A-Za-z0-9_./#'-]*"
+)
+AMBIGUOUS_REFERENCE_TITLE_RE = re.compile(
+    rf"^[ \t]*{AMBIGUOUS_COMMAND_WORD_PATTERN}[ \t]+"
+    rf"(?:{REFERENCE_TITLE_WORD_PATTERN}(?:[ \t]+|(?=[.!]?[ \t]*$)))"
+    r"{1,5}[.!]?[ \t]*$",
+    re.I,
 )
 GENERIC_ACTION_LABELS = {
     ("action", "request"),
@@ -472,6 +582,14 @@ def declarative_action_request(clean):
     return False
 
 
+def summary_followed_by_command(clean):
+    """Recognize a noun-summary clause followed by an explicit new command."""
+    return any(
+        DIRECTIVE_RE.search("and " + matched.group("command"))
+        for matched in SUMMARY_AND_COMMAND_RE.finditer(clean or "")
+    )
+
+
 def action_like_clean_text(clean):
     """Classify already-visible prose with the deterministic action grammar."""
     if question_mark_count(clean) or TODO_RE.search(clean):
@@ -480,6 +598,8 @@ def action_like_clean_text(clean):
         DIRECTIVE_RE.search(variant)
         or ADDITIONAL_DIRECTIVE_RE.search(variant)
         or declarative_action_request(variant)
+        or BOUNDARY_UNTIL_HUMAN_ACTION_RE.search(variant)
+        or summary_followed_by_command(variant)
         for variant in action_prose_variants(clean)
     )
 
@@ -534,11 +654,48 @@ def question_mark_count(text):
 
 
 def link_label_action_count(label):
-    """Count authority actions in a short link label conservatively."""
-    verbs = len(ACTION_VERB_RE.findall(label or ""))
+    """Count actions in a short label using the visible command grammar."""
+    clean = strip_action_emphasis(label or "")
+    action_like = action_like_plain_prose(clean)
+    verbs = len(ACTION_VERB_RE.findall(clean)) if action_like else 0
+    if action_like and not verbs:
+        verbs = 1
     questions = question_mark_count(label)
     todos = len(TODO_RE.findall(label or ""))
     return max(verbs, questions, todos)
+
+
+def ambiguous_reference_title(label):
+    """Return whether a short verb-like label can be a declarative field title."""
+    clean = strip_action_emphasis(label or "")
+    return bool(
+        AMBIGUOUS_REFERENCE_TITLE_RE.fullmatch(clean)
+        and len(ACTION_VERB_RE.findall(clean)) == 1
+        and not question_mark_count(clean)
+        and not TODO_RE.search(clean)
+    )
+
+
+def supporting_link_labels(entry, owning_destination):
+    """Return non-owning labels and whether a field cue makes each a reference."""
+    source, matches = visible_markdown_link_source(entry)
+    supporting = []
+    for matched in matches:
+        destination = (
+            matched.group("angle")
+            if matched.group("angle") is not None
+            else matched.group("bare")
+        )
+        if destination == owning_destination:
+            continue
+        prefix = source[:matched.start()]
+        suffix = source[matched.end():]
+        is_reference = bool(
+            DECLARATIVE_REFERENCE_CUE_RE.search(prefix)
+            and REFERENCE_LINK_LINE_END_RE.match(suffix)
+        )
+        supporting.append((matched.group("label"), is_reference))
+    return supporting
 
 
 def additional_action_like_prose(text):
@@ -554,6 +711,8 @@ def additional_action_like_prose(text):
             DIRECTIVE_RE.search(variant)
             or ADDITIONAL_DIRECTIVE_RE.search(variant)
             or declarative_action_request(variant)
+            or BOUNDARY_UNTIL_HUMAN_ACTION_RE.search(variant)
+            or summary_followed_by_command(variant)
             for variant in action_prose_variants(clean)
         )
     )
@@ -935,15 +1094,21 @@ def required_human_queue_paths(
     )
 
 
-def material_external_action_state(value):
-    """Treat empty serialized containers as no assignment, without provider policy."""
+def external_action_state_count(value):
+    """Count material top-level external actions without provider policy.
+
+    A serialized array exposes one action per material top-level element. Any
+    other material object or scalar exposes one action. Nested structure only
+    determines whether its owning top-level value is empty; it does not invent
+    provider-specific identities or roles.
+    """
     text = (value or "").strip()
     if not text:
-        return False
+        return 0
     try:
         parsed = json.loads(text)
     except (TypeError, ValueError):
-        return True
+        return 1
 
     def material(candidate):
         if candidate is None:
@@ -960,7 +1125,14 @@ def material_external_action_state(value):
             return any(material(item) for item in candidate.values())
         return True
 
-    return material(parsed)
+    if isinstance(parsed, list):
+        return sum(1 for item in parsed if material(item))
+    return int(material(parsed))
+
+
+def material_external_action_state(value):
+    """Backward-compatible boolean view of external assignment state."""
+    return external_action_state_count(value) > 0
 
 
 def projection_findings(
@@ -1027,9 +1199,10 @@ def projection_findings(
                 f"additional prose input {input_number} contains an action-like "
                 "question or directive outside the declared action section"
             )
-    has_external_actions = any(
-        material_external_action_state(value) for value in external_actions
+    external_action_count = sum(
+        external_action_state_count(value) for value in external_actions
     )
+    has_external_actions = external_action_count > 0
     if not sections:
         if allow_missing_action_section_if_no_action \
                 and not findings \
@@ -1082,8 +1255,10 @@ def projection_findings(
                 findings.append(
                     f"action section {section_number} claims no "
                     f"{actor_description} action "
-                    "but externally assigned action state is non-empty; "
-                    "project at least one live canonical queue link"
+                    "but externally assigned action state contains "
+                    f"{external_action_count} action(s); project at least "
+                    f"{external_action_count} distinct live canonical queue "
+                    "link(s)"
                 )
             continue
         entries, outside = section_entries(body)
@@ -1134,8 +1309,13 @@ def projection_findings(
                 )
                 continue
             supporting_action_labels = [
-                label for label, destination in links
-                if destination != queue_looking[0][1]
+                label
+                for label, is_reference in supporting_link_labels(
+                    entry, queue_looking[0][1]
+                )
+                if not (
+                    is_reference and ambiguous_reference_title(label)
+                )
                 and link_label_action_count(label)
             ]
             if supporting_action_labels:
@@ -1208,6 +1388,13 @@ def projection_findings(
         findings.append(
             "a no-action acknowledgement cannot appear beside listed actions"
         )
+    if not saw_no_action and len(linked_paths) < external_action_count:
+        findings.append(
+            "externally assigned action state contains "
+            f"{external_action_count} action(s), but the declared action "
+            f"section projects only {len(linked_paths)} distinct live "
+            "canonical queue action(s)"
+        )
     missing = sorted(required_paths - linked_paths)
     if missing and not saw_no_action and not invalid_projection:
         findings.append(
@@ -1265,8 +1452,10 @@ def main(argv=None):
         default=[],
         metavar="NAME",
         help=(
-            "require a queue-linked projection when any named external "
-            "action state is non-empty"
+            "require distinct queue-linked projections for named external "
+            "action state: each material top-level JSON array element counts "
+            "once, each material object/scalar counts once, and repeated "
+            "inputs add their counts"
         ),
     )
     parser.add_argument(

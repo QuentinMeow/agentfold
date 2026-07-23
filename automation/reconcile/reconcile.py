@@ -1858,12 +1858,12 @@ def revision_parents(revision, label):
     return ancestry.stdout.split()[1:]
 
 
-def matching_lineage_paths(revision, path, slug, identity):
-    """Find this action in one parent, following an identity-preserving rename."""
-    same_path = git_artifact_bytes_at(revision, path)
+def matching_lineage_paths(parent, revision, path, identity):
+    """Find this action in one parent, following one unambiguous rename."""
+    same_path = git_artifact_bytes_at(parent, path)
     if same_path is not None:
         text = decode_utf8_artifact(
-            same_path, f"`{path}` at {revision}"
+            same_path, f"`{path}` at {parent}"
         )
         # Preserve the current incarnation even when its action bytes changed; the
         # claim check then reports that rewrite instead of losing the receipt.
@@ -1872,7 +1872,7 @@ def matching_lineage_paths(revision, path, slug, identity):
     tree = subprocess.run(
         [
             "git", "--no-replace-objects", "ls-tree",
-            "-r", "-z", revision, "--", "message-queue",
+            "-r", "-z", parent, "--", "message-queue",
         ],
         cwd=REPO,
         stdout=subprocess.PIPE,
@@ -1881,28 +1881,33 @@ def matching_lineage_paths(revision, path, slug, identity):
     )
     if tree.returncode:
         raise GitSnapshotError(git_failure(
-            tree, f"could not follow queue action lineage at {revision}"
+            tree, f"could not follow queue action lineage at {parent}"
         ))
     matches = []
     for candidate, mode in parse_git_tree_records(tree.stdout).items():
         if mode not in ("100644", "100755") \
-                or not governed_queue_path(candidate) \
-                or queue_action_slug(candidate) != slug:
+                or not governed_queue_path(candidate):
             continue
-        artifact = git_artifact_bytes_at(revision, candidate)
+        artifact = git_artifact_bytes_at(parent, candidate)
         if artifact is None:
             continue
         candidate_text = decode_utf8_artifact(
-            artifact, f"`{candidate}` at {revision}"
+            artifact, f"`{candidate}` at {parent}"
         )
         if queue_action_identity(candidate, candidate_text) == identity:
             matches.append((candidate, candidate_text))
     if len(matches) > 1:
         raise GitSnapshotError(
-            f"queue action lineage is ambiguous at {revision}: "
+            f"queue action lineage is ambiguous at {parent}: "
             + ", ".join(path for path, _text in matches)
         )
-    return matches
+    # The prior path must disappear on this exact edge. Otherwise a newly
+    # added identical action could borrow the older action's claim receipt.
+    return [
+        (candidate, candidate_text)
+        for candidate, candidate_text in matches
+        if git_artifact_bytes_at(revision, candidate) is None
+    ]
 
 
 def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
@@ -1910,7 +1915,6 @@ def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
     claimed = "folding" if actor == "needs-human" else "in-repair"
     initial = "waiting" if actor == "needs-human" else "open"
     identity = queue_action_identity(path, text)
-    slug = queue_action_slug(path)
     final_identity = claim_identity(text, actor, leaf)
     stack = [(prior_revision, path, text)]
     seen = set()
@@ -1920,14 +1924,29 @@ def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
         if state in seen:
             continue
         seen.add(state)
-        predecessors = []
-        for parent in revision_parents(
+        parents = revision_parents(
             revision, f"claim history for `{current_path}`"
-        ):
+        )
+        predecessors = []
+        for parent in parents:
+            artifact = git_artifact_bytes_at(parent, current_path)
+            if artifact is not None:
+                predecessors.append((
+                    parent,
+                    current_path,
+                    decode_utf8_artifact(
+                        artifact, f"`{current_path}` at {parent}"
+                    ),
+                ))
+        # A merge may present a same-path action on one parent and an identical
+        # claimed action under another path on a second parent. Prefer exact-path
+        # lineage across every merge; infer a rename only on a one-parent edge.
+        if not predecessors and len(parents) == 1:
+            parent = parents[0]
             predecessors.extend(
                 (parent, previous_path, previous)
                 for previous_path, previous in matching_lineage_paths(
-                    parent, current_path, slug, identity
+                    parent, revision, current_path, identity
                 )
             )
         if text_fields(current).get("Status", "").strip() == claimed:
