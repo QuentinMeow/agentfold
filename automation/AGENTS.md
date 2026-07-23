@@ -27,6 +27,9 @@ Rules:
   `blocking-*`, never
   hard-stales `non-blocking-*`, and checks `future-blocking-*` only when `Blocks at`
   starts with a reached UTC `YYYY-MM-DD`; event boundaries require actor reclassification.
+- Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
+  head remains the candidate; a divergent old-tip snapshot must retain every live action,
+  and an unavailable nonzero old tip fails closed.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository
@@ -35,8 +38,9 @@ Rules:
 - Retry filing preserves claimed/rejected content on rerun; garbage collection removes
   only exact generator identities whose named finding cleared. Active legacy output may
   be migrated, but untrusted legacy lookalikes are never garbage-collected.
-- Adopters deleting a harness folder delete its checks — the registry is a plain dict,
-  and every check no-ops when its folder is absent.
+- Adopters may delete an empty/resolved harness folder; the deletion edge may not erase
+  live actions, and removing only the queue v1 marker remains an anti-downgrade failure.
+  After clean removal, its registry check no-ops with the absent folder.
 - Tracked executables use repository-local state only. Agent/provider shims are thin,
   optional, policy-free forwarders to canonical behavior; personal installers stay
   outside AgentFold (`templates/task/design.md` carries the core-fit receipt).

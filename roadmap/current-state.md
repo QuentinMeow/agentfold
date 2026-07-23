@@ -13,9 +13,11 @@ What is true today, mapped to the desired-state lines.
   targets, line budgets (AGENTS.md, SKILL.md, root README), memory expiry, and
   dependency-aware stale items. Visible CommonMark is the evidence boundary; task
   status and task-scoped admission enforce named transitions. Queue deletion is bound
-  to Git history, one-line claims, changed resolution evidence, review successors, and
-  checked pickup/retry exceptions. It files collision-safe, aggregated retry
-  projections while preserving actor notes. A separate Git boundary gate requires
+  to Git history, one-line claims, changed resolution evidence, explicit review
+  dispositions, displaced-ref continuity, and checked pickup/retry exceptions. Empty
+  queue-service removal remains modular but cannot erase a live action. It files
+  collision-safe, aggregated retry projections while preserving actor notes. A separate
+  Git boundary gate requires
   substitution evidence for core diffs and rejects obvious user-global access in
   tracked executables. Its token-expensive independent review mode is manually invoked
   outside the gate; `--require-review` validates a revision-bound receipt, while

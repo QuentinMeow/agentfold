@@ -282,6 +282,32 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual([], self.findings(root, body))
 
+    def test_canonical_prefix_label_must_name_an_action_not_only_its_actor(self):
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Owner must authorize production deployment.",
+            )
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            for label in ("Owner", "Owner?", "Owner TODO", "Owner must"):
+                with self.subTest(label=label):
+                    findings = self.findings(
+                        root,
+                        f"## What to review\n\n1. [{label}]({path})\n",
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn("canonical `Action`", findings[0])
+            for label in ("Owner must authorize", "Review request"):
+                with self.subTest(label=label):
+                    self.assertEqual(
+                        [],
+                        self.findings(
+                            root,
+                            f"## What to review\n\n1. [{label}]({path})\n",
+                        ),
+                    )
+
     def test_hidden_or_duplicate_canonical_action_field_is_rejected(self):
         contents = (
             "# Review\n\n```\n**Action:** Review the boundary.\n```\n",
@@ -303,6 +329,25 @@ class ActionProjectionTests(unittest.TestCase):
                 )
                 self.assertEqual(1, len(findings))
                 self.assertIn("canonical `Action` field", findings[0])
+
+    def test_candidate_raw_html_action_field_is_not_canonical_evidence(self):
+        with self.repo() as root:
+            item = self.queue_item(root)
+            item.write_text(
+                "<p>**Action:** Review the boundary.</p>\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "candidate hidden action")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            path = item.relative_to(root).as_posix()
+            findings = self.findings(
+                root,
+                f"## What to review\n\n1. [Review]({path})\n",
+                candidate_revision=candidate,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("canonical `Action` field", findings[0])
 
     def test_nested_commonmark_bullets_are_part_of_the_linked_action(self):
         with self.repo() as root:
@@ -499,6 +544,9 @@ class ActionProjectionTests(unittest.TestCase):
     def test_clear_declarative_human_asks_outside_section_are_rejected(self):
         asks = (
             "Maintainer approval is requested before merge.",
+            "Approval from a maintainer is required before merge.",
+            "Approval from a senior maintainer is required before merge.",
+            "Maintainer approval is currently required before merge.",
             "Human review is required before release.",
             "Owner confirmation is needed before deployment.",
             "We need your approval before merge.",
@@ -519,6 +567,149 @@ class ActionProjectionTests(unittest.TestCase):
                     findings[0],
                 )
 
+    def test_feedback_response_reply_and_comment_requests_are_rejected(self):
+        asks = (
+            "Please provide feedback on whether the fallback should ship.",
+            "Please provide your feedback on the fallback.",
+            "Please give feedback on whether the fallback should ship.",
+            "Please give us feedback on the fallback.",
+            "Please *provide feedback* on whether the fallback should ship.",
+            "Please respond to the proposal.",
+            "Please reply before merge.",
+            "Please **reply** before merge.",
+            "For this release, please reply before merge.",
+            "We need you to reply before merge.",
+            "Please comment on the deployment plan.",
+            "Please leave a comment on the deployment plan.",
+            "A reply from the owner is requested before merge.",
+            "We request feedback from a maintainer.",
+            "We ask a maintainer to comment on the deployment plan.",
+        )
+        for ask in asks:
+            with self.subTest(ask=ask), self.repo() as root:
+                findings = self.findings(
+                    root,
+                    f"## Goal\n\n{ask}\n\n"
+                    "## What to review\n\nNo human action requested.\n",
+                )
+                self.assertEqual(1, len(findings))
+                self.assertIn("outside the declared action section", findings[0])
+
+    def test_feedback_and_response_requests_inside_linked_entry_are_rejected(self):
+        asks = (
+            "Please provide feedback on whether the fallback should ship.",
+            "Please give feedback on the deployment plan.",
+            "Please respond before merge.",
+            "Please reply before merge.",
+            "Please comment on the deployment plan.",
+            "Approval from a maintainer is required before merge.",
+        )
+        for ask in asks:
+            with self.subTest(ask=ask), self.repo() as root:
+                item = self.queue_item(root)
+                self.git(root, "add", ".")
+                body = (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]"
+                    f"({item.relative_to(root).as_posix()}). {ask}\n"
+                )
+                findings = self.findings(root, body)
+                self.assertEqual(1, len(findings))
+                self.assertIn("additional unlinked", findings[0])
+
+    def test_rendered_html_asks_outside_and_inside_action_section_are_rejected(self):
+        outside_asks = (
+            "<p>Maintainer approval is requested before merge.</p>",
+            (
+                "<div><strong>Please provide feedback on whether the fallback "
+                "should ship.</strong></div>"
+            ),
+            "<p>Please provide\nfeedback on whether the fallback should ship.</p>",
+            "<p>Please<br>reply before merge.</p>",
+            "<p>Please&nbsp;reply before merge.</p>",
+            "<span>&#10;&#10;</span>\nPlease reply before merge.",
+            "<p hidden>Archived request.<p>Please reply before merge.</p>",
+            "<script></script>Please reply before merge.",
+            "<!-- archived -->Please reply before merge.",
+            "> <p>Please reply before merge.</p>",
+        )
+        for ask in outside_asks:
+            with self.subTest(location="outside", ask=ask), self.repo() as root:
+                findings = self.findings(
+                    root,
+                    f"## Goal\n\n{ask}\n\n"
+                    "## What to review\n\nNo human action requested.\n",
+                )
+                self.assertEqual(1, len(findings))
+                self.assertIn("outside the declared action section", findings[0])
+
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            bodies = (
+                (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]({path})\n"
+                    "   <p>Approval from a maintainer is required before merge.</p>\n"
+                ),
+                (
+                    "## What to review\n\n"
+                    f"1. [Review the boundary]({path}). "
+                    "<span>Please reply before merge.</span>\n"
+                ),
+            )
+            for body in bodies:
+                with self.subTest(location="inside", body=body[-48:]):
+                    findings = self.findings(root, body)
+                    self.assertEqual(1, len(findings))
+                    self.assertIn("rendered HTML", findings[0])
+
+    def test_hidden_html_and_code_do_not_create_human_asks(self):
+        hidden = (
+            "<!-- Maintainer approval is requested before merge. -->",
+            "<script>Maintainer approval is requested before merge.</script>",
+            "<style>p::after { content: 'Please reply before merge.'; }</style>",
+            "<template>Maintainer approval is requested before merge.</template>",
+            "<p hidden>Maintainer approval is requested before merge.</p>",
+            (
+                '<p aria-hidden="true">Maintainer approval is requested '
+                "before merge.</p>"
+            ),
+            (
+                '<p style="display: none">Maintainer approval is requested '
+                "before merge.</p>"
+            ),
+            '<p style="display:\n none">Please reply before merge.</p>',
+            '<p style="display:/**/none">Please reply before merge.</p>',
+            "<code>Maintainer approval is requested before merge.</code>",
+            "```\n<p>Maintainer approval is requested before merge.</p>\n```",
+        )
+        for content in hidden:
+            with self.subTest(content=content[:20]), self.repo() as root:
+                body = (
+                    f"## Goal\n\n{content}\n\n"
+                    "## What to review\n\nNo human action requested.\n"
+                )
+                self.assertEqual([], self.findings(root, body))
+
+    def test_rendered_html_cannot_supply_a_queue_link(self):
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            body = (
+                "## What to review\n\n"
+                "1. Review request:\n"
+                f'   <p><a href="{path}">Review the boundary</a></p>\n'
+            )
+            findings = self.findings(root, body)
+            self.assertTrue(findings)
+            self.assertTrue(any(
+                "exactly one valid canonical" in finding
+                for finding in findings
+            ))
+
     def test_descriptive_and_negated_action_prose_is_accepted(self):
         with self.repo() as root:
             body = (
@@ -527,7 +718,28 @@ class ActionProjectionTests(unittest.TestCase):
                 "No additional maintainer confirmation is required before merge.\n\n"
                 "We do not need your approval for this documentation.\n"
                 "You do not need to review the generated report.\n\n"
+                "Feedback from a maintainer is not required before merge.\n"
+                "No comments are requested for this archived release.\n"
+                "Please do not reply to the archived notification.\n"
+                "The maintainer responded to feedback on the prior release.\n"
+                "Approval from a maintainer was required by the old process.\n\n"
+                "Reply metadata remains in the archived audit record.\n"
+                "Comment syntax is documented in the archived guide.\n\n"
+                "Answer formatting changed in this release.\n\n"
                 "## What to review\n\nNo human action requested.\n"
+            )
+            self.assertEqual([], self.findings(root, body))
+
+    def test_negated_and_descriptive_feedback_inside_entry_is_accepted(self):
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            body = (
+                "## What to review\n\n"
+                f"1. [Review the boundary]"
+                f"({item.relative_to(root).as_posix()}). "
+                "Feedback from a maintainer is not required for the archived "
+                "release, and the prior reply remains in its audit record.\n"
             )
             self.assertEqual([], self.findings(root, body))
 

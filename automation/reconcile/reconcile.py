@@ -42,6 +42,7 @@ MEMORY_ZONES = ["facts", "decisions", "lessons", "known-issues"]
 ACTIVE_TRANSITIONS = set()
 ACTIVE_TASK_ID = None
 CHANGE_RANGE = None
+DISPLACED_TIP = None
 _GIT_SNAPSHOT_CACHE_ACTIVE = False
 _GIT_INDEX_CACHE = None
 _GIT_INDEX_OID_CACHE = None
@@ -93,11 +94,21 @@ REVIEW_REVISION_RE = re.compile(
     r"^(?:sha256:[0-9a-f]{64}|git:(?:[0-9a-f]{40}|[0-9a-f]{64})"
     r"(?:\.\.\.(?:[0-9a-f]{40}|[0-9a-f]{64}))?)$"
 )
+REVIEW_OUTCOMES = {
+    "approved",
+    "changes-requested",
+    "rejected",
+    "abandoned",
+    "not-approved",  # legacy alias for changes-requested
+}
+REVIEW_SUCCESSOR_OUTCOMES = {"changes-requested", "not-approved"}
+REVIEW_TERMINAL_OUTCOMES = {"rejected", "abandoned"}
 GIT_RANGE_RE = re.compile(
     r"^(?:root:(?:[0-9a-f]{40}|[0-9a-f]{64})|"
     r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
     r"\.\.\.(?:[0-9a-f]{40}|[0-9a-f]{64}))$"
 )
+FULL_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 QUEUE_ITEM_RE = re.compile(
     r"^(blocking|future-blocking|non-blocking)-[a-z0-9][a-z0-9-]*\.md$"
 )
@@ -572,6 +583,45 @@ def validate_range_candidate(change_range):
         raise GitSnapshotError(
             "--range candidate contains untracked files outside the commit"
         )
+
+
+def validate_displaced_tip(displaced_tip, change_range):
+    """Validate an explicit old ref tip without changing candidate selection."""
+    if not displaced_tip:
+        return
+    if not change_range or change_range.startswith("root:"):
+        raise GitSnapshotError(
+            "--displaced-tip requires a full BASE...HEAD --range"
+        )
+    range_head = change_range.split("...", 1)[1]
+    available = subprocess.run(
+        [
+            "git", "--no-replace-objects", "cat-file", "-e",
+            f"{displaced_tip}^{{commit}}",
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if available.returncode:
+        raise GitSnapshotError(git_failure(
+            available, "--displaced-tip is not an available commit"
+        ))
+    common = subprocess.run(
+        [
+            "git", "--no-replace-objects", "merge-base",
+            displaced_tip, range_head,
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if common.returncode:
+        raise GitSnapshotError(git_failure(
+            common, "--displaced-tip and --range head have no merge base"
+        ))
 
 
 def live_queue_items():
@@ -1264,6 +1314,59 @@ def queue_mutation_events(activation):
             yield source, destination, before, after, parent, revision
 
 
+def committed_queue_deletion_events(parent, revision):
+    """Yield queue deletions on one explicit committed snapshot edge."""
+    for path in deleted_paths_between(parent, revision):
+        yield path, git_text_at(parent, path), parent, revision
+
+
+def committed_queue_mutation_events(parent, revision):
+    """Yield queue mutations on one explicit committed snapshot edge."""
+    for source, destination in mutated_paths_between(parent, revision):
+        before = git_text_at(parent, source)
+        after_bytes = git_artifact_bytes_at(revision, destination)
+        if after_bytes is None:
+            raise GitSnapshotError(
+                f"could not read queue mutation destination `{destination}`"
+            )
+        after = decode_utf8_artifact(
+            after_bytes,
+            f"`{destination}` in the queue mutation candidate",
+        )
+        yield source, destination, before, after, parent, revision
+
+
+def displaced_tip_edge():
+    """Return an explicit divergent old-ref-tip -> new-head continuity edge."""
+    if DISPLACED_TIP is None:
+        return None
+    if CHANGE_RANGE is None or CHANGE_RANGE.startswith("root:"):
+        raise GitSnapshotError(
+            "--displaced-tip requires a full BASE...HEAD --range"
+        )
+    range_head = CHANGE_RANGE.split("...", 1)[1]
+    ancestor = subprocess.run(
+        [
+            "git", "--no-replace-objects", "merge-base",
+            "--is-ancestor", DISPLACED_TIP, range_head,
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if ancestor.returncode == 0:
+        return None
+    if ancestor.returncode != 1:
+        detail = ancestor.stderr.decode(
+            "utf-8", errors="replace"
+        ).strip() if ancestor.stderr else ""
+        raise GitSnapshotError(
+            detail or "could not compare the pushed old tip to the new head"
+        )
+    return DISPLACED_TIP, range_head
+
+
 def pickup_task_path(text):
     candidates = [
         path for path in context_path_candidates(
@@ -1468,6 +1571,14 @@ def first_concrete_response(fields):
     return None
 
 
+def unanswered_review(fields):
+    return bool(
+        first_concrete_response(fields) is None
+        and not has_concrete_value(fields.get("Reviewed revision", ""))
+        and fields.get("Review outcome", "pending") in {"", "pending"}
+    )
+
+
 def queue_mutation_problem(source, destination, before, after):
     """Reject action replacement while permitting lifecycle-only updates."""
     if queue_action_identity(source, before) != queue_action_identity(
@@ -1507,11 +1618,23 @@ def queue_mutation_problem(source, destination, before, after):
                 prior_status == "awaiting-artifact"
                 and current_status == "waiting"
                 and prior_binding == ("pending", "pending")
+                and unanswered_review(prior_response)
+                and unanswered_review(current_response)
+            )
+            retraction_transition = (
+                prior_status == "waiting"
+                and current_status == "awaiting-artifact"
+                and current_binding == ("pending", "pending")
+                and unanswered_review(prior_response)
+                and unanswered_review(current_response)
             )
             if prior_binding != current_binding \
-                    and not publication_transition:
+                    and not (
+                        publication_transition or retraction_transition
+                    ):
                 return (
                     "immutable review binding changed outside the "
+                    "unanswered waiting -> awaiting-artifact retraction or "
                     "awaiting-artifact -> waiting publication transition"
                 )
         response_key = first_concrete_response(prior_response)
@@ -1816,7 +1939,7 @@ def review_successor_problem(path, text, prior_revision, revision):
     got = text_fields(text)
     candidates = context_path_candidates(got.get("Successor action", ""))
     if len(candidates) != 1:
-        return "not-approved review needs exactly one **Successor action:**"
+        return "changes-requested review needs exactly one **Successor action:**"
     successor_path = candidates[0]
     successor_parts = Path(successor_path).parts
     if successor_path == path or not valid_queue_item_path(successor_path) \
@@ -1878,7 +2001,7 @@ def queue_deletion_problem(path, text, prior_revision, revision):
             # The response disposition is write-once evidence, not pending delivery
             # state. Older live reviews may omit it until a response is recorded.
             outcome = got.get("Review outcome", "pending").strip()
-            if outcome not in {"approved", "not-approved"}:
+            if outcome not in REVIEW_OUTCOMES:
                 return "review has no terminal **Review outcome:**"
         lifecycle = claimed_lifecycle_problem(
             path, text, prior_revision, actor, leaf
@@ -1889,13 +2012,20 @@ def queue_deletion_problem(path, text, prior_revision, revision):
             target_problem = review_candidate_problem(text, revision)
             if target_problem:
                 return target_problem
-            return (
-                None
-                if got.get("Review outcome", "").strip() == "approved"
-                else review_successor_problem(
+            outcome = got.get("Review outcome", "").strip()
+            if outcome in REVIEW_SUCCESSOR_OUTCOMES:
+                return review_successor_problem(
                     path, text, prior_revision, revision
                 )
-            )
+            if outcome in REVIEW_TERMINAL_OUTCOMES \
+                    and context_path_candidates(
+                        got.get("Successor action", "")
+                    ):
+                return (
+                    f"{outcome} review is terminal and must not declare "
+                    "**Successor action:**"
+                )
+            return None
         return resolution_evidence_problem(text, prior_revision, revision)
     item = REPO / path
     if actor == "needs-agent" and leaf == "retries" \
@@ -1925,13 +2055,19 @@ def queue_deletion_problem(path, text, prior_revision, revision):
 def check_queue_resolution():
     if not (REPO / ".git").exists():
         return
-    if not git_index_entries("message-queue"):
-        return
+    queue_present = bool(git_index_entries("message-queue"))
     activation = queue_resolution_activation_commit(_GIT_HEAD_OID)
     enabled = queue_resolution_enabled()
-    if activation is None and not enabled:
+    continuity_edge = displaced_tip_edge()
+    displaced_activation = (
+        queue_resolution_activation_commit(continuity_edge[0])
+        if continuity_edge is not None
+        else None
+    )
+    if activation is None and not enabled and displaced_activation is None:
         return
-    if activation is not None and not enabled:
+    if (activation is not None or displaced_activation is not None) \
+            and queue_present and not enabled:
         yield Finding(
             "queue-resolution",
             Path("message-queue/AGENTS.md"),
@@ -1939,49 +2075,70 @@ def check_queue_resolution():
             "restore **Queue resolution schema:** v1 before changing queue state",
         )
     if activation is None:
-        activation = _GIT_HEAD_OID
+        activation = _GIT_HEAD_OID if enabled else None
     reported = set()
-    for (
-        source,
-        destination,
-        before,
-        after,
-        _prior_revision,
-        _revision,
-    ) in queue_mutation_events(activation):
-        problem = queue_mutation_problem(
-            source, destination, before, after
+    mutation_event_groups = []
+    deletion_event_groups = []
+    if activation is not None:
+        mutation_event_groups.append(queue_mutation_events(activation))
+        deletion_event_groups.append((
+            queue_deletion_events(activation),
+            False,
+        ))
+    if continuity_edge is not None and displaced_activation is not None:
+        parent, revision = continuity_edge
+        mutation_event_groups.append(
+            committed_queue_mutation_events(parent, revision)
         )
-        if not problem:
-            continue
-        identity = (source, destination, problem)
-        if identity in reported:
-            continue
-        reported.add(identity)
-        yield Finding(
-            "queue-resolution",
-            Path(destination),
-            f"live queue action was rewritten: {problem}",
-            "preserve the action and response identity; file a distinct "
-            "successor action when the requested work changes",
-        )
-    for path, text, prior_revision, revision in queue_deletion_events(
-        activation
-    ):
-        problem = queue_deletion_problem(
-            path, text, prior_revision, revision
-        )
-        if problem:
-            identity = (path, problem)
+        deletion_event_groups.append((
+            committed_queue_deletion_events(parent, revision),
+            True,
+        ))
+    for events in mutation_event_groups:
+        for (
+            source,
+            destination,
+            before,
+            after,
+            _prior_revision,
+            _revision,
+        ) in events:
+            problem = queue_mutation_problem(
+                source, destination, before, after
+            )
+            if not problem:
+                continue
+            identity = (source, destination, problem)
             if identity in reported:
                 continue
             reported.add(identity)
             yield Finding(
                 "queue-resolution",
-                Path(path),
-                f"deleted unresolved queue item: {problem}",
-                "commit the required claim/response evidence before deleting it",
+                Path(destination),
+                f"live queue action was rewritten: {problem}",
+                "preserve the action and response identity; file a distinct "
+                "successor action when the requested work changes",
             )
+    for events, is_continuity_edge in deletion_event_groups:
+        for path, text, prior_revision, revision in events:
+            problem = (
+                "divergent update discarded a live old-tip action"
+                if is_continuity_edge
+                else queue_deletion_problem(
+                    path, text, prior_revision, revision
+                )
+            )
+            if problem:
+                identity = (path, problem)
+                if identity in reported:
+                    continue
+                reported.add(identity)
+                yield Finding(
+                    "queue-resolution",
+                    Path(path),
+                    f"deleted unresolved queue item: {problem}",
+                    "commit the required claim/response evidence before deleting it",
+                )
 
 
 # ---------------------------------------------------------------- checks
@@ -2329,12 +2486,26 @@ def check_queue_schema():
                             "review response is not bound to the requested revision",
                             "copy Review revision into Reviewed revision with the response",
                         )
-                    if outcome not in {"approved", "not-approved"}:
+                    if outcome not in REVIEW_OUTCOMES:
                         yield Finding(
                             "queue-schema",
                             item.relative_to(REPO),
-                            "review response needs **Review outcome:** approved or not-approved",
-                            "classify the response before claiming it for folding",
+                            "review response needs an explicit terminal "
+                            "**Review outcome:**",
+                            "use approved, changes-requested, rejected, or "
+                            "abandoned (legacy not-approved means changes-requested)",
+                        )
+                    elif outcome in REVIEW_TERMINAL_OUTCOMES \
+                            and context_path_candidates(
+                                got.get("Successor action", "")
+                            ):
+                        yield Finding(
+                            "queue-schema",
+                            item.relative_to(REPO),
+                            f"**Review outcome:** {outcome} is terminal but "
+                            "**Successor action:** is present",
+                            "remove the successor or classify the response as "
+                            "changes-requested",
                         )
                 elif has_concrete_value(reviewed_revision):
                     yield Finding(
@@ -4162,7 +4333,7 @@ def file_retries(findings):
 
 
 def reconcile(argv=None):
-    global ACTIVE_TASK_ID, ACTIVE_TRANSITIONS, CHANGE_RANGE
+    global ACTIVE_TASK_ID, ACTIVE_TRANSITIONS, CHANGE_RANGE, DISPLACED_TIP
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="report findings (default)")
     parser.add_argument("--file-retries", action="store_true",
@@ -4192,6 +4363,11 @@ def reconcile(argv=None):
         metavar="BASE...HEAD|root:HEAD",
         help="Git range used to identify new handovers; root:HEAD covers a first push",
     )
+    parser.add_argument(
+        "--displaced-tip",
+        metavar="FULL_OID",
+        help="old ref tip replaced by --range head; validates force-push continuity",
+    )
     args = parser.parse_args(argv)
     invalid_transitions = [
         transition for transition in args.at_transition
@@ -4203,9 +4379,17 @@ def reconcile(argv=None):
         parser.error(
             "--range must be full-base...full-head or root:full-head"
         )
+    if args.displaced_tip and not FULL_GIT_OID_RE.fullmatch(args.displaced_tip):
+        parser.error("--displaced-tip must be one full commit object id")
+    if args.displaced_tip and (
+        not args.range or args.range.startswith("root:")
+    ):
+        parser.error("--displaced-tip requires a full BASE...HEAD --range")
     ACTIVE_TRANSITIONS = set(args.at_transition)
     CHANGE_RANGE = args.range
+    DISPLACED_TIP = args.displaced_tip
     validate_range_candidate(CHANGE_RANGE)
+    validate_displaced_tip(DISPLACED_TIP, CHANGE_RANGE)
     if args.task_id:
         task_id = args.task_id
         if task_id.startswith("task/"):

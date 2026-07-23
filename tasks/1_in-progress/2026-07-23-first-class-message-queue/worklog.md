@@ -96,3 +96,25 @@
   weakening the v1 marker inside a retained queue service still fails. Focused repairs
   raised the suites to 40 action-projection tests and 149 queue tests; the full
   repository runner again passed 5/5 files.
+
+## 2026-07-23 — lifecycle hardening round two (codex subagent)
+
+- Added the only safe review-binding reversal: an unanswered `waiting` review retracts
+  to `awaiting-artifact` with pending/blank response fields, then publishes its new
+  binding in a separate commit. Direct rebinds, publication-plus-answer, post-answer
+  retraction, and same-edge rebind-plus-approval remain invalid.
+- Split review outcomes into `approved`, `changes-requested`, `rejected`, and
+  `abandoned`. Only requested changes require a same-timing successor; rejection and
+  abandonment are terminal, while legacy `not-approved` retains requested-change
+  behavior for historical compatibility.
+- Added provider-neutral `--displaced-tip` admission. A divergent replaced ref now
+  compares its old snapshot with the new range head as preservation-only continuity;
+  ordinary PR base/head divergence is untouched, and GitHub push/PR-synchronize
+  adapters fetch the old object or fail closed.
+- Removed the empty-candidate early return from queue resolution. Deleting an
+  empty/resolved queue service passes, deleting one with blocking, non-blocking, or
+  malformed live actions fails, and partial v1-marker removal remains an anti-downgrade
+  finding.
+- Added focused lifecycle, outcome, force-push, adapter, and service-removal
+  regressions. `python3 -m unittest automation.tests.test_reconcile_queue` passed all
+  159 tests; Ruby parsed `.github/workflows/harness.yml` successfully.

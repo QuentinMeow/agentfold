@@ -65,6 +65,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "ACTIVE_TASK_ID": None,
                 "ACTIVE_TRANSITIONS": set(),
                 "CHANGE_RANGE": None,
+                "DISPLACED_TIP": None,
             }
             with mock.patch.multiple(RECONCILE, **replacements):
                 yield root
@@ -113,6 +114,12 @@ class ReconcileQueueTests(unittest.TestCase):
             'QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"',
             workflow,
         )
+        self.assertIn(
+            "github.event.action == 'synchronize' && github.event.before",
+            workflow,
+        )
+        self.assertIn('--displaced-tip "$QUEUE_DISPLACED_TIP"', workflow)
+        self.assertIn('--displaced-tip "$QUEUE_PUSH_BEFORE"', workflow)
         self.assertIn("if: ${{ always() }}", workflow)
         self.assertNotIn("--at-transition repository-admission", workflow)
 
@@ -1151,6 +1158,237 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual([], findings)
 
+    def test_unanswered_review_can_retract_then_republish_binding(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Revision A\n")
+            digest_a = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-republish.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review exact artifact\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the current artifact\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest_a}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** continue implementation\n\n"
+                "## What you need to know\n\nReview one exact revision.\n\n"
+                "## Differences\n\nApprove accepts it; changes revise it.\n\n"
+                "## Example\n\nRevision A may be replaced before response.\n\n"
+                "**Your review:** ______\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "publish revision a")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            target.write_text("# Revision B\n", encoding="utf-8")
+            digest_b = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** awaiting-artifact"
+                ).replace(
+                    "**Review target:** `docs/source.md`",
+                    "**Review target:** pending",
+                ).replace(
+                    f"**Review revision:** {digest_a}",
+                    "**Review revision:** pending",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "retract obsolete revision a")
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** awaiting-artifact", "**Status:** waiting"
+                ).replace(
+                    "**Review target:** pending",
+                    "**Review target:** `docs/source.md`",
+                ).replace(
+                    "**Review revision:** pending",
+                    f"**Review revision:** {digest_b}",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "publish revision b")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings)
+
+    def test_review_republication_cannot_bind_and_approve_same_edge(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Revision B\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-republish.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review exact artifact\n\n"
+                "**Status:** awaiting-artifact\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review after publication\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** pending\n"
+                "**Review revision:** pending\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks now:** transition:merge\n\n"
+                "## What you need to know\n\nThe revision is not published yet.\n\n"
+                "## Differences\n\nApprove accepts it; changes revise it.\n\n"
+                "## Example\n\nPublication precedes human judgment.\n\n"
+                "**Your review:** ______\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "await revision")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** awaiting-artifact", "**Status:** waiting"
+                ).replace(
+                    "**Review target:** pending",
+                    "**Review target:** `docs/source.md`",
+                ).replace(
+                    "**Review revision:** pending",
+                    f"**Review revision:** {digest}",
+                ).replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {digest}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ).replace(
+                    "**Your review:** ______",
+                    "**Your review:** approved",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "publish and approve revision")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings))
+            self.assertIn("publication transition", findings[0].message)
+
+    def test_answered_review_cannot_retract_its_binding(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Revision A\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-answered-review.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review exact artifact\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the artifact\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** rejected\n"
+                "**Blocks now:** transition:merge\n"
+                "## What you need to know\n\nJudge the exact revision.\n\n"
+                "## Differences\n\nReject ends it; changes request revision.\n\n"
+                "## Example\n\nA response freezes revision A.\n\n"
+                "**Your review:** reject revision a\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record response")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** awaiting-artifact"
+                ).replace(
+                    "**Review target:** `docs/source.md`",
+                    "**Review target:** pending",
+                ).replace(
+                    f"**Review revision:** {digest}",
+                    "**Review revision:** pending",
+                ).replace(
+                    f"**Reviewed revision:** {digest}",
+                    "**Reviewed revision:** ______",
+                ).replace(
+                    "**Review outcome:** rejected",
+                    "**Review outcome:** pending",
+                ).replace(
+                    "**Your review:** reject revision a",
+                    "**Your review:** ______",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "attempt response retraction")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings))
+            self.assertIn("immutable review binding", findings[0].message)
+
     def test_timing_rename_cannot_rewrite_action_identity(self):
         for rewrites_action, rejected in ((False, False), (True, True)):
             with self.subTest(rewrites_action=rewrites_action), self.repo() as root:
@@ -1682,6 +1920,109 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(1, len(findings))
                 self.assertIn(expected, findings[0].message)
 
+    def test_terminal_review_outcomes_close_without_successors(self):
+        for outcome in ("rejected", "abandoned"):
+            with self.subTest(outcome=outcome), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    f"blocking-{outcome}.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    "# Review proposal\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** decide whether this proposal continues\n"
+                    "**Full context:** `message-queue/AGENTS.md`\n"
+                    "**Review target:** https://example.invalid/proposal\n"
+                    f"**Review revision:** sha256:{'a' * 64}\n"
+                    f"**Reviewed revision:** sha256:{'a' * 64}\n"
+                    f"**Review outcome:** {outcome}\n"
+                    "**Blocks now:** transition:merge\n\n"
+                    "## What you need to know\n\nJudge one exact proposal.\n\n"
+                    "## Differences\n\nReject ends it; changes request revision.\n\n"
+                    "## Example\n\nA rejected proposal creates no revision two.\n\n"
+                    f"**Your review:** {outcome}\n",
+                )
+                self.git(root, "add", ".")
+                schema_findings = list(RECONCILE.check_queue_schema())
+                self.assertEqual(
+                    [], schema_findings, self.messages(schema_findings)
+                )
+                self.git(root, "commit", "-m", f"record {outcome} outcome")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim terminal response")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual([], findings)
+
+    def test_changes_requested_outcome_requires_successor(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-changes-requested.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review proposal\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the proposal\n"
+                "**Full context:** `message-queue/AGENTS.md`\n"
+                "**Review target:** https://example.invalid/proposal\n"
+                f"**Review revision:** sha256:{'a' * 64}\n"
+                f"**Reviewed revision:** sha256:{'a' * 64}\n"
+                "**Review outcome:** changes-requested\n"
+                "**Blocks now:** transition:merge\n"
+                "**Your review:** revise it\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record requested changes")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim response")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings))
+            self.assertIn("Successor action", findings[0].message)
+
     def test_generated_retry_gc_exception_rejects_manual_lookalike(self):
         for generated, rejected in ((True, False), (False, True)):
             with self.subTest(generated=generated), self.repo() as root:
@@ -1989,16 +2330,90 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "activate queue resolution")
+            base = self.git(root, "rev-parse", "HEAD")
             contract.unlink()
             self.git(root, "add", "-A")
             self.git(root, "commit", "-m", "remove queue service")
+            head = self.git(root, "rev-parse", "HEAD")
 
             RECONCILE.start_git_snapshot_cache()
             try:
-                findings = list(RECONCILE.check_queue_resolution())
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
             finally:
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual([], findings)
+
+    def test_whole_queue_service_removal_rejects_live_actions(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            blocking = self.write(
+                root,
+                "message-queue/needs-agent/requests/blocking-live.md",
+                "# Blocking action\n\n**Status:** open\n",
+            )
+            nonblocking = self.write(
+                root,
+                "message-queue/needs-agent/requests/non-blocking-live.md",
+                "# Nonblocking action\n\n**Status:** open\n",
+            )
+            malformed = self.write(
+                root,
+                "message-queue/question.md",
+                "# Malformed live action\n\n**Status:** waiting\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue with live actions")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.unlink()
+            blocking.unlink()
+            nonblocking.unlink()
+            malformed.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                staged = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(
+                {
+                    blocking.relative_to(root),
+                    nonblocking.relative_to(root),
+                    malformed.relative_to(root),
+                },
+                {finding.subject for finding in staged},
+            )
+            self.assertFalse(any(
+                "removed after activation" in finding.message
+                for finding in staged
+            ))
+
+            self.git(root, "commit", "-m", "remove queue with live actions")
+            head = self.git(root, "rev-parse", "HEAD")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    ranged = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(
+                {
+                    blocking.relative_to(root),
+                    nonblocking.relative_to(root),
+                    malformed.relative_to(root),
+                },
+                {finding.subject for finding in ranged},
+            )
 
     def test_unreadable_historical_queue_state_fails_closed(self):
         for kind in ("invalid-utf8", "symlink"):
@@ -2370,6 +2785,147 @@ class ReconcileQueueTests(unittest.TestCase):
             finally:
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual(1, len(findings))
+
+    def test_divergent_range_checks_discarded_old_tip_snapshot(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate resolution gate")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "old-tip")
+            path = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-old-tip-action.md"
+            )
+            self.write(
+                root,
+                path,
+                "# Preserve this action\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the old tip\n"
+                "**Full context:** `message-queue/AGENTS.md`\n"
+                "**Resolution evidence:** `message-queue/AGENTS.md`\n"
+                "**If unanswered:** keep the action live\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file action on old tip")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", common)
+            self.write(root, "rewritten.md", "# Rewritten history\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "rewrite without old action")
+            new_tip = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.multiple(
+                    RECONCILE,
+                    CHANGE_RANGE=f"{old_tip}...{new_tip}",
+                    DISPLACED_TIP=old_tip,
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn("deleted unresolved", findings[0].message)
+
+    def test_divergent_range_accepts_action_carried_to_new_tip(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate resolution gate")
+            common = self.git(root, "rev-parse", "HEAD")
+            path = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-carried-action.md"
+            )
+            action = (
+                "# Preserve this action\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the update\n"
+                "**Full context:** `message-queue/AGENTS.md`\n"
+                "**Resolution evidence:** `message-queue/AGENTS.md`\n"
+                "**If unanswered:** keep the action live\n"
+            )
+
+            self.git(root, "checkout", "-b", "old-tip")
+            self.write(root, path, action)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file action on old tip")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", common)
+            self.write(root, path, action)
+            self.write(root, "rewritten.md", "# Rewritten history\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "carry action through rewrite")
+            new_tip = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.multiple(
+                    RECONCILE,
+                    CHANGE_RANGE=f"{old_tip}...{new_tip}",
+                    DISPLACED_TIP=old_tip,
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings)
+
+    def test_divergent_pr_range_is_not_implicitly_a_force_push(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "base-branch")
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "non-blocking-base-only.md",
+                "# Base action\n\n**Status:** open\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base branch action")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "pr-head", common)
+            self.write(root, "feature.md", "# Feature\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "pull request head")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings)
 
     def test_range_accepts_claim_then_evidence_bound_resolution(self):
         with self.repo() as root:
@@ -4308,6 +4864,32 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.main([
                         "--check", "--range", f"{base}...{head}"
                     ]),
+                )
+
+    def test_displaced_tip_validation_fails_closed(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "README.md", "# Head\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "head")
+            head = self.git(root, "rev-parse", "HEAD")
+            change_range = f"{base}...{head}"
+
+            RECONCILE.validate_displaced_tip(base, change_range)
+            with self.assertRaises(RECONCILE.GitSnapshotError):
+                RECONCILE.validate_displaced_tip("a" * 40, change_range)
+
+            tree = self.git(root, "rev-parse", "HEAD^{tree}")
+            disconnected = self.git(
+                root, "commit-tree", tree, "-m", "disconnected"
+            )
+            with self.assertRaises(RECONCILE.GitSnapshotError):
+                RECONCILE.validate_displaced_tip(
+                    disconnected, change_range
                 )
 
     def test_range_allows_repository_ignored_generated_file(self):

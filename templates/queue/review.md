@@ -15,11 +15,13 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Review target:** <pending | one repo file | git:<full id or base...head> | one HTTPS artifact>
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
-**Review outcome:** <pending | approved | not-approved>
+**Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
 
-<!-- A not-approved review is resolved only by a new live review action. Before
-deleting this item, add **Successor action:** `<new queue path>` here and
-**Supersedes:** `<this queue path>` to the same-timing successor. -->
+<!-- approved accepts the bound revision. changes-requested continues the review:
+before deleting, add **Successor action:** `<new queue path>` here and
+**Supersedes:** `<this queue path>` to a new same-timing successor. rejected declines
+the proposal and abandoned ends pursuit; both are terminal with no successor.
+Legacy **Review outcome:** not-approved remains accepted as changes-requested. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
 blocking-*:
@@ -53,5 +55,8 @@ do not use unexplained approval shorthand.>
 
 <!-- Status-folder task paths move and are not durable context. When answering, copy
 Review revision into Reviewed revision. Git revisions must name locally available
-commit objects. A changed target or revision invalidates any older response until both
-response fields are cleared. -->
+commit objects. If an unanswered waiting target becomes stale, retract it in one commit:
+set Status to awaiting-artifact, target/revision to pending, and keep response/reviewed
+blank with outcome pending. Publish the replacement in a later awaiting-artifact ->
+waiting commit. Neither lifecycle edge may add a response; the first response freezes
+the binding forever. -->

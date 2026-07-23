@@ -1,10 +1,11 @@
 # Queue resolution is proven by Git evidence, not a terminal label
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-23
 **Decided-by:** agent (delegated two-way-door implementation of the owner's queue-first requirement; independently adversarially reviewed)
 **Description:** Queue actions resolve through committed claims and boundary-specific Git evidence; external asks are checked projections
 **Review-by:** 2027-02-10
+**Superseded-by:** `memory/decisions/2026-07-23-queue-resolution-preserves-review-intent.md`
 
 ## Context
 

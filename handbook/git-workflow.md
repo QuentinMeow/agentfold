@@ -60,6 +60,7 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   restore with `git checkout <sha>^ -- <path>`.
 - A misfiled queue item is moved with every live link updated. A stale item is
   re-surfaced, reclassified, or explicitly resolved. Delete only after a one-line claim
-  and changed durable evidence; approved reviews revalidate their target, and
-  not-approved reviews leave a same-boundary successor. Verified pickup/retry exceptions
-  stay atomic. Git history can recover accidents, not replace live delivery state.
+  and changed durable evidence. Approved reviews revalidate their target;
+  `changes-requested` (and legacy `not-approved`) leaves a same-boundary successor;
+  `rejected` and `abandoned` end the action. Verified pickup/retry exceptions stay
+  atomic. Git history can recover accidents, not replace live delivery state.

@@ -59,6 +59,11 @@ carry a second status or answer slot.
 
 Commit the response while status is `waiting`, then claim it in a separate one-line
 `Status: folding` commit. Fold into the predeclared `Resolution evidence` file(s);
-deletion requires those files to change in that commit. Approved reviews revalidate the
-bound target. A not-approved review instead leaves a same-timing successor. Git history
+deletion requires those files to change in that commit. An unanswered waiting review
+whose artifact changes first retracts to `awaiting-artifact` with pending binding and
+blank response fields; a later commit republishes the replacement as `waiting`.
+Publication and retraction never add a response, and the first response freezes its
+binding. `approved` accepts the exact revision; `changes-requested` leaves a new
+same-timing successor; `rejected` declines it and `abandoned` ends pursuit, both without
+a successor. Legacy `not-approved` is accepted as `changes-requested`. Git history
 archives delivery; the changed durable source preserves the result.

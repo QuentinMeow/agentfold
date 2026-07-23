@@ -23,7 +23,22 @@ jobs:
         env:
           QUEUE_TASK_BRANCH: ${{ github.head_ref }}
           QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
-        run: python3 automation/reconcile/reconcile.py --check --at-transition merge --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
+          QUEUE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
+          QUEUE_DISPLACED_ARGS=()
+          if [ -n "$QUEUE_DISPLACED_TIP" ] && \
+              [ "$QUEUE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
+            if ! git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$QUEUE_DISPLACED_TIP"
+            fi
+            git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}"
+            QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_DISPLACED_TIP")
+          fi
+          python3 automation/reconcile/reconcile.py --check \
+            --at-transition merge \
+            --branch "$QUEUE_TASK_BRANCH" \
+            --range "$QUEUE_CHANGE_RANGE" \
+            "${QUEUE_DISPLACED_ARGS[@]}"
       - name: Action projection — pull-request questions are queued
         if: ${{ always() && github.event_name == 'pull_request' }}
         env:
@@ -40,6 +55,7 @@ jobs:
           QUEUE_PUSH_BRANCH: ${{ github.ref_name }}
           QUEUE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          QUEUE_DISPLACED_ARGS=()
           if [ "$QUEUE_PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
             if [ "$QUEUE_PUSH_BRANCH" = "$QUEUE_DEFAULT_BRANCH" ]; then
               QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
@@ -48,17 +64,18 @@ jobs:
             else
               QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
             fi
-          elif git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
-            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BEFORE...$QUEUE_PUSH_HEAD"
-          elif [ "$QUEUE_PUSH_BRANCH" != "$QUEUE_DEFAULT_BRANCH" ] && \
-              QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
-            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
           else
-            QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
+            if ! git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$QUEUE_PUSH_BEFORE"
+            fi
+            git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"
+            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BEFORE...$QUEUE_PUSH_HEAD"
+            QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_PUSH_BEFORE")
           fi
           python3 automation/reconcile/reconcile.py --check \
             --branch "$QUEUE_PUSH_BRANCH" \
-            --range "$QUEUE_CHANGE_RANGE"
+            --range "$QUEUE_CHANGE_RANGE" \
+            "${QUEUE_DISPLACED_ARGS[@]}"
       - name: Repository tests
         if: ${{ always() }}
         run: python3 automation/run_tests.py

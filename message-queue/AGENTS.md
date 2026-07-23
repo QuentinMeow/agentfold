@@ -1,11 +1,9 @@
 # message-queue/ — the canonical action bus
 
 **Queue resolution schema:** v1
-Every pending human↔agent action and every action another agent/session must discover
-lives here, one file per action. PRs, issues, chat, tasks, and handovers are projections:
-they may summarize and link a live item, never originate a durable ask. Background stays
-in tasks, designs, memory, or code; the queue item owns only live delivery/state and a
-not-yet-folded response. Principle: `handbook/principles/files-as-messages.md`.
+Every pending human↔agent or discoverable cross-session action lives here, one per file.
+PRs, issues, chat, tasks, and handovers may link a live item, never originate an ask.
+Background stays durable; the item owns delivery/state and an unfolded response (`handbook/principles/files-as-messages.md`).
 
 ## Routing: three independent axes
 
@@ -40,21 +38,23 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 ## Lifecycle and content
 
 - Copy the matching template; never write a schema from memory. Human items explain
-  the action from zero context, compare meaningful dispositions, give a small example,
-  state the unattended/boundary result, link a complete source, and expose a response
-  slot. Writing guide: `handbook/human-action-guide.md`.
+  the action from zero context, compare dispositions, give an example, state the
+  unattended/boundary result, link a source, and expose a response slot
+  (`handbook/human-action-guide.md`).
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
-- Commit a human response while `waiting`; claim later by changing only `Status` to
-  `folding`. Agent claims likewise change only `open` to `in-repair`. Never edit the
-  response or action identity after claiming.
+- Commit a human response while `waiting`; claim later with a status-only change to
+  `folding`. An unanswered review may retract a stale binding in one
+  `waiting` → `awaiting-artifact` commit that restores pending/blank response fields;
+  publish its replacement in a later `awaiting-artifact` → `waiting` commit. Neither edge
+  may add a response; the first response freezes the binding.
+- Agent claims change only `open` to `in-repair`; never edit action identity after claim.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
-  and exactly one Full context link: the backlog task's current `task.md`. The task
-  links it reciprocally, and the atomic claim/move commit deletes it. Only pickups use
-  moving task paths as live context; retries may quote one only as broken-state evidence.
+  and one Full context link to the backlog `task.md`; the task links it reciprocally.
+  Its atomic claim/move deletes it. Only pickups use moving task paths as live context;
+  retries may quote one only as broken-state evidence.
 - Ordinary actions predeclare `Resolution evidence`; every named non-queue file changes
-  in the deletion commit. Reviews bind one exact target/revision and classify the answer
-  as `approved` or `not-approved`; approval revalidates the target, while non-approval
-  leaves a same-timing successor. A PR URL is navigation, never revision authority.
-- Generated retries delete only with exact identity and a cleared finding; task pickups
-  require the atomic backlog-to-claimed move. Git history archives resolved items.
+  in the deletion commit. Reviews bind one target/revision: `approved`, `rejected`, and
+  `abandoned` end the action; `changes-requested` requires a new same-timing successor.
+  Legacy `not-approved` means `changes-requested`. Approval revalidates the target; a PR URL is navigation, never revision authority.
+- Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
 - Transcribe chat responses before use; rename the live file whenever timing changes.

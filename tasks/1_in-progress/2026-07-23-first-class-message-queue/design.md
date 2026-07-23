@@ -82,9 +82,14 @@ portable adoption:
   and refresh a marked machine projection without overwriting actor status or notes.
 - Queue resolution is a Git-backed lifecycle, not a status label: an answered/open item
   is claimed in a separate one-line commit, ordinary deletion changes predeclared
-  evidence files, approved reviews revalidate the exact target, and non-approval leaves
-  a same-boundary successor. Pickup and generated-retry exceptions prove their own
-  state transitions, and activation cannot be removed to disable history checks.
+  evidence files, approved reviews revalidate the exact target, requested changes leave
+  a same-boundary successor, and explicit rejection/abandonment ends the action. An
+  unanswered stale binding retracts to pending before a separate republication. Pickup
+  and generated-retry exceptions prove their own state transitions, and activation
+  cannot be removed to disable history checks.
+- Force-ref admission names the displaced old tip explicitly, so continuity compares it
+  with the new range head without treating ordinary PR divergence as a force push.
+  Whole queue-service removal remains modular only when its edge erases no live action.
 - External action prose crosses a provider-neutral projection gate. Every declared PR
   review entry carries exactly one live human queue link and declarative context; task
   PRs project every human action in `Queue actions`, or use an explicit no-action
@@ -97,6 +102,9 @@ elsewhere. The correcting ADR is
 
 Accepted decision:
 `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
+
+Refined resolution lifecycle:
+`memory/decisions/2026-07-23-queue-resolution-preserves-review-intent.md`.
 
 ## Core fit
 

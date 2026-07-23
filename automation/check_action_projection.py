@@ -16,6 +16,7 @@ if str(AUTOMATION) not in sys.path:
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
     markdown_links,
+    rendered_human_text,
     semantic_text,
     strip_indented_code,
     strip_inline_code,
@@ -44,27 +45,69 @@ LIST_ITEM_RE = re.compile(
     r"(?P<spacing>[ \t]+)"
 )
 NO_ACTION_TEXT = "No human action requested."
+CLEAR_ACTION_VERB_PATTERN = (
+    r"(?:accept|approve|authorize|choose|confirm|consider|"
+    r"decide|deploy|(?:give|provide)"
+    r"(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|inspect|"
+    r"(?:add|leave)(?:[ \t]+(?:a|your))?[ \t]+comment|merge|"
+    r"release|review|select|"
+    r"sign[ \t]+off|tell|verify|vote)"
+)
+ACTION_VERB_PATTERN = (
+    rf"(?:{CLEAR_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
+)
+DIRECTIVE_ACTION_PATTERN = (
+    rf"(?:{CLEAR_ACTION_VERB_PATTERN}"
+    r"|answer(?="
+    r"[.!?;,:)]|$|[ \t]+(?:how|that|the|this|what|when|whether|which|"
+    r"who|why|with)\b)"
+    r"|(?:reply|respond)(?="
+    r"[.!?;,:)]|$|[ \t]+(?:after|before|below|by|here|if|in|no|now|"
+    r"on|promptly|to|tomorrow|via|when|with|yes)\b)"
+    r"|comment(?="
+    r"[.!?;,:)]|$|[ \t]+(?:about|after|before|below|here|if|now|on|"
+    r"promptly|tomorrow|when)\b))"
+)
+DIRECTIVE_PREFIX_PATTERN = r"(?:(?:and|also|then)[ \t]+)*"
+HUMAN_ACTION_NOUN_PATTERN = (
+    r"(?:approval|authorization|choice|clarification|comments?|confirmation|"
+    r"decision|feedback|input|repl(?:y|ies)|responses?|review|"
+    r"sign[ -]?off|verification|vote)"
+)
+HUMAN_ACTOR_PATTERN = r"(?:human|maintainer|owner|reviewer)s?"
+ACTION_SOURCE_PATTERN = (
+    rf"(?:you|(?:(?:a|an|the)[ \t]+)?"
+    r"(?:(?:authorized|code|designated|lead|project|responsible|senior)"
+    r"[ \t]+){0,2}"
+    rf"{HUMAN_ACTOR_PATTERN})"
+)
 ACTION_VERB_RE = re.compile(
-    r"\b(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
-    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    rf"\b{ACTION_VERB_PATTERN}\b",
     re.I,
 )
 DIRECTIVE_RE = re.compile(
     r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
-    r"(?:(?:also[ \t]+)?please[ \t]+|also[ \t]+)?"
-    r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
-    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    r"(?:"
+    rf"{DIRECTIVE_PREFIX_PATTERN}please[ \t]+"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{ACTION_VERB_PATTERN}"
+    r"|"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
+    r")\b",
     re.I | re.M,
 )
 ADDITIONAL_DIRECTIVE_RE = re.compile(
-    r"(?:^|[.!;:—][ \t]+)"
+    r"(?:^|[,.!;:—][ \t]+)"
     r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
-    r"(?:(?:and|also|then)[ \t]+|please[ \t]+)*"
-    r"(?:accept|approve|authorize|choose|confirm|consider|decide|deploy|"
-    r"inspect|merge|release|review|select|sign[ \t]+off|tell|verify|vote)\b",
+    r"(?:"
+    rf"{DIRECTIVE_PREFIX_PATTERN}please[ \t]+"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{ACTION_VERB_PATTERN}"
+    r"|"
+    rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
+    r")\b",
     re.I | re.M,
 )
 TODO_RE = re.compile(r"\bTODO\b", re.I)
+EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3})")
 FULL_OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
 QUEUE_ACTION_RE = re.compile(
     r"^\*\*Action:\*\*[ \t]*(?P<action>\S(?:.*\S)?)[ \t]*$",
@@ -73,40 +116,47 @@ QUEUE_ACTION_RE = re.compile(
 DECLARATIVE_ACTION_RE = re.compile(
     r"\b"
     r"(?:(?:explicit|additional|separate|formal|manual)[ \t]+)*"
-    r"(?:(?:your|human|maintainer|owner|reviewer)s?(?:['’]s)?[ \t]+)?"
-    r"(?:approval|authorization|choice|clarification|confirmation|decision|"
-    r"input|response|review|sign[ -]?off|verification|vote)"
+    rf"(?:(?:your|{HUMAN_ACTOR_PATTERN}(?:['’]s)?)[ \t]+)?"
+    rf"{HUMAN_ACTION_NOUN_PATTERN}"
+    rf"(?:[ \t]+(?:from|by)[ \t]+{ACTION_SOURCE_PATTERN})?"
     r"[ \t]+"
     r"(?:(?:is|are|remains?|will[ \t]+be|must[ \t]+be)[ \t]+)?"
     r"(?:(?:also|now|still)[ \t]+)?"
+    r"(?:(?:currently)[ \t]+)?"
     r"(?P<negation>not[ \t]+)?"
     r"(?:awaited|needed|outstanding|pending|requested|required)\b",
     re.I,
 )
 HUMAN_REQUEST_RE = re.compile(
-    r"\b(?:human|maintainer|owner|reviewer)s?\b"
+    rf"\b{HUMAN_ACTOR_PATTERN}\b"
     r"[ \t]+(?:is|are)[ \t]+"
     r"(?P<negation>not[ \t]+)?(?:requested|required)[ \t]+to[ \t]+"
-    r"(?:accept|approve|authorize|choose|confirm|decide|inspect|review|"
-    r"select|sign[ \t]+off|verify|vote)\b",
+    rf"{ACTION_VERB_PATTERN}\b",
     re.I,
 )
 FIRST_PERSON_REQUEST_RE = re.compile(
     r"\b(?:we|i)[ \t]+"
     r"(?P<negation>do[ \t]+not[ \t]+)?"
-    r"(?:await|need|require)[ \t]+"
-    r"(?:your|human|maintainer|owner|reviewer)s?(?:['’]s)?[ \t]+"
-    r"(?:approval|authorization|choice|clarification|confirmation|decision|"
-    r"input|response|review|sign[ -]?off|verification|vote)\b",
+    r"(?:await|need|request|require)[ \t]+"
+    rf"(?:(?:your|{HUMAN_ACTOR_PATTERN}(?:['’]s)?)[ \t]+)?"
+    rf"{HUMAN_ACTION_NOUN_PATTERN}"
+    rf"(?:[ \t]+(?:from|by)[ \t]+{ACTION_SOURCE_PATTERN})?\b",
     re.I,
 )
 ACTOR_OBLIGATION_RE = re.compile(
-    r"\b(?:you|human|maintainer|owner|reviewer)s?\b[ \t]+"
+    rf"\b(?:you|{HUMAN_ACTOR_PATTERN})\b[ \t]+"
     r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
     r"(?:must|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
     r"requested[ \t]+to)[ \t]+"
-    r"(?:accept|approve|authorize|choose|confirm|decide|inspect|review|"
-    r"select|sign[ \t]+off|verify|vote)\b",
+    rf"{ACTION_VERB_PATTERN}\b",
+    re.I,
+)
+FIRST_PERSON_VERB_REQUEST_RE = re.compile(
+    r"\b(?:we|i)[ \t]+"
+    r"(?P<negation>do[ \t]+not[ \t]+)?"
+    r"(?:ask|need|request|require)[ \t]+(?:that[ \t]+)?"
+    rf"{ACTION_SOURCE_PATTERN}[ \t]+(?:to[ \t]+)?"
+    rf"{ACTION_VERB_PATTERN}\b",
     re.I,
 )
 GENERIC_ACTION_LABELS = {
@@ -185,12 +235,28 @@ def action_sections(text, titles):
 
 
 def visible_outside_action_sections(text, titles):
-    """Return visible prose outside every configured action section."""
-    lines = semantic_text(text).splitlines()
+    """Return human-readable prose outside every configured action section."""
+    lines = rendered_human_text(text).splitlines()
     for start, end, _body in action_section_spans(text, titles):
         for index in range(start, min(end, len(lines))):
             lines[index] = ""
     return "\n".join(lines)
+
+
+def rendered_action_section_body(text, start, end):
+    """Return human-readable section prose without granting HTML structure."""
+    structural_lines = semantic_text(text).splitlines()
+    rendered_lines = rendered_human_text(text).splitlines()
+    heading = (
+        HEADING_RE.match(structural_lines[start])
+        if start < len(structural_lines)
+        else None
+    )
+    depth = heading.group("quote").count(">") if heading else 0
+    return "\n".join(
+        strip_quote(rendered_lines[index], depth)
+        for index in range(start + 1, min(end, len(rendered_lines)))
+    ).strip()
 
 
 def indentation_width(value):
@@ -254,6 +320,31 @@ def prose_without_links(entry):
     return MARKDOWN_LINK_RE.sub("", clean)
 
 
+def strip_prose_quote_markers(text):
+    """Remove CommonMark quote prefixes before classifying rendered prose."""
+    output = []
+    for line in (text or "").split("\n"):
+        while True:
+            marker = re.match(r"^[ ]{0,3}>[ \t]?", line)
+            if not marker:
+                break
+            line = line[marker.end():]
+        output.append(line)
+    return "\n".join(output)
+
+
+def action_prose_variants(text):
+    """Return source lines and their rendered soft-line-break equivalent."""
+    source = text or ""
+    softened = re.sub(r"(?<!\n)\n(?!\n)", " ", source)
+    return (source,) if softened == source else (source, softened)
+
+
+def strip_action_emphasis(text):
+    """Remove visible Markdown emphasis delimiters before ask classification."""
+    return EMPHASIS_MARKER_RE.sub("", text or "")
+
+
 def declarative_action_request(clean):
     """Recognize narrow present-tense/passive requests, excluding local negation."""
     for pattern in (
@@ -261,6 +352,7 @@ def declarative_action_request(clean):
         HUMAN_REQUEST_RE,
         FIRST_PERSON_REQUEST_RE,
         ACTOR_OBLIGATION_RE,
+        FIRST_PERSON_VERB_REQUEST_RE,
     ):
         for matched in pattern.finditer(clean):
             if matched.group("negation"):
@@ -286,14 +378,21 @@ def action_like_prose(text):
     requested or required. Markdown destinations and code are not prose; callers
     inspect link labels separately. Ordinary descriptive prose remains accepted.
     """
-    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
+    clean = strip_prose_quote_markers(semantic_text(text))
+    clean = strip_indented_code(strip_inline_code(clean))
     clean = MARKDOWN_LINK_RE.sub(
         lambda matched: matched.group("label"),
         clean,
     )
-    if "?" in clean or TODO_RE.search(clean) or DIRECTIVE_RE.search(clean):
+    clean = strip_action_emphasis(clean)
+    if "?" in clean or TODO_RE.search(clean):
         return True
-    return declarative_action_request(clean)
+    return any(
+        DIRECTIVE_RE.search(variant)
+        or ADDITIONAL_DIRECTIVE_RE.search(variant)
+        or declarative_action_request(variant)
+        for variant in action_prose_variants(clean)
+    )
 
 
 def link_label_action_count(label):
@@ -306,12 +405,17 @@ def link_label_action_count(label):
 
 def additional_action_like_prose(text):
     """Recognize a second action in prose surrounding an owning queue link."""
-    clean = strip_indented_code(strip_inline_code(semantic_text(text)))
+    clean = strip_prose_quote_markers(semantic_text(text))
+    clean = strip_indented_code(strip_inline_code(clean))
+    clean = strip_action_emphasis(clean)
     return bool(
         "?" in clean
         or TODO_RE.search(clean)
-        or ADDITIONAL_DIRECTIVE_RE.search(clean)
-        or declarative_action_request(clean)
+        or any(
+            ADDITIONAL_DIRECTIVE_RE.search(variant)
+            or declarative_action_request(variant)
+            for variant in action_prose_variants(clean)
+        )
     )
 
 
@@ -344,7 +448,8 @@ def label_projects_action(label, canonical_action, queue_path):
     if label_tokens in generic_labels:
         return True
     return (
-        len(label_tokens) <= len(action_tokens)
+        len(ACTION_VERB_RE.findall(label or "")) == 1
+        and len(label_tokens) <= len(action_tokens)
         and label_tokens == action_tokens[:len(label_tokens)]
     )
 
@@ -660,6 +765,10 @@ def projection_findings(
     )
     section_spans = action_section_spans(text, titles)
     sections = [body for _start, _end, body in section_spans]
+    rendered_sections = [
+        rendered_action_section_body(text, start, end)
+        for start, end, _body in section_spans
+    ]
     if not sections:
         return [
             "missing a declared action section; add `What to review` with "
@@ -677,11 +786,23 @@ def projection_findings(
             "visible action-like question or directive exists outside the "
             "declared action section"
         )
-    for section_number, body in enumerate(sections, start=1):
+    for section_number, (body, rendered_body) in enumerate(
+            zip(sections, rendered_sections), start=1):
         if not body:
             invalid_projection = True
             findings.append(f"action section {section_number} is empty")
             continue
+        rendered_only_action = (
+            additional_action_like_prose(prose_without_links(rendered_body))
+            and not additional_action_like_prose(prose_without_links(body))
+        )
+        if rendered_only_action:
+            invalid_projection = True
+            findings.append(
+                f"action section {section_number} contains an additional "
+                "unlinked request in rendered HTML; put the single action in "
+                "the queue-link label"
+            )
         if body.strip() == NO_ACTION_TEXT:
             saw_no_action = True
             if required_paths:
