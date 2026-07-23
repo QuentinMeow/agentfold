@@ -1,6 +1,6 @@
 # Design notes — Make the message queue the first-class interaction surface
 
-**Status:** exploring
+**Status:** chosen
 
 ## Problem
 
@@ -31,9 +31,27 @@ pointer. Enforce delivery prefixes and structural contradictions mechanically.
 
 ## Chosen
 
-Pending breadth-first audit and adversarial review. The expected direction is Option C
-because it addresses both failures: discoverability in filenames and lossless delivery
-across PR, chat, task, and agent-session boundaries.
+Option C. It addresses both failures: discoverability in filenames and lossless
+delivery across PR, chat, task, and agent-session boundaries.
+
+The path encodes three independent properties: who acts next in the actor folder, what
+kind of action it is in the leaf folder, and when it blocks in the filename prefix.
+`blocking-*` stops a named boundary now; `future-blocking-*` stops only at a named future
+date, event, or transition; `non-blocking-*` never stops work and names the safe
+unattended outcome. The filename is canonical, so no `Blocking` field can drift.
+
+PRs, issues, chat, tasks, and handovers are projections. They may summarize and link a
+live queue item, but cannot originate a pending durable action. A task declares its
+live queue actions explicitly. `2_blocked` broadens from human decisions to any
+reciprocally linked `blocking-*` human or agent dependency; a task stays in progress
+while an active agent is repairing that dependency.
+
+Human messages compare meaningful dispositions, show a concrete example, state the
+unattended result, and link the durable source. This structure constrains delivery and
+evidence, not how a future agent completes the work.
+
+Accepted decision:
+`memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
 
 ## Core fit (required when changing AgentFold core)
 

@@ -5,6 +5,7 @@
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
+**Queue actions:** `message-queue/needs-human/reviews/future-blocking-confirm-template-first-adoption.md`; `message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md`; `message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md`; `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`; `message-queue/needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md`; `message-queue/needs-human/reviews/future-blocking-review-sensitive-data-recovery.md`
 
 ## Goal
 

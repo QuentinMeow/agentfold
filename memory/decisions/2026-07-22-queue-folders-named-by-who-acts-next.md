@@ -1,6 +1,7 @@
 # Queue folders are named by who acts next, not by urgency
 
-**Status:** decided
+**Status:** superseded
+**Superseded-by:** `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`
 **Date:** 2026-07-22
 **Decided-by:** agent (owner sketched urgency-based names, delegated the call)
 **Description:** message-queue/ splits into needs-human/ and needs-agent/; urgency is a Blocking: field, never a folder

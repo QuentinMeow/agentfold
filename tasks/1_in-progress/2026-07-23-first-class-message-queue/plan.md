@@ -1,9 +1,9 @@
 # Plan — Make the message queue the first-class interaction surface
 
-- [ ] 1. Reconstruct the five PR review questions and inventory every human/agent ask
+- [x] 1. Reconstruct the five PR review questions and inventory every human/agent ask
       path, queue schema, and current enforcement point.
-- [ ] 2. Transcribe and claim the owner's chat decisions in a prefixed queue item.
-- [ ] 3. Define delivery-prefix semantics and the canonical queue/channel relationship
+- [x] 2. Transcribe and claim the owner's chat decisions in a prefixed queue item.
+- [x] 3. Define delivery-prefix semantics and the canonical queue/channel relationship
       in the task design and a superseding ADR.
 - [ ] 4. Update contracts, human-action guidance, queue templates, and relevant skills.
 - [ ] 5. Add reconciler checks and focused tests; migrate every live message filename.
