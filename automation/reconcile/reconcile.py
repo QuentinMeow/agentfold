@@ -430,9 +430,30 @@ def check_queue_schema():
                 "**Action:** is empty or a placeholder",
                 "state the next actor's concrete action",
             )
+        context_targets = context_files(got.get("Full context", ""))
+        task_contexts = []
+        for target in context_targets:
+            try:
+                task_rel = target.relative_to(TASKS)
+            except ValueError:
+                continue
+            if task_rel.parts and task_rel.parts[0] in TASK_STATUSES:
+                task_contexts.append(target)
+        is_pickup = (
+            actor == "needs-agent"
+            and leaf == "requests"
+            and got.get("Request kind", "").strip() == "task-pickup"
+        )
+        if task_contexts and not is_pickup:
+            yield Finding(
+                "queue-schema",
+                item.relative_to(REPO),
+                "**Full context:** uses a status-dependent task path outside task-pickup",
+                "link a stable design, ADR, evidence file, or name the task id in prose",
+            )
         if actor == "needs-agent" and leaf != "retries" \
                 and "Full context" in got \
-                and not context_files(got["Full context"]):
+                and not context_targets:
             yield Finding(
                 "queue-schema",
                 item.relative_to(REPO),
@@ -455,7 +476,7 @@ def check_queue_schema():
                 f"missing the literal {label} line",
                 f"append `{response_options[0]}: ______` in bold-key form",
             )
-        if "Full context" in got and not context_files(got["Full context"]):
+        if "Full context" in got and not context_targets:
             yield Finding(
                 "queue-schema",
                 item.relative_to(REPO),
@@ -469,11 +490,14 @@ def check_queue_schema():
             reviewed_revision = got.get("Reviewed revision", "").strip()
             local_targets = context_files(target)
             linked_targets = markdown_link_destinations(target)
-            https_targets = [
-                candidate for candidate in [target, *linked_targets]
+            https_targets = set(
+                re.findall(r"https://[^\s<>)\]]+", target)
+            )
+            https_targets.update(
+                candidate for candidate in linked_targets
                 if re.fullmatch(r"https://[^\s]+", candidate)
-            ]
-            target_available = len(local_targets) == 1 or len(https_targets) == 1
+            )
+            target_available = len(local_targets) + len(https_targets) == 1
             response = got.get("Your review", "").strip()
             if status == "awaiting-artifact":
                 if target.lower() != "pending":
@@ -513,7 +537,17 @@ def check_queue_schema():
                         "**Review revision:** is not an immutable sha256 or Git revision",
                         "use sha256:<64 hex>, git:<full id>, or git:<base>...<head>",
                     )
-                if local_targets:
+                elif revision.startswith("git:"):
+                    missing = missing_git_review_objects(revision)
+                    if missing:
+                        yield Finding(
+                            "queue-schema",
+                            item.relative_to(REPO),
+                            "**Review revision:** names unavailable Git commit object(s): "
+                            + ", ".join(missing),
+                            "fetch or create the exact commits before requesting review",
+                        )
+                if len(local_targets) == 1 and not https_targets:
                     if local_targets[0] == item:
                         yield Finding(
                             "queue-schema",
@@ -644,7 +678,7 @@ def inferred_task_transitions(status):
     return reached
 
 
-def task_records():
+def task_record_occurrences():
     if not TASKS.is_dir():
         return {}
     records = {}
@@ -652,11 +686,37 @@ def task_records():
         folder = TASKS / status
         if not folder.is_dir():
             continue
-        for task in folder.iterdir():
+        for task in sorted(folder.iterdir()):
             if task.is_dir() and TASK_ID_RE.fullmatch(task.name) \
                     and (task / "task.md").is_file():
-                records[task.name] = (status, task, fields(task / "task.md"))
+                records.setdefault(task.name, []).append(
+                    (status, task, fields(task / "task.md"))
+                )
     return records
+
+
+def task_records():
+    return {
+        task_id: occurrences[0]
+        for task_id, occurrences in task_record_occurrences().items()
+    }
+
+
+def missing_git_review_objects(revision):
+    object_ids = revision[len("git:"):].split("...")
+    missing = []
+    for object_id in object_ids:
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{object_id}^{{commit}}"],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode:
+            missing.append(object_id)
+    return missing
 
 
 def check_active_queue_boundaries():
@@ -677,6 +737,10 @@ def check_active_queue_boundaries():
         if ACTIVE_TASK_ID is not None and task_ids and ACTIVE_TASK_ID not in task_ids:
             continue
         reached = boundary_transitions(tokens).intersection(ACTIVE_TRANSITIONS)
+        if timing == "blocking" and task_ids:
+            # `blocking-*` means the named task cannot advance at all. Unlike a
+            # future blocker, it does not need to restate each external transition.
+            reached.update(ACTIVE_TRANSITIONS)
         if reached:
             yield Finding(
                 "queue-boundary",
@@ -707,7 +771,8 @@ def check_queue_task_reciprocity():
 
         context_task_ids = set()
         context_targets = []
-        if queue_endpoint(item) == "needs-agent/requests":
+        is_pickup = got.get("Request kind", "").strip() == "task-pickup"
+        if queue_endpoint(item) == "needs-agent/requests" and is_pickup:
             context_targets = context_files(got.get("Full context", ""))
             for target in context_targets:
                 try:
@@ -719,7 +784,6 @@ def check_queue_task_reciprocity():
                         and TASK_ID_RE.fullmatch(rel.parts[1]):
                     context_task_ids.add(rel.parts[1])
         task_ids.update(context_task_ids)
-        is_pickup = got.get("Request kind", "").strip() == "task-pickup"
         if is_pickup:
             if timing != "non-blocking":
                 yield Finding(
@@ -779,14 +843,26 @@ def check_task_structure():
     if not TASKS.is_dir():
         return
     queue_enabled = QUEUE.is_dir()
-    for entry in TASKS.iterdir():
+    for task_id, occurrences in task_record_occurrences().items():
+        if len(occurrences) <= 1:
+            continue
+        locations = ", ".join(
+            str(task.relative_to(REPO)) for _, task, _ in occurrences
+        )
+        yield Finding(
+            "task-structure",
+            TASKS.relative_to(REPO),
+            f"task id {task_id} exists in multiple status folders: {locations}",
+            "keep exactly one task folder; status is represented only by its parent",
+        )
+    for entry in sorted(TASKS.iterdir()):
         if entry.name in ("AGENTS.md", "README.md", "CLAUDE.md") or entry.name.startswith("."):
             continue
         if entry.name not in TASK_STATUSES:
             yield Finding("task-structure", entry.relative_to(REPO),
                           "not a valid status folder", f"one of: {', '.join(TASK_STATUSES)}")
             continue
-        for task in entry.iterdir():
+        for task in sorted(entry.iterdir()):
             if task.name == "README.md" or task.name.startswith("."):
                 continue
             rel = task.relative_to(REPO)
@@ -794,7 +870,7 @@ def check_task_structure():
                 yield Finding("task-structure", rel, "loose file in a status folder",
                               "tasks are folders; move stray files into one")
                 continue
-            if not TASK_ID_RE.match(task.name):
+            if not TASK_ID_RE.fullmatch(task.name):
                 yield Finding("task-structure", rel, "task id must be YYYY-MM-DD-kebab-slug",
                               "rename per handbook/naming-conventions.md")
             if not (task / "task.md").is_file():
@@ -1005,6 +1081,89 @@ def newly_added_handovers():
     return paths, None
 
 
+def live_human_queue_paths():
+    return {
+        item.relative_to(REPO).as_posix()
+        for item in live_queue_items() or ()
+        if readable_queue_item(item)
+        and item.relative_to(QUEUE).parts[0] == "needs-human"
+    }
+
+
+def handover_creation_state(handover, rel):
+    """Read a new handover and queue from the snapshot that created the record."""
+    if CHANGE_RANGE is None:
+        return handover.read_text(encoding="utf-8"), live_human_queue_paths(), None
+
+    history = subprocess.run(
+        [
+            "git", "log", "--format=%H", "--reverse", "--diff-filter=A",
+            CHANGE_RANGE, "--", rel.as_posix(),
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    commits = history.stdout.splitlines() if history.returncode == 0 else []
+    if history.returncode or len(commits) != 1:
+        detail = history.stderr.strip() or (
+            f"expected one creation commit, found {len(commits)}"
+        )
+        return None, None, detail
+    created_at = commits[0]
+
+    artifact = subprocess.run(
+        ["git", "show", f"{created_at}:{rel.as_posix()}"],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    tree = subprocess.run(
+        [
+            "git", "ls-tree", "-r", "--name-only", created_at, "--",
+            "message-queue/needs-human",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if artifact.returncode or tree.returncode:
+        detail = artifact.stderr.strip() or tree.stderr.strip() \
+            or "could not read the creation snapshot"
+        return None, None, detail
+
+    live_human = set()
+    for name in tree.stdout.splitlines():
+        path = Path(name)
+        if len(path.parts) == 4 \
+                and path.parts[:2] == ("message-queue", "needs-human") \
+                and SLUG_RE.fullmatch(path.parts[2]) \
+                and QUEUE_ITEM_RE.fullmatch(path.parts[3]):
+            live_human.add(path.as_posix())
+    return artifact.stdout, live_human, None
+
+
+def new_handover_queue_target(handover, target):
+    """Resolve a new handover link to one exact portable needs-human path."""
+    candidate = target.split("#", 1)[0]
+    path = Path(candidate)
+    if not candidate or path.is_absolute() \
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate):
+        return None
+    try:
+        resolved = (handover.parent / path).resolve()
+        relative = resolved.relative_to(REPO.resolve()).as_posix()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return relative if HANDOVER_HUMAN_LINK_RE.fullmatch(relative) else None
+
+
 def check_handover_queue_projection():
     if not QUEUE.is_dir() or not CONVERSATIONS.is_dir():
         return
@@ -1019,12 +1178,6 @@ def check_handover_queue_projection():
             "pass a valid --range in CI or repair the staged Git diff",
         )
     order = {"blocking": 0, "future-blocking": 1, "non-blocking": 2}
-    live_human = {
-        item.relative_to(REPO).as_posix()
-        for item in live_queue_items() or ()
-        if readable_queue_item(item)
-        and item.relative_to(QUEUE).parts[0] == "needs-human"
-    }
     for conv in sorted(CONVERSATIONS.iterdir()):
         if not conv.is_dir():
             continue
@@ -1036,7 +1189,21 @@ def check_handover_queue_projection():
         rel = handover.relative_to(REPO)
         text = handover.read_text(encoding="utf-8")
         is_new = rel in added
-        has_v1 = fields(handover).get("Queue projection", "").strip() == "v1"
+        live_human = live_human_queue_paths()
+        if is_new:
+            text, live_human, creation_error = handover_creation_state(
+                handover, rel
+            )
+            if creation_error:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "could not verify the handover's creation snapshot: "
+                    + creation_error,
+                    "preserve the add commit and pass a range containing it",
+                )
+                continue
+        has_v1 = text_fields(text).get("Queue projection", "").strip() == "v1"
         if not has_v1 and not is_new:
             continue  # old records stay immutable; creation-time checks govern new ones
         if not has_v1:
@@ -1078,10 +1245,20 @@ def check_handover_queue_projection():
         for target in targets:
             if "message-queue/needs-human/" not in target:
                 continue
-            matched = HANDOVER_HUMAN_LINK_RE.search(target)
+            canonical = (
+                new_handover_queue_target(handover, target)
+                if is_new else None
+            )
+            matched = (
+                HANDOVER_HUMAN_LINK_RE.fullmatch(canonical)
+                if canonical is not None
+                else HANDOVER_HUMAN_LINK_RE.search(target)
+                if not is_new
+                else None
+            )
             if matched:
                 classes.append(matched.group(1))
-                projected_human.append(matched.group(0))
+                projected_human.append(canonical or matched.group(0))
             else:
                 invalid_human_links.append(target)
         if invalid_human_links:
@@ -1463,6 +1640,16 @@ def retry_identity_matches(text, finding):
 
 
 def retry_destination(key, finding):
+    if RETRIES.is_dir():
+        for candidate in sorted(RETRIES.glob("*.md")):
+            if delivery_class(candidate.name) is None \
+                    or not candidate.is_file() or candidate.is_symlink():
+                continue
+            text = candidate.read_text(encoding="utf-8")
+            if reconciler_owned_retry(text) \
+                    and retry_identity_matches(text, finding):
+                return candidate
+
     base = RETRIES / f"blocking-{key}.md"
     existing = [base]
     existing.extend(sorted(RETRIES.glob(f"blocking-{key}-[0-9]*.md")))
@@ -1505,8 +1692,7 @@ def file_retries(findings):
                 continue
         desired.write_text(retry_text(f), encoding="utf-8")
     removed = 0
-    generated = set(RETRIES.glob("blocking-reconcile-*.md"))
-    generated.update(RETRIES.glob("reconcile-*.md"))
+    generated = set(RETRIES.glob("*.md"))
     for item in generated:
         if item.is_symlink() or not item.is_file():
             continue

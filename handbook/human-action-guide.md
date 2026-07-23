@@ -25,7 +25,7 @@ remote?” is a human-reviewed security promise whose alternatives need explanat
 Every human item must contain:
 
 1. **Action:** the concrete response requested.
-2. **Full context:** a repo-relative link to the durable design, task, diff, or evidence.
+2. **Full context:** a repo-relative link to the durable design, ADR, diff, or evidence.
 3. A zero-context explanation of why the action exists now.
 4. **Differences:** meaningful dispositions and the consequence that changes between
    them; define unfamiliar terms rather than asking whether they “look right.”
@@ -38,7 +38,9 @@ immutable bytes: SHA-256 for one local file, a full Git object id for a commit/t
 full base and head ids for a diff. If it does not exist yet, use `awaiting-artifact`
 with pending target/revision. A PR URL is only navigation. When answering, the human
 copies `Review revision` into `Reviewed revision`; the reconciler rejects a stale or
-unbound response.
+unbound response and Git ids that do not name available commit objects. Link exactly
+one review target. Task status paths move and are not durable context; only a
+`task-pickup` request may use one, because its claim commit deletes that request.
 
 The summary must be sufficient to act; the full-context link is for depth, not a missing
 prerequisite. A recommendation is evidence, not permission to hide an alternative.

@@ -27,10 +27,12 @@ no shorthand invented mid-session.>
 originate an ask. Order entries by filename class: `blocking-`, then
 `future-blocking-`, then `non-blocking-`. Never use a bare name: write a clickable
 markdown link plus enough context to act without opening anything —
-`[short name](<repo path to the queue item>)` followed by 2–3 sentences explaining the
-choice, why it arose, and the named boundary or unattended outcome. The queue file
-remains canonical and links to the full source. Repeat this section verbatim in the
-session's final chat reply. Write `None.` when no items are open.>
+`[short name](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)` followed
+by 2–3 sentences explaining the choice, why it arose, and the named boundary or
+unattended outcome. New handovers must use a relative link that resolves to the exact
+queue file; an external URL or a path copied from another folder does not count. The
+queue file remains canonical and links to the full source. Repeat this section
+verbatim in the session's final chat reply. Write `None.` when no items are open.>
 
 ## Dead ends
 

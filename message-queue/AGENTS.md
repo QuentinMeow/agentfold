@@ -50,10 +50,10 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   and exactly one Full context link: the backlog task's current `task.md`. The task
   links it reciprocally, and the atomic claim/move commit deletes it. This is the only
   queue case allowed to use a status-dependent task path.
-- A review without its exact artifact uses `Status: awaiting-artifact` and
-  pending target/revision. Waiting reviews bind to file SHA-256 or full Git object
-  id(s); the answer copies it to `Reviewed revision`, invalidating stale responses.
-  A PR URL is navigation, never revision authority.
+- A review without its exact artifact uses `Status: awaiting-artifact` plus pending
+  target/revision. Waiting reviews name one target and bind it to file SHA-256 or locally
+  available full Git commit id(s); the answer copies that to `Reviewed revision`,
+  invalidating stale responses. A PR URL is navigation, never revision authority.
 - Fold a response into its durable source before deleting the live item. Resolved items
   are deleted in the resolving commit; git history is the archive.
 - A response from chat is transcribed into the item before being used. If the timing

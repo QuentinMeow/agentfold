@@ -2,6 +2,7 @@ import contextlib
 import datetime
 import hashlib
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,6 +74,22 @@ class ReconcileQueueTests(unittest.TestCase):
     @staticmethod
     def messages(findings):
         return [finding.message for finding in findings]
+
+    @staticmethod
+    def git(root, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+
+    def init_git(self, root):
+        self.git(root, "init")
+        self.git(root, "config", "user.name", "Test")
+        self.git(root, "config", "user.email", "test@example.invalid")
 
     def test_queue_checks_no_op_when_queue_is_absent(self):
         with self.repo() as root:
@@ -378,6 +395,14 @@ class ReconcileQueueTests(unittest.TestCase):
     def test_review_artifact_state_prevents_premature_response(self):
         with self.repo() as root:
             self.write(root, "docs/source.md", "# Source\n")
+            self.init_git(root)
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "docs/head.md", "# Head\n")
+            self.git(root, "add", "docs/head.md")
+            self.git(root, "commit", "-m", "head")
+            head = self.git(root, "rev-parse", "HEAD")
             path = (
                 "message-queue/needs-human/reviews/"
                 "future-blocking-review-artifact.md"
@@ -423,11 +448,22 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Review target:** https://example.test/pull/1",
                 ).replace(
                     "**Review revision:** pending",
-                    "**Review revision:** git:" + "a" * 40 + "..." + "b" * 40,
+                    f"**Review revision:** git:{base}...{head}",
                 ),
                 encoding="utf-8",
             )
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    f"git:{base}...{head}",
+                    "git:" + "a" * 40 + "..." + "b" * 40,
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("unavailable Git commit object" in message
+                                for message in messages))
 
     def test_review_response_is_bound_to_exact_local_bytes(self):
         with self.repo() as root:
@@ -472,6 +508,32 @@ class ReconcileQueueTests(unittest.TestCase):
             target.write_text("# Changed\n", encoding="utf-8")
             messages = self.messages(RECONCILE.check_queue_schema())
             self.assertTrue(any("does not match target bytes" in message
+                                for message in messages))
+
+    def test_review_target_must_not_mix_local_and_https_artifacts(self):
+        with self.repo() as root:
+            target = self.write(root, "docs/source.md", "# Source\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/non-blocking-ambiguous.md",
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review one artifact\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md` and "
+                "https://example.test/pull/1\n"
+                f"**Review revision:** {digest}\n"
+                "**Reviewed revision:** ______\n"
+                "**If unanswered:** keep the current bytes\n\n"
+                "## What you need to know\n\nOnly one artifact may be judged.\n\n"
+                "## Differences\n\nOne target is bindable; two are ambiguous.\n\n"
+                "## Example\n\nA response cannot silently apply to only one target.\n\n"
+                "**Your review:** ______\n",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("must identify exactly one" in message
                                 for message in messages))
 
     def test_decision_requires_two_options_and_two_concrete_consequences(self):
@@ -729,7 +791,8 @@ class ReconcileQueueTests(unittest.TestCase):
             handover = self.make_handover(
                 root,
                 "2026-07-23-1200PDT-complete",
-                f"- [Review]({queue_rel}) — decide before the start boundary.",
+                "- [Review](../../../"
+                f"{queue_rel}) — decide before the start boundary.",
             )
             with mock.patch.object(
                 RECONCILE,
@@ -739,6 +802,111 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(
                     [], list(RECONCILE.check_handover_queue_projection())
                 )
+
+    def test_new_handover_uses_its_creation_queue_snapshot(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-created-together.md"
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-creation-snapshot",
+                "- [Review](../../../"
+                f"{queue_rel}) — this action was live at creation.",
+            )
+            creation_text = handover.read_text(encoding="utf-8")
+            later_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-created-later.md"
+            )
+            self.write(root, later_rel, "# Later action\n")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ), mock.patch.object(
+                RECONCILE,
+                "handover_creation_state",
+                return_value=(creation_text, {queue_rel}, None),
+            ):
+                self.assertEqual(
+                    [], list(RECONCILE.check_handover_queue_projection())
+                )
+
+    def test_range_check_reads_queue_at_real_handover_creation_commit(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n**Queue projection schema:** v1\n",
+            )
+            self.write(root, "message-queue/needs-human/reviews/README.md", "# Reviews\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            original_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-created-together.md"
+            )
+            original = self.write(root, original_rel, "# Original action\n")
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-real-snapshot",
+                "- [Review](../../../"
+                f"{original_rel}) — live when this handover was written.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add handover and action")
+
+            original.unlink()
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/non-blocking-added-later.md",
+                "# Later action\n",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve old action and add another")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                self.assertEqual(
+                    [], list(RECONCILE.check_handover_queue_projection())
+                )
+
+    def test_new_handover_rejects_external_or_wrongly_relative_projection(self):
+        for destination in (
+            "https://example.test/message-queue/needs-human/reviews/"
+            "future-blocking-review.md",
+            "message-queue/needs-human/reviews/future-blocking-review.md",
+        ):
+            with self.subTest(destination=destination), self.repo() as root:
+                queue_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review.md"
+                )
+                self.write(root, queue_rel, "# Pending review\n")
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-bad-target",
+                    f"- [Review]({destination}) — decide later.",
+                )
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any("unprefixed or invalid" in message
+                                    for message in messages))
 
     def test_handover_accepts_angle_destination_with_checkout_spaces(self):
         with self.repo() as root:
@@ -911,7 +1079,7 @@ class ReconcileQueueTests(unittest.TestCase):
                                 for message in messages))
             self.assertTrue(task.is_dir())
 
-    def test_nonpickup_request_may_link_an_in_progress_task(self):
+    def test_nonpickup_request_must_not_link_status_dependent_task_path(self):
         with self.repo() as root:
             queue_rel = (
                 "message-queue/needs-agent/requests/"
@@ -929,9 +1097,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 "`tasks/1_in-progress/2026-07-23-example/task.md`\n"
                 "**If unanswered:** leave the current task plan unchanged\n",
             )
-            self.assertEqual(
-                [], list(RECONCILE.check_queue_task_reciprocity())
-            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("status-dependent task path" in message
+                                for message in messages))
 
     def test_explicit_transition_gate_scopes_task_or_checks_all(self):
         with self.repo() as root:
@@ -968,6 +1136,22 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(
                     2, len(list(RECONCILE.check_active_queue_boundaries()))
                 )
+
+    def test_immediate_task_blocker_stops_scoped_external_transition(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/blocking-unblock-task.md",
+                "**Blocks now:** task:2026-07-23-example\n",
+            )
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID="2026-07-23-example",
+            ):
+                findings = list(RECONCILE.check_active_queue_boundaries())
+            self.assertEqual(1, len(findings))
+            self.assertIn("transition:merge", findings[0].message)
 
     def test_immediate_blocker_stops_its_named_external_transition(self):
         with self.repo() as root:
@@ -1029,6 +1213,28 @@ class ReconcileQueueTests(unittest.TestCase):
             messages = self.messages(RECONCILE.check_task_structure())
             self.assertTrue(any("is not a live file" in message for message in messages))
             self.assertTrue(any("done task must declare" in message for message in messages))
+
+    def test_duplicate_task_id_across_status_folders_is_rejected(self):
+        with self.repo() as root:
+            self.make_task(root, "1_in-progress", "none")
+            self.make_task(root, "2_blocked", "none")
+            messages = self.messages(RECONCILE.check_task_structure())
+            self.assertTrue(any("exists in multiple status folders" in message
+                                for message in messages))
+
+    def test_task_id_validation_uses_the_whole_folder_name(self):
+        with self.repo() as root:
+            task = root / "tasks/0_backlog/2026-07-23-example.invalid"
+            task.mkdir(parents=True)
+            (task / "task.md").write_text(
+                "# Invalid\n\n"
+                "**Claimed-by:** unclaimed\n"
+                "**Filed:** 2026-07-23\n"
+                "**Repository scope:** records-only\n",
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_task_structure())
+            self.assertTrue(any("task id must be" in message for message in messages))
 
     def test_retry_names_are_prefixed_idempotent_and_gc_legacy_names(self):
         with self.repo() as root:
@@ -1205,6 +1411,25 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
             self.assertTrue(alternate.is_file())
             self.assertFalse(manual.exists())
+
+    def test_reclassified_generated_retry_is_rediscovered_and_collected(self):
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "queue-schema", Path("example.md"), "broken", "repair"
+            )
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            generated = next(RECONCILE.RETRIES.glob("blocking-*.md"))
+            reclassified = generated.with_name(
+                generated.name.replace("blocking-", "future-blocking-", 1)
+            )
+            generated.rename(reclassified)
+
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            self.assertTrue(reclassified.is_file())
+            self.assertEqual([], list(RECONCILE.RETRIES.glob("blocking-*.md")))
+
+            self.assertEqual((0, 1), RECONCILE.file_retries([]))
+            self.assertFalse(reclassified.exists())
 
     def test_memory_index_derives_supersession_without_rewriting_old_adr(self):
         with self.repo() as root:

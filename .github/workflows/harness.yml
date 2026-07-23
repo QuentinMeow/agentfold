@@ -24,7 +24,21 @@ jobs:
           QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
         run: python3 automation/reconcile/reconcile.py --check --at-transition merge --at-transition repository-admission --branch "$QUEUE_TASK_BRANCH" --range "$QUEUE_CHANGE_RANGE"
       - name: Reconciler — every harness invariant holds
-        if: github.event_name != 'pull_request'
-        run: python3 automation/reconcile/reconcile.py --check
+        if: github.event_name == 'push'
+        env:
+          QUEUE_PUSH_BEFORE: ${{ github.event.before }}
+          QUEUE_PUSH_HEAD: ${{ github.sha }}
+          QUEUE_PUSH_BRANCH: ${{ github.ref_name }}
+          QUEUE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          QUEUE_PUSH_BASE="$QUEUE_PUSH_BEFORE"
+          if [ "$QUEUE_PUSH_BASE" = "0000000000000000000000000000000000000000" ]; then
+            QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"
+          fi
+          QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
+          python3 automation/reconcile/reconcile.py --check \
+            --at-transition repository-admission \
+            --branch "$QUEUE_PUSH_BRANCH" \
+            --range "$QUEUE_CHANGE_RANGE"
       - name: Repository tests
         run: python3 automation/run_tests.py

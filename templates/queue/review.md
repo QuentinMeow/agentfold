@@ -9,10 +9,10 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 # <The review judgment needed, one line>
 
 **Status:** <awaiting-artifact | waiting>
-**Filed:** <YYYY-MM-DD>, by <who>, from <task id — link>
+**Filed:** <YYYY-MM-DD>, by <who>, from task <task id>
 **Action:** <approve, request a named change, or state another disposition>
-**Full context:** [<complete source, diff, or artifact>](<repo-relative path>)
-**Review target:** <pending while awaiting-artifact | exact repo file or HTTPS artifact>
+**Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
+**Review target:** <pending while awaiting-artifact | exactly one repo file or HTTPS artifact>
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
 
@@ -46,5 +46,7 @@ do not use unexplained approval shorthand.>
 
 **Your review:** ______
 
-<!-- When answering, copy Review revision into Reviewed revision. A changed target or
-revision invalidates any older response until both response fields are cleared. -->
+<!-- Status-folder task paths move and are not durable context. When answering, copy
+Review revision into Reviewed revision. Git revisions must name locally available
+commit objects. A changed target or revision invalidates any older response until both
+response fields are cleared. -->

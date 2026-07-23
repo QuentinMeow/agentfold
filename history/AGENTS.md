@@ -21,7 +21,8 @@ AgentFold date or retained legacy folder on forks. Existing unmarked records rem
 records; every newly added handover must declare `**Queue projection:** v1` and exactly
 project all live `message-queue/needs-human/` actions in filename-timing order. It never
 originates an ask. Resolved targets may later disappear because git history archives
-past delivery.
+past delivery. Range-based checks evaluate the handover and queue together at the
+handover's creation commit, so later queue additions or resolutions never rewrite it.
 
 ## Other files in a conversation folder (optional)
 
