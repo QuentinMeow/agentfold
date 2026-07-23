@@ -29,8 +29,10 @@ if str(AUTOMATION) not in sys.path:
 from check_action_projection import (
     LIST_ITEM_RE,
     action_like_rendered_prose,
+    parse_task_queue_action_value,
     prose_without_links,
     section_entries,
+    task_queue_action_paths_from_text,
     visible_outside_action_sections,
 )
 from markdown_semantics import (
@@ -2885,9 +2887,11 @@ def check_stale_queue():
 
 
 def task_queue_paths(value):
-    if (value or "").strip().lower() == "none":
+    try:
+        paths = parse_task_queue_action_value(value)
+    except ValueError:
         return []
-    return sorted(set(QUEUE_PATH_RE.findall(value or "")))
+    return sorted(paths)
 
 
 def queue_endpoint(path):
@@ -3381,23 +3385,34 @@ def check_task_structure():
                 )
             if queue_enabled or "Queue actions" in got:
                 queue_value = got.get("Queue actions", "")
-                queue_paths = task_queue_paths(queue_value)
-                queue_is_none = queue_value.strip().lower() == "none"
-                if "Queue actions" in got and not queue_is_none and not queue_paths:
+                queue_paths = []
+                queue_is_none = False
+                queue_field_count = field_counts(task_text).get(
+                    "Queue actions", 0
+                )
+                if queue_field_count > 1:
                     yield Finding(
                         "task-structure",
                         rel / "task.md",
-                        "**Queue actions:** must be `none` or list live queue paths",
-                        "list root-relative message-queue paths with valid delivery prefixes",
+                        "task must contain exactly one **Queue actions:** field",
+                        "keep one field containing exactly `none` or canonical "
+                        "backticked queue paths",
                     )
-                remainder = QUEUE_PATH_RE.sub("", queue_value)
-                if queue_paths and re.search(r"\bnone\b", remainder, flags=re.I):
-                    yield Finding(
-                        "task-structure",
-                        rel / "task.md",
-                        "**Queue actions:** cannot combine `none` with a queue path",
-                        "use exactly `none`, or list the live queue paths",
-                    )
+                elif queue_field_count == 1:
+                    try:
+                        queue_paths = list(
+                            task_queue_action_paths_from_text(task_text)
+                        )
+                        queue_is_none = not queue_paths
+                    except ValueError as error:
+                        yield Finding(
+                            "task-structure",
+                            rel / "task.md",
+                            "invalid **Queue actions:** projection: "
+                            + str(error),
+                            "use exactly `none` or canonical backticked queue "
+                            "paths separated by `;` or `,`",
+                        )
                 live_queue_paths = []
                 for queue_path in queue_paths:
                     target = REPO / queue_path

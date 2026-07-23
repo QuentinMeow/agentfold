@@ -28,18 +28,33 @@ from markdown_semantics import (
 REPO = Path(__file__).resolve().parents[1]
 QUEUE_ACTORS = ("needs-human", "needs-agent")
 QUEUE_ACTOR_CHOICES = (*QUEUE_ACTORS, "any")
-QUEUE_ITEM_RE = re.compile(
-    r"^message-queue/(?P<actor>needs-human|needs-agent)/"
+QUEUE_TYPED_ITEM_PATTERN = (
     r"[a-z0-9][a-z0-9-]*/"
     r"(?:blocking|future-blocking|non-blocking)-"
-    r"[a-z0-9][a-z0-9-]*\.md$"
+    r"[a-z0-9][a-z0-9-]*\.md"
+)
+QUEUE_ITEM_PATH_PATTERN = (
+    r"message-queue/(?:needs-human|needs-agent)/"
+    + QUEUE_TYPED_ITEM_PATTERN
+)
+QUEUE_ITEM_RE = re.compile(
+    r"^message-queue/(?P<actor>needs-human|needs-agent)/"
+    + QUEUE_TYPED_ITEM_PATTERN
+    + r"$"
 )
 QUEUE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])"
-    r"message-queue/(?:needs-human|needs-agent)/[a-z0-9][a-z0-9-]*/"
-    r"(?:blocking|future-blocking|non-blocking)-"
-    r"[a-z0-9][a-z0-9-]*\.md"
-    r"(?![A-Za-z0-9_.-])"
+    + QUEUE_ITEM_PATH_PATTERN
+    + r"(?![A-Za-z0-9_.-])"
+)
+TASK_QUEUE_ACTION_TOKEN_PATTERN = rf"`{QUEUE_ITEM_PATH_PATTERN}`"
+TASK_QUEUE_ACTION_VALUE_RE = re.compile(
+    rf"{TASK_QUEUE_ACTION_TOKEN_PATTERN}"
+    rf"(?:[ \t]*(?:;|,)[ \t]*{TASK_QUEUE_ACTION_TOKEN_PATTERN})*"
+)
+TASK_QUEUE_ACTION_FIELD_RE = re.compile(
+    r"^\*\*Queue actions:\*\*[ \t]*(.*)$",
+    re.M,
 )
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
 HEADING_RE = re.compile(
@@ -149,6 +164,11 @@ HUMAN_ACTION_NOUN_PATTERN = (
     r"sign[ -]?off|verification|vote)"
 )
 HUMAN_ACTOR_PATTERN = r"(?:human|maintainer|owner|reviewer)s?"
+AUTOMATION_ACTOR_PATTERN = (
+    r"(?:(?:a|an|the)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+){0,3}"
+    r"(?:agent|assistant|bot|worker)s?"
+)
 ACTION_SOURCE_PATTERN = (
     rf"(?:you|(?:(?:a|an|the)[ \t]+)?"
     r"(?:(?:authorized|code|designated|lead|project|responsible|senior)"
@@ -221,6 +241,14 @@ FIRST_PERSON_REQUEST_RE = re.compile(
 )
 ACTOR_OBLIGATION_RE = re.compile(
     rf"\b{ACTION_SOURCE_PATTERN}\b[ \t]+"
+    r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
+    r"(?:must|should|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
+    r"requested[ \t]+to)[ \t]+"
+    rf"{ACTION_VERB_PATTERN}\b",
+    re.I,
+)
+AUTOMATION_ACTOR_OBLIGATION_RE = re.compile(
+    rf"\b{AUTOMATION_ACTOR_PATTERN}\b[ \t]+"
     r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
     r"(?:must|should|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
     r"requested[ \t]+to)[ \t]+"
@@ -317,6 +345,50 @@ ELLIPTICAL_COURTESY_REQUEST_RE = re.compile(
     r"(?:appreciated|valued|welcome)[ \t]*[.!]?[ \t]*(?=$|\n)",
     re.I | re.M,
 )
+HUMAN_POSSESSIVE_SOURCE_PATTERN = (
+    rf"(?:your|"
+    r"(?:(?:(?:a|an|the)[ \t]+)?"
+    r"(?:(?:authorized|code|designated|lead|project|responsible|senior)"
+    r"[ \t]+){0,2}"
+    rf"{HUMAN_ACTOR_PATTERN})(?:['’]s|['’]))"
+)
+INDIRECT_SOLICITATION_TARGET_PATTERN = (
+    r"(?:"
+    rf"(?:what|whether)[ \t]+(?:do[ \t]+|does[ \t]+)?"
+    rf"{ACTION_SOURCE_PATTERN}[ \t]+(?:think|thinks)\b"
+    r"|"
+    rf"how[ \t]+{ACTION_SOURCE_PATTERN}[ \t]+"
+    r"(?:think|thinks|(?:would|could|might|will)[ \t]+"
+    r"(?:approach|handle|proceed|respond|solve))\b"
+    r"|"
+    rf"{HUMAN_POSSESSIVE_SOURCE_PATTERN}[ \t]+"
+    r"(?:feedback|input|opinions?|perspective|take|thoughts?|views?)\b"
+    r")"
+)
+FIRST_PERSON_CURIOSITY_RE = re.compile(
+    r"\b(?:i[ \t]*(?:am|['’]m)|we[ \t]*(?:are|['’]re))[ \t]+"
+    r"(?P<negation>(?:not|no[ \t]+longer)[ \t]+)?"
+    r"(?:curious|interested|wondering)\b"
+    r"[^.!?;\n]{0,160}?"
+    rf"{INDIRECT_SOLICITATION_TARGET_PATTERN}",
+    re.I,
+)
+FIRST_PERSON_WONDER_RE = re.compile(
+    r"\b(?:i|we)[ \t]+"
+    r"(?P<negation>(?:(?:do[ \t]+not|don['’]t|no[ \t]+longer)[ \t]+)?)"
+    r"wonder\b"
+    r"[^.!?;\n]{0,160}?"
+    rf"{INDIRECT_SOLICITATION_TARGET_PATTERN}",
+    re.I,
+)
+ELLIPTICAL_CURIOSITY_RE = re.compile(
+    r"(?:^|\n)[ \t]*"
+    r"(?P<negation>(?:(?:not|no[ \t]+longer)[ \t]+)?)"
+    r"(?:curious|interested|wondering)\b"
+    r"[^.!?;\n]{0,160}?"
+    rf"{INDIRECT_SOLICITATION_TARGET_PATTERN}",
+    re.I | re.M,
+)
 DECLARATIVE_REFERENCE_CUE_RE = re.compile(
     r"(?:^|[\n.!?;])[ \t]*"
     r"(?:(?:for[ \t]+)?context|details|reference|source)[ \t]*:[ \t]*$",
@@ -392,6 +464,30 @@ def allowed_queue_actors(queue_actor):
 def queue_item_actor(path):
     matched = QUEUE_ITEM_RE.fullmatch(path or "")
     return matched.group("actor") if matched else None
+
+
+def parse_task_queue_action_value(value):
+    """Parse the closed Queue actions value grammar."""
+    clean = (value or "").strip()
+    if clean == "none":
+        return ()
+    if not TASK_QUEUE_ACTION_VALUE_RE.fullmatch(clean):
+        raise ValueError(
+            "must be exactly `none` or backticked canonical queue paths "
+            "separated by `;` or `,`"
+        )
+    paths = tuple(QUEUE_PATH_RE.findall(clean))
+    if len(paths) != len(set(paths)):
+        raise ValueError("must not repeat a canonical queue path")
+    return paths
+
+
+def task_queue_action_paths_from_text(text):
+    """Return paths from the task's sole structural Queue actions field."""
+    values = TASK_QUEUE_ACTION_FIELD_RE.findall(semantic_text(text or ""))
+    if len(values) != 1:
+        raise ValueError("must contain exactly one Queue actions field")
+    return parse_task_queue_action_value(values[0])
 
 
 def quote_depth(line):
@@ -590,11 +686,15 @@ def declarative_action_request(clean):
         HUMAN_REQUEST_RE,
         FIRST_PERSON_REQUEST_RE,
         ACTOR_OBLIGATION_RE,
+        AUTOMATION_ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         FIRST_PERSON_COURTESY_REQUEST_RE,
         PASSIVE_COURTESY_REQUEST_RE,
         ELLIPTICAL_COURTESY_REQUEST_RE,
+        FIRST_PERSON_CURIOSITY_RE,
+        FIRST_PERSON_WONDER_RE,
+        ELLIPTICAL_CURIOSITY_RE,
     ):
         for matched in pattern.finditer(clean):
             if matched.group("negation"):
@@ -1034,21 +1134,16 @@ def task_queue_paths(
             f"expected one live task record for `{task_id}`, found {len(task_paths)}"
         )
     task_path = task_paths[0]
-    matched = re.search(
-        r"^\*\*Queue actions:\*\*[ \t]*(.*)$",
-        candidate_text(
+    try:
+        queue_paths = set(task_queue_action_paths_from_text(candidate_text(
             task_path, repo=repo, candidate_revision=candidate_revision
-        ),
-        flags=re.M,
-    )
-    if not matched:
-        raise RuntimeError(f"`{task_path}` has no Queue actions field")
-    value = matched.group(1).strip()
-    queue_paths = set(QUEUE_PATH_RE.findall(value))
-    if value.casefold() == "none":
-        return set()
+        )))
+    except ValueError as error:
+        raise RuntimeError(
+            f"`{task_path}` has an invalid Queue actions field: {error}"
+        ) from error
     if not queue_paths:
-        raise RuntimeError(f"`{task_path}` has an invalid Queue actions field")
+        return set()
     actor_paths = {
         path for path in queue_paths
         if queue_item_actor(path) in actors

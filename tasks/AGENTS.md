@@ -22,10 +22,10 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 - Reference tasks by id, never by full path — paths change with status. Find one with
   `ls tasks/*/<task-id>`. The sole exception is a `task-pickup` request: it links the
   backlog path; its verified claim/move is the sole open-status queue deletion.
-- `task.md` declares `**Queue actions:** none` or every live queue action the task
-  projects. Tasks do not originate asks; the linked queue files own delivery/status.
-  A queue item naming `task:<id>` or using that task as its pickup context must link
-  back here; the reconciler checks both directions.
+- `Queue actions` is exactly lowercase `none` or unique backticked canonical queue paths
+  separated by `;` or `,`; no prose or duplicate field. Tasks do not originate asks:
+  linked queue files own delivery/status and must link back when naming `task:<id>` or
+  using the task as pickup context; the reconciler checks both directions.
 - Every unclaimed backlog task links a non-blocking agent request with
   `Request kind: task-pickup`. Claiming resolves and deletes it in the claim commit.
 - **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the

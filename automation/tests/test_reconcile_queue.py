@@ -7020,6 +7020,66 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual([], list(RECONCILE.check_task_structure()))
 
+    def test_task_queue_actions_field_has_closed_projection_syntax(self):
+        first = (
+            "message-queue/needs-human/reviews/"
+            "non-blocking-review-first.md"
+        )
+        second = (
+            "message-queue/needs-agent/requests/"
+            "non-blocking-update-second.md"
+        )
+        accepted = (
+            "none",
+            f"`{first}`",
+            f"`{first}`; `{second}`",
+            f"`{first}`, `{second}`",
+        )
+        rejected = (
+            f"none; `{first}`",
+            f"`{first}`; please review it",
+            f"`{first}`;",
+            first,
+            f"`{first}`; `{first}`",
+        )
+
+        for value in accepted:
+            with self.subTest(accepted=value), self.repo() as root:
+                self.write(root, first, "# First\n")
+                self.write(root, second, "# Second\n")
+                self.make_task(root, "1_in-progress", value)
+                messages = self.messages(RECONCILE.check_task_structure())
+                self.assertFalse(any(
+                    "Queue actions" in message for message in messages
+                ), messages)
+
+        for value in rejected:
+            with self.subTest(rejected=value), self.repo() as root:
+                self.write(root, first, "# First\n")
+                self.make_task(root, "1_in-progress", value)
+                messages = self.messages(RECONCILE.check_task_structure())
+                self.assertTrue(any(
+                    "invalid **Queue actions:** projection" in message
+                    for message in messages
+                ), messages)
+
+        with self.repo() as root:
+            self.write(root, first, "# First\n")
+            task = self.make_task(
+                root, "1_in-progress", f"`{first}`"
+            )
+            task_md = task / "task.md"
+            task_md.write_text(
+                task_md.read_text(encoding="utf-8")
+                + f"**Queue actions:** `{first}`\n",
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_task_structure())
+            self.assertTrue(any(
+                "exactly one **Queue actions:** field" in message
+                for message in messages
+            ), messages)
+
     def test_task_cannot_cross_its_future_start_boundary(self):
         with self.repo() as root:
             self.write(root, "docs/source.md", "# Source\n")

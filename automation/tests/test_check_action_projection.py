@@ -1059,6 +1059,85 @@ class ActionProjectionTests(unittest.TestCase):
                     findings[0],
                 )
 
+    def test_agent_role_obligations_are_actions_but_capabilities_are_not(self):
+        actions = (
+            "A Codex agent must fix the failing test before merge.",
+            "The agent must review the migration before merge.",
+            "Bots should fix the failing check.",
+            "The worker needs to update the generated snapshot.",
+            "An automation worker is requested to retry the job.",
+            "The coding assistant should review the release notes.",
+        )
+        descriptions = (
+            "The bot should not update the snapshot.",
+            "The worker updated the snapshot yesterday.",
+            "The agent must be able to review changes offline.",
+            "The assistant was requested to retry the old job.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            findings = self.findings(
+                root,
+                actions[0],
+                allow_missing_action_section_if_no_action=True,
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("missing a declared action section", findings[0])
+
+    def test_indirect_recipient_solicitations_are_actions(self):
+        actions = (
+            "I'm curious what you think about the migration.",
+            "We are curious how you would approach the fallback.",
+            "I’m curious to hear your feedback on the rollout.",
+            "I'm interested in your perspective on the release.",
+            "I wonder whether you think the fallback should ship.",
+        )
+        descriptions = (
+            "I'm curious what the bot reported.",
+            "I was curious what you thought during the retrospective.",
+            "The report explains what you think is a regression.",
+            "I am not curious what you think about the archived release.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            item = self.queue_item(root)
+            self.git(root, "add", ".")
+            path = item.relative_to(root).as_posix()
+            outside = (
+                f"{actions[0]}\n\n"
+                "## What to review\n\n"
+                f"1. [Review the boundary.]({path})\n"
+            )
+            findings = self.findings(root, outside, queue_actor="any")
+            self.assertEqual(1, len(findings))
+            self.assertIn("outside the declared action section", findings[0])
+
+            inside = (
+                "## What to review\n\n"
+                f"1. [Review the boundary.]({path}) — {actions[2]}\n"
+            )
+            findings = self.findings(root, inside, queue_actor="any")
+            self.assertEqual(1, len(findings))
+            self.assertIn("additional unlinked", findings[0])
+
     def test_boundary_until_human_review_is_an_action_request(self):
         asks = (
             "This cannot merge until the maintainer looks over the migration.",
@@ -1600,6 +1679,65 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, len(findings))
             self.assertIn(path, findings[0])
+
+    def test_task_queue_actions_value_uses_closed_projection_syntax(self):
+        first = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-first.md"
+        )
+        second = (
+            "message-queue/needs-agent/requests/"
+            "non-blocking-update-second.md"
+        )
+        accepted = (
+            ("none", ()),
+            (f"`{first}`", (first,)),
+            (f"`{first}`; `{second}`", (first, second)),
+            (f"`{first}`, `{second}`", (first, second)),
+        )
+        rejected = (
+            f"none; `{first}`",
+            f"`{first}`; please review it",
+            f"`{first}`;",
+            first,
+            f"`{first}`; `{first}`",
+        )
+        for value, expected in accepted:
+            with self.subTest(accepted=value):
+                self.assertEqual(
+                    expected,
+                    PROJECTION.parse_task_queue_action_value(value),
+                )
+        for value in rejected:
+            with self.subTest(rejected=value):
+                with self.assertRaises(ValueError):
+                    PROJECTION.parse_task_queue_action_value(value)
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            PROJECTION.task_queue_action_paths_from_text(
+                f"**Queue actions:** `{first}`\n"
+                f"**Queue actions:** `{second}`\n"
+            )
+
+    def test_task_scope_rejects_trailing_queue_actions_prose(self):
+        task_id = "2026-07-23-closed-task-projection"
+        with self.repo() as root:
+            item = self.queue_item(root)
+            path = item.relative_to(root).as_posix()
+            self.task_record(
+                root,
+                task_id,
+                f"`{path}` — I’m curious what you think about deployment.",
+            )
+            self.git(root, "add", ".")
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid Queue actions field"
+            ):
+                self.findings(
+                    root,
+                    "## What to review\n\n"
+                    f"1. [Review the boundary.]({path})\n",
+                    task_id=task_id,
+                )
 
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:

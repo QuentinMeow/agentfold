@@ -368,3 +368,28 @@
   integration snapshot.
 - Session handover:
   `history/conversations/2026-07-23-1200PDT-repair-final-projection-gaps/handover.md`.
+
+## 2026-07-23 — agent obligation and task projection repair (codex subagent)
+
+- Extended the shared rendered-action grammar with provider-neutral direct obligations
+  for agents, assistants, bots, and workers, including optional role descriptors.
+  Present direct work remains actionable; negated, historical, automatic-system, and
+  capability descriptions remain ordinary prose.
+- Classified present first-person curiosity, interest, and wondering as indirect
+  solicitations only when they target a recipient's thinking, approach, feedback,
+  input, or opinion. The same grammar now rejects these asks outside the declared
+  action section and as extra unlinked asks inside an otherwise linked entry.
+- Made `Queue actions` a closed task projection: exactly lowercase `none`, or unique
+  backticked canonical queue paths separated by semicolons or commas. Provider task
+  scoping and the reconciler share one parser, and duplicate fields, bare paths,
+  trailing delimiters, mixed `none`, and appended prose now fail closed.
+- Updated the task contract and template to expose the enforced syntax. An independent
+  bounded retest passed all 22 agent-obligation, solicitation, and task-integration
+  cases.
+- `python3 automation/tests/test_check_action_projection.py` passed all 83 tests;
+  `python3 automation/tests/test_github_action_projection_workflow.py` passed all
+  eight adapter tests; and `python3 automation/tests/test_reconcile_queue.py` passed
+  all 209 queue/history tests with zero reconciler findings. `py_compile` and
+  `git diff --check` also passed.
+- Session handover:
+  `history/conversations/2026-07-23-1312PDT-repair-agent-obligation-task-projection/handover.md`.
