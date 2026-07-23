@@ -1166,6 +1166,39 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertEqual(1, len(findings))
             self.assertIn("missing a declared action section", findings[0])
 
+    def test_modal_requests_to_named_people_and_groups_are_actions(self):
+        actions = (
+            "Could the security team sanity-check this.",
+            "Would the release committee inspect the fallback.",
+            "Can someone review the migration.",
+            "Could @quentin verify the recovery path.",
+            "Would Alice Smith confirm the boundary.",
+        )
+        descriptions = (
+            "The security team sanity-checked this yesterday.",
+            "The release committee can inspect the fallback automatically.",
+            "Alice Smith confirmed the boundary yesterday.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            findings = self.findings(
+                root,
+                actions[0],
+                allow_missing_action_section_if_no_action=True,
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("missing a declared action section", findings[0])
+
     def test_indirect_recipient_solicitations_are_actions(self):
         actions = (
             "I'm curious what you think about the migration.",

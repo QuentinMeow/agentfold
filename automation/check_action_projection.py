@@ -192,13 +192,23 @@ HUMAN_ACTION_NOUN_PATTERN = (
     r"verification|views?|vote)"
 )
 HUMAN_ACTOR_PATTERN = r"(?:human|maintainer|owner|reviewer)s?"
+NAMED_HUMAN_GROUP_PATTERN = (
+    r"(?:(?:a|an|the)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z0-9&'._-]*[ \t]+){0,3}"
+    r"(?:committee|council|crew|department|group|office|staff|squad|team)"
+)
+NAMED_HUMAN_IDENTITY_PATTERN = (
+    r"(?:@[A-Za-z0-9][A-Za-z0-9_.-]*|anyone|somebody|someone|"
+    r"(?-i:[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)?))"
+)
 AUTOMATION_ACTOR_PATTERN = (
     r"(?:(?:a|an|the)[ \t]+)?"
     r"(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+){0,3}"
     r"(?:agent|assistant|bot|worker)s?"
 )
 ACTION_SOURCE_PATTERN = (
-    rf"(?:you|(?:(?:a|an|the)[ \t]+)?"
+    rf"(?:you|{NAMED_HUMAN_IDENTITY_PATTERN}|{NAMED_HUMAN_GROUP_PATTERN}|"
+    r"(?:(?:a|an|the)[ \t]+)?"
     r"(?:(?:authorized|code|designated|lead|project|responsible|senior)"
     r"[ \t]+){0,2}"
     rf"{HUMAN_ACTOR_PATTERN})"

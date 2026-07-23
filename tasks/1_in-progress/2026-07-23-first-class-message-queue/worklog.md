@@ -488,3 +488,16 @@
   passed 101 tests, Python compilation, Ruby workflow parsing, and `git diff --check`.
 - Session handover:
   `history/conversations/2026-07-23-1445PDT-repair-review-state-replay/handover.md`.
+
+## 2026-07-23 — named modal addressee repair (codex)
+
+- The first exact-revision panel reviewer found that a modal request addressed to a
+  named group, “Could the security team sanity-check this,” passed without queue
+  projection because the actor grammar recognized only generic role names.
+- Extended provider-neutral action addressees to named teams and organizational groups,
+  explicit `@` handles, indefinite people, and one- or two-token named identities.
+  Preserved declarative past-tense controls and added the exact reported regression.
+- The repair invalidated the entire five-reviewer panel; a fresh panel is required on
+  the next immutable commit.
+- Session handover:
+  `history/conversations/2026-07-23-1521PDT-repair-named-modal-addressees/handover.md`.
