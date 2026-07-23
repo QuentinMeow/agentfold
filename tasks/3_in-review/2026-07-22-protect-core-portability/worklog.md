@@ -47,3 +47,16 @@
 - Merged the reviewed PR #4 response fold into the stacked branch, pushed all commits,
   updated PR #6's reviewer checklist and verification counts, and confirmed both GitHub
   Actions runs pass.
+
+## 2026-07-23 — PR summary standard (codex)
+
+- Kept the GitHub-specific authoring standard outside AgentFold core by installing the
+  generic `write-github-pr-summary` skill in the user's personal Codex skills directory.
+- Updated draft PRs #4 and #6 with a three-column file/folder change table as the final
+  section inside `Changes`; independent coverage audits account for all 21 files in
+  PR #4 and all 44 files in PR #6's substantive diff before this session record.
+- Corrected two stale PR #4 phrases so its summary distinguishes active routing
+  contracts from records and accurately names the service-test runner available on that
+  branch.
+- Forward-tested and validated the skill, read both published bodies back exactly, and
+  confirmed their remote heads, bases, file totals, draft state, and green checks.
