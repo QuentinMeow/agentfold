@@ -34,4 +34,4 @@ this task.
 
 - Decision: `memory/decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md`
 - Design: `docs/designs/risk-tiered-agent-guardrails.md`
-- Related severity work: `tasks/0_backlog/2026-07-22-severity-tiers-for-reconciler-findings/task.md`
+- Related severity work: task `2026-07-22-severity-tiers-for-reconciler-findings`

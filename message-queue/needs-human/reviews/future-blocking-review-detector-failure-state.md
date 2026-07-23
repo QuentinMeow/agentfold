@@ -1,11 +1,11 @@
 # Should detector failures remain distinct from clean results and findings?
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the separate failure state and its mode-dependent transition behavior, or describe the desired alternative.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
-**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
-**Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.

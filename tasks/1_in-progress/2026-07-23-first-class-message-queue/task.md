@@ -39,4 +39,4 @@ or never blocks.
 - Existing queue-routing decision:
   `memory/decisions/2026-07-22-queue-folders-named-by-who-acts-next.md`
 - Related coordination backlog:
-  `tasks/0_backlog/2026-07-22-finalize-coordination-write-rules/task.md`
+  task `2026-07-22-finalize-coordination-write-rules`
