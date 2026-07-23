@@ -1169,15 +1169,22 @@ class ActionProjectionTests(unittest.TestCase):
     def test_modal_requests_to_named_people_and_groups_are_actions(self):
         actions = (
             "Could the security team sanity-check this.",
+            "Could the platform engineers review this.",
+            "Would the security guild inspect the fallback.",
+            "Can the release managers verify the recovery path.",
             "Would the release committee inspect the fallback.",
             "Can someone review the migration.",
             "Could @quentin verify the recovery path.",
             "Would Alice Smith confirm the boundary.",
+            "Might our specialist working group evaluate the threat model.",
         )
         descriptions = (
             "The security team sanity-checked this yesterday.",
             "The release committee can inspect the fallback automatically.",
             "Alice Smith confirmed the boundary yesterday.",
+            "Could SQLite support this.",
+            "Could this work better.",
+            "Would the release managers have enough capacity.",
         )
         for action in actions:
             with self.subTest(action=action):

@@ -109,13 +109,14 @@ KEEP_POSTED_PATTERN = (
     r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)"
 )
 REQUEST_ACTION_VERB_PATTERN = (
-    r"(?:address|analy[sz]e|audit|benchmark|bisect|check|debug|diagnose|"
-    r"document|examine|fix|implement|investigate|measure|profile|reproduce|"
-    r"resolve|retry|run|test|trace|triage|update)"
+    r"(?:address|analy[sz]e|assess|audit|benchmark|bisect|"
+    r"(?:[A-Za-z][A-Za-z'-]*-)?check|debug|diagnose|document|evaluate|"
+    r"examine|fix|implement|investigate|measure|profile|proofread|reproduce|"
+    r"resolve|retry|run|test|trace|triage|update|validate)"
 )
 UNAMBIGUOUS_WORK_COMMAND_PATTERN = (
-    r"(?:analy[sz]e|bisect|diagnose|examine|fix|implement|investigate|"
-    r"reproduce|resolve)"
+    r"(?:analy[sz]e|assess|bisect|diagnose|evaluate|examine|fix|implement|"
+    r"investigate|proofread|reproduce|resolve|validate)"
 )
 AMBIGUOUS_WORK_COMMAND_PATTERN = (
     r"(?:address|audit|benchmark|check|debug|document|measure|profile|retry|"
@@ -200,6 +201,12 @@ NAMED_HUMAN_GROUP_PATTERN = (
 NAMED_HUMAN_IDENTITY_PATTERN = (
     r"(?:@[A-Za-z0-9][A-Za-z0-9_.-]*|anyone|somebody|someone|"
     r"(?-i:[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)?))"
+)
+FREEFORM_ADDRESSEE_TOKEN_PATTERN = (
+    r"(?:@?[A-Za-z0-9][A-Za-z0-9&'._/-]*)"
+)
+FREEFORM_ADDRESSEE_PATTERN = (
+    rf"(?:{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{1,6}}?"
 )
 AUTOMATION_ACTOR_PATTERN = (
     r"(?:(?:a|an|the)[ \t]+)?"
@@ -396,6 +403,15 @@ MODAL_ACTOR_REQUEST_RE = re.compile(
     r"(?:please[ \t]+)?"
     r"(?P<negation>)(?:(?:not|never)[ \t]+)?"
     rf"{OPEN_COMMAND_WORD_PATTERN}\b",
+    re.I,
+)
+MODAL_FREEFORM_ADDRESSEE_REQUEST_RE = re.compile(
+    r"\b(?:can|could|may|might|should|will|would)[ \t]+"
+    rf"(?!(?:{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{0,7}}"
+    r"(?:not|never)\b)"
+    rf"{FREEFORM_ADDRESSEE_PATTERN}"
+    r"(?:please[ \t]+)?"
+    rf"{DIRECTIVE_ACTION_PATTERN}\b",
     re.I,
 )
 COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|reviews?)"
@@ -812,6 +828,7 @@ def declarative_action_request(clean):
         AUTOMATION_ACTOR_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
+        MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
         FIRST_PERSON_COURTESY_REQUEST_RE,
         PASSIVE_COURTESY_REQUEST_RE,
         PASSIVE_WORK_APPRECIATION_RE,

@@ -501,3 +501,18 @@
   the next immutable commit.
 - Session handover:
   `history/conversations/2026-07-23-1521PDT-repair-named-modal-addressees/handover.md`.
+
+## 2026-07-23 — free-form modal addressee repair (codex)
+
+- The next exact-revision panel reviewer showed that enumerating organizational suffixes
+  was still incomplete: “platform engineers,” “security guild,” and “release managers”
+  could carry review requests without queue projection.
+- Replaced that suffix dependency for modal requests with a bounded free-form addressee
+  followed by a recognized action verb. Expanded the narrow work vocabulary for common
+  evaluation verbs and hyphenated check forms.
+- Preserved negated requests and capability questions as negative controls. All 99
+  projection tests passed, including the exact missed phrases and adjacent controls.
+- This repair invalidated the entire panel again; no earlier verdict counts toward the
+  required exact-revision review.
+- Session handover:
+  `history/conversations/2026-07-23-1544PDT-repair-freeform-modal-addressees/handover.md`.
