@@ -1488,9 +1488,34 @@ def queue_mutation_problem(source, destination, before, after):
     )
     if actor == "needs-human":
         prior_response = human_response_fields(before)
+        current_response = human_response_fields(after)
+        source_leaf = source_parts[2] if len(source_parts) > 2 else ""
+        destination_leaf = (
+            destination_parts[2] if len(destination_parts) > 2 else ""
+        )
+        if "reviews" in {source_leaf, destination_leaf}:
+            binding_keys = ("Review target", "Review revision")
+            prior_binding = tuple(
+                prior_response[key] for key in binding_keys
+            )
+            current_binding = tuple(
+                current_response[key] for key in binding_keys
+            )
+            prior_status = text_fields(before).get("Status", "").strip()
+            current_status = text_fields(after).get("Status", "").strip()
+            publication_transition = (
+                prior_status == "awaiting-artifact"
+                and current_status == "waiting"
+                and prior_binding == ("pending", "pending")
+            )
+            if prior_binding != current_binding \
+                    and not publication_transition:
+                return (
+                    "immutable review binding changed outside the "
+                    "awaiting-artifact -> waiting publication transition"
+                )
         response_key = first_concrete_response(prior_response)
         if response_key is not None:
-            current_response = human_response_fields(after)
             if current_response != prior_response:
                 return (
                     "human response or its immutable review binding changed "
@@ -1899,6 +1924,8 @@ def queue_deletion_problem(path, text, prior_revision, revision):
 
 def check_queue_resolution():
     if not (REPO / ".git").exists():
+        return
+    if not git_index_entries("message-queue"):
         return
     activation = queue_resolution_activation_commit(_GIT_HEAD_OID)
     enabled = queue_resolution_enabled()

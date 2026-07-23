@@ -84,3 +84,15 @@
   reviews need no eager migration, and every action mechanism remains filesystem- and
   Git-based. The full runner passed 5/5 files: 33 projection tests, 55 core-scope tests
   (one skipped), 146 queue tests, 5 quote-api tests, and 3 quote-cli tests.
+- The first immutable release panel blocked `8fcbd54` with three concrete cases:
+  a first response could rebind an already-published review, a PR action could borrow
+  an unrelated live queue link or hide in passive prose, and removing the entire
+  optional queue service still triggered its historical anti-downgrade check.
+- Review bindings are now write-once after the sole awaiting-artifact-to-waiting
+  publication edge. External action labels use a deterministic canonical prefix or
+  leaf-specific neutral label, and common passive, first-person, and actor-obligation
+  asks are checked both outside and inside the declared action section.
+- Whole-service removal now disables the queue lifecycle check, while removing or
+  weakening the v1 marker inside a retained queue service still fails. Focused repairs
+  raised the suites to 40 action-projection tests and 149 queue tests; the full
+  repository runner again passed 5/5 files.

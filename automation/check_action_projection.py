@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -65,6 +66,72 @@ ADDITIONAL_DIRECTIVE_RE = re.compile(
 )
 TODO_RE = re.compile(r"\bTODO\b", re.I)
 FULL_OBJECT_ID_RE = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
+QUEUE_ACTION_RE = re.compile(
+    r"^\*\*Action:\*\*[ \t]*(?P<action>\S(?:.*\S)?)[ \t]*$",
+    re.M,
+)
+DECLARATIVE_ACTION_RE = re.compile(
+    r"\b"
+    r"(?:(?:explicit|additional|separate|formal|manual)[ \t]+)*"
+    r"(?:(?:your|human|maintainer|owner|reviewer)s?(?:['’]s)?[ \t]+)?"
+    r"(?:approval|authorization|choice|clarification|confirmation|decision|"
+    r"input|response|review|sign[ -]?off|verification|vote)"
+    r"[ \t]+"
+    r"(?:(?:is|are|remains?|will[ \t]+be|must[ \t]+be)[ \t]+)?"
+    r"(?:(?:also|now|still)[ \t]+)?"
+    r"(?P<negation>not[ \t]+)?"
+    r"(?:awaited|needed|outstanding|pending|requested|required)\b",
+    re.I,
+)
+HUMAN_REQUEST_RE = re.compile(
+    r"\b(?:human|maintainer|owner|reviewer)s?\b"
+    r"[ \t]+(?:is|are)[ \t]+"
+    r"(?P<negation>not[ \t]+)?(?:requested|required)[ \t]+to[ \t]+"
+    r"(?:accept|approve|authorize|choose|confirm|decide|inspect|review|"
+    r"select|sign[ \t]+off|verify|vote)\b",
+    re.I,
+)
+FIRST_PERSON_REQUEST_RE = re.compile(
+    r"\b(?:we|i)[ \t]+"
+    r"(?P<negation>do[ \t]+not[ \t]+)?"
+    r"(?:await|need|require)[ \t]+"
+    r"(?:your|human|maintainer|owner|reviewer)s?(?:['’]s)?[ \t]+"
+    r"(?:approval|authorization|choice|clarification|confirmation|decision|"
+    r"input|response|review|sign[ -]?off|verification|vote)\b",
+    re.I,
+)
+ACTOR_OBLIGATION_RE = re.compile(
+    r"\b(?:you|human|maintainer|owner|reviewer)s?\b[ \t]+"
+    r"(?P<negation>(?:(?:do|does|is|are)[ \t]+not)[ \t]+)?"
+    r"(?:must|needs?[ \t]+to|(?:is|are)[ \t]+requested[ \t]+to|"
+    r"requested[ \t]+to)[ \t]+"
+    r"(?:accept|approve|authorize|choose|confirm|decide|inspect|review|"
+    r"select|sign[ \t]+off|verify|vote)\b",
+    re.I,
+)
+GENERIC_ACTION_LABELS = {
+    ("action", "request"),
+    ("human", "action"),
+    ("queue", "action"),
+    ("requested", "action"),
+}
+LEAF_GENERIC_ACTION_LABELS = {
+    "clarifications": {
+        ("clarification",),
+        ("clarification", "request"),
+        ("human", "clarification"),
+    },
+    "decisions": {
+        ("decision",),
+        ("decision", "request"),
+        ("human", "decision"),
+    },
+    "reviews": {
+        ("human", "review"),
+        ("review",),
+        ("review", "request"),
+    },
+}
 
 
 def normalized_title(value):
@@ -187,21 +254,46 @@ def prose_without_links(entry):
     return MARKDOWN_LINK_RE.sub("", clean)
 
 
+def declarative_action_request(clean):
+    """Recognize narrow present-tense/passive requests, excluding local negation."""
+    for pattern in (
+        DECLARATIVE_ACTION_RE,
+        HUMAN_REQUEST_RE,
+        FIRST_PERSON_REQUEST_RE,
+        ACTOR_OBLIGATION_RE,
+    ):
+        for matched in pattern.finditer(clean):
+            if matched.group("negation"):
+                continue
+            prefix = clean[max(0, matched.start() - 64):matched.start()]
+            if re.search(
+                r"\b(?:no|without)[ \t]+"
+                r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,4}$",
+                prefix,
+                re.I,
+            ):
+                continue
+            return True
+    return False
+
+
 def action_like_prose(text):
     """Recognize deterministic human-action grammar in visible prose.
 
     A fragment is action-like when it contains a question mark, a standalone TODO,
-    or an authority verb in command position at the start of a line/list item.
-    Markdown destinations and code are not prose; callers inspect link labels
-    separately. Ordinary declarative prose with an authority verb mid-sentence is
-    therefore accepted.
+    an authority verb in command position at the start of a line/list item, or a
+    narrow present-tense declaration that human approval/review/confirmation is
+    requested or required. Markdown destinations and code are not prose; callers
+    inspect link labels separately. Ordinary descriptive prose remains accepted.
     """
     clean = strip_indented_code(strip_inline_code(semantic_text(text)))
     clean = MARKDOWN_LINK_RE.sub(
         lambda matched: matched.group("label"),
         clean,
     )
-    return bool("?" in clean or TODO_RE.search(clean) or DIRECTIVE_RE.search(clean))
+    if "?" in clean or TODO_RE.search(clean) or DIRECTIVE_RE.search(clean):
+        return True
+    return declarative_action_request(clean)
 
 
 def link_label_action_count(label):
@@ -219,6 +311,41 @@ def additional_action_like_prose(text):
         "?" in clean
         or TODO_RE.search(clean)
         or ADDITIONAL_DIRECTIVE_RE.search(clean)
+        or declarative_action_request(clean)
+    )
+
+
+def normalized_action_tokens(text):
+    """Normalize visible action prose without erasing or stemming its meaning."""
+    clean = strip_inline_code(semantic_text(text or ""))
+    clean = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"),
+        clean,
+    )
+    normalized = unicodedata.normalize("NFKC", clean).casefold()
+    return tuple(re.findall(r"[a-z0-9]+", normalized))
+
+
+def label_projects_action(label, canonical_action, queue_path):
+    """Bind a projected label to one Action without fuzzy semantic borrowing.
+
+    A small neutral vocabulary remains usable per queue leaf. Every descriptive
+    alternative must be an exact leading token prefix of canonical Action, so it
+    cannot append an unrelated subject or stronger request.
+    """
+    label_tokens = normalized_action_tokens(label)
+    action_tokens = normalized_action_tokens(canonical_action)
+    if not label_tokens or not action_tokens:
+        return False
+    leaf = Path(queue_path).parts[2]
+    generic_labels = GENERIC_ACTION_LABELS | LEAF_GENERIC_ACTION_LABELS.get(
+        leaf, set()
+    )
+    if label_tokens in generic_labels:
+        return True
+    return (
+        len(label_tokens) <= len(action_tokens)
+        and label_tokens == action_tokens[:len(label_tokens)]
     )
 
 
@@ -414,6 +541,20 @@ def candidate_text(path, repo=REPO, candidate_revision=None):
         return output.decode("utf-8")
     except UnicodeDecodeError as error:
         raise RuntimeError(f"`{path}` is not valid UTF-8") from error
+
+
+def canonical_queue_action(path, repo=REPO, candidate_revision=None):
+    """Return the queue item's single non-empty canonical Action, if present."""
+    matches = QUEUE_ACTION_RE.findall(
+        semantic_text(
+            candidate_text(
+                path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            )
+        )
+    )
+    return matches[0].strip() if len(matches) == 1 else None
 
 
 def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
@@ -631,6 +772,29 @@ def projection_findings(
                 findings.append(
                     f"action section {section_number}, entry {entry_number} "
                     "links non-live queue item(s): " + ", ".join(dead)
+                )
+                continue
+            queue_path = paths[0]
+            canonical_action = canonical_queue_action(
+                queue_path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            )
+            if canonical_action is None:
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    f"links `{queue_path}`, which must contain exactly one "
+                    "non-empty canonical `Action` field"
+                )
+                continue
+            if not label_projects_action(
+                    queue_label, canonical_action, queue_path):
+                invalid_projection = True
+                findings.append(
+                    f"action section {section_number}, entry {entry_number} "
+                    "has a queue-link label that does not summarize the linked "
+                    f"queue item's canonical `Action` in `{queue_path}`"
                 )
                 continue
             linked_paths.update(paths)
