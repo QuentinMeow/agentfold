@@ -50,4 +50,4 @@ unpublished.
 Option A, because it follows the repository's explicit live-coordination lane without
 publishing reviewed-system implementation outside PRs.
 
-**Your answer:** ______
+**Your answer:** Approve direct coordination push
