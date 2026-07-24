@@ -81,8 +81,12 @@ portable adoption:
 - Every newly added handover must exactly project the complete live human queue.
   Post-activation human entries copy `Action`, `Why-you-might-care`, and
   `If-you-do-nothing` from the creation snapshot; agent entries are Action-labeled
-  links only. Both repository-local schema markers are sticky, while pre-marker and
-  later-resolved records remain immutable history.
+  links only. The versioned action-entry schema preserves the grammar active at
+  creation: v1 is the original structural contract and v2 adds action-origin and
+  raw-HTML checks. Queue-projection adoption freezes all existing handover paths on
+  every Git edge, including unmarked legacy and parallel history; deletion remains
+  available for retention, while corrections use new paths. Both repository-local
+  schema markers are sticky.
 - Reconciler retries aggregate by full check/subject identity, use collision-safe names,
   and refresh a marked machine projection without overwriting actor status or notes.
 - Queue resolution is a Git-backed lifecycle, not a status label: the first concrete
@@ -104,9 +108,9 @@ portable adoption:
   Whole queue-service removal remains modular only when its edge erases no live action.
 - External action prose crosses a provider-neutral projection gate. Outbound task PR
   descriptions require immutable task-scope evidence and project every `needs-human`
-  action in `Queue actions`; inbound review sources project only the `needs-agent`
-  actions carried by that surface; issues and
-  conversation comments may link either actor because the path owns direction. Allowed
+  action in `Queue actions`; inbound review and conversation sources project only the
+  `needs-agent` actions carried by that surface; issue bodies may link either actor
+  because the path owns direction. Allowed
   absolute links bind to an adapter-supplied immutable prefix. A provider assignment
   requires a distinct actor-correct queue item whose opaque binding preserves provider,
   role, actor kind, and identity; body headings are classified as visible prose. When
@@ -114,16 +118,20 @@ portable adoption:
   instead copy its exact opaque, versioned `External source` binding. Those items stay
   live while the source remains effective; an edit changes identity, a superseding or
   dismissed formal review removes the old source, and resolving a diff thread removes
-  that source. GitHub routes every non-empty effective formal review as agent triage
-  rather than making English classification a prerequisite; that triage may be
-  non-blocking. Changes-requested reviews are forced even with an empty body, directly
-  from either review connection, and unresolved threads remain forced action state.
+  that source. GitHub routes every non-empty issue/PR conversation comment and every
+  non-empty effective formal review as agent triage rather than making English
+  classification a prerequisite; that triage may be non-blocking. Comment deletion or
+  artifact closure resolves its source. Changes-requested reviews are forced even with
+  an empty body, directly from either review connection, and unresolved threads remain
+  forced action state.
   This binding proves routing and version continuity, not semantic
   completeness of an agent-authored transcription; artifact review owns that judgment.
   GitHub's default/base context makes PR-description, issue, conversation, and
   PR-update review-state checks authoritative. A candidate-context job also replays
-  current formal reviews and unresolved diff threads on direct events and every PR
-  update, preventing an unrelated push from clearing a failure. GitHub has no
+  current conversation comments, formal reviews, and unresolved diff threads on direct
+  events and every PR update, preventing an unrelated push from clearing a failure.
+  Issue and closed-PR comment events capture the latest default-branch object so an
+  agent-added binding can satisfy a rerun without author edits. GitHub has no
   target-context review event, so hostile direct-event tampering still requires a
   separately controlled provider gate.
 

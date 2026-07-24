@@ -18,6 +18,16 @@ SPEC = importlib.util.spec_from_file_location(
 COLLECTOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COLLECTOR)
 
+CONVERSATION_MODULE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / ".github/scripts/collect_conversation_actions.py"
+)
+CONVERSATION_SPEC = importlib.util.spec_from_file_location(
+    "collect_conversation_actions", CONVERSATION_MODULE_PATH
+)
+CONVERSATION = importlib.util.module_from_spec(CONVERSATION_SPEC)
+CONVERSATION_SPEC.loader.exec_module(CONVERSATION)
+
 
 def payload(connection_name, nodes, has_next=False, cursor=None):
     return {
@@ -63,6 +73,123 @@ def thread(thread_id, resolved=False, comments=None, has_next=False):
             },
         },
     }
+
+
+def issue_comment(index, body="Looks good.", updated_at=None, user_type="User"):
+    return {
+        "node_id": f"IC_{index}",
+        "body": body,
+        "updated_at": updated_at or f"2026-07-23T20:{index:02d}:00Z",
+        "html_url": f"https://github.invalid/comment/{index}",
+        "user": {"type": user_type},
+    }
+
+
+class CollectGitHubConversationActionsTests(unittest.TestCase):
+    def test_nonempty_comments_are_structural_agent_triage(self):
+        bodies = (
+            "I would love your feedback.",
+            "Needs owner signoff before merge.",
+            "Kindly ensure the login race is fixed.",
+            "Looks good.",
+        )
+        for index, body in enumerate(bodies):
+            with self.subTest(body=body):
+                source = CONVERSATION.comment_source(
+                    issue_comment(index, body=body)
+                )
+                self.assertEqual("needs-agent", source["actor"])
+                self.assertTrue(source["force"])
+                self.assertEqual(body, source["body"])
+
+        bot = CONVERSATION.comment_source(
+            issue_comment(9, body="Bot handoff.", user_type="Bot")
+        )
+        self.assertEqual("needs-agent", bot["actor"])
+        self.assertTrue(bot["force"])
+
+    def test_blank_comment_is_inactive_and_delete_is_absent(self):
+        blank = CONVERSATION.comment_source(
+            issue_comment(1, body=" \n ")
+        )
+        self.assertFalse(blank["force"])
+        self.assertEqual(
+            [],
+            CONVERSATION.event_sources({
+                "action": "deleted",
+                "comment": issue_comment(2, body="Old action."),
+            }),
+        )
+
+    def test_edit_versions_identity_including_same_body_reversion(self):
+        first = CONVERSATION.comment_source(issue_comment(
+            1, body="A", updated_at="2026-07-23T20:00:00Z"
+        ))
+        edited = CONVERSATION.comment_source(issue_comment(
+            1, body="B", updated_at="2026-07-23T20:01:00Z"
+        ))
+        reverted = CONVERSATION.comment_source(issue_comment(
+            1, body="A", updated_at="2026-07-23T20:02:00Z"
+        ))
+        self.assertEqual(3, len({
+            first["identity"],
+            edited["identity"],
+            reverted["identity"],
+        }))
+
+    def test_event_and_api_records_have_the_same_identity(self):
+        comment = issue_comment(1, body="Review the fallback.")
+        event = CONVERSATION.event_sources({
+            "action": "edited",
+            "comment": comment,
+        })
+        api = CONVERSATION.current_sources(
+            lambda _url, _token: [comment],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+        )
+        self.assertEqual(event, api)
+
+    def test_rest_collection_paginates(self):
+        calls = []
+        first = [issue_comment(index) for index in range(100)]
+        last = [issue_comment(100)]
+
+        def request(url, token):
+            calls.append((url, token))
+            return first if url.endswith("page=1") else last
+
+        sources = CONVERSATION.current_sources(
+            request,
+            "https://api.github.invalid/",
+            "token",
+            "owner/repo",
+            42,
+        )
+        self.assertEqual(101, len(sources))
+        self.assertEqual(2, len(calls))
+        self.assertIn("per_page=100&page=2", calls[1][0])
+
+    def test_malformed_comment_and_event_fail_closed(self):
+        bad_comments = (
+            {},
+            {**issue_comment(1), "body": None},
+            {**issue_comment(1), "node_id": ""},
+            {**issue_comment(1), "updated_at": None},
+            {**issue_comment(1), "html_url": None},
+        )
+        for value in bad_comments:
+            with self.subTest(value=value), self.assertRaises(
+                CONVERSATION.ProviderError
+            ):
+                CONVERSATION.comment_source(value)
+        with self.assertRaises(CONVERSATION.ProviderError):
+            CONVERSATION.event_sources({
+                "action": "future",
+                "comment": issue_comment(1),
+            })
 
 
 class CollectGitHubReviewActionsTests(unittest.TestCase):

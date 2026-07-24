@@ -23,11 +23,10 @@ Rules:
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Sticky `queue-resolution` checks every staged/range deletion
-  against its one-line claim and changed resolution evidence; requested review changes
-  require an agent repair plus a dependent artifact-pending re-review. `stale-queue` age-checks
-  `blocking-*`, never
-  hard-stales `non-blocking-*`, and checks `future-blocking-*` only when `Blocks at`
-  starts with a reached UTC `YYYY-MM-DD`; event boundaries require actor reclassification.
+  against its claim and changed evidence; requested review changes require agent repair
+  plus artifact-pending re-review. `stale-queue` age-checks `blocking-*`, never hard-stales
+  `non-blocking-*`, and checks `future-blocking-*` only at a reached UTC `YYYY-MM-DD`;
+  event boundaries require actor reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
   head remains the candidate; a divergent old-tip snapshot must retain every live action,
   and an unavailable nonzero old tip fails closed.
@@ -36,15 +35,19 @@ Rules:
   project the task completely. Scoped external assignments require distinct task-owned
   queue actions with exact opaque adapter bindings. Inbound sources are unscoped:
   their own asks remain enforceable without claiming to represent a task. Versioned
-  source bindings let an agent transcribe uneditable provider prose; current review
-  state is replayed on direct events and every candidate update. Summary mode allows
-  ordinary change titles while rejecting asks. Candidate-context direct-event checks
-  are not hostile-workflow evidence without a separately controlled provider gate.
+  source bindings let an agent transcribe uneditable provider prose. Every non-empty
+  GitHub conversation comment is structural agent triage, and current conversation
+  plus review state replay on every PR candidate update. Summary mode allows ordinary
+  change titles while rejecting asks. Candidate-context direct-event checks are not
+  hostile-workflow evidence without a separately controlled provider gate.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository
   schema in `history/AGENTS.md`; staged/CI diffs make each new handover exactly project
-  the current live human queue while leaving old records stable.
+  the current live human queue. Git-edge checks freeze every pre-existing handover at
+  adoption, including legacy records and intermediate/parallel history. Entry schema
+  versions preserve creation-time grammar; a newly rejecting grammar needs a new
+  version instead of retroactive validation.
 - Retry filing preserves claimed/rejected content on rerun; garbage collection removes
   only exact generator identities whose named finding cleared. Active legacy output may
   be migrated, but untrusted legacy lookalikes are never garbage-collected.
@@ -54,5 +57,4 @@ Rules:
 - Tracked executables use repository-local state only. Agent/provider shims are thin,
   optional, policy-free forwarders to canonical behavior; personal installers stay
   outside AgentFold (`templates/task/design.md` carries the core-fit receipt).
-- Never weaken a check to make a commit pass; fix the finding or file the reason as a
-  decision.
+- Never weaken a check to pass; fix the finding or file the reason as a decision.

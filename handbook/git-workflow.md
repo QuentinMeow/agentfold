@@ -62,12 +62,18 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   authority commands such as `Review this change`, and requests in a title or body
   still require queue projection. Editing provider prose never creates or resolves an
   ask.
-- GitHub issue and conversation adapters accept either queue actor because the linked
-  path says who acts next. Assignment adapters map GitHub `User` accounts and teams to
-  `needs-human`, map `Bot` accounts to `needs-agent`, and fail closed on unknown account
-  types or missing identities. These inbound comments are explicitly unscoped: they
-  must project their own asks but cannot stand in for a task's complete action set.
-  Current formal reviews and unresolved diff threads enforce `needs-agent/` actions.
+- GitHub issue bodies accept either queue actor because the linked path says who acts
+  next. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
+  `Bot` accounts to `needs-agent`, and fail closed on unknown account types or missing
+  identities. Every non-empty issue or PR conversation comment is a structurally
+  forced `needs-agent` triage source; author type does not change who triages next.
+  Its body is never English-classified. An edit versions the identity, deletion removes
+  it, and closing the issue/PR is its terminal provider boundary. Current open-PR
+  comments replay on every candidate update; issue and closed-PR events capture the
+  latest trusted default-branch commit so a new binding can satisfy a rerun without
+  editing the author's words. These inbound sources are unscoped: they carry only
+  their own triage and cannot stand in for a task's complete action set. Current formal
+  reviews and unresolved diff threads also enforce `needs-agent/` actions.
   Every non-empty effective formal review creates an agent-triage source instead of
   asking a prose heuristic whether the human meant work; its queue item may be
   non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from
@@ -77,9 +83,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   `External source` binding. Editing the source creates a new identity. A bound item
   stays live until the effective review is superseded/dismissed or the thread resolves.
   `pull_request_target`, issue, and issue-comment checks run trusted default/base
-  workflow code and replay current review state on every PR target update. The
-  candidate-context review job also replays that state on direct review events and
-  every PR update, so pushing an unrelated commit cannot clear an unqueued request.
+  workflow code and replay current review and conversation state on every PR target
+  update. The candidate-context job also replays both states on direct review events
+  and every PR update, so pushing an unrelated commit cannot clear an unqueued request.
   It uses only the ephemeral workflow token, never a developer's local CLI login.
   Direct review events have no target-context variant, so a separately controlled
   provider gate is still required before claiming resistance to hostile workflow

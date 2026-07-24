@@ -14,7 +14,7 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Full context:** [<complete source>](<repo-relative path>)
 <!-- For a provider assignment, add exactly one **External assignment:** <opaque
 role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
-<!-- For transcribed provider prose, add exactly one **External source:** <opaque
+<!-- For transcribed or structurally triaged provider content, add exactly one **External source:** <opaque
 versioned source identity emitted by its adapter>. Omit it otherwise. -->
 **Resolution evidence:** `<durable file completion will create or change>`
 <!-- Add **Request kind:** task-pickup only for the canonical pickup request of one

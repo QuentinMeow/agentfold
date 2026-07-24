@@ -682,3 +682,29 @@
   cases passed. All three reviewer blocks invalidated the panel.
 - Session handover:
   `history/conversations/2026-07-23-1831PDT-activation-join-source-repair/handover.md`.
+
+## 2026-07-23 — structural conversations and versioned history (codex)
+
+- Three fresh reviewers of `6f9dc284` found that the full task range retroactively
+  applied the latest action grammar to 18 immutable handovers, post-adoption edits to
+  legacy handovers were unobserved, and unstructured GitHub comments could evade the
+  finite prose grammar.
+- Upgraded the action-entry contract to v2. V1 keeps its creation-time structural
+  semantics; v2 adds action-origin and raw-HTML checks. Future rejecting grammar changes
+  require a new version rather than reinterpretation of accepted records.
+- Added Git-edge mutation scanning for every existing handover after queue-projection
+  adoption. Staged, intermediate, real/parallel, and exact synthetic-merge mutations are
+  rejected even for unmarked legacy paths; deletion remains the retention mechanism.
+- Added a thin GitHub conversation adapter. Every nonblank issue/PR conversation
+  comment becomes a content-and-update-versioned `needs-agent` source without English
+  inference. Direct events use a fresh immutable default or open-PR merge candidate;
+  current open-PR comments replay in both trusted-target and candidate contexts.
+- Documented source lifetime: comment edits create new identities, deletion or artifact
+  closure resolves the provider source, and current open-artifact bindings remain live.
+- Added exact bypass, bot, blank, deletion, edit/reversion, event/API parity,
+  pagination, malformed-input, workflow trust/candidate, v1/v2 epoch, staged,
+  modify/restore, and parallel synthetic-merge regressions. All 23 GitHub adapter tests
+  and all 219 queue/history tests passed. The three reviewer blocks invalidated the
+  panel.
+- Session handover:
+  `history/conversations/2026-07-23-1916PDT-conversation-history-results/handover.md`.

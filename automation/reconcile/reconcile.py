@@ -1147,7 +1147,7 @@ def queue_resolution_v1_at(revision):
     )
 
 
-def schema_activation_commits(head, path, field):
+def schema_activation_commits(head, path, field, version="v1"):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
         return (), None
@@ -1172,7 +1172,7 @@ def schema_activation_commits(head, path, field):
         if artifact is None:
             continue
         text = decode_utf8_artifact(artifact, f"`{path}` at {commit}")
-        if text_fields(text).get(field, "").strip() == "v1":
+        if text_fields(text).get(field, "").strip() == version:
             activations.append(commit)
     return tuple(activations), None
 
@@ -1367,7 +1367,7 @@ def queue_revision_edges(activations):
             or "could not enumerate queue-deletion commits"
         )
     commits = revisions.stdout.splitlines()
-    if _GIT_HEAD_OID != range_head:
+    if _GIT_HEAD_OID and _GIT_HEAD_OID != range_head:
         commits.append(_GIT_HEAD_OID)
     for commit in commits:
         governed, governance_error = governed_by_activation_join(
@@ -1433,6 +1433,80 @@ def queue_mutation_events(activations):
                 f"`{destination}` in the queue mutation candidate",
             )
             yield source, destination, before, after, parent, revision
+
+
+def governed_handover_path(path):
+    """Recognize a handover path even when its conversation name is malformed."""
+    parts = Path(path).parts
+    return bool(
+        len(parts) == 4
+        and parts[:2] == ("history", "conversations")
+        and parts[3] == "handover.md"
+    )
+
+
+def mutated_handover_paths_from_name_status(data):
+    """Return pre-existing handovers changed in place or renamed."""
+    paths = []
+    for status, source, _destination in name_status_records(data):
+        if status.startswith("R") and governed_handover_path(source):
+            paths.append(source)
+        elif status in {"M", "T"} and governed_handover_path(source):
+            paths.append(source)
+    return paths
+
+
+def mutated_handover_paths_between(parent, child):
+    changed = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status",
+            "-z", "-M", "--diff-filter=MRT", parent, child, "--",
+            "history/conversations",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, f"could not inspect handover mutations in {child}"
+        ))
+    return mutated_handover_paths_from_name_status(changed.stdout)
+
+
+def staged_mutated_handover_paths():
+    if not _GIT_HEAD_OID:
+        return []
+    changed = subprocess.run(
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            "--diff-filter=MRT", _GIT_HEAD_OID, "--",
+            "history/conversations",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, "could not inspect staged handover mutations"
+        ))
+    return mutated_handover_paths_from_name_status(changed.stdout)
+
+
+def handover_mutation_events(activations):
+    """Yield every post-adoption mutation edge, including intermediate commits."""
+    for parent, revision in queue_revision_edges(activations):
+        paths = (
+            staged_mutated_handover_paths()
+            if revision is None
+            else mutated_handover_paths_between(parent, revision)
+        )
+        for path in paths:
+            yield path, parent, revision
 
 
 def committed_queue_deletion_events(parent, revision):
@@ -3589,12 +3663,13 @@ def live_handover_paths():
 
 
 def projection_schema_activation_commits(
-    head, field="Queue projection schema"
+    head, field="Queue projection schema", version="v1"
 ):
     activations, error = schema_activation_commits(
         head,
         "history/AGENTS.md",
         field,
+        version=version,
     )
     if error:
         return (), error
@@ -3603,14 +3678,18 @@ def projection_schema_activation_commits(
     return (), f"could not find a v1 {field} activation commit"
 
 
-def handover_action_entry_enabled():
+def handover_action_entry_version():
     contract = repo_artifact_bytes(REPO / "history" / "AGENTS.md")
-    return bool(
-        contract is not None
-        and text_fields(
-            contract.decode("utf-8")
-        ).get("Queue action-entry schema", "").strip() == "v1"
-    )
+    if contract is None:
+        return None
+    version = text_fields(
+        contract.decode("utf-8")
+    ).get("Queue action-entry schema", "").strip()
+    return version if version in {"v1", "v2"} else None
+
+
+def handover_action_entry_enabled():
+    return handover_action_entry_version() is not None
 
 
 def history_service_present():
@@ -3619,14 +3698,15 @@ def history_service_present():
     return (REPO / "history").is_dir()
 
 
-def handover_action_entry_activations():
-    """Return committed strict-entry activations, including merged branches."""
+def handover_action_entry_activations(version="v1"):
+    """Return committed entry-version activations, including merged branches."""
     revision = committed_candidate_revision()
     if revision is None:
         return ()
     activations, _error = projection_schema_activation_commits(
         revision,
         field="Queue action-entry schema",
+        version=version,
     )
     return activations
 
@@ -3643,34 +3723,51 @@ def handover_projection_activations():
     return activations
 
 
-def strict_handover_entries_governed(rel):
-    """Return whether this handover was created after strict-entry activation."""
-    current_activation = handover_action_entry_enabled()
-    committed_activations = handover_action_entry_activations()
-    if not current_activation and not committed_activations:
-        return False, None
+def handover_action_entry_version_for(rel):
+    """Return the highest entry schema governing this handover's creation."""
+    current_version = handover_action_entry_version()
+    activation_map = {
+        version: handover_action_entry_activations(version)
+        for version in ("v1", "v2")
+    }
+    if current_version is None and not any(activation_map.values()):
+        return None, None
     if CHANGE_RANGE is None:
-        return True, None
+        return current_version, None
     created_at, creation_error = handover_creation_commit(rel)
     if creation_error:
-        return False, creation_error
+        return None, creation_error
     range_head = (
         CHANGE_RANGE[len("root:"):]
         if CHANGE_RANGE.startswith("root:")
         else CHANGE_RANGE.rsplit("...", 1)[-1]
     )
-    activations = committed_activations
-    if not activations:
-        activations, activation_error = projection_schema_activation_commits(
-            _GIT_HEAD_OID or range_head,
-            field="Queue action-entry schema",
+    candidate = _GIT_HEAD_OID or range_head
+    governed_versions = []
+    for version in ("v1", "v2"):
+        activations = activation_map[version]
+        if not activations:
+            activations, activation_error = projection_schema_activation_commits(
+                candidate,
+                field="Queue action-entry schema",
+                version=version,
+            )
+            if activation_error and current_version == version:
+                return None, activation_error
+        if not activations:
+            continue
+        governed, governance_error = governed_by_activation_join(
+            created_at, activations
         )
-        if activation_error:
-            return False, activation_error
-    governed, governance_error = governed_by_activation_join(
-        created_at, activations
+        if governance_error:
+            return None, governance_error
+        if governed:
+            governed_versions.append(version)
+    return (
+        max(governed_versions, key=lambda value: int(value[1:]))
+        if governed_versions else None,
+        None,
     )
-    return governed, governance_error
 
 
 def newly_added_handovers():
@@ -4110,6 +4207,7 @@ def handover_projection_entries(
     body,
     actor,
     live_paths,
+    entry_version,
     raw_body=None,
 ):
     """Validate strict action-owned list entries in a new v1 handover."""
@@ -4129,14 +4227,14 @@ def handover_projection_entries(
     raw_entries, raw_outside = section_entries(
         body if raw_body is None else raw_body
     )
-    if action_like_rendered_prose(raw_outside):
+    if entry_version == "v2" and action_like_rendered_prose(raw_outside):
         problems.append(
             "contains an action-like rendered question or directive outside "
             "the top-level action list"
         )
     for index, entry in enumerate(entries, start=1):
         raw_entry = raw_entries[index - 1] if index <= len(raw_entries) else ""
-        if contains_raw_html(raw_entry):
+        if entry_version == "v2" and contains_raw_html(raw_entry):
             problems.append(
                 f"entry {index} contains raw HTML; strict handover action "
                 "entries permit only the sole Markdown queue link and fixed "
@@ -4257,7 +4355,9 @@ def check_handover_queue_projection():
     if not history_service_present():
         return
     projection_activations = handover_projection_activations()
-    entry_activations = handover_action_entry_activations()
+    entry_v1_activations = handover_action_entry_activations("v1")
+    entry_v2_activations = handover_action_entry_activations("v2")
+    entry_version_now = handover_action_entry_version()
     if projection_activations \
             and not handover_projection_enabled():
         yield Finding(
@@ -4266,16 +4366,40 @@ def check_handover_queue_projection():
             "Queue projection schema v1 was removed after activation",
             "restore **Queue projection schema:** v1 while history remains",
         )
-    if entry_activations \
-            and not handover_action_entry_enabled():
+    if entry_v2_activations and entry_version_now != "v2":
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            "Queue action-entry schema v2 was removed or downgraded after activation",
+            "restore **Queue action-entry schema:** v2 while history remains",
+        )
+    elif entry_v1_activations and entry_version_now not in {"v1", "v2"}:
         yield Finding(
             "handover-queue-projection",
             Path("history/AGENTS.md"),
             "Queue action-entry schema v1 was removed after activation",
-            "restore **Queue action-entry schema:** v1 while history remains",
+            "restore **Queue action-entry schema:** v1 or upgrade to v2",
         )
     if not handover_projection_enabled() and not projection_activations:
         return
+    reported_mutations = set()
+    mutation_activations = projection_activations
+    if not mutation_activations and handover_projection_enabled() \
+            and _GIT_HEAD_OID:
+        mutation_activations = (_GIT_HEAD_OID,)
+    for path, _parent, _revision in handover_mutation_events(
+        mutation_activations
+    ):
+        if path in reported_mutations:
+            continue
+        reported_mutations.add(path)
+        yield Finding(
+            "handover-queue-projection",
+            Path(path),
+            "handover record was modified after queue-projection adoption",
+            "restore the original bytes; record a correction in a new "
+            "conversation handover (deletion remains allowed)",
+        )
     added, diff_error = newly_added_handovers()
     if diff_error:
         yield Finding(
@@ -4301,7 +4425,7 @@ def check_handover_queue_projection():
             continue
         live_human = live_human_queue_paths()
         live_agent = live_agent_queue_paths()
-        strict_entries = False
+        entry_version = None
         if is_new:
             text, live_human, live_agent, creation_error = handover_creation_state(
                 handover, rel
@@ -4315,7 +4439,7 @@ def check_handover_queue_projection():
                     "preserve the add commit and pass a range containing it",
                 )
                 continue
-            strict_entries, strict_error = strict_handover_entries_governed(
+            entry_version, strict_error = handover_action_entry_version_for(
                 rel
             )
             if strict_error:
@@ -4349,7 +4473,8 @@ def check_handover_queue_projection():
                 )
         else:
             text = candidate_text
-        if strict_entries and contains_raw_html(text):
+        strict_entries = entry_version is not None
+        if entry_version == "v2" and contains_raw_html(text):
             yield Finding(
                 "handover-queue-projection",
                 rel,
@@ -4358,7 +4483,7 @@ def check_handover_queue_projection():
                 "cannot define or preserve queue-projection boundaries",
             )
             continue
-        if strict_entries and action_like_rendered_prose(
+        if entry_version == "v2" and action_like_rendered_prose(
             visible_outside_action_sections(
                 text,
                 ("Needs your attention", "Next steps"),
@@ -4446,6 +4571,7 @@ def check_handover_queue_projection():
                             next_body or "",
                             "needs-agent",
                             live_agent,
+                            entry_version,
                             raw_body=raw_level_two_section_body(
                                 text, "## Next steps"
                             ),
@@ -4539,6 +4665,7 @@ def check_handover_queue_projection():
                 body,
                 "needs-human",
                 live_human,
+                entry_version,
                 raw_body=raw_level_two_section_body(
                     text, "## Needs your attention"
                 ),

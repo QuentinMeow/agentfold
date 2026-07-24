@@ -14,7 +14,7 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Full context:** [<complete source>](<repo-relative path>)
 <!-- For a provider assignment, add exactly one **External assignment:** <opaque
 role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
-<!-- For transcribed provider prose, add exactly one **External source:** <opaque
+<!-- For transcribed or structurally triaged provider content, add exactly one **External source:** <opaque
 versioned source identity emitted by its adapter>. Omit it otherwise. -->
 **Why-you-might-care:** <one sentence explaining the practical consequence>
 **If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>

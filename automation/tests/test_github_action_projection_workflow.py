@@ -53,7 +53,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             on_block,
         )
         self.assertIn(
-            "issue_comment:\n    types: [created, edited]", on_block
+            "issue_comment:\n    types: [created, edited, deleted]", on_block
         )
         self.assertIn(
             "pull_request_review:\n"
@@ -132,7 +132,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}",
             "ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}",
             "github.event.issue.assignees",
-            "ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}",
+            "steps.authoritative-default-candidate.outputs.revision",
             "--additional-prose-env ACTION_PROJECTION_TITLE",
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
             "--queue-actor any",
@@ -176,38 +176,65 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "--external-action-env ACTION_PROJECTION_ASSIGNEES", issue
         )
 
-    def test_issue_and_pr_conversation_comments_use_distinct_candidates(self):
+    def test_conversation_comments_are_structural_and_use_distinct_candidates(self):
+        checkout = self.step(
+            "authoritative-external-action-projection",
+            "Checkout default-branch projection gate",
+        )
+        self.assertIn(
+            "ref: ${{ github.event.repository.default_branch }}", checkout
+        )
+        capture = self.step(
+            "authoritative-external-action-projection",
+            "Capture immutable default-branch candidate",
+        )
+        self.assert_contains_all(capture, (
+            'rev-parse --verify "HEAD^{commit}"',
+            '>> "$GITHUB_OUTPUT"',
+        ))
+        collect = self.step(
+            "authoritative-external-action-projection",
+            "Collect event conversation comment",
+        )
+        self.assert_contains_all(collect, (
+            "collect_conversation_actions.py",
+            '--event-file "$GITHUB_EVENT_PATH"',
+            "agentfold-conversation-actions.json",
+        ))
         issue = self.step(
             "authoritative-external-action-projection",
-            "Action projection — issue conversation comment",
+            "Action projection — issue or closed-PR conversation comment",
         )
         self.assert_contains_all(issue, (
-            "github.event_name == 'issue_comment' && "
             "!github.event.issue.pull_request",
-            "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
-            "ACTION_PROJECTION_CANDIDATE_REVISION: ${{ github.sha }}",
-            "--queue-actor any",
-            "--unscoped",
+            "github.event.issue.state != 'open'",
+            "steps.authoritative-default-candidate.outputs.revision",
+            "--external-action-sources-file",
+            "agentfold-conversation-actions.json",
         ))
         pull_request = self.step(
             "authoritative-external-action-projection",
-            "Action projection — PR conversation comment",
+            "Action projection — open-PR conversation comment",
         )
         self.assert_contains_all(pull_request, (
-            "github.event_name == 'issue_comment' && "
             "github.event.issue.pull_request",
-            "ACTION_PROJECTION_BODY: ${{ github.event.comment.body }}",
+            "github.event.issue.state == 'open'",
             "steps.authoritative-pr-candidate.outputs.revision",
-            "--queue-actor any",
-            "--unscoped",
+            "--external-action-sources-file",
+            "agentfold-conversation-actions.json",
         ))
         self.assertNotIn("steps.authoritative-pr-candidate", issue)
         for step in (issue, pull_request):
+            self.assertNotIn("--from-env", step)
+            self.assertNotIn("--allow-missing-action-section-if-no-action", step)
+            self.assertNotIn("--queue-actor", step)
+            self.assertNotIn("--unscoped", step)
             self.assertNotIn("--additional-prose-env", step)
             self.assertNotIn("--external-action-env", step)
 
     def test_review_surfaces_enforce_actions_with_honest_trust_ceiling(self):
         self.assertIn("permissions:\n  contents: read", self.workflow)
+        self.assertIn("  issues: read", self.workflow)
         self.assertIn("  pull-requests: read", self.workflow)
         self.assertIn(
             "# GitHub has no pull_request_review_target or "
@@ -295,6 +322,41 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "--candidate-revision",
             "--allowed-url-prefix",
         ))
+
+        target_comments = self.step(
+            "authoritative-external-action-projection",
+            "Collect current PR conversation comments",
+        )
+        candidate_comments = self.step(
+            "review-state-action-projection",
+            "Collect current PR conversation comments",
+        )
+        for step in (target_comments, candidate_comments):
+            self.assert_contains_all(step, (
+                "GITHUB_TOKEN: ${{ github.token }}",
+                "github.event.pull_request.number",
+                "ACTION_PROJECTION_API_URL: ${{ github.api_url }}",
+                "collect_conversation_actions.py",
+                '--issue-number "$ACTION_PROJECTION_PR_NUMBER"',
+                "agentfold-conversation-actions.json",
+            ))
+        target_comment_projection = self.step(
+            "authoritative-external-action-projection",
+            "Action projection — current PR conversation state",
+        )
+        candidate_comment_projection = self.step(
+            "review-state-action-projection",
+            "Action projection — current PR conversation state",
+        )
+        for step in (
+            target_comment_projection,
+            candidate_comment_projection,
+        ):
+            self.assert_contains_all(step, (
+                "--external-action-sources-file",
+                "agentfold-conversation-actions.json",
+                "--label github-current-pull-request-conversation-state",
+            ))
 
     def test_no_untrusted_candidate_is_ever_checked_out(self):
         for forbidden in (

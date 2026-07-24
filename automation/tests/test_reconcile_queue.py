@@ -4645,7 +4645,7 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         return conversation / "handover.md"
 
-    def activate_strict_handover_entries(self, root):
+    def activate_strict_handover_entries(self, root, version="v2"):
         contract = root / "history/AGENTS.md"
         contract.parent.mkdir(parents=True, exist_ok=True)
         text = (
@@ -4653,10 +4653,11 @@ class ReconcileQueueTests(unittest.TestCase):
             if contract.is_file()
             else "# History contract\n\n**Queue projection schema:** v1\n"
         )
-        if "**Queue action-entry schema:** v1" not in text:
+        marker = f"**Queue action-entry schema:** {version}"
+        if marker not in text:
             contract.write_text(
                 text.rstrip()
-                + "\n**Queue action-entry schema:** v1\n",
+                + f"\n{marker}\n",
                 encoding="utf-8",
             )
         return contract
@@ -5034,7 +5035,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "history/AGENTS.md",
                 "# History\n\n"
                 "**Queue projection schema:** v1\n"
-                "**Queue action-entry schema:** v1\n",
+                "**Queue action-entry schema:** v2\n",
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "activate strict handovers")
@@ -5220,6 +5221,201 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
             self.assertTrue(any("changed after its creation" in message
                                 for message in messages))
+
+    def test_action_entry_v2_does_not_reinterpret_v1_creation_prose(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v1-prose",
+                "None.",
+            )
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "# Handover",
+                    "# Handover — repair contract round three",
+                ),
+                encoding="utf-8",
+            )
+            self.activate_strict_handover_entries(root, version="v1")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create v1 handover")
+
+            contract = root / "history/AGENTS.md"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    "**Queue action-entry schema:** v1",
+                    "**Queue action-entry schema:** v2",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "activate v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"root:{head}"
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_action_entry_v2_rejects_new_action_like_handover_prose(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate v2")
+
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v2-prose",
+                "None.",
+            )
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "# Handover",
+                    "# Handover — repair contract round three",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create v2 handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"root:{head}"
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "action-like question or directive" in message
+                for message in messages
+            ), messages)
+
+    def test_projection_adoption_freezes_unmarked_legacy_handover(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.write(
+                root,
+                "history/conversations/"
+                "2026-07-22-1200PDT-legacy/handover.md",
+                "# Legacy\n\n"
+                "## Needs your attention\n\nNone.\n\n"
+                "## Next steps\n\nNone.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy")
+            original = handover.read_text(encoding="utf-8")
+
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projection")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            handover.write_text(
+                "# Legacy\n\n"
+                "## Needs your attention\n\nCan you approve this release?\n\n"
+                "## Next steps\n\nDeploy this now.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", str(handover.relative_to(root)))
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                staged_messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "modified after queue-projection adoption" in message
+                for message in staged_messages
+            ), staged_messages)
+
+            self.git(root, "commit", "-m", "originate asks")
+            handover.write_text(original, encoding="utf-8")
+            self.git(root, "add", str(handover.relative_to(root)))
+            self.git(root, "commit", "-m", "restore legacy bytes")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                range_messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "modified after queue-projection adoption" in message
+                for message in range_messages
+            ), range_messages)
+
+    def test_projection_activation_governs_parallel_handover_mutation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.write(
+                root,
+                "history/conversations/"
+                "2026-07-22-1200PDT-parallel-legacy/handover.md",
+                "# Legacy\n\n"
+                "## Needs your attention\n\nNone.\n\n"
+                "## Next steps\n\nNone.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy")
+            trunk = self.git(root, "branch", "--show-current")
+
+            self.git(root, "checkout", "-b", "feature")
+            handover.write_text(
+                "# Legacy\n\n"
+                "## Needs your attention\n\nCan you approve this release?\n\n"
+                "## Next steps\n\nNone.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "modify parallel handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", trunk)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projection")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "feature")
+            self.git(root, "merge", "--no-ff", "--no-commit", trunk)
+            self.git(root, "commit", "-m", "synthetic merge")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "modified after queue-projection adoption" in message
+                for message in messages
+            ), messages)
 
     def test_new_handover_requires_v1_marker(self):
         with self.repo() as root:
@@ -5946,7 +6142,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "history/AGENTS.md",
                 "# History\n\n"
                 "**Queue projection schema:** v1\n"
-                "**Queue action-entry schema:** v1\n",
+                "**Queue action-entry schema:** v2\n",
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "activate strict handovers")
