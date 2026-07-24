@@ -1,7 +1,8 @@
-# clarifications/ — your move, soon
+# clarifications/ — your move
 
-Questions whose answers will shape upcoming work. Agents are not blocked — each file
-states the assumption they're proceeding on — but the longer a clarification sits, the
-more work gets built on the assumption. Answer after `**Your answer:**`.
+Questions that correct an understanding or shape future work. Timing comes from the
+filename: a clarification may block now, at a named future boundary, or never. Each
+file contrasts plausible interpretations, gives an example, links full context, and
+states what happens meanwhile. Answer after `**Your answer:**`.
 
-File one: copy `templates/queue/clarification.md`.
+File one with a timing-prefixed name by copying `templates/queue/clarification.md`.

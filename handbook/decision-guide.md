@@ -2,7 +2,9 @@
 
 A decision file is an interface between an agent with full context and a human with
 none. Most unanswered decisions are unanswerable — they assume knowledge the human
-doesn't have. Schema: `templates/queue/decision.md`. This guide is about the content.
+doesn't have. General rules for every human action:
+`human-action-guide.md`; schema: `templates/queue/decision.md`. This guide adds the
+decision-specific content.
 
 ## The contract with the reader
 
@@ -17,18 +19,18 @@ screen, and will answer from their phone. Therefore:
    language, then a *concrete scenario* of life after choosing it — "If we pick A and a
    user does X, then Y happens." The example consequence is the most important part of
    the file: it is how a non-expert experiences the difference between options.
-4. **A recommendation and a default path.** Say which option you'd pick and why in one
-   sentence. State what happens if the human never answers (`async` mode: you proceed
-   on the default after the stated date; a `Blocking: yes` decision instead says what
-   stays stopped).
-5. **The answer slot is literal**: end with `**Your answer:** ______`. Accept anything
-   written there — a letter, a sentence, a counter-question. A counter-question gets
-   answered in the file, with examples, and the item stays open.
-6. **The file is disposable context, not an artifact.** Durable background belongs in
-   the task's `design.md` or `memory/`, linked from here — never written only here. A
-   well-made decision file could be deleted and regenerated from its sources; the only
-   thing it ever uniquely holds is the human's answer, which folding moves into docs
-   and an ADR before the file is deleted.
+4. **A recommendation and dependency timing.** Say which option you'd pick and why in
+   one sentence. The filename and its matching fields state whether the choice blocks
+   now, at a named future boundary, or never; no duplicate `Blocking` field exists.
+5. **The answer slot is literal**: end with `**Your answer:** ______`. Accept a letter,
+   sentence, or counter-question; the first concrete response is immutable. For a
+   counter-question, claim and fold that disposition, answer it in the named durable
+   evidence, then create a new same-timing item whose `Supersedes` names the old path.
+   Never edit human text; claim `folding` with a status-only commit.
+6. **Background is reconstructable; delivery state is not.** Durable background belongs
+   in the task's `design.md` or `memory/`, linked from here — never written only here.
+   The live file uniquely owns the unresolved action, timing, status, and any answer;
+   do not delete it until those are folded or explicitly disposed.
 
 ## Example (abridged)
 
@@ -42,6 +44,7 @@ screen, and will answer from their phone. Therefore:
 
 ## After the answer
 
-Fold the answer into the affected docs, record an ADR in `memory/decisions/` (schema:
-`templates/memory/adr.md`) so the reasoning survives, then delete the queue file — git
-history is the archive.
+Fold the answer (or the answer to a counter-question) into the affected docs, record an
+ADR in `memory/decisions/` (schema: `templates/memory/adr.md`) when a decision was made,
+then delete the resolved item. A counter-question also gets the linked successor above;
+Git history archives completed delivery but does not replace live state.

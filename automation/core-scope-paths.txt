@@ -1,3 +1,5 @@
 # Thin agent/provider adapters that invoke canonical AgentFold core behavior.
+.github/scripts/collect_conversation_actions.py
+.github/scripts/collect_review_actions.py
 .github/workflows/harness.yml
 CLAUDE.md

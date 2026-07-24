@@ -1,8 +1,9 @@
 # decisions/ — your move
 
 Choices only a human may make (one-way doors: `handbook/collaboration-modes.md`). Each
-file explains the options with example consequences, recommends one, and states the
-default path agents follow if you never answer. Write anything after `**Your answer:**`
-— a letter, a sentence, a counter-question — and an agent takes it from there.
+file explains the difference between options with concrete consequences, recommends
+one, links full context, and states the exact boundary or unattended outcome. Write
+anything after `**Your answer:**` — a letter, sentence, or counter-question.
 
-File one: copy `templates/queue/decision.md`. Writing guide: `handbook/decision-guide.md`.
+File one with a timing-prefixed name by copying `templates/queue/decision.md`. Guides:
+`handbook/human-action-guide.md` and `handbook/decision-guide.md`.

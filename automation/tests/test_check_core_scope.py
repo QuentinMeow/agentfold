@@ -72,7 +72,15 @@ class CoreScopeTests(unittest.TestCase):
         self.assertFalse(SCOPE.is_core_path(".github/ISSUE_TEMPLATE/agent_bug.md"))
 
     def test_only_registered_provider_adapter_is_core(self):
-        registered = {".github/workflows/harness.yml", ".gitlab-ci.yml", "CLAUDE.md"}
+        registered = {
+            ".github/scripts/collect_review_actions.py",
+            ".github/workflows/harness.yml",
+            ".gitlab-ci.yml",
+            "CLAUDE.md",
+        }
+        self.assertTrue(SCOPE.is_core_path(
+            ".github/scripts/collect_review_actions.py", registered
+        ))
         self.assertTrue(SCOPE.is_core_path(".github/workflows/harness.yml", registered))
         self.assertTrue(SCOPE.is_core_path(".gitlab-ci.yml", registered))
         self.assertTrue(SCOPE.is_core_path("CLAUDE.md", registered))
@@ -88,6 +96,25 @@ class CoreScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(tmp)
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+
+    def test_annotated_core_fit_heading_does_not_consume_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            annotated = COMPLETE_DESIGN.replace(
+                "## Core fit", "## Core fit (required when changing AgentFold core)"
+            )
+            task = self.make_task(tmp, design=annotated)
+            self.assertEqual([], SCOPE.validate_task(task, touched_core=True))
+
+    def test_bare_level_two_heading_terminates_core_fit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fields_only = COMPLETE_DESIGN.split("## Core fit\n\n", 1)[1]
+            design = (
+                "# Design\n\n## Core fit\n\nThe receipt stops here.\n\n"
+                "##\n\n" + fields_only
+            )
+            task = self.make_task(tmp, design=design)
+            errors = SCOPE.validate_task(task, touched_core=True)
+            self.assertTrue(any("Agent substitution" in error for error in errors))
 
     def test_complete_core_fit_passes_with_crlf(self):
         with tempfile.TemporaryDirectory() as tmp:

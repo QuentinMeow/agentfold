@@ -6,21 +6,24 @@ cheap to roll back.
 
 ## Two kinds of writes
 
-| | Coordination writes | Code writes |
+| | Live coordination writes | Reviewed system writes |
 |---|---|---|
-| What | `message-queue/`, `tasks/`, `history/`, `memory/`, `roadmap/` | `services/`, `skills/`, `automation/`, `handbook/` |
+| What | queue-item state; concrete task claims/status; new handovers; owner answers/decisions | contracts, templates, automation, skills, lessons, and state/docs tied to implementation |
 | Where | directly on `main` | branch `task/<task-id>` |
 | Commit size | tiny, single-purpose, immediate | logical milestones |
 | Why | other agents must see queue/task state **now**, not after a merge | code needs review before it's truth |
 
 Coordination commits use the prefix `harness:` (e.g. `harness: file decision on quote
-storage`). This split is what keeps the message queue real-time while code stays gated.
+storage`). A directory does not choose the lane: `tasks/AGENTS.md` is a reviewed system
+contract, while `tasks/1_in-progress/<id>/task.md` is live coordination. This split keeps
+the action bus real-time while behavioral and descriptive changes stay reviewable.
 
 ## Conflict avoidance (by construction, not by care)
 
 - **One item, one file** — concurrent agents create files, never edit shared ones.
-- **One agent per task** — claim by committing `**Claimed-by:**` in `task.md` first;
-  if the push is rejected because someone else claimed, pick another task.
+- **One agent per task** — claim in one coordination commit: set `**Claimed-by:**`, move
+  backlog to in-progress, and resolve its pickup request; if the push is rejected,
+  another agent won, so pick another task.
 - **One worktree per agent** — parallel agents use `git worktree add ../<task-id>
   task/<task-id>`, never share a checkout.
 - **Service boundaries** — a task branch touches one service; cross-service work is
@@ -41,6 +44,69 @@ storage`). This split is what keeps the message queue real-time while code stays
 - `main` is always green: reconciler clean, tests passing.
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
+- A terminal human response does not erase a future merge dependency. Keep its
+  `future-blocking-*` review folding and live; fresh approval of `git:<base>...<head>`
+  satisfies merge only on that base with queue-only lifecycle commits afterward. The
+  merge commit carries the receipt. Cleanup passes only when that merge is already in
+  the adapter-supplied target base, so candidate-local topology cannot stand in for
+  admission. Local no-range hooks are best-effort; hard assurance depends on a
+  controlled adapter supplying the authentic target base and enforcing its ref policy.
+- A PR description may summarize actions only by linking their live canonical queue
+  items. Its declared “What to review” section is checked at the provider boundary:
+  one top-level entry and one queue link per action, including every live human path
+  in the task's `Queue actions`. A `task/<id>` branch declares its task and is checked
+  against changed task records and `task:` commit tokens between the trusted base and
+  immutable candidate; another branch is bound from that same evidence. Missing,
+  conflicting, or ambiguous scope fails closed. External assignments retain direction:
+  a human reviewer or assignee requires a distinct task-owned `needs-human/` link,
+  while an assigned agent or bot requires a distinct task-owned `needs-agent/` link.
+  Each linked item must copy the adapter's opaque provider/stable-artifact/role/
+  actor-kind/principal binding, so another artifact cannot reuse it. Use the exact
+  `No queued action requested.`
+  acknowledgement only when neither task scope nor assignment exposes an action.
+- A pull-request title is change-summary metadata, so a conventional title such as
+  `Fix the login race` is not itself an ask. Questions, TODOs, explicit obligations,
+  authority commands such as `Review this change`, and requests in its title or body
+  still require queue projection.
+- Every open GitHub issue is a structurally forced, content-versioned external source;
+  neither English phrasing nor `No queued action requested.` can suppress it. The issue
+  body may project a canonical link directly, or an agent may transcribe its prose.
+  In both cases at least one actor-correct item carries the exact `External source`;
+  a presentation link never replaces the durable binding. Each path selects
+  `needs-human/` or `needs-agent/`; an informational issue may select a non-blocking
+  triage item. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
+  `Bot` accounts to `needs-agent`, and fail closed on unknown account types or missing
+  identities. Every non-empty conversation comment on an issue or PR is structural
+  `needs-agent` triage, regardless of author or wording. Comment edits version identity;
+  deletion or artifact closure ends it. Open issues replay on issue and non-PR comment
+  events, while open-PR comments replay on candidate updates. These inbound sources are
+  unscoped: they carry only their own action and cannot stand in for a task's complete
+  set. Removing a source's final live binding is a separate exact-tree admission check:
+  a trusted provider adapter must classify that exact version as released; current or
+  unavailable state fails closed. GitHub resolves global node IDs from trusted base
+  code and replays review/thread state as needed. This required check prevents a
+  candidate-local deletion from waiting for a later comment event to rediscover the
+  orphan. Direct pushes can land before their post-push result, so hard enforcement also
+  requires rules that admit changes only through the protected required check. Current
+  formal reviews and unresolved diff threads also enforce `needs-agent/`.
+  Every non-empty effective formal review creates an agent-triage source instead of
+  asking a prose heuristic whether the human meant work; its queue item may be
+  non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from
+  either review connection; unresolved threads remain forced when current state replays.
+  Provider-authored prose may project canonical links directly; every active source
+  still has one or more live items with the adapter's exact versioned `External source`
+  binding. Editing the source creates a new identity. A bound item
+  stays live until the effective review is superseded/dismissed or the thread resolves.
+  `pull_request_target`, issue, and issue-comment checks run trusted default/base
+  workflow code. Candidate and target jobs replay current review/conversation state on
+  supported PR/review events, including merge-queue enqueue, so a later push cannot
+  clear an unqueued request. GitHub emits no Actions event for thread resolve/unresolve:
+  hard assurance that a currently unresolved thread cannot merge requires native
+  “Require conversation resolution before merging”; without it, the ceiling is “state
+  projected at the last supported event.” Neither mechanism proves every transient
+  reopen-then-resolve toggle was queued. Direct review events also lack a target-context
+  variant, so a separately controlled provider gate remains necessary against hostile
+  workflow tampering. The workflow uses only its token, never a local CLI login.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 
@@ -49,5 +115,11 @@ storage`). This split is what keeps the message queue real-time while code stays
 - A bad merge: `git revert -m 1 <merge-commit>` — never delete history.
 - A bad coordination commit: `git revert <sha>`; if the file was deleted queue state,
   restore with `git checkout <sha>^ -- <path>`.
-- A misfiled or stale queue item: delete the file in a `harness:` commit; git history
-  is the archive, so deletion is always safe (`../handbook/principles/files-as-messages.md`).
+- A misfiled queue item is moved with every live link updated. A stale item is
+  re-surfaced, reclassified, or explicitly resolved. Delete only after a one-line claim
+  and changed durable evidence. Approved reviews revalidate their target;
+  `changes-requested` (and legacy `not-approved`) leaves a same-boundary agent repair
+  and dependent artifact-pending re-review. `rejected`/`abandoned` cleanup also proves
+  the task, local target, or reviewed Git candidate was withdrawn.
+  Verified pickup/retry exceptions stay atomic. Git history can recover accidents, not
+  replace live delivery state.

@@ -1,6 +1,6 @@
 # Desired state
 
-**Last-updated:** 2026-07-22
+**Last-updated:** 2026-07-24
 
 In priority order. Each line is specific enough to spawn tasks against.
 
@@ -33,7 +33,10 @@ In priority order. Each line is specific enough to spawn tasks against.
    feedback, content-bound evidence, detector canaries, protected exceptions, and
    remote authority where available. Every guard is selected through one `hard`,
    `soft`, `off`, or `manual` configuration surface; starter mechanisms are
-   templates, costly agent review is manual by default, and sandboxing is deferred.
+   templates, costly agent review is manual by default, and assurance is derived per
+   obligation and scope from observed coverage, health, and enforcement rather than
+   configured labels. Sandboxing and controlled egress are excluded unless a separate
+   design receives explicit human approval.
    *(Human-reviewed design in `docs/designs/risk-tiered-agent-guardrails.md`;
    implementation task `2026-07-22-universal-guard-mode-configuration` filed but not
    started.)*

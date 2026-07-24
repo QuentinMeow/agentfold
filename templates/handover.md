@@ -3,6 +3,7 @@
 **Session:** <YYYY-MM-DD HH:MM–HH:MM TZ, local time>, <who>
 **Task:** <task id, or "none — exploratory">
 **Mode:** <autonomous | async | pair>
+**Queue projection:** v1
 
 One screen max, plain language, for a teammate who was away. Depth goes in the task
 folder; this file links to it.
@@ -22,13 +23,16 @@ no shorthand invented mid-session.>
 
 ## Needs your attention
 
-<One entry per open needs-human/ item — including still-open items from earlier
-sessions. Never a bare name: write a clickable markdown link plus enough context to
-act without opening anything — `[short name](<repo path to the queue item>)` followed
-by 2–3 sentences: what the choice is, why it came up, the default path. The linked
-item holds the options and links onward to its sources (it is a projection —
-`message-queue/AGENTS.md`). This section is repeated verbatim in the session's final
-chat reply.>
+<This is a projection of every open `message-queue/needs-human/` item, not a place to
+originate an ask. Use one top-level bullet per live item, ordered by `blocking-`,
+`future-blocking-`, `non-blocking-`, then queue path. The bullet's first content is
+`[<the queue item's exact Action text>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)`.
+That is the bullet's only link. Append exactly
+` — Why-you-might-care: <copied field> || If-you-do-nothing: <copied field>`,
+copying both values from the same queue snapshot with only whitespace reflow allowed.
+No other prose can appear. The relative link must resolve to the exact live queue
+file. Repeat this section verbatim in the final chat reply. Write `None.` when no
+human items are open.>
 
 ## Dead ends
 
@@ -37,7 +41,11 @@ Failed approaches are exactly what compaction and chat lose. "None" is fine.>
 
 ## Next steps
 
-<What the next session should probably do first.>
+<Write `None.` or one top-level bullet per assigned `needs-agent/` action. Use the
+same strict link form as above, but make that one relative queue link the bullet's only
+content; its label exactly copies the item's `Action`. Do not add prose or another
+link. This section may project a scoped subset of live agent actions; it need not list
+unrelated global agent work.>
 
 ## Deep links
 

@@ -12,5 +12,6 @@ desired-state line; a task that matches no line means either the roadmap is stal
 Update ritual: finishing a task that changes reality updates `current-state.md` in the
 same change (the session-handover skill includes this step; the reconciler flags a
 current-state older than the newest done task). Desired-state changes are one-way
-doors — file a decision in `message-queue/needs-human/decisions/` unless the owner
-asked directly.
+doors — file a timing-prefixed decision in
+`message-queue/needs-human/decisions/`. A direct owner request is transcribed into that
+item before it is folded; chat is never the only decision record.

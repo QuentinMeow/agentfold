@@ -1,0 +1,54 @@
+# Handover — repair panel-ten blockers
+
+**Session:** 2026-07-23 14:11–14:11 PDT, codex
+**Task:** 2026-07-23-first-class-message-queue
+**Mode:** async
+**Queue projection:** v1
+
+## What happened
+
+- Rejected action-shaped Markdown headings and common idiomatic requests that had
+  bypassed the provider action grammar.
+- Required scoped external assignments to use distinct task-owned queue actions and
+  required every PR branch to carry matching immutable task evidence.
+- Prevented delete/re-add and parallel-history reuse of a committed governed v1
+  handover path while preserving deletion and pre-activation reuse.
+- Added exact regressions for every blocking scenario; bounded reviewer rechecks,
+  92 projection tests, and 51 handover tests passed.
+
+## How it works now
+
+Visible provider headings are classified like ordinary prose, and scoped assignment
+cardinality counts only links owned by the selected task. A PR branch cannot select a
+task unless its base/candidate range identifies that same task.
+
+Once a governed v1 handover path is committed, later corrections use a new conversation
+path even if the original was deleted or arrived through parallel history.
+
+## Decisions made for you
+
+None.
+
+## Needs your attention
+
+- [Confirm the four claim ceilings below, or name a profile whose promise should change.](../../../message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md) — Why-you-might-care: Profile names must not advertise stronger protection than their actual enforcement boundary. || If-you-do-nothing: Guardrail implementation waits at its start boundary; the current proposal remains unchanged.
+- [Confirm the separate failure state and its mode-dependent transition behavior, or describe the desired alternative.](../../../message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md) — Why-you-might-care: A crashed or incomplete scanner must not accidentally become evidence that content is safe. || If-you-do-nothing: Guardrail implementation waits at its start boundary; the separate failure state remains a proposal.
+- [After the PR is linked and status becomes waiting, review the queue-ownership invariant, timing prefixes, and enforcement before merge.](../../../message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md) — Why-you-might-care: This changes every human and durable cross-session agent action surface in AgentFold. || If-you-do-nothing: The task may be reviewed and revised, but it does not merge.
+- [Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.](../../../message-queue/needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md) — Why-you-might-care: Treating an agent-authored receipt as approval would let the producing agent waive its own security gate. || If-you-do-nothing: Guardrail implementation waits at its start boundary; the current authority split remains a proposal.
+- [Confirm the incident-recovery boundary and sequence, or identify a missing recovery obligation.](../../../message-queue/needs-human/reviews/future-blocking-review-sensitive-data-recovery.md) — Why-you-might-care: Deleting one Git file does not undo credential or private-data disclosure across remote copies and logs. || If-you-do-nothing: Guardrail implementation waits at its start boundary; the current recovery sequence remains a proposal.
+- [Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.](../../../message-queue/needs-human/reviews/non-blocking-review-template-first-explanation.md) — Why-you-might-care: This review is about whether the documentation now explains a prior decision, not whether an implementation task may reverse it. || If-you-do-nothing: AgentFold continues to ship mechanisms as opt-in templates under the decided four-mode policy.
+
+## Dead ends
+
+Trusting an exact `take a look` phrase was too narrow; the classifier now accepts
+bounded modifiers around the stable `look` cue. Treating a re-added handover as merely
+new also discarded its immutable prior incarnation.
+
+## Next steps
+
+None.
+
+## Deep links
+
+- Task folder: [task](../../../tasks/1_in-progress/2026-07-23-first-class-message-queue/) · Worklog: [worklog](../../../tasks/1_in-progress/2026-07-23-first-class-message-queue/worklog.md) · Verification: pending
+- Commits: none — unstaged repair

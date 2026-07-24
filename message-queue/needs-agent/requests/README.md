@@ -1,6 +1,8 @@
 # requests/ — an agent's move
 
-The human's drop box. Leave anything here in any format — a sentence, a pasted error, a
-half-formed idea (`templates/queue/request.md` exists if you want structure). The next
-agent session reads every file here first, acts on it or converts it into a proper
-task/decision, and deletes it in the same commit.
+Durable work assigned by the owner or one agent/session to another. Each request names
+the action, full source, observable completion, and dependency timing. The next relevant
+agent claims it, acts or converts it into a task, and deletes it only with the completed
+action or an explicit rejection.
+
+File one with a timing-prefixed name by copying `templates/queue/request.md`.
