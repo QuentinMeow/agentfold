@@ -823,3 +823,25 @@
 - Refreshed origin/main at `acc23b6289f5ca66744718af379aba0468be93e2`;
   the merged heads of PRs #4 (`999a6c4`) and #6 (`9e24478`) are ancestors of that
   exact main revision.
+
+## 2026-07-24 — derived-assurance review and handoff (codex)
+
+- Retracted the stale PR #7 range review before changing non-queue artifacts, preserving
+  the review-binding lifecycle while the human review continued in chat.
+- Recorded the owner's response, claimed it separately, and folded it into
+  `memory/decisions/2026-07-23-assurance-profile-review-disposition.md`.
+- Replaced selectable assurance profiles with composable guard bindings and derived
+  evidence reports across the guardrail design, implementation task, and roadmap.
+  Controlled egress is reference-only and needs a separate explicit approval.
+- Fixed the generic-link checker so structured successor lifecycle fields do not prevent
+  the claimed predecessor from resolving; added focused regression coverage.
+- Retracted four stale reviews before changing their target, then republished those and
+  the derived-assurance follow-up against the exact revised design digest.
+- The latest pre-commit run passed all eight repository suites, including 262 queue
+  tests; reconciler checks reported zero findings. All commits through `ef0e520` are
+  pushed to the PR #7 branch.
+- Left the derived-assurance exact-byte review waiting. The next agent must continue the
+  owner's one-question-at-a-time review before publishing the final PR range or running
+  the final immutable-revision panel.
+- Session handover:
+  `history/conversations/2026-07-24-0012PDT-derived-assurance-review-handoff/handover.md`.

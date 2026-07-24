@@ -68,3 +68,33 @@ The implementation has undergone repeated independent adversarial audits, and ev
 finding implemented in this review round has a regression test. Per the owner's stop
 boundary, a fresh final immutable-revision panel is intentionally deferred until after
 the first human review; no final-pass verdict is claimed here.
+
+## 2026-07-24 derived-assurance revision
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+```
+
+The final queue-publication commit ran the repository pre-commit suite:
+
+```
+Ran 118 tests in 19.269s
+OK
+Ran 55 tests in 0.857s
+OK (skipped=1)
+Ran 24 tests in 0.012s
+OK
+Ran 9 tests in 0.011s
+OK
+Ran 262 tests in 67.384s
+OK
+Ran 9 tests in 0.004s
+OK
+Ran 5 tests in 0.094s
+OK
+Ran 3 tests in 0.234s
+OK
+tests: 8/8 files passed
+pre-commit: OK
+```
