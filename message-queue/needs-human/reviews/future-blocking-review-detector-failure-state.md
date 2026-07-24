@@ -1,6 +1,6 @@
 # Should detector failures remain distinct from clean results and findings?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the separate failure state and its mode-dependent transition behavior, or describe the desired alternative.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
