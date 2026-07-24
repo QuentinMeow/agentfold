@@ -5,7 +5,7 @@
 **Filed:** 2026-07-22, by codex, from the owner's review of the critical-agent-guardrails proposal
 **Parent:** 2026-07-22-design-critical-agent-guardrails
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-universal-guard-mode-configuration.md`; `message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md`; `message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md`; `message-queue/needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md`; `message-queue/needs-human/reviews/future-blocking-review-sensitive-data-recovery.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-universal-guard-mode-configuration.md`; `message-queue/needs-agent/requests/future-blocking-revise-assurance-profile-scope-and-egress.md`; `message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md`; `message-queue/needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md`; `message-queue/needs-human/reviews/future-blocking-review-revised-assurance-profile-scope-and-egress.md`; `message-queue/needs-human/reviews/future-blocking-review-sensitive-data-recovery.md`
 
 ## Goal
 
