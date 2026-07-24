@@ -5,7 +5,7 @@
 **Filed:** 2026-07-24, by codex, from the owner's layered-workspace request in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`; `message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md`
 
 ## Goal
 
@@ -64,8 +64,10 @@ review is recorded.
 - [x] Only a small reversible first slice is implemented and tested after the design
       is coherent; mounts, destructive migrations, private-repository creation, and
       automatic public publication are out of scope for that first slice.
-- [x] Reconciler and relevant tests pass with real output in `verification.md`, and
-      remaining work is split into separately claimable queue-owned tasks.
+- [ ] Reconciler and relevant tests pass with real output in `verification.md`, and
+      remaining work is published as separately claimable queue-owned tasks through
+      the live coordination lane after this PR is admitted.
+- [ ] [After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, review the layered workspace design and read-only inspector, then approve the exact Git range, request a named change, or reject it before merge.](../../../message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md)
 
 ## Links
 

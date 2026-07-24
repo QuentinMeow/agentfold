@@ -141,3 +141,18 @@
   counterexamples. The 35 focused cases, all 10 repository test files, range-level
   core-scope check, diff hygiene, and reconciler passed with real output recorded in
   `verification.md`.
+
+## 2026-07-24 — task-pure publication reconstruction (codex)
+
+- Rebuilt the review branch on the clean test-runner-isolation stack layer because the
+  consolidated source range mixed this task with six newly drafted backlog tasks.
+- Preserved the reviewed design, inspector, tests, adoption guidance, roadmap content,
+  and parent task evidence while excluding all 18 live-coordination files for those
+  follow-ups: six task records, six pickup requests, and six dependency requests.
+- Preserved the complete original source on branch
+  codex/backup-layered-development-workspace-9d7bb1d. The excluded records await
+  direct coordination publication after this task's PR is admitted; they are not
+  claimed as current backlog state in this review candidate.
+- Added one canonical future merge review for the rebuilt exact range. Its binding
+  remains artifact-pending until the preceding isolation PR merges and this PR's actual
+  base is stable.

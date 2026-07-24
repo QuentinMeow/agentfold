@@ -21,7 +21,8 @@ In priority order. Each line is specific enough to spawn tasks against.
    repository-local tooling: explicit zone manifest/status, same-path override lineage,
    sealed public export, capability adapters, and observed backup/scan evidence.
    Mounts remain optional adapters rather than the boundary. *(Design proposed; the
-   first read-only topology inspector is implemented, and later stages are backlog.)*
+   first read-only topology inspector is implemented, and later stages are specified
+   but await coordination filing.)*
 6. **A queue/task viewer.** Read-only board rendered from the folders (the folders stay
    the source of truth). *(Not started.)*
 7. **The harness survives its own design review.** Finding severity tiers so advisory
