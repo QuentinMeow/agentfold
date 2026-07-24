@@ -1,12 +1,12 @@
 # Is sensitive-data recovery correctly separated from prevention and exceptions?
 
-**Status:** awaiting-artifact
+**Status:** waiting
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the incident-recovery boundary and sequence, or identify a missing recovery obligation.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Resolution evidence:** `memory/decisions/2026-07-23-sensitive-data-recovery-review-disposition.md`
-**Review target:** pending
-**Review revision:** pending
+**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Review revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration

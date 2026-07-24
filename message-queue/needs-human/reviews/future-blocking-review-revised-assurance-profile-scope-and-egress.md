@@ -1,14 +1,14 @@
 # Does the revised derived-assurance model match the approved direction?
 
-**Status:** awaiting-artifact
+**Status:** waiting
 **Filed:** 2026-07-24, by codex, from the owner's review of task `2026-07-22-universal-guard-mode-configuration`
 **Action:** Confirm the revised design makes guard configuration, derived assurance, manual evidence, coverage limits, and controlled-egress non-scope clear.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Resolution evidence:** `memory/decisions/2026-07-24-revised-assurance-report-review-disposition.md`
 **Why-you-might-care:** The implementation must configure real guards and report only observed protection, rather than letting an agent select or claim an assurance label.
 **If-you-do-nothing:** Guardrail implementation waits at its start boundary; the approved conceptual direction remains recorded but the revised design is not accepted.
-**Review target:** pending
-**Review revision:** pending
+**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Review revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Supersedes:** `message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md`
