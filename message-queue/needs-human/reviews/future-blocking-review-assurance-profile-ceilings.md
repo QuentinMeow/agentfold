@@ -7,8 +7,8 @@
 **Resolution evidence:** `memory/decisions/2026-07-23-assurance-profile-review-disposition.md`
 **Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
-**Reviewed revision:** ______
-**Review outcome:** pending
+**Reviewed revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
+**Review outcome:** changes-requested
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Deployment assurance profiles”
@@ -40,4 +40,4 @@ before CI. The stronger statement needs repository admission or controlled egres
 When answering here, copy `Review revision` into `Reviewed revision` so the answer
 stays bound to the exact design bytes.
 
-**Your review:** ______
+**Your review:** Changes requested: controlled egress must remain reference-only and must not be implemented unless a user explicitly approves it. Before final approval, explain whether profiles can differ by feature inside one repository and how those profiles compose.
