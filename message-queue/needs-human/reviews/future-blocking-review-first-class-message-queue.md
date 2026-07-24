@@ -4,9 +4,11 @@
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** After the PR is linked and status becomes waiting, review the queue-ownership invariant, timing prefixes, and enforcement before merge.
 **Full context:** `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`; `message-queue/AGENTS.md`; `handbook/principles/files-as-messages.md`
+**Resolution evidence:** `roadmap/current-state.md`
 **Review target:** pending
 **Review revision:** pending
 **Reviewed revision:** ______
+**Review outcome:** pending
 **Blocks at:** transition:merge task:2026-07-23-first-class-message-queue
 **Until then:** Implementation, tests, and independent review may continue.
 **Look-at:** `message-queue/AGENTS.md`; `handbook/principles/files-as-messages.md`
