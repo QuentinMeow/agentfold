@@ -9,5 +9,7 @@
 - [x] 5. Add reconciler checks and focused tests; migrate every live message filename.
 - [x] 6. Fold the answered queue item into the guardrail design and durable decisions,
       then delete the projection.
-- [ ] 7. Run full verification and independent adversarial review, then publish the
-      completed change for human review.
+- [x] 7. Run full verification and publish the completed implementation for first
+      human review.
+- [ ] 8. After that human review, run the final immutable-revision adversarial panel
+      and fold only approved review follow-up before merge.

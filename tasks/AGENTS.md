@@ -1,5 +1,6 @@
 # tasks/ — work items
 
+**Task admission schema:** v1
 One folder per task; **the status folder it sits in is its status** — there is no
 status field to drift (`handbook/principles/single-source-of-truth.md`).
 
@@ -8,7 +9,7 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 ```
 0_backlog → 1_in-progress → 3_in-review → 4_done
                   ↕
-              2_blocked (only while a Blocking: yes decision is open)
+              2_blocked (only while an unresolved blocking-* action stops it)
 ```
 
 - Task id = folder name = `YYYY-MM-DD-<kebab-slug>` (date filed). The id never changes;
@@ -20,14 +21,29 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   revision-bound receipt but does not launch a reviewer. The small untracked-fix branch
   convention applies only outside core until its backlog task defines a safe path.
 - Reference tasks by id, never by full path — paths change with status. Find one with
-  `ls tasks/*/<task-id>` .
-- **Claim before working**: set `**Claimed-by:**` in `task.md`, commit, then start.
+  `ls tasks/*/<task-id>`. The sole exception is a `task-pickup` request: it links the
+  backlog path; its verified claim/move is the sole open-status queue deletion.
+- `Queue actions` is exactly lowercase `none` or unique backticked canonical queue paths
+  separated by `;` or `,`; no prose or duplicate field. Tasks never originate pending
+  human or durable cross-session agent asks: task-local assignments use exact task-owned
+  action links. Queue files own delivery/status and reciprocal task context.
+- Every unclaimed backlog task links a non-blocking `Request kind: task-pickup`;
+  claiming resolves and deletes it in the claim commit.
+- **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the
+  task from backlog to in-progress, and resolve its pickup request; push, then start.
   One agent per task; a rejected push means someone beat you — pick another.
 - One git branch per task: `task/<task-id>` (`handbook/git-workflow.md`).
-- `2_blocked` is only for tasks stopped on a `message-queue/needs-human/decisions/`
-  item with `Blocking: yes`; `task.md` links the decision file.
-- `4_done` requires `verification.md` with real command output — the reconciler checks
-  it exists; the adversarial-review gate (mode-dependent) checks it's honest.
+- `2_blocked` requires a live `blocking-*` human or agent item in `Queue actions`, with
+  that item reciprocally naming `task:<id>` in `Blocks now`. `1_in-progress` is valid
+  only after a committed one-line `open` → `in-repair` agent claim, or an answered
+  `waiting` → `folding` human-action claim. Waiting/open blockers require `2_blocked`.
+- Every post-adoption Git edge rechecks task structure. A linked future blocker stops
+  `start`, `review`, or `complete`; its review binds a stable local artifact. Fresh
+  approval stays live in the crossing commit, and cleanup requires the task to remain
+  past that receipt. Its boundary names `task:<id>`; Git/provider admission handles merge.
+  Non-task branches infer scope from changed task records or `task: <id>` commit tags.
+- `4_done` requires real `verification.md` output and normally `Queue actions: none`;
+  only the exact approved completion receipt survives its crossing commit for cleanup.
 - Done tasks are pruned by the memory gardener after ~90 days: durable learnings are
   promoted into `memory/`, then the folder is deleted (git history archives it).
 
@@ -41,5 +57,4 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 | `worklog.md` | always by first session | append-only; each session adds what happened |
 | `verification.md` | for `3_in-review`/`4_done` | commands actually run + real output |
 
-A task too big to plan in ~10 steps gets split: child tasks link the parent in
-`**Parent:**`; the parent tracks only coordination.
+A task too big for ~10 steps is split; children link `**Parent:**`, which tracks coordination.

@@ -14,10 +14,11 @@ everyone reads.
   name a folder's purpose, it doesn't have one yet.
 - Numbered prefixes **only** for ordered pipelines where sorting is the point:
   `tasks/0_backlog/ … 4_done/`. Everywhere else, no numbers — they churn on insert.
-- Route by stable properties, not by mutable urgency. Queue folders are named by who
-  acts next (stable); urgency lives in a `Blocking:` field (mutable). Moving a file
-  whenever its urgency changes would break links (ADR:
-  `memory/decisions/2026-07-22-queue-folders-named-by-who-acts-next.md`).
+- Route queue folders by stable properties: who acts next, then message kind. Dependency
+  timing is visible in the filename and may only escalate with `git mv`; update every
+  live link in that coordination commit. Weakening resolves the old identity and creates
+  an authorized replacement (ADR:
+  `memory/decisions/2026-07-23-live-queue-obligations-only-weaken-with-evidence.md`).
 
 ## Files
 
@@ -25,8 +26,9 @@ everyone reads.
   time: tasks `2026-07-22-add-quote-cache/`, conversations
   `2026-07-22-1430PDT-fix-cli-crash/` (times are local + timezone abbreviation —
   humans read wall clocks, not UTC).
-- Queue items: plain kebab slugs, no date prefix and no numbering — slugs don't churn,
-  and file birth time lives in the `**Filed:**` field.
+- Queue items: exactly `blocking-<kebab-slug>.md`,
+  `future-blocking-<kebab-slug>.md`, or `non-blocking-<kebab-slug>.md`; no date or
+  numbering. The prefix says when unresolved work stops, not how severe it is.
 - Reserved names, exact meaning: `AGENTS.md` (agent contract of its folder),
   `README.md` (human doc of its folder), `SKILL.md` (skill entry point), `task.md`,
   `plan.md`, `design.md`, `worklog.md`, `verification.md`, `handover.md`.

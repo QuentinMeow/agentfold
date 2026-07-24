@@ -19,7 +19,7 @@
 <Which and why, in a few sentences. If this was a one-way door, link the
 message-queue decision item / resulting ADR instead of deciding here.>
 
-## Core fit (required when changing AgentFold core)
+## Core fit
 
 **Agent substitution:** <pass — why another agent runtime preserves the behavior>
 **Provider substitution:** <pass | not-applicable — why another provider preserves it>

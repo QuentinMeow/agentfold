@@ -14,6 +14,12 @@ import sys
 import unicodedata
 from pathlib import Path
 
+AUTOMATION = Path(__file__).resolve().parent
+if str(AUTOMATION) not in sys.path:
+    sys.path.insert(0, str(AUTOMATION))
+
+from markdown_semantics import semantic_text
+
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
 REVIEW_RE = re.compile(
@@ -21,31 +27,6 @@ REVIEW_RE = re.compile(
     re.I | re.M,
 )
 FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
-FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
-# CommonMark 0.31.2 HTML block starts and terminators.
-RAW_HTML_TYPE1_TAGS = "pre|script|style|textarea"
-RAW_HTML_TYPE1_START_RE = re.compile(
-    rf"^[ ]{{0,3}}<(?:{RAW_HTML_TYPE1_TAGS})(?=[ \t>]|$)", re.I
-)
-RAW_HTML_TYPE1_END_RE = re.compile(rf"</(?:{RAW_HTML_TYPE1_TAGS})>", re.I)
-HTML_COMMENT_START_RE = re.compile(r"^[ ]{0,3}<!--")
-HTML_PROCESSING_START_RE = re.compile(r"^[ ]{0,3}<\?")
-HTML_DECLARATION_START_RE = re.compile(r"^[ ]{0,3}<![A-Za-z]")
-HTML_CDATA_START_RE = re.compile(r"^[ ]{0,3}<!\[CDATA\[")
-RAW_HTML_TYPE6_TAGS = (
-    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|"
-    "dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|"
-    "frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|"
-    "menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|"
-    "table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-)
-RAW_HTML_TYPE6_START_RE = re.compile(
-    rf"^[ ]{{0,3}}</?(?:{RAW_HTML_TYPE6_TAGS})(?=[ \t]|$|/?>)", re.I
-)
-RAW_HTML_TYPE7_START_RE = re.compile(
-    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/]).*>[ \t]*$", re.I
-)
-
 CORE_PREFIXES = (
     "skills/",
     "automation/",
@@ -105,83 +86,6 @@ def git(*args, repo=REPO):
     return result.stdout
 
 
-def commonmark_lines(text):
-    """Split only on CommonMark line endings; Python also splits on form feed."""
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    pieces = normalized.split("\n")
-    lines = [piece + "\n" for piece in pieces[:-1]]
-    if pieces[-1]:
-        lines.append(pieces[-1])
-    return lines
-
-
-def semantic_text(text):
-    """Return only Markdown that can carry real receipt fields or headings.
-
-    Fences and HTML are consumed in source order. This matters because markers inside
-    an active raw HTML block are data, not new Markdown blocks, and vice versa.
-    """
-    output = []
-    fence_char = None
-    fence_length = 0
-    html_end = None
-    html_until_blank = False
-
-    for line in commonmark_lines(text):
-        candidate = line[:-1] if line.endswith("\n") else line
-        blank = "\n" if line.endswith("\n") else ""
-
-        if fence_char:
-            if re.fullmatch(
-                rf"[ ]{{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
-                candidate,
-            ):
-                fence_char = None
-                fence_length = 0
-            output.append(blank)
-            continue
-
-        if html_end:
-            if html_end.search(candidate):
-                html_end = None
-            output.append(blank)
-            continue
-
-        if html_until_blank:
-            if re.fullmatch(r"[ \t]*", candidate):
-                html_until_blank = False
-            output.append(blank)
-            continue
-
-        opening = FENCE_OPEN_RE.match(candidate)
-        if opening:
-            marker = opening.group("fence")
-            fence_char = marker[0]
-            fence_length = len(marker)
-            output.append(blank)
-            continue
-
-        for start, end in (
-            (RAW_HTML_TYPE1_START_RE, RAW_HTML_TYPE1_END_RE),
-            (HTML_COMMENT_START_RE, re.compile(r"-->")),
-            (HTML_PROCESSING_START_RE, re.compile(r"\?>")),
-            (HTML_DECLARATION_START_RE, re.compile(r">")),
-            (HTML_CDATA_START_RE, re.compile(r"\]\]>")),
-        ):
-            if start.match(candidate):
-                html_end = None if end.search(candidate) else end
-                output.append(blank)
-                break
-        else:
-            if RAW_HTML_TYPE6_START_RE.match(candidate) or RAW_HTML_TYPE7_START_RE.match(candidate):
-                html_until_blank = True
-                output.append(blank)
-            else:
-                output.append(line)
-
-    return "".join(output)
-
-
 def parsed_fields(text):
     pairs = FIELD_RE.findall(semantic_text(text))
     counts = {}
@@ -194,7 +98,8 @@ def parsed_fields(text):
 def named_sections(text, title):
     clean = semantic_text(text)
     pattern = re.compile(
-        rf"^## {re.escape(title)}(?:[ \t].*)?\r?\n(.*?)(?=^##[ \t]|\Z)",
+        rf"^## {re.escape(title)}(?:[ \t][^\r\n]*)?\r?\n"
+        rf"(.*?)(?=^##(?:[ \t]|\r?$)|\Z)",
         re.M | re.S,
     )
     return pattern.findall(clean)

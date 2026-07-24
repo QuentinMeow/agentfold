@@ -21,11 +21,25 @@ trusts the majority (`handbook/principles/majority-over-single-agent.md`).
    concrete failure scenario. No style opinions, no praise, no severity inflation;
    "I couldn't break it" is a valid, useful verdict.
 4. **Verdicts**: each returns `approve` or `block` + findings. Majority decides.
-   - approve-majority with findings → merge, file findings as tasks or known-issues.
-   - block-majority → back to `1_in-progress` with the findings in `worklog.md`.
-   - split → `message-queue/needs-human/reviews/` item with all three verdicts linked.
+   - approve-majority with deferred repair → file each pending agent action in
+     `message-queue/needs-agent/`; tasks and known-issues may record and link it.
+   - block-majority → back to `1_in-progress`; if repair survives this session, file a
+     live agent item that names the blocked merge or transition.
+   - split → file a human review item with all verdicts and evidence linked.
 5. **Record**: one line per verdict in the task's `verification.md` (who, lens,
-   verdict) — the merge gate's audit trail.
+   verdict) — the merge gate's audit trail. Records and external review surfaces are
+   projections; every still-pending action links its live queue item.
+
+## Queue discipline
+
+Use `templates/queue/` and `message-queue/AGENTS.md`, never an improvised schema.
+Prefix an item `blocking-` when named work cannot proceed now, `future-blocking-` when
+work may continue only until a stated date/event/transition, or `non-blocking-` when it
+never stops work. A human review must explain how the verdicts or choices differ, give
+a concrete consequence, state the safe unattended result (normally do not merge), and
+link the diff, task, and complete evidence. Arbitrary event/transition/operation
+evidence is agent-attested unless a controlled adapter enforces it. The queue is
+canonical for pending human and durable cross-session agent actions; other tools project it.
 
 ## Costs and calibration
 

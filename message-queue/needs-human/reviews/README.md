@@ -1,7 +1,16 @@
-# reviews/ — your move, optional
+# reviews/ — your judgment
 
-Things an agent thinks deserve human eyes: a surprising diff, a judgment call it made,
-output worth sanity-checking. **Doing nothing is always safe** — each file says what
-happens if you never look. Items older than 30 days get swept.
+Named judgments over a diff, artifact, claim, or proposed boundary. Reviews are not
+implicitly optional: the filename declares whether review blocks now, blocks at a
+future boundary, or never blocks. Each item explains possible dispositions, shows a
+concrete difference, links the full source, and states what happens without review.
+The target and immutable revision are separate from explanatory context. Use
+`Status: awaiting-artifact` plus pending target/revision until the artifact exists.
+A local file or HTTPS artifact binds to its SHA-256; a commit or diff repeats its full
+Git object id(s) as the revision.
+The answer copies that value into `Reviewed revision`, so a stale response cannot be
+folded after the target changes. `Resolution evidence` is a different non-queue file
+that records crossing or cancellation; it never doubles as the reviewed target.
 
-File one: copy `templates/queue/review.md`.
+File one with a timing-prefixed name by copying `templates/queue/review.md`; answer
+after `**Your review:**`.

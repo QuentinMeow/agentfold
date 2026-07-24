@@ -12,7 +12,8 @@ instructions are for judgment calls, systems are for invariants.
   template → reconciler finding → pre-commit block.
 - **Verification is part of the work.** Every task ends with `verification.md` listing
   commands actually run and their real output. A change an agent cannot verify
-  mechanically (test, build, render, screenshot) needs a human review item filed.
+  mechanically (test, build, render, screenshot) needs a timing-prefixed human review
+  item before the review is mentioned in any other channel.
 - **Hooks are tracked and installed idempotently.** `automation/hooks/` is versioned;
   `automation/install.py` wires it up. A quality gate that lives only on one person's
   machine doesn't exist.
