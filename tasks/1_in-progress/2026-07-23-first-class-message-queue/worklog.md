@@ -619,3 +619,26 @@
   regressions. All 101 projection tests passed; both blocks invalidated the panel.
 - Session handover:
   `history/conversations/2026-07-23-1734PDT-requirement-predicate-explanation-coverage/handover.md`.
+
+## 2026-07-23 — structural formal-review triage and unsuffixed obligations (codex)
+
+- Two fresh reviewers of `89f9cb1a` showed that prose inference remained an unsound
+  prerequisite for replaying non-empty `COMMENTED` formal reviews. They also found
+  unsuffixed passive, gerund, noun, predicate, imperative, and negative-imperative action
+  forms plus four ordinary self-answered explanations.
+- Made every non-empty GitHub `COMMENTED` formal review a forced agent-triage source.
+  The resulting queue action may be non-blocking; empty comments remain neutral,
+  changes-requested and unresolved threads remain forced action state, and approval
+  prose still uses ordinary classification.
+- Removed lifecycle suffixes from recognized passive actions, added bounded gerund/noun
+  and action-predicate obligation forms, and recognized direct `Add` plus `Do not`
+  commands. Reported, negative, capability, and property controls remain.
+- Replaced the explanatory answer-verb allowlist with a structural rule: a short
+  self-answered `how`/`what`/`why` lead is explanatory unless it carries human-choice
+  cues such as `you`, `your`, `recommendation`, `choice`, or a modal ask. The complete
+  answer still runs through action classification.
+- Updated task design and human/Git guidance for structural formal-review triage. The
+  focused projection, collector, and workflow run passed all 118 tests. Both reviewer
+  blocks invalidated the panel.
+- Session handover:
+  `history/conversations/2026-07-23-1751PDT-structural-formal-review-triage/handover.md`.

@@ -61,6 +61,11 @@ the adapter's opaque provider, role, actor-kind, and identity binding; an existi
 generic review cannot stand in for a new assignee or requested reviewer.
 When a person writes an actionable review or diff thread without a queue link, the
 receiving agent transcribes it instead of asking that person to rewrite their words.
+On GitHub, every non-empty `COMMENTED` formal review is routed to `needs-agent` for
+triage even when its wording looks informational; this structural rule keeps durable
+review interaction from depending on English inference. The triage action may be
+non-blocking. Changes-requested reviews and unresolved diff threads remain forced
+action state, while approval prose uses the ordinary action classifier.
 Each resulting `needs-agent/` item copies the adapter's opaque, content-versioned
 `External source`; one source may bind several items when it contains several asks.
 Keep those items live while the provider still reports the source as current—on

@@ -66,14 +66,26 @@ def thread(thread_id, resolved=False, comments=None, has_next=False):
 
 
 class CollectGitHubReviewActionsTests(unittest.TestCase):
-    def test_commented_review_preserves_action_body_without_forcing(self):
+    def test_nonempty_commented_reviews_are_forced_for_triage(self):
         body = "This needs to be repaired before merge."
-        source = COLLECTOR.review_source(
-            review("commented-action", body, "COMMENTED")
+
+        def request(query, variables):
+            if query == COLLECTOR.LATEST_REVIEWS_QUERY:
+                return payload("latestReviews", [
+                    review("commented-action", body, "COMMENTED"),
+                    review("empty-comment", "", "COMMENTED"),
+                ])
+            if query == COLLECTOR.LATEST_OPINIONS_QUERY:
+                return payload("latestOpinionatedReviews", [])
+            return payload("reviewThreads", [])
+
+        sources = COLLECTOR.collect_sources(
+            request, "owner", "repo", 42
         )
-        self.assertEqual("needs-agent", source["actor"])
-        self.assertEqual(body, source["body"])
-        self.assertFalse(source["force"])
+        by_body = {source["body"]: source for source in sources}
+        self.assertEqual("needs-agent", by_body[body]["actor"])
+        self.assertTrue(by_body[body]["force"])
+        self.assertFalse(by_body[""]["force"])
 
     def test_collects_paginated_latest_reviews_opinions_and_threads(self):
         calls = []

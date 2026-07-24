@@ -1211,6 +1211,19 @@ class ActionProjectionTests(unittest.TestCase):
                 "to avoid lock-in."
             ),
             "How is it implemented? By storing state in Git.",
+            (
+                "Why use queue files? They make the action survive "
+                "session loss."
+            ),
+            "Why a queue file? So the request survives session loss.",
+            (
+                "What happens if nobody replies? "
+                "The safe default continues."
+            ),
+            (
+                "How does this stay portable? "
+                "The repository stores all state locally."
+            ),
         )
         for explanation in explanations:
             with self.subTest(explanation=explanation):
@@ -1234,6 +1247,10 @@ class ActionProjectionTests(unittest.TestCase):
                 "Why this approach?\n",
                 "Does the boundary work? It should be checked before merge.\n",
                 "Why did you choose this approach? It keeps ownership neutral.\n",
+                (
+                    "What is your recommendation? "
+                    "It is useful for planning.\n"
+                ),
                 "Why should we merge? It appears ready.\n",
                 "Why this approach? Please review the fallback.\n",
                 (
@@ -1275,6 +1292,15 @@ class ActionProjectionTests(unittest.TestCase):
             "Fixing the login race is required before merge.",
             "A security review remains necessary before merge.",
             "A security sign-off is mandatory before merge.",
+            "This must be reviewed.",
+            "The migration needs fixing.",
+            "The release plan requires approval.",
+            "A security review is mandatory.",
+            "The patch is required to be validated.",
+            "Coverage must be added.",
+            "Adding a regression test is necessary.",
+            "Add a regression test.",
+            "Do not merge until the race is fixed.",
         )
         descriptions = (
             "This no longer needs to be repaired before merge.",
@@ -2721,6 +2747,15 @@ class ActionProjectionTests(unittest.TestCase):
                 "Fixing the login race is required before merge.",
                 "A security review remains necessary before merge.",
                 "A security sign-off is mandatory before merge.",
+                "This must be reviewed.",
+                "The migration needs fixing.",
+                "The release plan requires approval.",
+                "A security review is mandatory.",
+                "The patch is required to be validated.",
+                "Coverage must be added.",
+                "Adding a regression test is necessary.",
+                "Add a regression test.",
+                "Do not merge until the race is fixed.",
             ), start=1):
                 identity_value = f"provider:review:commented-action-{index}"
                 commented_action = json.dumps([{

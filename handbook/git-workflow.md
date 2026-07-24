@@ -68,6 +68,10 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   types or missing identities. These inbound comments are explicitly unscoped: they
   must project their own asks but cannot stand in for a task's complete action set.
   Current formal reviews and unresolved diff threads enforce `needs-agent/` actions.
+  A non-empty `COMMENTED` formal review always creates an agent-triage source instead
+  of asking a prose heuristic whether the human meant work; its queue item may be
+  non-blocking. `CHANGES_REQUESTED` and unresolved threads remain forced action state,
+  while an approval body is classified from its prose.
   Provider-authored prose may carry canonical links directly; otherwise an agent
   transcribes it into one or more live items with the adapter's exact versioned
   `External source` binding. Editing the source creates a new identity. A bound item
