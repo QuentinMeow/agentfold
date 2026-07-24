@@ -600,3 +600,22 @@
   invalidated the full panel.
 - Session handover:
   `history/conversations/2026-07-23-1719PDT-lifecycle-obligation-shape-coverage/handover.md`.
+
+## 2026-07-23 — requirement-predicate and explanation repair (codex)
+
+- Two fresh reviewers of `bdb8ae1c` found three remaining semantic shapes: a hard
+  recognized action without a lifecycle phrase, a requirement predicate placed after a
+  gerund or noun, and self-answered explanations beginning with `We use` or `By storing`.
+- Removed the lifecycle requirement from the narrower recognized-action fallback, so a
+  direct `must review` or `needs to review` obligation remains high-confidence on its
+  own.
+- Added a lifecycle-bound requirement-predicate form for required, necessary, mandatory,
+  needed, pending, or outstanding work. This covers gerund work and review/sign-off
+  nouns without pretending every noun phrase is an action.
+- Extended self-answered explanations only to non-action first-person use predicates and
+  `By <gerund>` implementation descriptions. Questions involving `you`, choices, later
+  asks, or non-allowlisted answers remain actionable.
+- Added exact action, explanation, provider-source, negation, and reported-speech
+  regressions. All 101 projection tests passed; both blocks invalidated the panel.
+- Session handover:
+  `history/conversations/2026-07-23-1734PDT-requirement-predicate-explanation-coverage/handover.md`.

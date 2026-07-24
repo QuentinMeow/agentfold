@@ -1206,6 +1206,11 @@ class ActionProjectionTests(unittest.TestCase):
         explanations = (
             "Why this approach? It keeps queue ownership provider-neutral.",
             "Why this approach?\nIt keeps queue ownership provider-neutral.",
+            (
+                "Why this approach? We use repository-local state "
+                "to avoid lock-in."
+            ),
+            "How is it implemented? By storing state in Git.",
         )
         for explanation in explanations:
             with self.subTest(explanation=explanation):
@@ -1265,6 +1270,11 @@ class ActionProjectionTests(unittest.TestCase):
             "This requires approval before merge.",
             "This needs a fix before merge.",
             "This ought to be reviewed before release.",
+            "The security guild must review this.",
+            "The security guild needs to review this.",
+            "Fixing the login race is required before merge.",
+            "A security review remains necessary before merge.",
+            "A security sign-off is mandatory before merge.",
         )
         descriptions = (
             "This no longer needs to be repaired before merge.",
@@ -1274,6 +1284,8 @@ class ActionProjectionTests(unittest.TestCase):
             "This should be repairable before merge.",
             "This should be highly repairable before merge.",
             "This needs no repair before merge.",
+            "A security review is not required before merge.",
+            "The memo says fixing the login race is required before merge.",
         )
         for action in actions:
             with self.subTest(action=action):
@@ -2705,6 +2717,10 @@ class ActionProjectionTests(unittest.TestCase):
                 "This must be approved before merge.",
                 "This needs fixing before merge.",
                 "This should be fixed before merge.",
+                "The security guild must review this.",
+                "Fixing the login race is required before merge.",
+                "A security review remains necessary before merge.",
+                "A security sign-off is mandatory before merge.",
             ), start=1):
                 identity_value = f"provider:review:commented-action-{index}"
                 commented_action = json.dumps([{

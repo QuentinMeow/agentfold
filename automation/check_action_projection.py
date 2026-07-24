@@ -289,7 +289,8 @@ SELF_ANSWERED_EXPLANATORY_QUESTION_RE = re.compile(
     r"(?:could|must|need(?:s)?|should|you|we|will|would)\b))"
     r"[^?!\n]{0,120}\?"
     r"(?=(?:[ \t]+|\n[ \t]*)(?:because\b|"
-    r"(?:(?:it|that|this)|the[ \t]+[A-Za-z][A-Za-z'-]*)[ \t]+"
+    r"by[ \t]+[A-Za-z][A-Za-z'-]*ing\b|"
+    r"(?:(?:i|it|that|this|we)|the[ \t]+[A-Za-z][A-Za-z'-]*)[ \t]+"
     r"(?:are|avoids?|documents?|explains?|is|keeps?|means?|preserves?|"
     r"records?|uses?)\b))",
     re.I | re.M,
@@ -371,11 +372,7 @@ FREEFORM_ACTOR_OBLIGATION_RE = re.compile(
     r"(?:requested|required)[ \t]+to)[ \t]+"
     rf"{OBLIGATION_MODIFIER_PATTERN}"
     r"(?!(?:not|never)\b)"
-    rf"{ACTION_VERB_PATTERN}\b"
-    r"[^.!?\n]{0,120}\b(?:before|by|prior[ \t]+to)[ \t]+"
-    r"(?:(?:a|an|the|this|that)[ \t]+)?"
-    r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
-    r"releas(?:e|ing)|ship(?:ping)?)\b",
+    rf"{ACTION_VERB_PATTERN}\b",
     re.I | re.M,
 )
 FREEFORM_PASSIVE_OBLIGATION_RE = re.compile(
@@ -416,6 +413,21 @@ FREEFORM_LIFECYCLE_OBLIGATION_RE = re.compile(
     r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,2}"
     r"[A-Za-z][A-Za-z'-]*(?:able|ible)\b))"
     r"[^.!?\n]{1,160}\b(?:before|by|prior[ \t]+to)[ \t]+"
+    r"(?:(?:a|an|the|this|that)[ \t]+)?"
+    r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
+    r"releas(?:e|ing)|ship(?:ping)?)\b",
+    re.I | re.M,
+)
+PREDICATE_LIFECYCLE_REQUIREMENT_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    rf"(?![^.!?\n]*\b{REPORTED_SPEECH_CUE_PATTERN}\b)"
+    r"(?!no\b)"
+    r"[^.!?\n]{1,120}\b"
+    r"(?:are|is|remains?|stays?)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!(?:no[ \t]+longer|not)\b)"
+    r"(?:mandatory|necessary|needed|outstanding|pending|required)\b"
+    r"[^.!?\n]{0,80}\b(?:before|by|prior[ \t]+to)[ \t]+"
     r"(?:(?:a|an|the|this|that)[ \t]+)?"
     r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
     r"releas(?:e|ing)|ship(?:ping)?)\b",
@@ -918,6 +930,7 @@ def declarative_action_request(clean):
         FREEFORM_ACTOR_OBLIGATION_RE,
         FREEFORM_PASSIVE_OBLIGATION_RE,
         FREEFORM_LIFECYCLE_OBLIGATION_RE,
+        PREDICATE_LIFECYCLE_REQUIREMENT_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
@@ -937,6 +950,7 @@ def declarative_action_request(clean):
                 FREEFORM_ACTOR_OBLIGATION_RE,
                 FREEFORM_PASSIVE_OBLIGATION_RE,
                 FREEFORM_LIFECYCLE_OBLIGATION_RE,
+                PREDICATE_LIFECYCLE_REQUIREMENT_RE,
             }:
                 clause_prefix = re.split(
                     r"(?:[.!?][ \t]+|\n[ \t]*\n)",
