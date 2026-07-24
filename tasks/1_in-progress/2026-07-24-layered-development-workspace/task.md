@@ -1,11 +1,11 @@
 # Design the layered development workspace and prove its first safe slice
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Mode:** async
 **Filed:** 2026-07-24, by codex, from the owner's layered-workspace request in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-layered-development-workspace.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`
 
 ## Goal
 
@@ -65,5 +65,5 @@ review is recorded.
 - Research and transfer context:
   `history/conversations/2026-07-24-0202PDT-layered-workspace-research-handoff/handover.md`
 - Provisional design notes: `design.md`
-- Pickup request:
-  `message-queue/needs-agent/requests/non-blocking-pick-up-layered-development-workspace.md`
+- Deferred coordination publication:
+  `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`

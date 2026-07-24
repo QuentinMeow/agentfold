@@ -14,3 +14,13 @@
   workspace task does not hide an urgent safety prerequisite.
 - Filed the task pickup and full requirements for another agent; no architecture or
   first-slice implementation was committed in this session.
+
+## 2026-07-24 — stacked-publication-preflight (codex)
+
+- Audited and preserved every source branch before rebuilding the work as three
+  bottom-up review layers.
+- An exact three-lens preflight blocked the first reconstructed workspace candidate
+  on coordination placement, durable follow-up ownership, verdict grammar,
+  publication-envelope authority, attached-worktree metadata, and Git-config parsing.
+- The executable and design repairs are in progress. The task remains in progress and
+  no blocked candidate is being presented as ready for human review.
