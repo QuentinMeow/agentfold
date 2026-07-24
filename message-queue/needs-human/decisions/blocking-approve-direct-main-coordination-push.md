@@ -1,6 +1,6 @@
 # May Codex push the stacked-review coordination commits directly to main?
 
-**Status:** waiting
+**Status:** folding
 **Blocking:** yes — operation:publish-stacked-review-prs is stopped
 **Filed:** 2026-07-24, by codex, from the stacked-publication session
 **Action:** Approve or decline pushing the coordination-only commit sequence directly to origin/main before Codex publishes the three dependent pull requests.
