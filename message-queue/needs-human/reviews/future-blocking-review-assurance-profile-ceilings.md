@@ -1,6 +1,6 @@
 # Do the four assurance-profile ceilings match the security claims you want?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the four claim ceilings below, or name a profile whose promise should change.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
