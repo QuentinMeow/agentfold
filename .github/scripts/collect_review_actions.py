@@ -339,11 +339,16 @@ def collect_sources(request, owner, name, number):
 
     by_identity = {}
     for review in latest:
+        review_state = review.get("state")
+        review_body = review.get("body", "")
         source = review_source(
             review,
             force=(
-                review.get("state") == "COMMENTED"
-                and bool(review.get("body", "").strip())
+                review_state == "CHANGES_REQUESTED"
+                or (
+                    review_state in {"APPROVED", "COMMENTED"}
+                    and bool(review_body.strip())
+                )
             ),
         )
         if review["state"] not in {"DISMISSED", "PENDING"}:

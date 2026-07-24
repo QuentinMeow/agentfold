@@ -642,3 +642,21 @@
   blocks invalidated the panel.
 - Session handover:
   `history/conversations/2026-07-23-1751PDT-structural-formal-review-triage/handover.md`.
+
+## 2026-07-23 — effective-review triage and clause-terminal obligation repair (codex)
+
+- Two fresh reviewers of `d14568a1` found that non-empty approved review prose still
+  depended on classification and that a shape-valid disagreement between GitHub's
+  latest-review connections could leave changes-requested state non-forced.
+- Made every non-empty effective formal review structural triage, regardless of review
+  state. Changes-requested is forced even with an empty body directly from either
+  connection, so provider connection disagreement cannot silently weaken it.
+- Tightened boundary-free gerund and noun obligations to cases where the action phrase
+  completes its clause. This retains `migration needs fixing` and `plan requires
+  approval` while allowing technical contracts such as an algorithm requiring element
+  insertion or a function requiring cache checks.
+- Updated task design and human/Git guidance to describe the provider rule. The focused
+  projection, collector, and workflow run passed all 118 tests. Both reviewer blocks
+  invalidated the panel.
+- Session handover:
+  `history/conversations/2026-07-23-1806PDT-effective-review-triage/handover.md`.

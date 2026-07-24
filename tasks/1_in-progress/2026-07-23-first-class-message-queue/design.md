@@ -112,11 +112,11 @@ portable adoption:
   instead copy its exact opaque, versioned `External source` binding. Those items stay
   live while the source remains effective; an edit changes identity, a superseding or
   dismissed formal review removes the old source, and resolving a diff thread removes
-  that source. GitHub routes every non-empty `COMMENTED` formal review as agent triage
+  that source. GitHub routes every non-empty effective formal review as agent triage
   rather than making English classification a prerequisite; that triage may be
-  non-blocking. Changes-requested reviews and unresolved threads remain forced action
-  state, while approval prose uses the ordinary classifier. This binding proves routing
-  and version continuity, not semantic
+  non-blocking. Changes-requested reviews are forced even with an empty body, directly
+  from either review connection, and unresolved threads remain forced action state.
+  This binding proves routing and version continuity, not semantic
   completeness of an agent-authored transcription; artifact review owns that judgment.
   GitHub's default/base context makes PR-description, issue, conversation, and
   PR-update review-state checks authoritative. A candidate-context job also replays

@@ -442,9 +442,12 @@ FREEFORM_ACTION_OBJECT_OBLIGATION_RE = re.compile(
     rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
     r"(?:needs?|requires?)[ \t]+"
     r"(?!no\b|to\b)"
-    r"(?:(?:a|an|another|the)[ \t]+)?"
-    rf"(?:{ACTION_GERUND_PATTERN}|{HUMAN_ACTION_NOUN_PATTERN}|"
-    r"fix|repair|test)\b",
+    r"(?:"
+    rf"{ACTION_GERUND_PATTERN}"
+    r"|(?:(?:a|an|another|the)[ \t]+)?"
+    rf"(?:{HUMAN_ACTION_NOUN_PATTERN}|fix|repair|test)"
+    r")\b"
+    r"[ \t]*[.!]?[ \t]*(?=$|\n)",
     re.I | re.M,
 )
 PREDICATE_ACTION_REQUIREMENT_RE = re.compile(

@@ -66,13 +66,15 @@ def thread(thread_id, resolved=False, comments=None, has_next=False):
 
 
 class CollectGitHubReviewActionsTests(unittest.TestCase):
-    def test_nonempty_commented_reviews_are_forced_for_triage(self):
+    def test_effective_formal_reviews_are_forced_structurally(self):
         body = "This needs to be repaired before merge."
 
         def request(query, variables):
             if query == COLLECTOR.LATEST_REVIEWS_QUERY:
                 return payload("latestReviews", [
                     review("commented-action", body, "COMMENTED"),
+                    review("approved-prose", "Looks good.", "APPROVED"),
+                    review("changes-empty", "", "CHANGES_REQUESTED"),
                     review("empty-comment", "", "COMMENTED"),
                 ])
             if query == COLLECTOR.LATEST_OPINIONS_QUERY:
@@ -85,7 +87,25 @@ class CollectGitHubReviewActionsTests(unittest.TestCase):
         by_body = {source["body"]: source for source in sources}
         self.assertEqual("needs-agent", by_body[body]["actor"])
         self.assertTrue(by_body[body]["force"])
-        self.assertFalse(by_body[""]["force"])
+        self.assertTrue(by_body["Looks good."]["force"])
+        empty_sources = [
+            source for source in sources if source["body"] == ""
+        ]
+        self.assertEqual(2, len(empty_sources))
+        self.assertEqual(
+            [False, True],
+            sorted(source["force"] for source in empty_sources),
+        )
+        changes_source = next(
+            source for source in empty_sources
+            if ":changes-empty:" in source["identity"]
+        )
+        empty_comment_source = next(
+            source for source in empty_sources
+            if ":empty-comment:" in source["identity"]
+        )
+        self.assertTrue(changes_source["force"])
+        self.assertFalse(empty_comment_source["force"])
 
     def test_collects_paginated_latest_reviews_opinions_and_threads(self):
         calls = []

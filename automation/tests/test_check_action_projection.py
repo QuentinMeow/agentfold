@@ -1312,6 +1312,11 @@ class ActionProjectionTests(unittest.TestCase):
             "This needs no repair before merge.",
             "A security review is not required before merge.",
             "The memo says fixing the login race is required before merge.",
+            "The algorithm requires adding each element to the set.",
+            (
+                "This function requires checking the cache before "
+                "computing a value."
+            ),
         )
         for action in actions:
             with self.subTest(action=action):
