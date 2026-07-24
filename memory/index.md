@@ -22,6 +22,7 @@
 - [Detector failures remain distinct from clean results and findings](decisions/2026-07-23-detector-failure-review-disposition.md) — Detector failures and incomplete coverage remain explicit result states; guard mode controls the transition response without relabeling the evidence
 - [The queue owns pending actions and filenames expose dependency timing](decisions/2026-07-23-queue-owns-pending-actions-and-timing.md) — Every pending human or durable cross-session agent action has one canonical queue item; its filename says when unresolved work blocks
 - [Unresolved queue delivery state is not regenerable](decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md) — Durable background can be reconstructed, but deleting an unresolved queue item loses its canonical action identity and delivery state
+- [The stacked-review coordination sequence may be pushed directly to main](decisions/2026-07-24-direct-main-coordination-push-authorized.md) — The prepared lifecycle-only coordination sequence may be pushed directly to main before publishing the three dependent pull requests
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retry items must be keyed by check+subject, or every rerun duplicates the queue

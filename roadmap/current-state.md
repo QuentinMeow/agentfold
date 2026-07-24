@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-22
+**Last-updated:** 2026-07-24
 
 What is true today, mapped to the desired-state lines.
 
@@ -33,6 +33,8 @@ What is true today, mapped to the desired-state lines.
   principle wording and narrowed the critical-obligations proposal to template-first,
   universally mode-configurable guards (`hard`, `soft`, `off`, `manual`);
   independent-agent review is manual by default and sandboxing is deferred.
+- **Stacked review publication (2026-07-24)**: authority and scope are recorded in
+  [the direct-main coordination decision](../memory/decisions/2026-07-24-direct-main-coordination-push-authorized.md).
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   public/private overlay, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
