@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-23
+**Last-updated:** 2026-07-24
 
 What is true today, mapped to the desired-state lines.
 
@@ -55,8 +55,10 @@ What is true today, mapped to the desired-state lines.
   universally mode-configurable guards (`hard`, `soft`, `off`, `manual`);
   independent-agent review is manual by default and sandboxing is deferred. On
   2026-07-23 the owner confirmed the four universal semantics; the proposal now defines
-  assurance profiles, template-first adoption, evidence authority, detector failure,
-  and incident recovery with separate examples.
+  composable guard bindings, derived assurance reports per obligation and scope,
+  template-first adoption, evidence authority, detector failure, and incident recovery
+  with separate examples. Controlled egress is reference-only and requires a separate
+  explicitly approved design.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   public/private overlay, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

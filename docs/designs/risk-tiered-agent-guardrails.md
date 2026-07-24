@@ -14,8 +14,8 @@ Build a small, layered guardrail system around this rule:
 Do not turn the handbook into one universal blocking checklist. Classify each obligation
 by consequence, reversibility, and detectability. Preferences stay as guidance;
 repairable drift becomes a reconciler finding; judgment-heavy risks can request explicit,
-content-bound review; and a deployment claiming protected disclosure boundaries runs the
-relevant guards in `hard` mode at more than one independently controlled boundary.
+content-bound review; and a policy requiring protection at a disclosure boundary binds
+the relevant guards in `hard` mode at independently controlled enforcement points.
 
 The proposed “acknowledge button” is useful because it interrupts the normal path and
 demands current dispositions. A self-authored receipt proves neither that the agent read
@@ -40,19 +40,26 @@ the same four mode semantics:
 |------|--------------------|-------------------|
 | `hard` | runs at its declared trigger | finding, incomplete coverage, or error blocks that transition |
 | `soft` | runs at its declared trigger | reports evidence and remediation without blocking |
-| `off` | does not run | records that the guard contributes no assurance |
+| `off` | does not run | records that the guard contributes no current evidence |
 | `manual` | runs only when explicitly invoked | produces evidence but is not an always-on gate |
 
+On 2026-07-24, the owner rejected “assurance profile” as selectable configuration.
+Repositories configure guard bindings, while AgentFold derives evidence-backed
+assurance separately for each obligation and scope. The owner also kept controlled
+egress outside approved work unless a separate proposal receives explicit human
+approval.
+
 The configuration controls invocation, not truth. Selecting `off` or `manual` for a
-critical guard visibly lowers the assurance profile; it cannot still claim that the
-boundary is enforced. A separately controlled provider rule may remain mandatory even
-when repository-local automation is off. Mode changes are ordinary reviewed policy
-changes, never an implicit exception written inside a detector.
+critical guard removes that guard's automatic evidence from the derived assurance
+report; it cannot still claim that the guard enforced a boundary. A separately
+controlled provider rule may remain mandatory even when repository-local automation is
+off. Mode changes are ordinary reviewed policy changes, never an implicit exception
+written inside a detector.
 
 Unless a later section explicitly says otherwise, words such as “block,” “reject,” and
-“fail closed” describe `hard` mode or an assurance profile that requires that hard guard.
-In `soft`, the same result is reported without stopping the transition; in `manual`, it
-affects only an explicitly requested run; in `off`, the guard supplies no result.
+“fail closed” describe a `hard` guard binding required at that transition. In `soft`,
+the same result is reported without stopping the transition; in `manual`, it affects
+only an explicitly requested run; in `off`, the guard supplies no result.
 
 ### Review vocabulary and concrete differences
 
@@ -62,18 +69,27 @@ questions. Use these definitions when reviewing or implementing the design:
 | Concept | What it controls or proves | Small example |
 |---------|----------------------------|---------------|
 | Guard mode | How one guard runs at one declared trigger | A PII scanner in `soft` reports a finding and permits the commit; the same scanner in `hard` blocks that commit. |
-| Assurance profile | The strongest whole-deployment security claim supported by every required control that is installed, active, and observable | Hard CI can justify “the finding cannot merge,” but not “the data never reached GitHub,” because the PR branch is already remote. |
+| Guard binding | One obligation, declared content scope, detector, lifecycle trigger or enforcement boundary, and mode | The same credential scanner may be `soft` on a staged tree and separately `hard` at remote admission. |
+| Derived assurance report | Current evidence-backed capabilities and gaps for one obligation and declared scope | Credentials may simultaneously show repository admission for covered patterns and manual semantic-review evidence only for the exact revision on which it ran. |
 | Template-first adoption | What AgentFold makes available without silently activating policy | Independent-agent review ships discoverably in a template as `manual`; an adopter must explicitly choose `hard` or `soft` to run it automatically. |
 | Self-authored acknowledgement | An untrusted, content-bound reminder that the producing agent considered an ambiguous case | The agent records why a public business email is allowed; this is useful audit evidence but not independent approval. |
 | Authenticated exception | Separate authority to permit a confirmed critical finding at a precisely bound destination | A human/provider approval may allow one content digest on one internal ref until expiry; the producing agent cannot grant this by writing `approved`. |
 | Detector failure state | Evidence that inspection was incomplete rather than clean | A crash or zero scanned files when files were expected blocks only in `hard`; `soft` reports the incomplete run and continues. |
 | Incident recovery | Post-disclosure containment, not permission to continue | Rotate an exposed credential first, then clean history and inventory clones, logs, artifacts, mirrors, and caches. |
 
-These concepts are deliberately separate. A mode is a per-guard behavior setting;
-an assurance profile is a deployment-wide claim ceiling. An acknowledgement addresses
-forgetfulness but cannot authorize a critical exception. A detector error is neither a
-finding nor a clean result. Recovery starts only after possible disclosure and cannot
-turn that disclosure into a successful guard run.
+These concepts are deliberately separate. Modes configure guard bindings; assurance is
+observed, not selected. There is no single deployment-wide scalar and no
+feature-selectable assurance label. Several capabilities may coexist for one obligation,
+while another obligation in the same change has different evidence and enforcement.
+An acknowledgement addresses forgetfulness but cannot authorize a critical exception.
+A detector error is neither a finding nor a clean result. Recovery starts only after
+possible disclosure and cannot turn that disclosure into a successful guard run.
+
+At a transition, the harness resolves applicable obligations and scopes, enumerates
+their guard bindings, runs or skips each binding according to its mode, records result,
+coverage, health, boundary, and exact subject, then enforces every applicable `hard`
+requirement. Only after that does it derive the report. An agent may help inventory
+controls and explain evidence; it cannot strengthen the report by writing a label.
 
 ## Context and current gap
 
@@ -113,6 +129,11 @@ This design does not:
 - make CI the first privacy boundary—content on a PR branch has already reached the
   remote system; or
 - include a filesystem/network capability sandbox in the initial implementation.
+
+Controlled egress is a reference-only future possibility, not approved scope. It would
+require a separate design for external filesystem/network controls and guarded
+credentials. AgentFold must not ship a controlled-egress mode, template, adapter, task,
+or implementation unless a user explicitly approves that separate proposal.
 
 ## How this design was made
 
@@ -182,9 +203,9 @@ judgment. This follows the same artifact-binding idea used by SLSA verification
 
 A self-authored receipt remains an untrusted claim even when perfectly bound. Evidence
 that authorizes a critical exception additionally binds repository identity, destination
-sink, ref, and assurance profile and needs an authenticated external principal: for
-example, a protected provider approval/check record or a signature whose key is
-unavailable to the producing agent.
+sink, ref, and required enforcement boundary and needs an authenticated external
+principal: for example, a protected provider approval/check record or a signature whose
+key is unavailable to the producing agent.
 
 ### Treat the verifier as attack surface
 
@@ -224,13 +245,10 @@ when available; protected required checks govern merge. GitHub rulesets can requ
 status check from an expected app
 ([GitHub rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
 
-There is no universal choke point for every disclosure sink. Git commits, LFS uploads,
-provider API calls, CI logs/artifacts, package/release publication, and mirrors each need
-an adapter or a capability boundary before their own egress. An agent with unrestricted
-network credentials can bypass repository scripts, so a no-transmission profile also
-requires an external capability boundary and credentials scoped to guarded wrappers.
-That stronger profile remains future work because the reviewed initial design explicitly
-defers sandboxing.
+Repository admission applies only to the declared Git surfaces that its observed
+controls cover. It does not imply protection for unrelated provider APIs, logs,
+artifacts, publications, or network access; those broader claims are outside this
+design.
 
 ### Make escape hatches narrower than the rule
 
@@ -295,12 +313,10 @@ last safe boundary sits—not by words such as MUST in prose.
 
 | Time | Best use | Guarantee ceiling when selected and healthy |
 |------|----------|---------------------------------------------|
-| Before agent input | classify, minimize, redact, or quarantine raw data | can prevent model exposure if access and egress are also controlled |
 | While editing | workspace/output scan and rapid correction | educational feedback; incomplete and agent-controlled |
 | Pre-commit | exact staged-tree scan and acknowledgement interlock | prevents ordinary local commits only |
 | Pre-push | scan every outbound commit and object | prevents ordinary pushes only; still client-controlled |
 | Pre-receive / push protection | quarantine and reject new objects centrally | prevents accepted remote history; remote necessarily receives/processes the attempted push |
-| Guarded provider/LFS/artifact API | scan or deny each non-Git egress sink | prevents only calls routed through the guarded capability |
 | PR CI | diverse rescans, policy tests, ownership, evidence validation | prevents merge, not remote disclosure |
 | Merge queue | retest the prospective merged result | prevents stale-base merge gaps when configured correctly |
 | Scheduled/history | catch new signatures, bypasses, and legacy leaks | detection and response, not prevention |
@@ -313,33 +329,42 @@ last safe boundary sits—not by words such as MUST in prose.
 | One universal pre-commit gate | simple mental model and fast feedback | bypassable; false positives and detector errors can deadlock all work |
 | One “smart” PII scanner | catches context patterns regex misses | remains a fallible oracle and a sensitive-data processor |
 | Independent reviewer agent | useful semantic critique | shared blind spots; no deterministic boundary; ongoing cost |
-| Capability sandbox alone (deferred) | prevents broad classes of reads/exfiltration | not selected now; cannot classify every permitted artifact or protect later Git use |
 | Risk-tiered layered evidence gates | matches friction and authority to consequence; replaceable detectors | more design work; strongest guarantees need hosting/infrastructure support |
 
-The last approach is recommended. The others remain useful layers or deployment modes,
+The last approach is recommended. The others remain useful mechanisms or guard bindings,
 but none should be advertised as a complete PII guarantee by itself.
 
-### Deployment assurance profiles
+### Derived assurance reports
 
-An assurance profile is the strongest whole-deployment claim justified by the combined
-controls, not another guard mode and not a label a policy file may declare for itself.
-The installed controls determine the claim. An installer records capabilities, and a
-protected canary verifies them against provider configuration. In `hard`, the
-profile-integrity guard rejects a stronger label when its required controls cannot be
-observed; other modes cannot treat that stronger profile as verified.
+Assurance is observed, not selected. An adopter configures individual guard bindings; it
+does not turn a named assurance level on or off. Each binding identifies an
+obligation, content scope, detector, lifecycle trigger or enforcement boundary, and one
+of the four modes. Multiple bindings may apply to the same change, and the same detector
+may be used by different bindings—for example, `soft` before commit and `hard` at remote
+admission.
 
-| Profile | Required observed controls | Honest claim |
-|---------|----------------------------|--------------|
-| Feedback only | local staged scan | catches ordinary mistakes before ordinary commits; bypassable |
-| Merge protected | independent required CI from a trusted source, with covered guards in `hard` mode | prohibited findings cannot merge; they may already exist remotely |
-| Repository admission | server pre-receive or equivalent push protection over declared Git surfaces, with covered guards in `hard` mode | rejected objects do not become reachable refs; the host still processed the attempted push |
-| Controlled egress (future) | admission controls plus an external filesystem/network capability boundary and guarded credentials for every declared sink | prohibited data cannot leave the approved boundary through covered capabilities |
+For each obligation and declared scope, the harness derives a current report from
+content-bound run manifests, detector coverage and health, enforcement configuration,
+and independently observed provider controls. The agent may explain this evidence but
+cannot make a stronger claim by writing a label. The claim is bounded by the weakest of
+detector coverage, enforcement boundary, and detector health or freshness. Coverage is
+stated as examined surfaces, inputs, skips, unsupported cases, limitations, and eval
+evidence; it is not converted to a completeness percentage unless an evaluation
+actually measures one.
 
-If a repository lacks remote admission, a critical guard configured `hard` may still
-block ordinary local commits and merges, but the harness must display “merge protected,”
-never “PII cannot reach the remote.” If a declared hard capability goes unavailable,
-the profile degrades visibly and its stronger transitions stop until recovery or
-authenticated break-glass. Soft, manual, and off deployments never inherit this claim.
+| Observed capability | Minimum current evidence | Honest claim |
+|---------------------|--------------------------|--------------|
+| Local detection evidence | A local or explicitly invoked guard ran on the bound subject and reported coverage and health | The recorded subject received the stated inspection; local automation remains bypassable |
+| Merge prevention | An independently controlled required check ran every applicable covered guard in `hard` mode on the prospective merge result | Covered prohibited findings cannot merge; content may already exist remotely |
+| Repository admission | Server pre-receive or equivalent push protection ran every applicable covered guard in `hard` mode over the declared Git surfaces | Rejected objects do not become reachable refs; the host still processed the attempted push |
+
+These capabilities are composable, not levels to choose between. A credential obligation
+may show local semantic-review evidence, merge prevention, and repository admission at
+once, while documentation style in the same change shows only local feedback. An
+uninvoked `manual` guard contributes no current evidence; once invoked, it contributes
+only evidence bound to that exact subject and never becomes an always-on gate. If an
+observed capability falls below a configured policy minimum, the applicable `hard`
+transition blocks. The report describes that result; it does not create enforcement.
 
 ## Recommended architecture
 
@@ -361,7 +386,7 @@ required schema:
 
 ```text
 templates/guardrails/
-├── config.json                # every guard id -> hard | soft | off | manual
+├── config.json                # each obligation/scope/detector/trigger binding -> mode
 ├── policy.json                # classifications and tier-to-control mapping
 └── evidence/                  # receipt, finding, waiver, and run-manifest schemas
 
@@ -382,8 +407,9 @@ tmp/guardrails/                 # ignored local reports; never raw matched liter
 ```
 
 The root reconciler can validate the policy/evidence schemas and expiry without owning
-the detectors themselves. The runner reports disabled and manual-only guards explicitly
-so absence of execution cannot be confused with a clean result.
+the detectors themselves. The runner reports `off` and uninvoked `manual` bindings as
+absent current evidence, while an invoked manual binding contributes evidence only for
+its exact subject. Neither state can be confused with a clean automatic run.
 
 “Template-first” therefore means opt-in activation, not missing documentation or an
 endorsed end-to-end workflow. AgentFold ships discoverable, replaceable mechanisms and
@@ -396,34 +422,20 @@ trade-off.
 
 ```mermaid
 flowchart LR
-    W["Agent workspace"] --> S["Candidate staged tree"]
-    S --> M{"Configured mode"}
-    M -- "off" --> C0["Continue; no guard assurance"]
-    M -- "manual, not invoked" --> C0
-    M -- "hard / soft / manual invoked" --> L{"Run local policy check"}
-    L -- "Clean" --> C1["Continue with recorded evidence"]
-    L -- "Judgment required" --> J{"Manual content review invoked?"}
-    J -- "Yes" --> K["Content-bound review receipt"]
-    J -- "No" --> X{"Mode hard?"}
-    K --> C1
-    L -- "Finding / incomplete / error" --> X
-    X -- "Yes" --> R["Redacted report and remediation"]
-    R --> W
-    X -- "No" --> N["Report weaker evidence; do not block"]
-    N --> C0
-    C0 --> C["Local commit"]
-    C1 --> C
-    C --> E{"Declared assurance controls healthy?"}
-    E -- "No, required hard control" --> D["Degraded: repair locally or authenticated break-glass"]
-    D --> W
-    E -- "No hard control required" --> I
-    E -- "Healthy merge-only profile" --> I
-    E -- "Healthy admission profile" --> P["Remote object admission"]
-    P -- "Reject (hard admission)" --> R
-    P -- "Accept" --> I["Required CI and merge-result checks"]
-    I -- "Reject (hard profile check)" --> R
-    I -- "Accept" --> G["Protected history"]
-    G --> H["Scheduled full-history rescan"]
+    C["Candidate transition"] --> O["Resolve applicable obligations and scopes"]
+    O --> B["Enumerate guard bindings for this trigger"]
+    B --> M{"Mode for each binding"}
+    M -- "off / manual not invoked" --> A["Record absent current evidence"]
+    M -- "hard / soft / manual invoked" --> R["Run detector; record result, coverage, health, boundary, and subject"]
+    R --> H{"Hard binding satisfied?"}
+    H -- "No: finding / incomplete / error" --> X["Block this transition; remediate or use authenticated exception"]
+    H -- "Yes, or binding is soft/manual" --> P["Permit this binding"]
+    A --> P
+    P --> N{"All applicable bindings evaluated?"}
+    N -- "No" --> M
+    N -- "Yes" --> T["Continue transition"]
+    A --> D["Derive assurance report per obligation and scope"]
+    R --> D
 ```
 
 In `hard` mode, critical findings do not take the self-receipt path. They are removed,
@@ -431,10 +443,9 @@ sanitized, or sent through a separately approved waiver. A scanner crash, timeou
 unreadable file, or unexplained skip is incomplete coverage—not clean—but only `hard`
 turns that outcome into a transition block. Soft and invoked-manual runs preserve the
 result as evidence and continue; off and uninvoked-manual paths make no inspection
-claim. The merge-only edge is an explicitly weaker deployment: content reaches the
-remote before CI, and the UI must say so rather than presenting that path as repository
-admission protection. A future sandbox/ingress design may add controls before the
-workspace; it is intentionally not part of this reviewed initial transition.
+claim. A merge binding is explicitly weaker than a repository-admission binding:
+content reaches the remote before CI, and the report must say so. Other independently
+observed bindings may still contribute their own capabilities for the same obligation.
 
 ### Content-bound acknowledgement
 
@@ -444,8 +455,9 @@ challenge without stopping the transition. The agent inspects the staged diff an
 redacted report, records a disposition
 for every finding ID, and asks the acknowledgement command to bind the receipt to:
 
-- the defined candidate envelope: repository identity, destination sink/ref/profile,
-  staged tree, parents, identities, and commit message with receipt fields removed;
+- the defined candidate envelope: repository identity, destination transition/ref and
+  required enforcement boundary, staged tree, parents, identities, and commit message
+  with receipt fields removed;
 - the relevant policy slice and detector version;
 - surfaces, redacted path locators, bytes, and file types examined;
 - explicit skipped, unreadable, timeout, and not-applicable counts;
@@ -454,8 +466,8 @@ for every finding ID, and asks the acknowledgement command to bind the receipt t
 
 A Git commit trailer is a reasonable portable carrier for a self-authored deliberation
 claim because the envelope can exclude the trailer and avoid a circular digest. Hard CI
-in a profile requiring this validation can reject structurally stale claims, but it
-cannot prove the agent read anything. An
+where policy requires this receipt can reject structurally stale claims, but it cannot
+prove the agent read anything. An
 unchanged finding-level disposition carries forward when its path, blob, rule, relevant
 policy slice, and declared context dependencies match; the new run manifest records that
 reuse so genuinely unrelated changes do not create warning fatigue. A contextual
@@ -489,48 +501,34 @@ The policy should distinguish:
 Recommended invariants:
 
 - Prohibited sensitive data does not become reachable from a protected Git ref.
-- Prohibited sensitive data is not transmitted outside its approved processing boundary.
 - Guardrail output never reproduces a matched sensitive literal.
 - Incomplete coverage or detector failure is never reported as clean.
 
-The second invariant is stronger than Git hosting can provide: a rejected remote push
-was still transmitted to and processed by the host. Environments that prohibit that
-transmission need local pre-push enforcement plus filesystem/network isolation. The
-portable repository can describe and test the policy but cannot create that external
-boundary by itself.
+This repository design makes no broader no-transmission claim: a rejected remote push
+was still transmitted to and processed by the host. Broader boundaries are outside the
+approved scope stated above.
 
 ### Covered surfaces
 
-Scanning only added text in the final diff is insufficient. The policy inventory should
-consider tracked blobs, every new commit in a push, content added and deleted in an
-intermediate commit, commit/tag messages, author identities, filenames, symlinks,
-submodules, archives, images/OCR, binary metadata, generated logs, Git LFS objects, PR
-text, CI logs/artifacts, releases, packages, and mirrors. Each run emits what it covered
-and what it skipped.
+Scanning only added text in the final diff is insufficient. The Git policy inventory
+should consider tracked blobs, every new commit in a push, content added and deleted in
+an intermediate commit, commit/tag messages, author identities, filenames, symlinks,
+submodules, archives, images/OCR, binary metadata, and generated repository files. Each
+run emits what it covered and what it skipped.
 
-Each declared surface maps to its own last safe sink:
-
-| Surface | Required pre-egress control for a no-transmission claim |
-|---------|---------------------------------------------------------|
-| Git blobs and commit/tag metadata | staged/commit-message scan plus pre-push or server admission over every new object |
-| Git LFS | guarded LFS transfer or LFS-server admission; a pointer-only Git scan is insufficient |
-| PR/issue/review text | provider API wrapper that scans arguments before submission |
-| CI logs and artifacts | redacting log boundary and guarded artifact uploader before host upload |
-| Releases and packages | protected publication workflow that scans payload and metadata before upload |
-| Mirrors | replication job that accepts only already-admitted object IDs and rescans metadata |
-
-The agent receives only credentials for guarded capabilities in the controlled-egress
-profile. If it can call the provider or network directly, these are detective controls,
-not a non-transmission boundary.
+| Git surface | Coverage requirement |
+|-------------|----------------------|
+| Candidate tree | inspect the exact blobs and relevant metadata bound to the local evidence |
+| Push range | inspect every newly introduced object, including content later deleted by another commit |
+| Protected ref or merge result | inspect the prospective accepted history under the independently observed rule |
+| LFS pointers, submodules, archives, images, and unsupported binaries | report whether content was inspected, delegated to a named detector, or explicitly unsupported; never treat the pointer or skip as complete coverage |
 
 ### Ingress and direct inspection
 
 The initial implementation begins with repository content already available to the
-agent; it does not promise sandboxed ingress. A future controlled-egress deployment may
-place unknown external data outside tracked Git in an access-controlled quarantine and
-minimize, redact, tokenize, or reject it before a cloud agent sees it. The agent may
-inspect sanitized input, tool output, generated files, and the exact staged diff to
-catch contextual PII that patterns miss.
+agent; it does not promise sandboxed ingress. The agent may inspect sanitized input,
+tool output, generated files, and the exact staged diff to catch contextual PII that
+patterns miss.
 
 Direct agent inspection is secondary evidence. If showing raw data to the model would
 itself violate policy, the harness must route review to an approved local model or human;
@@ -550,25 +548,26 @@ keyed construction or must avoid value-derived IDs.
 Ambiguous contextual findings may take the content-bound review route. In `hard` mode,
 active credentials and high-confidence prohibited identifiers block the configured
 transition. In `soft` or an invoked `manual` run they are reported without blocking and
-the deployment cannot claim that boundary as protected; in `off` they are not inspected
-by this guard. If a credential may have escaped the approved boundary, revoke or rotate
-it before cleaning history.
+that binding contributes no automatic protection at the boundary; another independently
+observed binding may still support its own narrower claim. In `off` they are not
+inspected by this guard. If a credential may have escaped the approved boundary, revoke
+or rotate it before cleaning history.
 
 ### Remote authority
 
-When the Git server is controlled and repository-admission protection is selected, run
-the covered guards in `hard` mode over all newly reachable objects in pre-receive
-quarantine and reject atomically. On GitHub, enable push protection and delegated bypass
-for supported secrets when that profile is desired, recognizing that secret scanning is
-not general PII scanning
+When an observed remote-admission binding exists and is `hard`, run its covered guards
+over all newly reachable objects in pre-receive quarantine and reject atomically. On
+GitHub, push protection and delegated bypass can provide that binding for supported
+secrets, recognizing that secret scanning is not general PII scanning
 ([GitHub push protection](https://docs.github.com/en/code-security/concepts/secret-security/push-protection)).
 
-For a merge-protected profile, required CI then replays the hard policy in a clean
-environment, preferably with at least one different detector or configuration,
-validates self-receipt freshness and external waiver authority, checks detector
-canaries, and scans the prospective merge result.
+When an applicable merge binding is `hard`, required CI replays its policy in a clean
+environment, preferably with at least one different detector or configuration, validates
+self-receipt freshness and external waiver authority, checks detector canaries, and
+scans the prospective merge result.
 Rules protect the scanner, workflow, policy, fixtures, and waiver paths themselves.
-Without remote admission, document the weaker promise honestly: “cannot merge,” not
+The derived report states merge prevention or repository admission only from the
+corresponding observed evidence. Without remote admission, it says “cannot merge,” not
 “cannot reach the remote.”
 
 ### Exceptions and recovery
@@ -576,11 +575,11 @@ Without remote admission, document the weaker promise honestly: “cannot merge,
 A critical exception is requested by the producing agent and approved by a distinct
 principal. It contains no sensitive literal and cannot suppress an entire directory.
 Its signed subject includes the finding/category, repository identity, destination sink,
-ref, assurance profile, covered content and context digests, reason, and expiry, so
-approval for an internal ref cannot be replayed to a public package. The gate verifies a
-protected provider approval record or a signature against a trusted key whose credential
-is outside the agent's capability set. An `approver:` string written by the agent is not
-approval.
+ref or transition, required enforcement boundary, covered content and context digests,
+reason, and expiry, so approval for an internal ref cannot be replayed to another
+destination. The gate verifies a protected provider approval record or a signature
+against a trusted key whose credential is outside the agent's capability set. An
+`approver:` string written by the agent is not approval.
 
 Scheduled full-history scans catch new signatures and expired waivers. A later leak is
 an incident, not a normal retry: contain access, revoke credentials, inventory every
@@ -589,7 +588,7 @@ host caches, delete affected logs/artifacts, then add the miss as a regression f
 GitHub notes that history rewriting does not clean other clones or every cached surface
 ([removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)).
 
-## Detector assurance
+## Detector validation and coverage
 
 Every detector or policy change runs:
 
@@ -648,8 +647,8 @@ Reject these as sole solutions:
 
 1. Define the universal guard configuration template and exact `hard`, `soft`,
    `off`, and `manual` runner semantics.
-2. Define the data/obligation policy, sink inventory, and honest assurance profiles
-   before choosing a scanner.
+2. Define the data/obligation policy, Git-surface inventory, guard bindings, and
+   derived-assurance report schema before choosing a scanner.
 3. Add a manually invocable stdlib coverage/result protocol and synthetic
    pass/finding/error canaries.
 4. Offer fast staged-tree feedback with redacted diagnostics; adopters choose its mode
@@ -659,9 +658,9 @@ Reject these as sole solutions:
    independent-agent review `manual` in the starter template.
 6. Add authenticated external approval for critical and operational exceptions; protect
    policy/check/fixture/waiver changes and validate authority where enabled.
-7. Offer pre-push, pre-receive/provider, LFS, provider-API, log/artifact, publication,
-   and mirror adapter templates as required by each deployment profile; never claim
-   coverage for an unguarded or disabled sink.
+7. Offer pre-push and pre-receive/provider-admission adapter templates for declared Git
+   surfaces; report every unguarded, unsupported, or disabled surface and never infer
+   coverage.
 8. Verify active deployment capabilities with canaries, then add optional scheduled
    history scans and an incident/outage exercise.
 9. Measure false negatives, false-positive burden, bypass rate, detector errors,
@@ -669,8 +668,9 @@ Reject these as sole solutions:
 10. Periodically ablate non-security scaffolding against held-out agent evals.
 
 Each step can land independently. No step should weaken the existing repository when a
-later, provider-specific layer is unavailable. Sandboxing requires a separate future
-design and is not a prerequisite for this sequence.
+later, provider-specific layer is unavailable. Sandboxing or any broader non-Git
+boundary requires a separate future design and explicit human approval; neither is a
+prerequisite or approved implementation step here.
 
 ## Research sources
 
