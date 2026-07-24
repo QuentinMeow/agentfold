@@ -1,11 +1,11 @@
 # Isolate repository tests from Git hook state
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Mode:** async
 **Filed:** 2026-07-24, by codex, from linked-worktree corruption observed during the layered workspace research session
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-test-runner-git-environment-isolation.md`
+**Queue actions:** none
 
 ## Goal
 
