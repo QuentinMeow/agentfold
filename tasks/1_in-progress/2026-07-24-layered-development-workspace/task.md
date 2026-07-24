@@ -5,7 +5,7 @@
 **Filed:** 2026-07-24, by codex, from the owner's layered-workspace request in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`; `message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md`
 
 ## Goal
 
