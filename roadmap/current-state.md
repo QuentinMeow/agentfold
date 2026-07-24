@@ -41,7 +41,9 @@ What is true today, mapped to the desired-state lines.
   Tasks declare live queue actions, every unclaimed backlog task has an agent pickup
   message, and human items mechanically require differences, a concrete example, an
   unattended/boundary outcome, and a full-context pointer. Reviews cannot accept a
-  response before their exact artifact exists.
+  response before their exact artifact exists. The superseded branch-local PR #7
+  continuation action was claimed and retired during stacked-history preparation; the
+  canonical main action owns the remaining review and exact-receipt work.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
 - **Design review (2026-07-22)**: a full grill of the harness — report in
