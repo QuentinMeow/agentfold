@@ -1,12 +1,12 @@
 # Do the four assurance-profile ceilings match the security claims you want?
 
-**Status:** awaiting-artifact
+**Status:** waiting
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the four claim ceilings below, or name a profile whose promise should change.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Resolution evidence:** `memory/decisions/2026-07-23-assurance-profile-review-disposition.md`
-**Review target:** pending
-**Review revision:** pending
+**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
