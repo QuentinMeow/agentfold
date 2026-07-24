@@ -1,6 +1,6 @@
 # Continue PR 7's queue-owned review and finalization
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-24, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Continue the queue-owned human review one question at a time, fold each response durably, then finalize PR #7's exact review artifact and independent panel before merge.
 **Full context:** [session handover](history/conversations/2026-07-24-0012PDT-derived-assurance-review-handoff/handover.md)

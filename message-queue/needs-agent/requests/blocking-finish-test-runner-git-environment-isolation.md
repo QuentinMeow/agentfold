@@ -1,6 +1,6 @@
 # Finish the test-runner Git-environment isolation repair
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-24, by codex, from the linked-worktree corruption observed in this session
 **Action:** Take over branch task/2026-07-24-isolate-test-git-environment, complete its TDD fix, and prove that hook-launched tests cannot mutate the invoking repository's config, refs, or worktree indexes.
 **Full context:** [root-cause and recovery record](history/conversations/2026-07-24-0202PDT-layered-workspace-research-handoff/artifacts/test-runner-git-environment-isolation.md)
