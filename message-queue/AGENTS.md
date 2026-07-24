@@ -19,8 +19,9 @@ Background stays durable; the item owns delivery/state and an unfolded response 
 - `non-blocking-<slug>.md`: the action never stops work and names the safe unattended
   outcome. Prefix is dependency timing, not risk severity.
 
-The filename is canonical; never add a duplicate `Blocking` field. Rename timing with
-every live link in one commit. Schemas: `templates/queue/`; naming ADR: `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`.
+The filename is canonical; never duplicate `Blocking`. Live timing may only escalate
+`non-blocking` → `future-blocking` → `blocking`, updating every link in one commit.
+Weakening needs an authorized replacement; a concrete human response freezes timing.
 
 ## Standard endpoints
 | Queue | Who acts | Contents |
@@ -38,8 +39,8 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 ## Lifecycle and content
 
 - Copy the matching template; human fields follow `handbook/human-action-guide.md`.
-  Record an artifact-scoped `External assignment` or versioned `External source`; keep
-  source items live until provider edit, deletion, or artifact closure.
+  Record an artifact-scoped `External assignment` or versioned `External source`.
+  Its last binding needs trusted release evidence; current/unavailable blocks admission.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
@@ -50,11 +51,10 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one reciprocal backlog `task.md` link. Its atomic claim/move deletes it; only
   pickups use moving task paths as live context, while retries may quote broken paths.
-- Ordinary actions predeclare `Resolution evidence`; every named non-queue file changes
-  on deletion. A review binds one target/revision. Terminal response does not end a
-  future dependency: keep it `folding` through the boundary. Fresh approval may satisfy
-  it; rejection/abandonment cannot. Git-range approval permits only same-base queue
-  lifecycle tail changes; post-merge cleanup needs a two-parent merge carrying the
-  receipt. `changes-requested` creates same-timing repair plus artifact-pending re-review.
+- Ordinary actions predeclare changed non-queue `Resolution evidence`. Reviews bind one
+  target/revision. Future timing survives response and escalation through its boundary;
+  only fresh approval can satisfy it. Git-range tails are queue-only on the same base.
+  Cleanup needs a receipt-carrying merge in already-admitted target history, never
+  candidate-local topology. `changes-requested` creates repair plus pending re-review.
 - Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
-- Transcribe chat responses before use; rename the live file whenever timing changes.
+- Transcribe chat responses before use; timing never changes after that response.

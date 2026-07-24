@@ -2754,6 +2754,94 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_forced_directionless_source_cannot_use_language_or_no_action_bypass(
+            self):
+        identity = "provider:issue:opaque-42"
+        bodies = (
+            "I'd like you to review the migration plan.",
+            "I'd like the next agent to run the migration test.",
+            "## What to review\n\nNo queued action requested.\n",
+            "",
+        )
+        with self.repo() as root:
+            self.git(root, "add", ".")
+            for body in bodies:
+                with self.subTest(body=body):
+                    sources = json.dumps([{
+                        "actor": "any",
+                        "identity": identity,
+                        "body": body,
+                        "force": True,
+                    }])
+                    findings = PROJECTION.external_action_source_findings(
+                        sources,
+                        ("What to review",),
+                        repo=root,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(identity, findings[0])
+                    self.assertIn(
+                        "needs-human or needs-agent queue items",
+                        findings[0],
+                    )
+
+    def test_forced_directionless_source_binding_path_supplies_actor(self):
+        identity = "provider:issue:opaque-43"
+        for actor in ("needs-human", "needs-agent"):
+            with self.subTest(actor=actor), self.repo() as root:
+                self.queue_item(
+                    root,
+                    name="non-blocking-handle-provider-issue.md",
+                    action="Handle the provider issue.",
+                    actor=actor,
+                    external_source=identity,
+                )
+                self.git(root, "add", ".")
+                sources = json.dumps([{
+                    "actor": "any",
+                    "identity": identity,
+                    "body": "Unclassified provider prose.",
+                    "force": True,
+                }])
+                self.assertEqual(
+                    [],
+                    PROJECTION.external_action_source_findings(
+                        sources,
+                        ("What to review",),
+                        repo=root,
+                    ),
+                )
+
+    def test_forced_directionless_source_accepts_direct_link_of_either_actor(
+            self):
+        for actor in ("needs-human", "needs-agent"):
+            with self.subTest(actor=actor), self.repo() as root:
+                item = self.queue_item(
+                    root,
+                    name="non-blocking-handle-provider-issue.md",
+                    action="Handle the provider issue.",
+                    actor=actor,
+                )
+                path = item.relative_to(root).as_posix()
+                self.git(root, "add", ".")
+                sources = json.dumps([{
+                    "actor": "any",
+                    "identity": f"provider:issue:direct-{actor}",
+                    "body": (
+                        "## What to review\n\n"
+                        f"- [Handle the provider issue.]({path})\n"
+                    ),
+                    "force": True,
+                }])
+                self.assertEqual(
+                    [],
+                    PROJECTION.external_action_source_findings(
+                        sources,
+                        ("What to review",),
+                        repo=root,
+                    ),
+                )
+
     def test_external_action_source_rejects_missing_or_wrong_actor_binding(self):
         identity = "provider:review-thread:opaque-43"
         with self.repo() as root:
@@ -3416,6 +3504,153 @@ class ActionProjectionTests(unittest.TestCase):
                     "--unscoped",
                 ]),
             )
+
+    def test_external_source_release_blocks_current_or_unknown_final_deletion(self):
+        identity = "provider:item:one:sha256:" + ("a" * 64)
+        with self.repo() as root:
+            item = self.queue_item(root, external_source=identity)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind source")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.unlink()
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "delete binding")
+            candidate = self.git(root, "rev-parse", "HEAD")
+
+            current = PROJECTION.external_source_release_findings(
+                json.dumps({"current": [identity], "released": []}),
+                base,
+                candidate,
+                repo=root,
+            )
+            unknown = PROJECTION.external_source_release_findings(
+                json.dumps({"current": [], "released": []}),
+                base,
+                candidate,
+                repo=root,
+            )
+            self.assertEqual(1, len(current))
+            self.assertIn("current external source", current[0])
+            self.assertEqual(1, len(unknown))
+            self.assertIn("without an authoritative", unknown[0])
+
+    def test_external_source_release_allows_authoritative_release(self):
+        identity = "provider:item:released:sha256:" + ("b" * 64)
+        with self.repo() as root:
+            item = self.queue_item(root, external_source=identity)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind source")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.unlink()
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "delete released binding")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                [],
+                PROJECTION.external_source_release_findings(
+                    json.dumps({"current": [], "released": [identity]}),
+                    base,
+                    candidate,
+                    repo=root,
+                ),
+            )
+            with self.assertRaises(ValueError):
+                PROJECTION.external_source_release_findings(
+                    json.dumps({
+                        "current": [],
+                        "released": [identity, "unrelated"],
+                    }),
+                    base,
+                    candidate,
+                    repo=root,
+                )
+
+    def test_external_source_release_allows_move_and_one_remaining_binding(self):
+        identity = "provider:item:move:sha256:" + ("c" * 64)
+        with self.repo() as root:
+            first = self.queue_item(root, external_source=identity)
+            self.queue_item(
+                root,
+                name="non-blocking-handle-copy.md",
+                actor="needs-agent",
+                external_source=identity,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind twice")
+            base = self.git(root, "rev-parse", "HEAD")
+            first.unlink()
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "keep one binding")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                [],
+                PROJECTION.external_source_release_findings(
+                    json.dumps({"current": [], "released": []}),
+                    base,
+                    candidate,
+                    repo=root,
+                ),
+            )
+
+    def test_external_source_release_rebinding_requires_old_release(self):
+        old = "provider:item:old:sha256:" + ("d" * 64)
+        new = "provider:item:new:sha256:" + ("e" * 64)
+        with self.repo() as root:
+            item = self.queue_item(root, external_source=old)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind old source")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(old, new),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "bind new source")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            findings = PROJECTION.external_source_release_findings(
+                json.dumps({"current": [old], "released": []}),
+                base,
+                candidate,
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn(old, findings[0])
+
+    def test_external_source_release_state_is_closed_and_unambiguous(self):
+        invalid = (
+            "[]",
+            "{}",
+            '{"current":[],"released":[],"maybe":[]}',
+            '{"current":"source","released":[]}',
+            '{"current":["same"],"released":["same"]}',
+            '{"current":["same","same"],"released":[]}',
+            '{"current":["bad\\nline"],"released":[]}',
+        )
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                PROJECTION.external_source_release_states(value)
+
+    def test_external_source_release_cli_requires_exact_two_tree_context(self):
+        with self.repo() as root:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+            ) as state_file:
+                state_file.write('{"current":[],"released":[]}\n')
+                state_path = state_file.name
+            try:
+                with mock.patch.object(PROJECTION, "REPO", root), \
+                        contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(
+                        2,
+                        PROJECTION.main([
+                            "--external-source-release-state-file", state_path,
+                        ]),
+                    )
+            finally:
+                Path(state_path).unlink()
 
     def test_core_projection_source_is_provider_neutral(self):
         source = MODULE_PATH.read_text(encoding="utf-8").lower()

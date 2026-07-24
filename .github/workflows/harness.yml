@@ -278,11 +278,17 @@ jobs:
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-current-pull-request-conversation-state
-      - name: Action projection — issue body and assignment state
-        if: ${{ github.event_name == 'issues' }}
+      - name: Action projection — issue assignment state
+        if: >-
+          ${{
+            (github.event_name == 'issues' &&
+             github.event.issue.state == 'open') ||
+            (github.event_name == 'issue_comment' &&
+             !github.event.issue.pull_request &&
+             github.event.issue.state == 'open')
+          }}
         env:
-          ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}
-          ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}
+          ACTION_PROJECTION_BODY: ""
           ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.issue.assignees) }}
           ACTION_PROJECTION_ARTIFACT_ID: ${{ github.event.issue.node_id }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-default-candidate.outputs.revision }}
@@ -331,7 +337,6 @@ jobs:
           export ACTION_PROJECTION_ASSIGNMENTS
           python3 automation/check_action_projection.py \
             --from-env ACTION_PROJECTION_BODY \
-            --additional-prose-env ACTION_PROJECTION_TITLE \
             --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
             --action-section "What to review" \
             --allow-missing-action-section-if-no-action \
@@ -339,19 +344,30 @@ jobs:
             --unscoped \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
-            --label github-issue
-      - name: Collect event conversation comment
-        if: ${{ github.event_name == 'issue_comment' }}
+            --label github-issue-assignment
+      - name: Collect current event-artifact conversation state
+        if: ${{ github.event_name == 'issues' || github.event_name == 'issue_comment' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACTION_PROJECTION_API_URL: ${{ github.api_url }}
+          ACTION_PROJECTION_EVENT_KIND: ${{ github.event_name }}
         run: |
           python3 .github/scripts/collect_conversation_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --issue-number "$ACTION_PROJECTION_ISSUE_NUMBER" \
+            --api-url "$ACTION_PROJECTION_API_URL" \
             --event-file "$GITHUB_EVENT_PATH" \
+            --event-kind "$ACTION_PROJECTION_EVENT_KIND" \
             --output "$RUNNER_TEMP/agentfold-conversation-actions.json"
-      - name: Action projection — issue or closed-PR conversation comment
+      - name: Action projection — current issue or closed-PR conversation state
         if: >-
           ${{
-            github.event_name == 'issue_comment' &&
-            (!github.event.issue.pull_request ||
-             github.event.issue.state != 'open')
+            github.event_name == 'issues' ||
+            (github.event_name == 'issue_comment' &&
+             (!github.event.issue.pull_request ||
+              github.event.issue.state != 'open'))
           }}
         env:
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-default-candidate.outputs.revision }}
@@ -382,6 +398,81 @@ jobs:
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-conversation-comment
+
+  external-source-release-admission:
+    name: External source release admission
+    if: >-
+      ${{
+        github.event_name == 'pull_request_target' ||
+        (github.event_name == 'push' &&
+         github.ref_name == github.event.repository.default_branch &&
+         github.event.before !=
+           '0000000000000000000000000000000000000000')
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted pre-admission source-release gate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.before }}
+      - name: Capture exact source-release base
+        id: source-release-base
+        env:
+          SOURCE_RELEASE_EXPECTED_BASE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          SOURCE_RELEASE_BASE="$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )"
+          test "$SOURCE_RELEASE_BASE" = "$SOURCE_RELEASE_EXPECTED_BASE"
+          printf 'revision=%s\n' "$SOURCE_RELEASE_BASE" >> "$GITHUB_OUTPUT"
+      - name: Fetch immutable source-release candidate
+        id: source-release-candidate
+        env:
+          SOURCE_RELEASE_EVENT: ${{ github.event_name }}
+          SOURCE_RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_RELEASE_EXPECTED_CANDIDATE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          if [ "$SOURCE_RELEASE_EVENT" = "pull_request_target" ]; then
+            git fetch --no-tags origin \
+              "refs/pull/$SOURCE_RELEASE_PR_NUMBER/merge"
+          else
+            git fetch --no-tags origin "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+          fi
+          SOURCE_RELEASE_CANDIDATE="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          test "$SOURCE_RELEASE_CANDIDATE" = \
+            "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+          printf 'revision=%s\n' "$SOURCE_RELEASE_CANDIDATE" \
+            >> "$GITHUB_OUTPUT"
+      - name: Resolve disappearing external sources from provider state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RELEASE_BASE: ${{ steps.source-release-base.outputs.revision }}
+          SOURCE_RELEASE_CANDIDATE: ${{ steps.source-release-candidate.outputs.revision }}
+          SOURCE_RELEASE_REPOSITORY: ${{ github.repository }}
+          SOURCE_RELEASE_GRAPHQL_URL: ${{ github.graphql_url }}
+          SOURCE_RELEASE_API_URL: ${{ github.api_url }}
+        run: |
+          python3 .github/scripts/resolve_external_source_releases.py \
+            --base-revision "$SOURCE_RELEASE_BASE" \
+            --candidate-revision "$SOURCE_RELEASE_CANDIDATE" \
+            --repository "$SOURCE_RELEASE_REPOSITORY" \
+            --graphql-url "$SOURCE_RELEASE_GRAPHQL_URL" \
+            --api-url "$SOURCE_RELEASE_API_URL" \
+            --output "$RUNNER_TEMP/agentfold-source-release-state.json"
+      - name: Verify final external-source bindings remain live
+        env:
+          SOURCE_RELEASE_BASE: ${{ steps.source-release-base.outputs.revision }}
+          SOURCE_RELEASE_CANDIDATE: ${{ steps.source-release-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-source-release-state-file \
+              "$RUNNER_TEMP/agentfold-source-release-state.json" \
+            --base-revision "$SOURCE_RELEASE_BASE" \
+            --candidate-revision "$SOURCE_RELEASE_CANDIDATE" \
+            --label github-external-source-release
 
   # GitHub has no pull_request_review_target, pull_request_review_comment_target, or
   # Actions trigger for thread resolve/unresolve. This job replays current state on

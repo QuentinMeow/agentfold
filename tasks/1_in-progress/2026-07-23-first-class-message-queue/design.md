@@ -96,8 +96,11 @@ portable adoption:
   predeclared evidence files and approved reviews revalidate the exact target.
   Terminal human response does not erase a future dependency: the folding review stays
   live through its boundary. A Git-range approval requires the same active base and
-  permits only queue-lifecycle tail changes; an exact two-parent merge must carry the
-  receipt before cleanup. Negative outcomes never authorize crossing. Requested changes
+  permits only queue-lifecycle tail changes. Live timing only escalates, freezes with a
+  human response, and retains any historical future boundary. Cleanup requires an exact
+  receipt-carrying merge already present in the adapter-supplied target base; topology
+  created inside the candidate proves nothing about admission. Negative outcomes never
+  authorize crossing. Requested changes
   leave a same-boundary agent repair plus a dependent artifact-pending human re-review;
   approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
@@ -113,8 +116,9 @@ portable adoption:
 - External action prose crosses a provider-neutral projection gate. Outbound task PR
   descriptions require immutable task-scope evidence and project every `needs-human`
   action in `Queue actions`; inbound review and conversation sources project only the
-  `needs-agent` actions carried by that surface; issue bodies may link either actor
-  because the path owns direction. Allowed
+  `needs-agent` actions carried by that surface. Every open issue is a forced
+  directionless source: English and no-action prose cannot suppress it, while each
+  direct or source-bound queue path owns direction. Allowed
   absolute links bind to an adapter-supplied immutable prefix. A provider assignment
   requires a distinct actor-correct queue item whose opaque binding preserves provider,
   stable artifact, role, actor kind, and principal identity; another artifact cannot
@@ -125,10 +129,19 @@ portable adoption:
   dismissed formal review removes the old source, and resolving a diff thread removes
   that source. GitHub routes every non-empty issue/PR conversation comment and every
   non-empty effective formal review as agent triage rather than making English
-  classification a prerequisite; that triage may be non-blocking. Comment deletion or
-  artifact closure resolves its source. Changes-requested reviews are forced even with
-  an empty body, directly from either review connection; unresolved threads remain
-  forced action state whenever current provider state is replayed.
+  classification a prerequisite; that triage may be non-blocking. Issue snapshots
+  replay on issue and non-PR comment events. Comment deletion or artifact closure
+  resolves its source. Changes-requested reviews are forced even with an empty body,
+  directly from either review connection; unresolved threads remain forced action
+  state whenever current provider state is replayed. A separate provider-neutral
+  exact-tree gate detects when a candidate removes the final binding for any versioned
+  source. Its thin provider adapter must classify every disappearing identity as
+  current or released; current and unavailable state block. The GitHub adapter resolves
+  opaque global node IDs and replays review/thread state from trusted base code. An
+  edit or supersession releases the old identity only after its current replacement is
+  bound in the candidate.
+  Required-check/ref protection is the hard admission boundary; a post-push result
+  alone cannot undo an already accepted direct write.
   This binding proves routing and version continuity, not semantic
   completeness of an agent-authored transcription; artifact review owns that judgment.
   GitHub's default/base context makes PR-description, issue, conversation, and

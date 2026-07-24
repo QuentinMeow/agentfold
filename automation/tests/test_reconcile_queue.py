@@ -1596,24 +1596,25 @@ class ReconcileQueueTests(unittest.TestCase):
                 source = self.write(
                     root,
                     "message-queue/needs-agent/requests/"
-                    "blocking-repair.md",
+                    "non-blocking-repair.md",
                     "# Repair\n\n"
                     "**Status:** open\n"
                     "**Filed:** 2026-07-23\n"
                     "**Action:** repair the source\n"
                     "**Full context:** `docs/source.md`\n"
                     "**Resolution evidence:** `docs/source.md`\n"
-                    "**Blocks now:** transition:merge\n",
+                    "**If unanswered:** leave the source unchanged\n",
                 )
                 self.git(root, "add", ".")
                 self.git(root, "commit", "-m", "file action")
                 destination = source.with_name(
-                    "non-blocking-repair.md"
+                    "future-blocking-repair.md"
                 )
                 source.rename(destination)
                 text = destination.read_text(encoding="utf-8").replace(
-                    "**Blocks now:** transition:merge",
                     "**If unanswered:** leave the source unchanged",
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** implementation may continue",
                 )
                 if rewrites_action:
                     text = text.replace(
@@ -1633,7 +1634,77 @@ class ReconcileQueueTests(unittest.TestCase):
                         "action identity changed", findings[0].message
                     )
 
-    def test_claim_receipt_survives_later_timing_rename(self):
+    def test_timing_cannot_weaken_or_move_with_a_human_response(self):
+        cases = (
+            (
+                "future-blocking-question.md",
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** implementation may continue\n"
+                "**Your answer:** ______\n",
+                "non-blocking-question.md",
+                "**If unanswered:** keep the current behavior\n"
+                "**Your answer:** ______\n",
+                "weakened",
+            ),
+            (
+                "non-blocking-question.md",
+                "**If unanswered:** keep the current behavior\n"
+                "**Your answer:** approve\n",
+                "future-blocking-question.md",
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** implementation may continue\n"
+                "**Your answer:** approve\n",
+                "human response",
+            ),
+        )
+        for (
+            source_name,
+            source_timing,
+            destination_name,
+            destination_timing,
+            expected,
+        ) in cases:
+            with self.subTest(expected=expected), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(
+                    root,
+                    "message-queue/needs-human/decisions/" + source_name,
+                    "# Choose\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** choose the source disposition\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/source.md`\n"
+                    + source_timing,
+                )
+                self.write(root, "docs/source.md", "# Source\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file human action")
+
+                destination = source.with_name(destination_name)
+                source.rename(destination)
+                destination.write_text(
+                    destination.read_text(encoding="utf-8").replace(
+                        source_timing, destination_timing
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn(expected, findings[0].message)
+
+    def test_claim_receipt_survives_later_timing_escalation(self):
         with self.repo() as root:
             self.init_git(root)
             self.write(
@@ -1644,14 +1715,14 @@ class ReconcileQueueTests(unittest.TestCase):
             evidence = self.write(root, "docs/source.md", "# Source\n")
             source = self.write(
                 root,
-                "message-queue/needs-agent/requests/blocking-repair.md",
+                "message-queue/needs-agent/requests/non-blocking-repair.md",
                 "# Repair\n\n"
                 "**Status:** open\n"
                 "**Filed:** 2026-07-23\n"
                 "**Action:** repair the source\n"
                 "**Full context:** `docs/source.md`\n"
                 "**Resolution evidence:** `docs/source.md`\n"
-                "**Blocks now:** transition:merge\n",
+                "**If unanswered:** leave the source unchanged\n",
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "file action")
@@ -1663,12 +1734,12 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "claim action")
-            destination = source.with_name("non-blocking-repair.md")
+            destination = source.with_name("blocking-repair.md")
             source.rename(destination)
             destination.write_text(
                 destination.read_text(encoding="utf-8").replace(
-                    "**Blocks now:** transition:merge",
                     "**If unanswered:** leave the source unchanged",
+                    "**Blocks now:** operation:repair",
                 ),
                 encoding="utf-8",
             )
@@ -2373,8 +2444,175 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(rejected, bool(findings), self.messages(findings))
                 if rejected:
                     self.assertIn(
-                        "remain live through an exact two-parent merge",
+                        "previously admitted target history",
                         findings[0].message,
+                    )
+
+    def test_historical_future_review_cannot_delete_as_blocking(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            source.write_text("# Reviewed change\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reviewed implementation")
+            reviewed_head = self.git(root, "rev-parse", "HEAD")
+            binding = f"git:{base}...{reviewed_head}"
+            item = self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review.md",
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the merge candidate\n"
+                "**Full context:** `docs/source.md`\n"
+                f"**Review target:** {binding}\n"
+                f"**Review revision:** {binding}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** implementation may continue\n"
+                "**Your review:** ______\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file future review")
+
+            blocking = item.with_name("blocking-review.md")
+            item.rename(blocking)
+            blocking.write_text(
+                blocking.read_text(encoding="utf-8").replace(
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** implementation may continue",
+                    "**Blocks now:** transition:merge",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "escalate review")
+            blocking.write_text(
+                blocking.read_text(encoding="utf-8").replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {binding}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ).replace(
+                    "**Your review:** ______",
+                    "**Your review:** approve",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record response")
+            blocking.write_text(
+                blocking.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim response")
+            blocking.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn(
+                "previously admitted target history", findings[0].message
+            )
+
+    def test_merge_receipt_must_predate_the_admission_candidate(self):
+        for receipt_in_base, rejected in ((False, True), (True, False)):
+            with self.subTest(receipt_in_base=receipt_in_base), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                base = self.git(root, "rev-parse", "HEAD")
+                source.write_text("# Reviewed change\n", encoding="utf-8")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "reviewed implementation")
+                reviewed_head = self.git(root, "rev-parse", "HEAD")
+                binding = f"git:{base}...{reviewed_head}"
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    "# Review\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** approve the merge candidate\n"
+                    "**Full context:** `docs/source.md`\n"
+                    f"**Review target:** {binding}\n"
+                    f"**Review revision:** {binding}\n"
+                    f"**Reviewed revision:** {binding}\n"
+                    "**Review outcome:** approved\n"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** implementation may continue\n"
+                    "**Your review:** approve\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record response")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim response")
+                feature = self.git(root, "rev-parse", "HEAD")
+                self.git(root, "checkout", "-b", "target", base)
+                self.git(
+                    root, "merge", "--no-ff", feature,
+                    "-m", "carry approved receipt",
+                )
+                receipt_merge = self.git(root, "rev-parse", "HEAD")
+                admitted_base = receipt_merge if receipt_in_base else base
+                if not receipt_in_base:
+                    self.git(root, "checkout", "-b", "candidate")
+                item.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "clean up receipt")
+                candidate = self.git(root, "rev-parse", "HEAD")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    with mock.patch.object(
+                        RECONCILE,
+                        "CHANGE_RANGE",
+                        f"{admitted_base}...{candidate}",
+                    ):
+                        findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(
+                    rejected, bool(findings), self.messages(findings)
+                )
+                if rejected:
+                    self.assertIn(
+                        "previously admitted target history",
+                        findings[-1].message,
                     )
 
     def test_not_approved_review_requires_same_boundary_agent_successor(self):
@@ -3717,7 +3955,7 @@ class ReconcileQueueTests(unittest.TestCase):
             (
                 "message-queue/needs-agent/requests/"
                 "non-blocking-repair.md",
-                False,
+                True,
             ),
             (
                 "message-queue/needs-human/decisions/"

@@ -126,24 +126,26 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "check_action_projection.py", self.job("reconcile-and-test")
         )
 
-    def test_issue_state_allows_link_actor_to_express_mixed_direction(self):
+    def test_issue_assignment_state_replays_on_issue_and_comment_events(self):
         projection = self.step(
             "authoritative-external-action-projection",
-            "Action projection — issue body and assignment state",
+            "Action projection — issue assignment state",
         )
         self.assert_contains_all(projection, (
-            "ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}",
-            "ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}",
+            "github.event_name == 'issues'",
+            "github.event_name == 'issue_comment'",
+            "!github.event.issue.pull_request",
+            'ACTION_PROJECTION_BODY: ""',
             "github.event.issue.assignees",
             "ACTION_PROJECTION_ARTIFACT_ID: "
             "${{ github.event.issue.node_id }}",
             "steps.authoritative-default-candidate.outputs.revision",
-            "--additional-prose-env ACTION_PROJECTION_TITLE",
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
             "--queue-actor any",
             "--unscoped",
             "--allow-missing-action-section-if-no-action",
         ))
+        self.assertNotIn("--additional-prose-env", projection)
 
     def test_assignment_adapter_maps_bot_direction_and_fails_unknowns_closed(self):
         pull_request = self.step(
@@ -169,7 +171,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         ))
         issue = self.step(
             "authoritative-external-action-projection",
-            "Action projection — issue body and assignment state",
+            "Action projection — issue assignment state",
         )
         self.assert_contains_all(issue, (
             '--argjson assignees "$ACTION_PROJECTION_ASSIGNEES"',
@@ -187,7 +189,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "--external-action-env ACTION_PROJECTION_ASSIGNEES", issue
         )
 
-    def test_conversation_comments_are_structural_and_use_distinct_candidates(self):
+    def test_conversation_state_replays_snapshot_and_uses_distinct_candidates(self):
         checkout = self.step(
             "authoritative-external-action-projection",
             "Checkout default-branch projection gate",
@@ -205,18 +207,31 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         ))
         collect = self.step(
             "authoritative-external-action-projection",
-            "Collect event conversation comment",
+            "Collect current event-artifact conversation state",
         )
         self.assert_contains_all(collect, (
+            "github.event_name == 'issues'",
+            "github.event_name == 'issue_comment'",
+            "GITHUB_TOKEN: ${{ github.token }}",
+            "ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}",
+            "ACTION_PROJECTION_ISSUE_NUMBER: "
+            "${{ github.event.issue.number }}",
+            "ACTION_PROJECTION_API_URL: ${{ github.api_url }}",
             "collect_conversation_actions.py",
+            '--repository "$ACTION_PROJECTION_REPOSITORY"',
+            '--issue-number "$ACTION_PROJECTION_ISSUE_NUMBER"',
+            '--api-url "$ACTION_PROJECTION_API_URL"',
             '--event-file "$GITHUB_EVENT_PATH"',
+            '--event-kind "$ACTION_PROJECTION_EVENT_KIND"',
             "agentfold-conversation-actions.json",
         ))
         issue = self.step(
             "authoritative-external-action-projection",
-            "Action projection — issue or closed-PR conversation comment",
+            "Action projection — current issue or closed-PR conversation state",
         )
         self.assert_contains_all(issue, (
+            "github.event_name == 'issues'",
+            "github.event_name == 'issue_comment'",
             "!github.event.issue.pull_request",
             "github.event.issue.state != 'open'",
             "steps.authoritative-default-candidate.outputs.revision",
@@ -242,6 +257,58 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             self.assertNotIn("--unscoped", step)
             self.assertNotIn("--additional-prose-env", step)
             self.assertNotIn("--external-action-env", step)
+
+    def test_external_source_release_is_checked_at_controlled_admission(self):
+        job = self.job("external-source-release-admission")
+        self.assert_contains_all(job, (
+            "name: External source release admission",
+            "github.event_name == 'pull_request_target'",
+            "github.event_name == 'push'",
+            "github.event.repository.default_branch",
+            "github.event.before !=",
+        ))
+        checkout = self.step(
+            "external-source-release-admission",
+            "Checkout trusted pre-admission source-release gate",
+        )
+        self.assert_contains_all(checkout, (
+            "fetch-depth: 0",
+            "github.event.pull_request.base.sha",
+            "github.event.before",
+        ))
+        candidate = self.step(
+            "external-source-release-admission",
+            "Fetch immutable source-release candidate",
+        )
+        self.assert_contains_all(candidate, (
+            '"refs/pull/$SOURCE_RELEASE_PR_NUMBER/merge"',
+            "github.event.pull_request.merge_commit_sha",
+            "github.sha",
+            'test "$SOURCE_RELEASE_CANDIDATE" =',
+        ))
+        resolve = self.step(
+            "external-source-release-admission",
+            "Resolve disappearing external sources from provider state",
+        )
+        self.assert_contains_all(resolve, (
+            "GITHUB_TOKEN: ${{ github.token }}",
+            "resolve_external_source_releases.py",
+            '--base-revision "$SOURCE_RELEASE_BASE"',
+            '--candidate-revision "$SOURCE_RELEASE_CANDIDATE"',
+            "agentfold-source-release-state.json",
+        ))
+        verify = self.step(
+            "external-source-release-admission",
+            "Verify final external-source bindings remain live",
+        )
+        self.assert_contains_all(verify, (
+            "automation/check_action_projection.py",
+            "--external-source-release-state-file",
+            '--base-revision "$SOURCE_RELEASE_BASE"',
+            '--candidate-revision "$SOURCE_RELEASE_CANDIDATE"',
+            "--label github-external-source-release",
+        ))
+        self.assertNotIn("pull_request.head.sha", job)
 
     def test_review_surfaces_enforce_actions_with_honest_trust_ceiling(self):
         self.assertIn("permissions:\n  contents: read", self.workflow)

@@ -21,11 +21,11 @@ Rules:
   (`memory/lessons/automation/deterministic-finding-keys.md`).
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
-  actor's generic schema. Sticky `queue-resolution` checks every staged/range deletion
-  against its claim and changed evidence; future reviews remain live through their
-  boundary; Git-range approval permits only queue-lifecycle tail changes. Requested
-  changes require agent repair plus artifact-pending re-review. `stale-queue` age-checks `blocking-*`, never hard-stales
-  `non-blocking-*`, and checks `future-blocking-*` only at a reached UTC `YYYY-MM-DD`;
+  actor's generic schema. Timing only escalates while live and freezes on human response.
+  `queue-resolution` checks staged/range deletion against its claim and evidence;
+  historical future reviews survive escalation. Git-range approval permits
+  queue-only tails; cleanup needs its merge in the admitted base. Requested changes
+  require repair plus pending re-review. `stale-queue` checks reached dates, not `non-blocking-*`;
   event boundaries require actor reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
   head remains the candidate; a divergent old-tip snapshot must retain every live action,
@@ -33,14 +33,14 @@ Rules:
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned
-  queue actions bound to the stable artifact, role, actor kind, and principal. Inbound sources are unscoped:
-  their own asks remain enforceable without claiming to represent a task. Versioned
-  source bindings let an agent transcribe uneditable provider prose. Every non-empty
-  GitHub conversation comment is structural agent triage, and current conversation
-  plus review state replay on supported PR/review events. Summary mode allows ordinary
-  change titles while rejecting asks. GitHub thread state has no Actions transition
-  trigger: hard merge assurance needs provider-native conversation resolution, and
-  hostile-workflow assurance needs a separately controlled provider gate.
+  queue actions bound to the stable artifact, role, actor kind, and principal. Inbound
+  sources are unscoped; forced directionless sources let the bound queue path select
+  the actor. Structural issues/comments replay current event-artifact state. Removing
+  the final versioned source binding needs a closed current/released attestation from
+  the provider adapter at exact-tree admission; current or unknown blocks. Summary mode
+  allows ordinary PR titles while rejecting asks. GitHub thread state has no Actions
+  transition trigger: hard assurance needs native conversation resolution, a protected
+  required release check, and separately controlled provider code.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository

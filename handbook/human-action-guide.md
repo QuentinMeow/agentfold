@@ -47,7 +47,9 @@ prerequisite. A recommendation is evidence, not permission to hide an alternativ
 Then choose the filename prefix from `message-queue/AGENTS.md`: `blocking-` only when a
 named boundary is stopped now; `future-blocking-` when work stops at an explicit future
 boundary; `non-blocking-` only when it can remain unanswered forever. Risk severity does
-not determine the prefix.
+not determine the prefix. A live action may move only toward an earlier dependency:
+`non-blocking` → `future-blocking` → `blocking`. Weakening creates an authorized
+replacement, and no human timing changes with or after the first concrete response.
 
 ## Project without forking the action
 
@@ -59,28 +61,32 @@ when neither a human nor an agent/bot assignment exposes an action. Each provide
 assignment gets a distinct queue item whose `External assignment` field exactly copies
 the adapter's opaque provider, stable-artifact, role, actor-kind, and principal binding;
 another artifact or generic review cannot reuse it for a new assignee or reviewer.
-When a person writes an actionable review or diff thread without a queue link, the
-receiving agent transcribes it instead of asking that person to rewrite their words.
-On GitHub, every non-empty issue or PR conversation comment and every non-empty
-effective formal review is routed to `needs-agent` for triage even when its wording
-looks informational; this structural rule keeps durable interaction from depending on
-English inference. The triage action may be non-blocking. Changes-requested reviews
-are forced even with an empty body; whenever current state is replayed, unresolved diff
-threads remain forced action state. GitHub emits no Actions event for resolving or
+When a person writes provider prose without a queue link, the receiving agent
+transcribes it instead of asking that person to rewrite their words. On GitHub, every
+open issue is a forced, directionless source: its direct or source-bound queue path
+chooses the concrete actor, and even informational wording needs at least a
+non-blocking triage item. Every non-empty conversation comment on an issue/PR and every
+effective formal review is structural `needs-agent` triage. These rules do not consult
+English, and no-action prose cannot waive them. Changes-requested reviews are forced
+even with an empty body; whenever current state is replayed, unresolved diff threads
+remain forced action state. GitHub emits no Actions event for resolving or
 reopening a thread, so replay also runs when a PR enters a merge queue, but its evidence
 is only as fresh as the last supported event. A hard claim that a currently unresolved
 thread cannot merge requires GitHub's native “Require conversation resolution before
 merging” rule (`required_review_thread_resolution` in rulesets or
 `required_conversation_resolution` in classic protection). That rule does not prove
 that every transient reopen-then-resolve toggle was durably queued.
-Each resulting `needs-agent/` item copies the adapter's opaque, content-versioned
-`External source`; one source may bind several items when it contains several asks.
+Each transcribed item copies the adapter's opaque, content-versioned `External source`;
+one source may bind several items, potentially across actor folders for an issue.
 Keep those items live while the provider still reports the source as current—on
 GitHub, an open artifact's current conversation comment, effective formal review, or
 unresolved diff thread at a replayed snapshot. A comment edit gets a new identity;
 comment deletion or artifact closure removes it. A superseded/dismissed review or
 resolved thread likewise leaves the next replayed snapshot and permits normal queue
-resolution. Example: “Please fix
+resolution. At controlled Git admission, removing the final binding also requires the
+trusted adapter to classify the exact old identity as released; current or unavailable
+provider state blocks. That check needs protected required-check admission to prevent
+direct writes from landing before a post-push failure. Example: “Please fix
 both the race and its missing regression” may become two request files with the same
 source binding and separate `Action` fields. The binding proves durable routing and
 source version, not that an agent's transcription captured every nuance; ordinary
@@ -98,8 +104,10 @@ binding. `approved` accepts the exact revision. For `future-blocking-*`, that ou
 is response-terminal but not boundary-terminal: keep the folding item live until the
 boundary is crossed. A Git-range approval stays fresh only on the same base with
 queue-lifecycle-only commits after its reviewed head. At merge it can satisfy the
-boundary while live; cleanup requires an exact two-parent merge that carried the
-receipt. Rejected or abandoned review never authorizes crossing. `changes-requested` creates one
+boundary while live; cleanup requires an exact two-parent merge carrying the receipt
+in target history already admitted before the cleanup candidate. A merge manufactured
+inside that candidate is not evidence of crossing. Historical future timing survives
+later escalation. Rejected or abandoned review never authorizes crossing. `changes-requested` creates one
 same-timing `needs-agent` action that solely owns the concrete repair, context, and
 resolution evidence, plus one distinct `needs-human` re-review awaiting that artifact;
 the latter depends on the former, so the review boundary stays closed without duplicating

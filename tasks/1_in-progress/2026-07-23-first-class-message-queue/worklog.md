@@ -728,3 +728,32 @@
   changes; the item remains live, and post-merge deletion needs a two-parent merge that
   carried its exact folding receipt. Focused assignment/workflow tests and the new
   candidate-drift/merge-receipt tests passed. The rejected panel was invalidated.
+
+## 2026-07-23 — structural issue, source-release, and admitted-receipt repair (codex)
+
+- A fresh three-lens review of `52f5b046` found five related bypasses: polite issue
+  phrasing still depended on finite English classification; issue comments replayed
+  only the triggering delta; pushes did not check removal of a still-current provider
+  binding; timing renames could erase a future dependency; and a candidate-local merge
+  could imitate the expected boundary receipt.
+- Open issue artifacts are now forced, content-versioned, actor-neutral sources. The
+  canonical queue path chooses the actor, and neither unknown prose nor the no-action
+  acknowledgement can waive structural routing.
+- Issue/comment runs now fetch the complete current artifact snapshot and overlay the
+  triggering event without dropping peer comments. API/event disagreement, malformed
+  deletion, pagination failure, repository mismatch, and unknown state fail closed.
+- A provider-neutral exact-tree release gate detects disappearance of the final
+  `External source` binding. The thin GitHub adapter resolves opaque global node IDs
+  from trusted base code; an unchanged source blocks, terminal provider state releases,
+  and an edit/supersession releases only after the candidate binds the current version.
+  Pull-request admission checks this before merge; default-branch push replay is
+  detection only, so hard assurance still requires protected required checks.
+- Live timing now escalates monotonically and freezes with the first human response.
+  Deletion follows lineage so a historical future boundary survives escalation.
+  Post-merge cleanup counts only a receipt-carrying merge already present in the
+  adapter-supplied admission base; a root range or candidate-local topology fails.
+- Recorded the two-way-door lifecycle decision in
+  `memory/decisions/2026-07-23-live-queue-obligations-only-weaken-with-evidence.md`.
+  The full runner passed all 8 test files: 112 projection tests, 55 core-scope tests
+  (one skipped), 24 collector tests, 9 workflow tests, 224 queue tests, 9 source-release
+  resolver tests, and 8 service tests.

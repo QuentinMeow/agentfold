@@ -29,7 +29,8 @@ named current task, transition, or operation cannot proceed; `future-blocking-` 
 work may continue only until a named date, event, or transition; `non-blocking-` means
 the message never stops work and records the safe unattended outcome. The filename is
 the canonical delivery class. Each queue template shows the one matching timing block
-to retain; do not add a second `Blocking` field.
+to retain; do not add a second `Blocking` field. Live timing can only escalate from
+non-blocking to future-blocking to blocking, and freezes with a human response.
 
 `task/task.md` lists its live dependencies in `Queue actions`. `handover.md` projects
 open human queue items in delivery order; it never originates an action.

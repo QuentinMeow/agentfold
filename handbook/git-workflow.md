@@ -47,7 +47,10 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - A terminal human response does not erase a future merge dependency. Keep its
   `future-blocking-*` review folding and live; fresh approval of `git:<base>...<head>`
   satisfies merge only on that base with queue-only lifecycle commits afterward. The
-  merge commit carries the receipt, and only a later cleanup commit deletes it.
+  merge commit carries the receipt. Cleanup passes only when that merge is already in
+  the adapter-supplied target base, so candidate-local topology cannot stand in for
+  admission. Local no-range hooks are best-effort; hard assurance depends on a
+  controlled adapter supplying the authentic target base and enforcing its ref policy.
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
   one top-level entry and one queue link per action, including every live human path
@@ -61,23 +64,31 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   actor-kind/principal binding, so another artifact cannot reuse it. Use the exact
   `No queued action requested.`
   acknowledgement only when neither task scope nor assignment exposes an action.
-- A provider title is change-summary metadata, so a conventional title such as
+- A pull-request title is change-summary metadata, so a conventional title such as
   `Fix the login race` is not itself an ask. Questions, TODOs, explicit obligations,
-  authority commands such as `Review this change`, and requests in a title or body
-  still require queue projection. Editing provider prose never creates or resolves an
-  ask.
-- GitHub issue bodies accept either queue actor because the linked path says who acts
-  next. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
+  authority commands such as `Review this change`, and requests in its title or body
+  still require queue projection.
+- Every open GitHub issue is a structurally forced, content-versioned external source;
+  neither English phrasing nor `No queued action requested.` can suppress it. The issue
+  body may link a canonical item directly, or a receiving agent may transcribe
+  uneditable title/body prose into item(s) carrying the exact `External source`.
+  Issue sources are directionless until each linked or bound path selects
+  `needs-human/` or `needs-agent/`; an informational issue may select a non-blocking
+  triage item. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
   `Bot` accounts to `needs-agent`, and fail closed on unknown account types or missing
-  identities. Every non-empty issue or PR conversation comment is a structurally
-  forced `needs-agent` triage source; author type does not change who triages next.
-  Its body is never English-classified. An edit versions the identity, deletion removes
-  it, and closing the issue/PR is its terminal provider boundary. Current open-PR
-  comments replay on every candidate update; issue and closed-PR events capture the
-  latest trusted default-branch commit so a new binding can satisfy a rerun without
-  editing the author's words. These inbound sources are unscoped: they carry only
-  their own triage and cannot stand in for a task's complete action set. Current formal
-  reviews and unresolved diff threads also enforce `needs-agent/` actions.
+  identities. Every non-empty conversation comment on an issue or PR is structural
+  `needs-agent` triage, regardless of author or wording. Comment edits version identity;
+  deletion or artifact closure ends it. Open issues replay on issue and non-PR comment
+  events, while open-PR comments replay on candidate updates. These inbound sources are
+  unscoped: they carry only their own action and cannot stand in for a task's complete
+  set. Removing a source's final live binding is a separate exact-tree admission check:
+  a trusted provider adapter must classify that exact version as released; current or
+  unavailable state fails closed. GitHub resolves global node IDs from trusted base
+  code and replays review/thread state as needed. This required check prevents a
+  candidate-local deletion from waiting for a later comment event to rediscover the
+  orphan. Direct pushes can land before their post-push result, so hard enforcement also
+  requires rules that admit changes only through the protected required check. Current
+  formal reviews and unresolved diff threads also enforce `needs-agent/`.
   Every non-empty effective formal review creates an agent-triage source instead of
   asking a prose heuristic whether the human meant work; its queue item may be
   non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from

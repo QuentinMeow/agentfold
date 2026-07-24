@@ -15,9 +15,10 @@ everyone reads.
 - Numbered prefixes **only** for ordered pipelines where sorting is the point:
   `tasks/0_backlog/ … 4_done/`. Everywhere else, no numbers — they churn on insert.
 - Route queue folders by stable properties: who acts next, then message kind. Dependency
-  timing is visible in the filename and may change with `git mv`; update every live link
-  in that coordination commit (ADR:
-  `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`).
+  timing is visible in the filename and may only escalate with `git mv`; update every
+  live link in that coordination commit. Weakening resolves the old identity and creates
+  an authorized replacement (ADR:
+  `memory/decisions/2026-07-23-live-queue-obligations-only-weaken-with-evidence.md`).
 
 ## Files
 

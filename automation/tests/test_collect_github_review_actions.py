@@ -79,10 +79,47 @@ def issue_comment(index, body="Looks good.", updated_at=None, user_type="User"):
     return {
         "node_id": f"IC_{index}",
         "body": body,
-        "updated_at": updated_at or f"2026-07-23T20:{index:02d}:00Z",
+        "updated_at": updated_at or (
+            f"2026-07-23T{20 + index // 60:02d}:{index % 60:02d}:00Z"
+        ),
         "html_url": f"https://github.invalid/comment/{index}",
         "user": {"type": user_type},
     }
+
+
+def github_event(
+    action,
+    comment=None,
+    *,
+    event_kind="issue_comment",
+    issue_number=42,
+    issue_state="open",
+    pull_request=False,
+    issue_title="Triage this issue",
+    issue_body="Please investigate.",
+):
+    issue = {
+        "number": issue_number,
+        "node_id": "I_kwDOIssue",
+        "state": issue_state,
+        "title": issue_title,
+        "body": issue_body,
+        "html_url": f"https://github.invalid/issues/{issue_number}",
+    }
+    if issue_state == "closed":
+        issue["closed_at"] = "2026-07-23T20:00:30Z"
+    if pull_request:
+        issue["pull_request"] = {
+            "url": f"https://api.github.invalid/pulls/{issue_number}"
+        }
+    payload = {
+        "action": action,
+        "repository": {"full_name": "owner/repo"},
+        "issue": issue,
+    }
+    if event_kind == "issue_comment":
+        payload["comment"] = comment
+    return payload
 
 
 class CollectGitHubConversationActionsTests(unittest.TestCase):
@@ -108,17 +145,28 @@ class CollectGitHubConversationActionsTests(unittest.TestCase):
         self.assertEqual("needs-agent", bot["actor"])
         self.assertTrue(bot["force"])
 
-    def test_blank_comment_is_inactive_and_delete_is_absent(self):
+    def test_blank_comment_is_inactive_and_delete_removes_only_that_node(self):
         blank = CONVERSATION.comment_source(
             issue_comment(1, body=" \n ")
         )
         self.assertFalse(blank["force"])
+        retained = issue_comment(1, body="Earlier action.")
+        deleted = issue_comment(2, body="Old action.")
         self.assertEqual(
-            [],
-            CONVERSATION.event_sources({
-                "action": "deleted",
-                "comment": issue_comment(2, body="Old action."),
-            }),
+            [
+                CONVERSATION.comment_source(retained),
+            ],
+            CONVERSATION.collect_sources(
+                lambda _url, _token: [retained, deleted],
+                "https://api.github.invalid",
+                "token",
+                "owner/repo",
+                42,
+                payload=github_event(
+                    "deleted", deleted, pull_request=True
+                ),
+                event_kind="issue_comment",
+            ),
         )
 
     def test_edit_versions_identity_including_same_body_reversion(self):
@@ -137,12 +185,19 @@ class CollectGitHubConversationActionsTests(unittest.TestCase):
             reverted["identity"],
         }))
 
-    def test_event_and_api_records_have_the_same_identity(self):
+    def test_event_overlay_and_api_records_have_the_same_identity(self):
         comment = issue_comment(1, body="Review the fallback.")
-        event = CONVERSATION.event_sources({
-            "action": "edited",
-            "comment": comment,
-        })
+        event = CONVERSATION.collect_sources(
+            lambda _url, _token: [comment],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event(
+                "edited", comment, pull_request=True
+            ),
+            event_kind="issue_comment",
+        )
         api = CONVERSATION.current_sources(
             lambda _url, _token: [comment],
             "https://api.github.invalid",
@@ -151,6 +206,221 @@ class CollectGitHubConversationActionsTests(unittest.TestCase):
             42,
         )
         self.assertEqual(event, api)
+
+    def test_snapshot_replays_prior_comment_with_triggering_delta(self):
+        prior = issue_comment(
+            1,
+            body="Please preserve this earlier action.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
+        triggering = issue_comment(
+            2,
+            body="Later comment.",
+            updated_at="2026-07-23T20:01:00Z",
+        )
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [prior],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event(
+                "created", triggering, pull_request=True
+            ),
+            event_kind="issue_comment",
+        )
+        self.assertEqual(
+            [
+                CONVERSATION.comment_source(prior),
+                CONVERSATION.comment_source(triggering),
+            ],
+            sources,
+        )
+
+    def test_event_overlay_keeps_newer_snapshot_version(self):
+        event_comment = issue_comment(
+            1,
+            body="Old event body.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
+        current = issue_comment(
+            1,
+            body="Current provider body.",
+            updated_at="2026-07-23T20:01:00Z",
+        )
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [current],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event(
+                "edited", event_comment, pull_request=True
+            ),
+            event_kind="issue_comment",
+        )
+        self.assertEqual([CONVERSATION.comment_source(current)], sources)
+
+    def test_event_overlay_supplies_newer_version_during_api_lag(self):
+        stale = issue_comment(
+            1,
+            body="Stale provider body.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
+        event_comment = issue_comment(
+            1,
+            body="Current event body.",
+            updated_at="2026-07-23T20:01:00Z",
+        )
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [stale],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event(
+                "edited", event_comment, pull_request=True
+            ),
+            event_kind="issue_comment",
+        )
+        self.assertEqual(
+            [CONVERSATION.comment_source(event_comment)], sources
+        )
+
+    def test_open_issue_event_adds_actor_neutral_artifact_source(self):
+        payload = github_event(
+            "edited",
+            event_kind="issues",
+            issue_title="Migration failure",
+            issue_body="I would like the agent to investigate.",
+        )
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=payload,
+            event_kind="issues",
+        )
+        self.assertEqual(1, len(sources))
+        source = sources[0]
+        self.assertEqual("any", source["actor"])
+        self.assertTrue(source["force"])
+        self.assertEqual(payload["issue"]["body"], source["body"])
+        self.assertRegex(
+            source["identity"],
+            r"^github:issue:I_kwDOIssue:sha256:[0-9a-f]{64}$",
+        )
+
+    def test_issue_source_versions_title_and_body_content(self):
+        original = CONVERSATION.issue_source(github_event(
+            "edited",
+            event_kind="issues",
+            issue_title="Original title",
+            issue_body="Original body",
+        ))[0]
+        retitled = CONVERSATION.issue_source(github_event(
+            "edited",
+            event_kind="issues",
+            issue_title="Changed title",
+            issue_body="Original body",
+        ))[0]
+        rewritten = CONVERSATION.issue_source(github_event(
+            "edited",
+            event_kind="issues",
+            issue_title="Original title",
+            issue_body="Changed body",
+        ))[0]
+        self.assertEqual(3, len({
+            original["identity"],
+            retitled["identity"],
+            rewritten["identity"],
+        }))
+        null_body = github_event(
+            "edited",
+            event_kind="issues",
+            issue_title="Original title",
+            issue_body=None,
+        )
+        source = CONVERSATION.issue_source(null_body)[0]
+        self.assertEqual("", source["body"])
+        self.assertTrue(source["force"])
+
+    def test_issue_comment_event_replays_issue_artifact_and_comments(self):
+        prior = issue_comment(1, body="Prior request.")
+        triggering = issue_comment(2, body="New request.")
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [prior, triggering],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event("created", triggering),
+            event_kind="issue_comment",
+        )
+        self.assertEqual("any", sources[0]["actor"])
+        self.assertEqual(
+            [
+                CONVERSATION.comment_source(prior),
+                CONVERSATION.comment_source(triggering),
+            ],
+            sources[1:],
+        )
+
+    def test_pull_request_and_closed_issue_do_not_emit_issue_artifact(self):
+        for payload in (
+            github_event(
+                "created", issue_comment(1), pull_request=True
+            ),
+            github_event(
+                "created", issue_comment(1), issue_state="closed"
+            ),
+        ):
+            with self.subTest(issue=payload["issue"]):
+                sources = CONVERSATION.collect_sources(
+                    lambda _url, _token: [],
+                    "https://api.github.invalid",
+                    "token",
+                    "owner/repo",
+                    42,
+                    payload=payload,
+                    event_kind="issue_comment",
+                )
+                self.assertEqual(
+                    [CONVERSATION.comment_source(payload["comment"])],
+                    sources,
+                )
+
+    def test_closed_artifact_replays_only_post_closure_comment_versions(self):
+        before_close = issue_comment(
+            1,
+            body="Resolved by closure.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
+        after_close = issue_comment(
+            2,
+            body="New action after closure.",
+            updated_at="2026-07-23T20:01:00Z",
+        )
+        sources = CONVERSATION.collect_sources(
+            lambda _url, _token: [before_close, after_close],
+            "https://api.github.invalid",
+            "token",
+            "owner/repo",
+            42,
+            payload=github_event(
+                "edited",
+                after_close,
+                issue_state="closed",
+                pull_request=True,
+            ),
+            event_kind="issue_comment",
+        )
+        self.assertEqual(
+            [CONVERSATION.comment_source(after_close)],
+            sources,
+        )
 
     def test_rest_collection_paginates(self):
         calls = []
@@ -185,11 +455,63 @@ class CollectGitHubConversationActionsTests(unittest.TestCase):
                 CONVERSATION.ProviderError
             ):
                 CONVERSATION.comment_source(value)
+        bad_events = (
+            github_event("future", issue_comment(1)),
+            {
+                **github_event("deleted", issue_comment(1)),
+                "comment": {},
+            },
+            {
+                **github_event("created", issue_comment(1)),
+                "repository": {"full_name": "other/repo"},
+            },
+            {
+                **github_event("created", issue_comment(1)),
+                "issue": {
+                    **github_event(
+                        "created", issue_comment(1)
+                    )["issue"],
+                    "number": 41,
+                },
+            },
+        )
+        for payload in bad_events:
+            with self.subTest(payload=payload), self.assertRaises(
+                CONVERSATION.ProviderError
+            ):
+                CONVERSATION.collect_sources(
+                    lambda _url, _token: [],
+                    "https://api.github.invalid",
+                    "token",
+                    "owner/repo",
+                    42,
+                    payload=payload,
+                    event_kind="issue_comment",
+                )
+
+    def test_same_timestamp_with_different_bodies_fails_closed(self):
+        snapshot = issue_comment(
+            1,
+            body="Snapshot body.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
+        event = issue_comment(
+            1,
+            body="Event body.",
+            updated_at="2026-07-23T20:00:00Z",
+        )
         with self.assertRaises(CONVERSATION.ProviderError):
-            CONVERSATION.event_sources({
-                "action": "future",
-                "comment": issue_comment(1),
-            })
+            CONVERSATION.collect_sources(
+                lambda _url, _token: [snapshot],
+                "https://api.github.invalid",
+                "token",
+                "owner/repo",
+                42,
+                payload=github_event(
+                    "edited", event, pull_request=True
+                ),
+                event_kind="issue_comment",
+            )
 
 
 class CollectGitHubReviewActionsTests(unittest.TestCase):

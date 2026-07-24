@@ -140,6 +140,11 @@ QUEUE_TIMING_FIELDS = {
     "future-blocking": ("Blocks at", "Until then"),
     "non-blocking": ("If unanswered",),
 }
+QUEUE_TIMING_ORDER = {
+    "non-blocking": 0,
+    "future-blocking": 1,
+    "blocking": 2,
+}
 HUMAN_PROJECTION_FIELDS = (
     "Why-you-might-care",
     "If-you-do-nothing",
@@ -1847,6 +1852,8 @@ def queue_mutation_problem(
         and source_parts[1] in {"needs-human", "needs-agent"}
         else ""
     )
+    prior_response = {}
+    current_response = {}
     if actor == "needs-human":
         prior_response = human_response_fields(before)
         current_response = human_response_fields(after)
@@ -1910,6 +1917,20 @@ def queue_mutation_problem(
         for keys in QUEUE_TIMING_FIELDS.values()
         for key in keys
     )
+    timing_changed = (
+        source_timing != destination_timing
+        or prior_timing != current_timing
+    )
+    if actor == "needs-human" and timing_changed and (
+        first_concrete_response(prior_response) is not None
+        or first_concrete_response(current_response) is not None
+    ):
+        return "dependency timing changed with or after the human response"
+    if source_timing in QUEUE_TIMING_ORDER \
+            and destination_timing in QUEUE_TIMING_ORDER \
+            and QUEUE_TIMING_ORDER[destination_timing] \
+            < QUEUE_TIMING_ORDER[source_timing]:
+        return "dependency timing was weakened while the queue item remained live"
     if source_timing == destination_timing and prior_timing != current_timing:
         return "dependency timing changed without a matching timing-prefix rename"
     return None
@@ -1984,6 +2005,59 @@ def matching_lineage_paths(parent, revision, path, identity):
         for candidate, candidate_text in matches
         if git_artifact_bytes_at(revision, candidate) is None
     ]
+
+
+def queue_lineage_snapshots(path, text, prior_revision):
+    """Yield one action's historical snapshots across unambiguous renames."""
+    identity = queue_action_identity(path, text)
+    stack = [(prior_revision, path, text)]
+    seen = set()
+    while stack:
+        revision, current_path, current = stack.pop()
+        state = (revision, current_path)
+        if state in seen:
+            continue
+        seen.add(state)
+        if queue_action_identity(current_path, current) != identity:
+            continue
+        yield current_path, current
+        parents = revision_parents(
+            revision, f"queue history for `{current_path}`"
+        )
+        predecessors = []
+        for parent in parents:
+            artifact = git_artifact_bytes_at(parent, current_path)
+            if artifact is not None:
+                predecessors.append((
+                    parent,
+                    current_path,
+                    decode_utf8_artifact(
+                        artifact, f"`{current_path}` at {parent}"
+                    ),
+                ))
+        if not predecessors and len(parents) == 1:
+            parent = parents[0]
+            predecessors.extend(
+                (parent, previous_path, previous)
+                for previous_path, previous in matching_lineage_paths(
+                    parent, revision, current_path, identity
+                )
+            )
+        stack.extend(predecessors)
+
+
+def historical_queue_timing(path, text, prior_revision, timing):
+    """Return the nearest snapshot where this action used one timing class."""
+    return next(
+        (
+            (candidate_path, candidate_text)
+            for candidate_path, candidate_text in queue_lineage_snapshots(
+                path, text, prior_revision
+            )
+            if delivery_class(Path(candidate_path).name) == timing
+        ),
+        None,
+    )
 
 
 def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
@@ -2332,15 +2406,18 @@ def future_review_boundary_problem(item, reached):
     return None
 
 
-def future_review_merge_receipt_problem(path, text, prior_revision):
-    """Require post-merge cleanup to point at history that carried the live receipt."""
+def future_review_merge_receipt_problem(
+    path, text, prior_revision, boundary_text=None
+):
+    """Require the admitted target history to carry the live merge receipt."""
     got = text_fields(text)
     if got.get("Review outcome", "").strip() != "approved":
         return (
             "a negative future review must remain live until durable "
             "cancellation evidence exists"
         )
-    tokens = future_boundary_tokens(got.get("Blocks at", ""))
+    boundary = text_fields(boundary_text if boundary_text is not None else text)
+    tokens = future_boundary_tokens(boundary.get("Blocks at", ""))
     if "transition:merge" not in tokens:
         return (
             "future review must remain live until its boundary adapter records "
@@ -2350,10 +2427,26 @@ def future_review_merge_receipt_problem(path, text, prior_revision):
     if not review_revision.startswith("git:") or "..." not in review_revision:
         return "merge cleanup needs a candidate-range Git review receipt"
     reviewed_base, reviewed_head = review_revision[len("git:"):].split("...")
+    if CHANGE_RANGE is not None and CHANGE_RANGE.startswith("root:"):
+        return (
+            "merge cleanup needs a previously admitted target base; "
+            "a root range has no prior admission boundary"
+        )
+    # In exact-range admission, only history already reachable from the
+    # adapter-supplied target BASE can prove that the receipt survived a prior
+    # boundary. A merge manufactured inside the candidate must not authorize
+    # deleting the receipt before that candidate's own merge. No-range local
+    # hooks use the deletion parent as a best-effort usability check; the
+    # controlled range adapter rechecks the stronger target-history claim.
+    receipt_history = (
+        CHANGE_RANGE.split("...", 1)[0]
+        if CHANGE_RANGE is not None
+        else prior_revision
+    )
     merges = subprocess.run(
         [
             "git", "--no-replace-objects", "rev-list", "--topo-order",
-            "--merges", prior_revision,
+            "--merges", receipt_history,
         ],
         cwd=REPO,
         text=True,
@@ -2396,8 +2489,8 @@ def future_review_merge_receipt_problem(path, text, prior_revision):
             continue
         return None
     return (
-        "future review must remain live through an exact two-parent merge "
-        "that carries its approved receipt"
+        "future review must remain live until the previously admitted target "
+        "history contains an exact two-parent merge carrying its approved receipt"
     )
 
 
@@ -2535,10 +2628,16 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                 return review_successor_problem(
                     path, text, prior_revision, revision
                 )
-            if delivery_class(Path(path).name) == "future-blocking" \
+            historical_future = historical_queue_timing(
+                path, text, prior_revision, "future-blocking"
+            )
+            if historical_future is not None \
                     and outcome in REVIEW_TERMINAL_OUTCOMES:
                 boundary_problem = future_review_merge_receipt_problem(
-                    path, text, prior_revision
+                    path,
+                    text,
+                    prior_revision,
+                    boundary_text=historical_future[1],
                 )
                 if boundary_problem:
                     return boundary_problem

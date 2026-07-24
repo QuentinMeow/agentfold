@@ -27,7 +27,9 @@ versioned source identity emitted by its adapter>. Omit it otherwise. -->
 <!-- approved accepts the bound revision and is response-terminal with no successor.
 Keep a future-blocking review folding and live through its boundary; approval may
 satisfy the boundary only while fresh. A Git-range approval permits queue-lifecycle
-tail changes on the same base. Post-merge deletion requires the merge to carry it.
+tail changes on the same base. Historical future timing survives any later escalation.
+Post-merge deletion requires an exact receipt-carrying merge already in the
+adapter-supplied target base; a candidate-local merge does not qualify.
 changes-requested preserves the boundary. Before deleting, add **Successor action:**
 `<new needs-agent queue path>` here. That new same-timing open action owns the repair
 in Action, keeps Full context, predeclares non-queue Resolution evidence, and points
