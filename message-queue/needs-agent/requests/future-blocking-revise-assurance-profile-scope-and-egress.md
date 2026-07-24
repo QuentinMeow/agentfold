@@ -1,6 +1,6 @@
 # Revise assurance wording and make controlled egress reference-only
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-24, by codex, from the owner's review of task `2026-07-22-universal-guard-mode-configuration`
 **Action:** Replace selectable assurance profiles with composable guard bindings and derived per-obligation reports, and make controlled egress reference-only pending a separate explicit human-approved proposal.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
