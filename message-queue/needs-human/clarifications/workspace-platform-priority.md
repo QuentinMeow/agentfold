@@ -1,6 +1,6 @@
 # Which operating systems must the layered workspace design prioritize?
 
-**Status:** waiting
+**Status:** folding
 **Blocking:** no — proceeding on the answered platform priority below
 **Assumption:** macOS and Linux define the baseline; Windows is included only when it adds little complexity and does not distort that design
 **Matters-by:** publication of the layered development workspace design
