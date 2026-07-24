@@ -7,8 +7,8 @@
 **Resolution evidence:** `memory/decisions/2026-07-23-detector-failure-review-disposition.md`
 **Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Review revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
-**Reviewed revision:** ______
-**Review outcome:** pending
+**Reviewed revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
+**Review outcome:** approved
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Treat the verifier as attack surface” and “Detector assurance”
@@ -39,4 +39,4 @@ incomplete report and may continue, without claiming the content was clean.
 When answering here, copy `Review revision` into `Reviewed revision` so the answer
 stays bound to the exact design bytes.
 
-**Your review:** ______
+**Your review:** partially reviewed, mostly correct, continue
