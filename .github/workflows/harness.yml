@@ -2,9 +2,9 @@ name: harness
 on:
   push:
   pull_request:
-    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned]
+    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned, enqueued]
   pull_request_target:
-    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned]
+    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned, enqueued]
   issues:
     types: [opened, edited, reopened, assigned, unassigned]
   issue_comment:
@@ -153,6 +153,7 @@ jobs:
           ACTION_PROJECTION_REQUESTED_REVIEWERS: ${{ toJSON(github.event.pull_request.requested_reviewers) }}
           ACTION_PROJECTION_REQUESTED_TEAMS: ${{ toJSON(github.event.pull_request.requested_teams) }}
           ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.pull_request.assignees) }}
+          ACTION_PROJECTION_ARTIFACT_ID: ${{ github.event.pull_request.node_id }}
           ACTION_PROJECTION_BRANCH: ${{ github.event.pull_request.head.ref }}
           ACTION_PROJECTION_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
@@ -165,7 +166,14 @@ jobs:
               --argjson reviewers "$ACTION_PROJECTION_REQUESTED_REVIEWERS" \
               --argjson teams "$ACTION_PROJECTION_REQUESTED_TEAMS" \
               --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              --arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID" \
               '
+              def artifact:
+                if (($artifact_id | type) == "string" and
+                    ($artifact_id | length) > 0)
+                then $artifact_id
+                else error("external assignment has no artifact identity")
+                end;
               def identified:
                 if ((.identity | type) == "string" and
                     (.identity | length) > 0)
@@ -176,12 +184,18 @@ jobs:
                 if .type == "User"
                 then {
                   actor: "needs-human",
-                  identity: ("github:pull-request:" + $role + ":user:" + .login)
+                  identity: (
+                    "github:pull-request:node:" + artifact + ":" +
+                    $role + ":user:" + .login
+                  )
                 } | identified
                 elif .type == "Bot"
                 then {
                   actor: "needs-agent",
-                  identity: ("github:pull-request:" + $role + ":bot:" + .login)
+                  identity: (
+                    "github:pull-request:node:" + artifact + ":" +
+                    $role + ":bot:" + .login
+                  )
                 } | identified
                 else error("unknown external account actor type")
                 end;
@@ -191,7 +205,8 @@ jobs:
                   {
                     actor: "needs-human",
                     identity: (
-                      "github:pull-request:requested-team:team:" + .slug
+                      "github:pull-request:node:" + artifact +
+                      ":requested-team:team:" + .slug
                     )
                   } | identified),
                 ($assignees[] | account("assignee"))
@@ -269,13 +284,21 @@ jobs:
           ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}
           ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}
           ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.issue.assignees) }}
+          ACTION_PROJECTION_ARTIFACT_ID: ${{ github.event.issue.node_id }}
           ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-default-candidate.outputs.revision }}
           ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-default-candidate.outputs.revision }}
         run: |
           ACTION_PROJECTION_ASSIGNMENTS="$(
             jq -cn \
               --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              --arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID" \
               '
+              def artifact:
+                if (($artifact_id | type) == "string" and
+                    ($artifact_id | length) > 0)
+                then $artifact_id
+                else error("external assignment has no artifact identity")
+                end;
               def identified:
                 if ((.identity | type) == "string" and
                     (.identity | length) > 0)
@@ -287,12 +310,18 @@ jobs:
                 if .type == "User"
                 then {
                   actor: "needs-human",
-                  identity: ("github:issue:assignee:user:" + .login)
+                  identity: (
+                    "github:issue:node:" + artifact +
+                    ":assignee:user:" + .login
+                  )
                 } | identified
                 elif .type == "Bot"
                 then {
                   actor: "needs-agent",
-                  identity: ("github:issue:assignee:bot:" + .login)
+                  identity: (
+                    "github:issue:node:" + artifact +
+                    ":assignee:bot:" + .login
+                  )
                 } | identified
                 else error("unknown external account actor type")
                 end
@@ -354,10 +383,11 @@ jobs:
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
             --label github-pull-request-conversation-comment
 
-  # GitHub has no pull_request_review_target or pull_request_review_comment_target.
-  # This candidate-context job replays current review state on direct events and
-  # every PR update, closing ordinary push-after-failure bypasses. Hostile-workflow
-  # assurance still needs a separately controlled provider gate for direct events.
+  # GitHub has no pull_request_review_target, pull_request_review_comment_target, or
+  # Actions trigger for thread resolve/unresolve. This job replays current state on
+  # supported review/PR events, including merge-queue enqueue. A hard claim that a
+  # currently unresolved thread cannot merge requires the provider-native conversation-
+  # resolution rule; without it, evidence is only current at the last supported event.
   review-state-action-projection:
     name: Current review-state action projection
     if: >-

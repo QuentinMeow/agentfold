@@ -2207,6 +2207,200 @@ def review_candidate_problem(text, revision):
     return None
 
 
+def git_is_ancestor(ancestor, descendant):
+    result = subprocess.run(
+        [
+            "git", "--no-replace-objects", "merge-base", "--is-ancestor",
+            ancestor, descendant,
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise GitSnapshotError(
+            result.stderr.decode("utf-8", errors="replace").strip()
+            or f"could not compare Git ancestry for {ancestor} and {descendant}"
+        )
+    return result.returncode == 0
+
+
+def changed_paths_between_revisions(base, head):
+    result = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff", "--name-only", "-z",
+            base, head, "--",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise GitSnapshotError(git_failure(
+            result, f"could not compare reviewed Git candidate {base}..{head}"
+        ))
+    return {
+        name.decode("utf-8", errors="surrogateescape")
+        for name in result.stdout.split(b"\0")
+        if name
+    }
+
+
+def candidate_changed_paths_since(reviewed_head):
+    """Compare a review head with the captured staged or committed candidate."""
+    if CHANGE_RANGE is None:
+        result = subprocess.run(
+            [
+                "git", "diff", "--cached", "--name-only", "-z",
+                reviewed_head, "--",
+            ],
+            cwd=REPO,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode:
+            raise GitSnapshotError(git_failure(
+                result, "could not compare the staged review candidate"
+            ))
+        return {
+            name.decode("utf-8", errors="surrogateescape")
+            for name in result.stdout.split(b"\0")
+            if name
+        }
+    candidate = committed_candidate_revision()
+    if candidate is None:
+        raise GitSnapshotError("review freshness needs a committed candidate")
+    return changed_paths_between_revisions(reviewed_head, candidate)
+
+
+def git_range_review_freshness_problem(path, review_revision):
+    """Require a Git-range approval to cover the active candidate modulo queue state."""
+    object_ids = review_revision[len("git:"):].split("...")
+    if len(object_ids) != 2:
+        return None  # A single commit is a narrow artifact, not a candidate range.
+    reviewed_base, reviewed_head = object_ids
+    if CHANGE_RANGE is None or CHANGE_RANGE.startswith("root:"):
+        return "Git-range approval needs an explicit active base...head range"
+    active_base, _active_head = CHANGE_RANGE.split("...", 1)
+    if reviewed_base != active_base:
+        return (
+            "reviewed Git base is stale; active base is "
+            f"{active_base}"
+        )
+    candidate = committed_candidate_revision()
+    if candidate is None or not git_is_ancestor(reviewed_head, candidate):
+        return "reviewed Git head is not an ancestor of the active candidate"
+    changed = candidate_changed_paths_since(reviewed_head)
+    unreviewed = sorted(
+        candidate for candidate in changed
+        if not valid_queue_item_path(candidate)
+    )
+    if unreviewed:
+        return (
+            "candidate changed outside queue lifecycle after review: "
+            + ", ".join(f"`{candidate}`" for candidate in unreviewed)
+        )
+    return None
+
+
+def future_review_boundary_problem(item, reached):
+    """Return why one live future review does not satisfy its reached boundary."""
+    rel = item.relative_to(REPO).as_posix()
+    parts = Path(rel).parts
+    if parts[1:3] != ("needs-human", "reviews"):
+        return "the action still needs its recorded actor"
+    text = repo_text(item)
+    got = text_fields(text)
+    if got.get("Status", "").strip() != "folding":
+        return "the review has no committed folding claim"
+    if got.get("Review outcome", "").strip() != "approved":
+        return "only an approved review can authorize the boundary"
+    if not has_concrete_value(got.get("Your review", "")):
+        return "the review has no concrete human disposition"
+    active_problem = active_blocking_repair_problem(item)
+    if active_problem:
+        return active_problem
+    target_problem = review_candidate_problem(text, None)
+    if target_problem:
+        return target_problem
+    review_revision = got.get("Review revision", "").strip()
+    if review_revision.startswith("git:") and "..." in review_revision:
+        return git_range_review_freshness_problem(rel, review_revision)
+    return None
+
+
+def future_review_merge_receipt_problem(path, text, prior_revision):
+    """Require post-merge cleanup to point at history that carried the live receipt."""
+    got = text_fields(text)
+    if got.get("Review outcome", "").strip() != "approved":
+        return (
+            "a negative future review must remain live until durable "
+            "cancellation evidence exists"
+        )
+    tokens = future_boundary_tokens(got.get("Blocks at", ""))
+    if "transition:merge" not in tokens:
+        return (
+            "future review must remain live until its boundary adapter records "
+            "durable crossing evidence"
+        )
+    review_revision = got.get("Review revision", "").strip()
+    if not review_revision.startswith("git:") or "..." not in review_revision:
+        return "merge cleanup needs a candidate-range Git review receipt"
+    reviewed_base, reviewed_head = review_revision[len("git:"):].split("...")
+    merges = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list", "--topo-order",
+            "--merges", prior_revision,
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if merges.returncode:
+        raise GitSnapshotError(
+            merges.stderr.strip() or "could not inspect merge-boundary receipts"
+        )
+    expected = text.encode("utf-8")
+    for merge in merges.stdout.splitlines():
+        parents = revision_parents(merge, "merge-boundary receipt")
+        if len(parents) != 2 or parents[0] != reviewed_base:
+            continue
+        feature_parent = parents[1]
+        if not git_is_ancestor(reviewed_head, feature_parent):
+            continue
+        if git_artifact_bytes_at(merge, path) != expected:
+            continue
+        same_tree = subprocess.run(
+            [
+                "git", "--no-replace-objects", "diff", "--quiet",
+                merge, feature_parent, "--",
+            ],
+            cwd=REPO,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if same_tree.returncode not in (0, 1):
+            raise GitSnapshotError(
+                same_tree.stderr.decode("utf-8", errors="replace").strip()
+                or "could not verify merge-boundary receipt tree"
+            )
+        if same_tree.returncode:
+            continue
+        tail = changed_paths_between_revisions(reviewed_head, feature_parent)
+        if any(not valid_queue_item_path(candidate) for candidate in tail):
+            continue
+        return None
+    return (
+        "future review must remain live through an exact two-parent merge "
+        "that carries its approved receipt"
+    )
+
+
 def review_successor_problem(path, text, prior_revision, revision):
     got = text_fields(text)
     candidates = context_path_candidates(got.get("Successor action", ""))
@@ -2341,6 +2535,13 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                 return review_successor_problem(
                     path, text, prior_revision, revision
                 )
+            if delivery_class(Path(path).name) == "future-blocking" \
+                    and outcome in REVIEW_TERMINAL_OUTCOMES:
+                boundary_problem = future_review_merge_receipt_problem(
+                    path, text, prior_revision
+                )
+                if boundary_problem:
+                    return boundary_problem
             if outcome in REVIEW_TERMINAL_OUTCOMES \
                     and context_path_candidates(
                         got.get("Successor action", "")
@@ -3230,12 +3431,23 @@ def check_active_queue_boundaries():
             # future blocker, it does not need to restate each external transition.
             reached.update(ACTIVE_TRANSITIONS)
         if reached:
+            if timing == "future-blocking":
+                boundary_problem = future_review_boundary_problem(item, reached)
+                if boundary_problem is None:
+                    continue
+            else:
+                boundary_problem = None
             yield Finding(
                 "queue-boundary",
                 item.relative_to(REPO),
                 f"unresolved {timing} action reached transition:"
-                + ",".join(sorted(reached)),
-                "resolve the action or reclassify its timing before crossing the boundary",
+                + ",".join(sorted(reached))
+                + (
+                    f": {boundary_problem}"
+                    if boundary_problem is not None else ""
+                ),
+                "resolve the action with fresh boundary evidence or reclassify "
+                "its timing before crossing the boundary",
             )
 
 

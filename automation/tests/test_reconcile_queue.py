@@ -2220,6 +2220,163 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual(rejected, bool(findings))
 
+    def test_git_range_approval_satisfies_merge_only_for_queue_only_tail(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            source.write_text("# Reviewed change\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reviewed implementation")
+            reviewed_head = self.git(root, "rev-parse", "HEAD")
+            binding = f"git:{base}...{reviewed_head}"
+            path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the merge candidate\n"
+                "**Full context:** `docs/source.md`\n"
+                f"**Review target:** {binding}\n"
+                f"**Review revision:** {binding}\n"
+                f"**Reviewed revision:** {binding}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:merge task:2026-07-23-example\n"
+                "**Until then:** implementation may continue\n"
+                "**Your review:** approve\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record response")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim response")
+            queue_only_head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.multiple(
+                    RECONCILE,
+                    ACTIVE_TRANSITIONS={"merge"},
+                    ACTIVE_TASK_ID="2026-07-23-example",
+                    CHANGE_RANGE=f"{base}...{queue_only_head}",
+                ):
+                    self.assertEqual(
+                        [], list(RECONCILE.check_active_queue_boundaries())
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+            source.write_text("# Changed after approval\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "unreviewed implementation")
+            stale_head = self.git(root, "rev-parse", "HEAD")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.multiple(
+                    RECONCILE,
+                    ACTIVE_TRANSITIONS={"merge"},
+                    ACTIVE_TASK_ID="2026-07-23-example",
+                    CHANGE_RANGE=f"{base}...{stale_head}",
+                ):
+                    findings = list(
+                        RECONCILE.check_active_queue_boundaries()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings))
+            self.assertIn(
+                "candidate changed outside queue lifecycle",
+                findings[0].message,
+            )
+            self.assertIn("docs/source.md", findings[0].message)
+
+    def test_future_git_review_deletes_only_after_merge_carries_receipt(self):
+        for merged, rejected in ((False, True), (True, False)):
+            with self.subTest(merged=merged), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                base = self.git(root, "rev-parse", "HEAD")
+                source.write_text("# Reviewed change\n", encoding="utf-8")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "reviewed implementation")
+                reviewed_head = self.git(root, "rev-parse", "HEAD")
+                binding = f"git:{base}...{reviewed_head}"
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    "# Review\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** approve the merge candidate\n"
+                    "**Full context:** `docs/source.md`\n"
+                    f"**Review target:** {binding}\n"
+                    f"**Review revision:** {binding}\n"
+                    f"**Reviewed revision:** {binding}\n"
+                    "**Review outcome:** approved\n"
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** implementation may continue\n"
+                    "**Your review:** approve\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record response")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim response")
+                feature = self.git(root, "rev-parse", "HEAD")
+                if merged:
+                    self.git(root, "checkout", "-b", "merge-receipt", base)
+                    self.git(
+                        root, "merge", "--no-ff", feature,
+                        "-m", "carry approved receipt",
+                    )
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(rejected, bool(findings), self.messages(findings))
+                if rejected:
+                    self.assertIn(
+                        "remain live through an exact two-parent merge",
+                        findings[0].message,
+                    )
+
     def test_not_approved_review_requires_same_boundary_agent_successor(self):
         for creates_successor, rejected in ((False, True), (True, False)):
             with self.subTest(creates_successor=creates_successor), self.repo() as root:

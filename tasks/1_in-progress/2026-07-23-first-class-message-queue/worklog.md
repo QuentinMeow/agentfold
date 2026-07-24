@@ -708,3 +708,23 @@
   panel.
 - Session handover:
   `history/conversations/2026-07-23-1916PDT-conversation-history-results/handover.md`.
+
+## 2026-07-23 — artifact identity and boundary-receipt repair (codex)
+
+- Replayed the unpublished task history without the transient edit/revert of an
+  immutable earlier handover. The repaired tip retained the exact original tree and
+  the full `acc23b6...1b40239` range reconciled with zero findings.
+- A fresh three-lens panel rejected `1b402391`: assignment bindings could collide
+  across artifacts, GitHub emits no thread-reopen Actions event, and a Git-range review
+  could disappear before later unreviewed candidate changes.
+- GitHub assignment identities now include the provider's stable artifact node plus
+  role, actor kind, and principal. A cross-artifact unscoped-binding regression proves
+  exact reuse fails.
+- Review-state replay now includes merge-queue enqueue and states its honest ceiling.
+  GitHub's native conversation-resolution rule owns the hard merge guarantee because
+  workflow checks only describe state at supported events.
+- Future-blocking Git-range approval is now a two-phase receipt. Fresh approval may
+  satisfy the named boundary only on the same base with queue-lifecycle-only tail
+  changes; the item remains live, and post-merge deletion needs a two-parent merge that
+  carried its exact folding receipt. Focused assignment/workflow tests and the new
+  candidate-drift/merge-receipt tests passed. The rejected panel was invalidated.

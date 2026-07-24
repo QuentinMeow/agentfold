@@ -1714,7 +1714,8 @@ def external_assignment_states(values):
 
     Every input is a JSON array of objects with a non-empty opaque `identity`
     and an exact `actor` of `needs-human` or `needs-agent`. Provider adapters
-    own the mapping from their actor types into this closed canonical shape.
+    own the mapping into this closed shape and must bind a stable artifact,
+    role, actor kind, and principal so another artifact cannot reuse the item.
     """
     states = []
     for input_number, value in enumerate(values, start=1):

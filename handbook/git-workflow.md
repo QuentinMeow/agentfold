@@ -44,6 +44,10 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - `main` is always green: reconciler clean, tests passing.
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
+- A terminal human response does not erase a future merge dependency. Keep its
+  `future-blocking-*` review folding and live; fresh approval of `git:<base>...<head>`
+  satisfies merge only on that base with queue-only lifecycle commits afterward. The
+  merge commit carries the receipt, and only a later cleanup commit deletes it.
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
   one top-level entry and one queue link per action, including every live human path
@@ -53,8 +57,8 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   conflicting, or ambiguous scope fails closed. External assignments retain direction:
   a human reviewer or assignee requires a distinct task-owned `needs-human/` link,
   while an assigned agent or bot requires a distinct task-owned `needs-agent/` link.
-  Each linked item must copy the adapter's opaque provider/role/identity binding, so
-  an unrelated task action cannot satisfy an assignment. Use the exact
+  Each linked item must copy the adapter's opaque provider/stable-artifact/role/
+  actor-kind/principal binding, so another artifact cannot reuse it. Use the exact
   `No queued action requested.`
   acknowledgement only when neither task scope nor assignment exposes an action.
 - A provider title is change-summary metadata, so a conventional title such as
@@ -77,19 +81,21 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   Every non-empty effective formal review creates an agent-triage source instead of
   asking a prose heuristic whether the human meant work; its queue item may be
   non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from
-  either review connection, and unresolved threads remain forced action state.
+  either review connection; unresolved threads remain forced when current state replays.
   Provider-authored prose may carry canonical links directly; otherwise an agent
   transcribes it into one or more live items with the adapter's exact versioned
   `External source` binding. Editing the source creates a new identity. A bound item
   stays live until the effective review is superseded/dismissed or the thread resolves.
   `pull_request_target`, issue, and issue-comment checks run trusted default/base
-  workflow code and replay current review and conversation state on every PR target
-  update. The candidate-context job also replays both states on direct review events
-  and every PR update, so pushing an unrelated commit cannot clear an unqueued request.
-  It uses only the ephemeral workflow token, never a developer's local CLI login.
-  Direct review events have no target-context variant, so a separately controlled
-  provider gate is still required before claiming resistance to hostile workflow
-  tampering between target updates.
+  workflow code. Candidate and target jobs replay current review/conversation state on
+  supported PR/review events, including merge-queue enqueue, so a later push cannot
+  clear an unqueued request. GitHub emits no Actions event for thread resolve/unresolve:
+  hard assurance that a currently unresolved thread cannot merge requires native
+  “Require conversation resolution before merging”; without it, the ceiling is “state
+  projected at the last supported event.” Neither mechanism proves every transient
+  reopen-then-resolve toggle was queued. Direct review events also lack a target-context
+  variant, so a separately controlled provider gate remains necessary against hostile
+  workflow tampering. The workflow uses only its token, never a local CLI login.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 

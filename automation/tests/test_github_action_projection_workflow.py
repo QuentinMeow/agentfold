@@ -43,7 +43,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )[0]
         pr_types = (
             "[opened, edited, reopened, synchronize, ready_for_review, "
-            "review_requested, review_request_removed, assigned, unassigned]"
+            "review_requested, review_request_removed, assigned, unassigned, "
+            "enqueued]"
         )
         self.assertIn(f"pull_request:\n    types: {pr_types}", on_block)
         self.assertIn(f"pull_request_target:\n    types: {pr_types}", on_block)
@@ -103,6 +104,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event.pull_request.requested_reviewers",
             "github.event.pull_request.requested_teams",
             "github.event.pull_request.assignees",
+            "ACTION_PROJECTION_ARTIFACT_ID: "
+            "${{ github.event.pull_request.node_id }}",
             "github.event.pull_request.head.ref",
             "ACTION_PROJECTION_BASE_REVISION: "
             "${{ github.event.pull_request.base.sha }}",
@@ -132,6 +135,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "ACTION_PROJECTION_BODY: ${{ github.event.issue.body }}",
             "ACTION_PROJECTION_TITLE: ${{ github.event.issue.title }}",
             "github.event.issue.assignees",
+            "ACTION_PROJECTION_ARTIFACT_ID: "
+            "${{ github.event.issue.node_id }}",
             "steps.authoritative-default-candidate.outputs.revision",
             "--additional-prose-env ACTION_PROJECTION_TITLE",
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
@@ -149,14 +154,17 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             '--argjson reviewers "$ACTION_PROJECTION_REQUESTED_REVIEWERS"',
             '--argjson teams "$ACTION_PROJECTION_REQUESTED_TEAMS"',
             '--argjson assignees "$ACTION_PROJECTION_ASSIGNEES"',
+            '--arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID"',
             'if .type == "User"',
-            '"github:pull-request:" + $role + ":user:" + .login',
+            '"github:pull-request:node:" + artifact + ":" +',
+            '$role + ":user:" + .login',
             'elif .type == "Bot"',
-            '"github:pull-request:" + $role + ":bot:" + .login',
-            '"github:pull-request:requested-team:team:" + .slug',
+            '$role + ":bot:" + .login',
+            '":requested-team:team:" + .slug',
             'account("requested-reviewer")',
             'account("assignee")',
             'error("unknown external account actor type")',
+            'error("external assignment has no artifact identity")',
             'error("external assignment has no identity")',
         ))
         issue = self.step(
@@ -165,10 +173,13 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         self.assert_contains_all(issue, (
             '--argjson assignees "$ACTION_PROJECTION_ASSIGNEES"',
+            '--arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID"',
             'if .type == "User"',
             'elif .type == "Bot"',
-            '"github:issue:assignee:user:" + .login',
-            '"github:issue:assignee:bot:" + .login',
+            '"github:issue:node:" + artifact +',
+            '":assignee:user:" + .login',
+            '":assignee:bot:" + .login',
+            'error("external assignment has no artifact identity")',
             'error("unknown external account actor type")',
             "--external-assignment-env ACTION_PROJECTION_ASSIGNMENTS",
         ))
@@ -237,18 +248,23 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertIn("  issues: read", self.workflow)
         self.assertIn("  pull-requests: read", self.workflow)
         self.assertIn(
-            "# GitHub has no pull_request_review_target or "
-            "pull_request_review_comment_target.",
+            "# GitHub has no pull_request_review_target, "
+            "pull_request_review_comment_target, or",
             self.workflow,
         )
         self.assertIn(
-            "# every PR update, closing ordinary push-after-failure bypasses.",
+            "# supported review/PR events, including merge-queue enqueue.",
             self.workflow,
         )
         self.assertIn(
-            "separately controlled provider gate",
+            "provider-native conversation-",
             self.workflow,
         )
+        self.assertIn(
+            "without it, evidence is only current at the last supported event",
+            self.workflow,
+        )
+        self.assertNotIn("pull_request_review_thread:", self.workflow)
         job = self.job("review-state-action-projection")
         self.assertIn(
             "name: Current review-state action projection",

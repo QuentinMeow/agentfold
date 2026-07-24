@@ -38,9 +38,8 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 ## Lifecycle and content
 
 - Copy the matching template; human fields follow `handbook/human-action-guide.md`.
-  Record an adapter's opaque `External assignment` for assignments or versioned
-  `External source` for transcribed/structural content; keep it live until the provider
-  source resolves. A GitHub comment resolves on edit, deletion, or artifact closure.
+  Record an artifact-scoped `External assignment` or versioned `External source`; keep
+  source items live until provider edit, deletion, or artifact closure.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
@@ -49,12 +48,13 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   to `awaiting-artifact`/pending, then publish its replacement; neither edge may add a response.
 - Agent claims change only `open` to `in-repair`; that committed edge proves active repair, and action identity never changes afterward.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
-  and one Full context link to the backlog `task.md`; the task links it reciprocally.
-  Its atomic claim/move deletes it. Only pickups use moving task paths as live context;
-  retries may quote one only as broken-state evidence.
-- Ordinary actions, including manual retries, predeclare `Resolution evidence`; every named non-queue file changes
-  in the deletion commit. Reviews bind one target/revision: `approved`, `rejected`, and
-  `abandoned` end it; `changes-requested` creates a same-timing agent repair plus a
-  distinct artifact-pending human re-review. Legacy `not-approved` is equivalent; approval revalidates the target, while a PR URL is only navigation.
+  and one reciprocal backlog `task.md` link. Its atomic claim/move deletes it; only
+  pickups use moving task paths as live context, while retries may quote broken paths.
+- Ordinary actions predeclare `Resolution evidence`; every named non-queue file changes
+  on deletion. A review binds one target/revision. Terminal response does not end a
+  future dependency: keep it `folding` through the boundary. Fresh approval may satisfy
+  it; rejection/abandonment cannot. Git-range approval permits only same-base queue
+  lifecycle tail changes; post-merge cleanup needs a two-parent merge carrying the
+  receipt. `changes-requested` creates same-timing repair plus artifact-pending re-review.
 - Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
 - Transcribe chat responses before use; rename the live file whenever timing changes.

@@ -92,8 +92,12 @@ portable adoption:
 - Queue resolution is a Git-backed lifecycle, not a status label: the first concrete
   human response is immutable. A counter-question is folded into durable evidence and
   continued in a new same-timing item that names its predecessor; agents never rewrite
-  human text. An answered/open item is claimed separately; ordinary deletion changes predeclared
-  evidence files and approved reviews revalidate the exact target. Requested changes
+  human text. An answered/open item is claimed separately; ordinary deletion changes
+  predeclared evidence files and approved reviews revalidate the exact target.
+  Terminal human response does not erase a future dependency: the folding review stays
+  live through its boundary. A Git-range approval requires the same active base and
+  permits only queue-lifecycle tail changes; an exact two-parent merge must carry the
+  receipt before cleanup. Negative outcomes never authorize crossing. Requested changes
   leave a same-boundary agent repair plus a dependent artifact-pending human re-review;
   approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
@@ -113,7 +117,8 @@ portable adoption:
   because the path owns direction. Allowed
   absolute links bind to an adapter-supplied immutable prefix. A provider assignment
   requires a distinct actor-correct queue item whose opaque binding preserves provider,
-  role, actor kind, and identity; body headings are classified as visible prose. When
+  stable artifact, role, actor kind, and principal identity; another artifact cannot
+  reuse it. Body headings are classified as visible prose. When
   provider prose cannot be edited by the receiving agent, one or more queue items may
   instead copy its exact opaque, versioned `External source` binding. Those items stay
   live while the source remains effective; an edit changes identity, a superseding or
@@ -122,18 +127,22 @@ portable adoption:
   non-empty effective formal review as agent triage rather than making English
   classification a prerequisite; that triage may be non-blocking. Comment deletion or
   artifact closure resolves its source. Changes-requested reviews are forced even with
-  an empty body, directly from either review connection, and unresolved threads remain
-  forced action state.
+  an empty body, directly from either review connection; unresolved threads remain
+  forced action state whenever current provider state is replayed.
   This binding proves routing and version continuity, not semantic
   completeness of an agent-authored transcription; artifact review owns that judgment.
   GitHub's default/base context makes PR-description, issue, conversation, and
   PR-update review-state checks authoritative. A candidate-context job also replays
-  current conversation comments, formal reviews, and unresolved diff threads on direct
-  events and every PR update, preventing an unrelated push from clearing a failure.
+  current conversation comments, formal reviews, and unresolved diff threads on
+  supported direct/PR events, including merge-queue enqueue, preventing an unrelated
+  push from clearing a failure.
   Issue and closed-PR comment events capture the latest default-branch object so an
   agent-added binding can satisfy a rerun without author edits. GitHub has no
-  target-context review event, so hostile direct-event tampering still requires a
-  separately controlled provider gate.
+  target-context review event or thread-state transition event. Therefore workflow
+  evidence is only as fresh as the last supported event; hard admission for threads
+  currently unresolved at merge requires the provider-native conversation-resolution
+  rule, and hostile direct-event tampering still requires a separately controlled
+  provider gate. Neither layer claims every transient reopen-then-resolve toggle.
 
 The live queue owns unresolved delivery state even though its background stays
 elsewhere. The correcting ADR is

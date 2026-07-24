@@ -2634,6 +2634,48 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_unscoped_assignment_cannot_reuse_another_artifact_binding(self):
+        artifact_a = "github:issue:node:ISSUE_A:assignee:user:alice"
+        artifact_b = "github:issue:node:ISSUE_B:assignee:user:alice"
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Handle Alice's issue assignment.",
+                external_assignment=artifact_a,
+            )
+            path = item.relative_to(root).as_posix()
+            self.git(root, "add", ".")
+            body = (
+                "## What to review\n\n"
+                f"- [Handle Alice's issue assignment.]({path})\n"
+            )
+            def assignments(identity):
+                return (json.dumps([{
+                    "actor": "needs-human",
+                    "identity": identity,
+                }]),)
+
+            self.assertEqual(
+                [],
+                self.findings(
+                    root,
+                    body,
+                    external_assignments=assignments(artifact_a),
+                    queue_actor="any",
+                    require_all_live=False,
+                ),
+            )
+            findings = self.findings(
+                root,
+                body,
+                external_assignments=assignments(artifact_b),
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("External assignment", findings[0])
+            self.assertIn(artifact_b, findings[0])
+
     def test_external_action_source_accepts_projection_or_opaque_binding(self):
         identity = "provider:review-thread:opaque-42"
         with self.repo() as root:

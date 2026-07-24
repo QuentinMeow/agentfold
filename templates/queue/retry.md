@@ -12,7 +12,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Filed:** <YYYY-MM-DD>, by <reconciler | agent/session — link>
 **Action:** <repair or explicitly reject the finding>
 <!-- For a provider assignment, add exactly one **External assignment:** <opaque
-role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
+stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
+Omit it otherwise. -->
 <!-- For transcribed or structurally triaged provider content, add exactly one **External source:** <opaque
 versioned source identity emitted by its adapter>. Omit it otherwise. -->
 **Check:** <reconciler check id, or "manual">

@@ -1,8 +1,7 @@
 # automation/ — things that run
 
 The mechanical half of `handbook/principles/systems-over-instructions.md`: everything
-here executes; nothing here is advice. Python stdlib only — automation must run on a
-bare clone.
+executes; Python stdlib only, so automation runs on a bare clone.
 
 | Piece | What it does | Runs |
 |-------|--------------|------|
@@ -23,8 +22,9 @@ Rules:
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Sticky `queue-resolution` checks every staged/range deletion
-  against its claim and changed evidence; requested review changes require agent repair
-  plus artifact-pending re-review. `stale-queue` age-checks `blocking-*`, never hard-stales
+  against its claim and changed evidence; future reviews remain live through their
+  boundary; Git-range approval permits only queue-lifecycle tail changes. Requested
+  changes require agent repair plus artifact-pending re-review. `stale-queue` age-checks `blocking-*`, never hard-stales
   `non-blocking-*`, and checks `future-blocking-*` only at a reached UTC `YYYY-MM-DD`;
   event boundaries require actor reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
@@ -33,13 +33,14 @@ Rules:
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned
-  queue actions with exact opaque adapter bindings. Inbound sources are unscoped:
+  queue actions bound to the stable artifact, role, actor kind, and principal. Inbound sources are unscoped:
   their own asks remain enforceable without claiming to represent a task. Versioned
   source bindings let an agent transcribe uneditable provider prose. Every non-empty
   GitHub conversation comment is structural agent triage, and current conversation
-  plus review state replay on every PR candidate update. Summary mode allows ordinary
-  change titles while rejecting asks. Candidate-context direct-event checks are not
-  hostile-workflow evidence without a separately controlled provider gate.
+  plus review state replay on supported PR/review events. Summary mode allows ordinary
+  change titles while rejecting asks. GitHub thread state has no Actions transition
+  trigger: hard merge assurance needs provider-native conversation resolution, and
+  hostile-workflow assurance needs a separately controlled provider gate.
 - Task status enforces `transition:start`, `transition:review`, and
   `transition:complete`; admission adapters pass `--at-transition <name>` for external
   boundaries such as merge. Handover projection checks activate from the repository
@@ -55,6 +56,5 @@ Rules:
   live actions, and removing only the queue v1 marker remains an anti-downgrade failure.
   After clean removal, its registry check no-ops with the absent folder.
 - Tracked executables use repository-local state only. Agent/provider shims are thin,
-  optional, policy-free forwarders to canonical behavior; personal installers stay
-  outside AgentFold (`templates/task/design.md` carries the core-fit receipt).
-- Never weaken a check to pass; fix the finding or file the reason as a decision.
+  policy-free forwarders; personal installers stay outside AgentFold (`templates/task/design.md`).
+- Never weaken a check to pass; fix it or file the reason as a decision.

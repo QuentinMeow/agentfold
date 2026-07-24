@@ -13,7 +13,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
 <!-- For a provider assignment, add exactly one **External assignment:** <opaque
-role-and-identity binding emitted by its adapter>. Omit it otherwise. -->
+stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
+Omit it otherwise. -->
 <!-- For transcribed or structurally triaged provider content, add exactly one **External source:** <opaque
 versioned source identity emitted by its adapter>. Omit it otherwise. -->
 **Why-you-might-care:** <one sentence explaining the practical consequence>
@@ -23,14 +24,18 @@ versioned source identity emitted by its adapter>. Omit it otherwise. -->
 **Reviewed revision:** ______
 **Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
 
-<!-- approved accepts the bound revision and is terminal with no successor.
+<!-- approved accepts the bound revision and is response-terminal with no successor.
+Keep a future-blocking review folding and live through its boundary; approval may
+satisfy the boundary only while fresh. A Git-range approval permits queue-lifecycle
+tail changes on the same base. Post-merge deletion requires the merge to carry it.
 changes-requested preserves the boundary. Before deleting, add **Successor action:**
 `<new needs-agent queue path>` here. That new same-timing open action owns the repair
 in Action, keeps Full context, predeclares non-queue Resolution evidence, and points
 back with Supersedes. It must also link one distinct same-timing **Follow-up review:**
 that is newly awaiting-artifact, points back with Supersedes, and names the repair in
 Depends on. The follow-up Action is the later judgment, never a copy of the repair.
-rejected declines the proposal and abandoned ends pursuit; both are terminal. Legacy
+rejected declines the proposal and abandoned ends pursuit; neither authorizes a future
+boundary. Legacy
 **Review outcome:** not-approved remains accepted as changes-requested. -->
 
 <!-- Replace this comment with exactly one block matching the filename:
