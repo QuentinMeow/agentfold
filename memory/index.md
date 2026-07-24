@@ -19,6 +19,7 @@
 - [A surfaced needs-human item is a clickable link plus context, never a bare name](decisions/2026-07-22-surfaced-asks-are-links-plus-context.md) — Handovers and final replies surface pending items as a clickable link to the queue file plus 2–3 sentences of context; the file links onward to its sources
 - [Task status is the folder the task sits in](decisions/2026-07-22-task-status-as-folders.md) — tasks/0_backlog…4_done folders ARE the status; no status field exists to drift
 - [Skills live in a visible skills/ dir; agent dirs are generated symlinks](decisions/2026-07-22-visible-skills-dir-with-symlinks.md) — skills/ is canonical; install.py symlinks it into .claude/, .cursor/, .agents/; symlinks are git-ignored
+- [Detector failures remain distinct from clean results and findings](decisions/2026-07-23-detector-failure-review-disposition.md) — Detector failures and incomplete coverage remain explicit result states; guard mode controls the transition response without relabeling the evidence
 - [The queue owns pending actions and filenames expose dependency timing](decisions/2026-07-23-queue-owns-pending-actions-and-timing.md) — Every pending human or durable cross-session agent action has one canonical queue item; its filename says when unresolved work blocks
 - [Unresolved queue delivery state is not regenerable](decisions/2026-07-23-unresolved-queue-delivery-state-is-not-regenerable.md) — Durable background can be reconstructed, but deleting an unresolved queue item loses its canonical action identity and delivery state
 
