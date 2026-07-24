@@ -66,6 +66,15 @@ def thread(thread_id, resolved=False, comments=None, has_next=False):
 
 
 class CollectGitHubReviewActionsTests(unittest.TestCase):
+    def test_commented_review_preserves_action_body_without_forcing(self):
+        body = "This needs to be repaired before merge."
+        source = COLLECTOR.review_source(
+            review("commented-action", body, "COMMENTED")
+        )
+        self.assertEqual("needs-agent", source["actor"])
+        self.assertEqual(body, source["body"])
+        self.assertFalse(source["force"])
+
     def test_collects_paginated_latest_reviews_opinions_and_threads(self):
         calls = []
 

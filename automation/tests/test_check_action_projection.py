@@ -1253,6 +1253,45 @@ class ActionProjectionTests(unittest.TestCase):
                         findings[0],
                     )
 
+    def test_passive_hard_obligations_are_actions_not_descriptions(self):
+        actions = (
+            "This needs to be repaired before merge.",
+            "This must be reviewed before release.",
+            "The migration has to be fixed before deployment.",
+            "This is currently required to be validated before publication.",
+        )
+        descriptions = (
+            "This no longer needs to be repaired before merge.",
+            "The memo noted this needs to be repaired before merge.",
+            "This needed to be repaired before the old release.",
+            "This needs to be able to be repaired before merge.",
+            "This should be repairable before merge.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            for action in actions:
+                with self.subTest(end_to_end_action=action):
+                    findings = self.findings(
+                        root,
+                        action,
+                        allow_missing_action_section_if_no_action=True,
+                        queue_actor="any",
+                        require_all_live=False,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(
+                        "missing a declared action section",
+                        findings[0],
+                    )
+
     def test_modal_requests_to_named_people_and_groups_are_actions(self):
         actions = (
             "Could the security team sanity-check this.",
@@ -2652,6 +2691,22 @@ class ActionProjectionTests(unittest.TestCase):
                     ("What to review",),
                     repo=root,
                 ),
+            )
+            commented_action = json.dumps([{
+                "actor": "needs-agent",
+                "identity": "provider:review:commented-action",
+                "body": "This needs to be repaired before merge.",
+                "force": False,
+            }])
+            findings = PROJECTION.external_action_source_findings(
+                commented_action,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn(
+                "provider:review:commented-action",
+                findings[0],
             )
             forced = json.dumps([{
                 "actor": "needs-agent",

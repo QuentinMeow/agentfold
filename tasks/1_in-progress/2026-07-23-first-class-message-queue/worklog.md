@@ -566,3 +566,20 @@
   All 100 projection tests passed; the reviewer block invalidated the whole panel.
 - Session handover:
   `history/conversations/2026-07-23-1643PDT-repair-obligation-modifiers-clauses/handover.md`.
+
+## 2026-07-23 — passive review-obligation repair (codex)
+
+- Contract lens 1 passed exact commit `34fdf3f7`; provider/projection lens 2 then found a
+  `COMMENTED` formal review whose passive hard obligation was replayed as a non-forced
+  source but skipped by the core classifier.
+- Added a high-confidence passive hard-obligation form using the same subject, modifier,
+  reported-speech, lifecycle, and clause boundaries as the active fallback. The passive
+  verb vocabulary is restricted to recognized review/work actions.
+- Closed an adjacent false positive where modal free-form parsing treated `should be
+  repairable before merge` as an addressee plus a distant merge command.
+- Added collector, action-classifier, end-to-end projection, and non-forced external
+  source regressions for the exact `This needs to be repaired before merge` review.
+  All 101 projection tests and nine collector tests passed. Lens 2's block invalidated
+  the full panel, including the earlier lens 1 pass.
+- Session handover:
+  `history/conversations/2026-07-23-1702PDT-repair-passive-review-obligation/handover.md`.

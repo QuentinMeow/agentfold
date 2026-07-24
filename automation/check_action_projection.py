@@ -112,11 +112,11 @@ REQUEST_ACTION_VERB_PATTERN = (
     r"(?:address|analy[sz]e|assess|audit|benchmark|bisect|"
     r"(?:[A-Za-z][A-Za-z'-]*-)?check|debug|diagnose|document|evaluate|"
     r"examine|fix|implement|investigate|measure|profile|proofread|reproduce|"
-    r"resolve|retry|run|test|trace|triage|update|validate)"
+    r"repair|resolve|retry|run|test|trace|triage|update|validate)"
 )
 UNAMBIGUOUS_WORK_COMMAND_PATTERN = (
     r"(?:analy[sz]e|assess|bisect|diagnose|evaluate|examine|fix|implement|"
-    r"investigate|proofread|reproduce|resolve|validate)"
+    r"investigate|proofread|repair|reproduce|resolve|validate)"
 )
 AMBIGUOUS_WORK_COMMAND_PATTERN = (
     r"(?:address|audit|benchmark|check|debug|document|measure|profile|retry|"
@@ -150,6 +150,13 @@ ACTION_VERB_PATTERN = (
     rf"(?:{CLEAR_ACTION_VERB_PATTERN}|{LET_KNOW_PATTERN}|"
     rf"{KEEP_POSTED_PATTERN}|"
     rf"{REQUEST_ACTION_VERB_PATTERN}|answer|comment|reply|respond)"
+)
+PASSIVE_ACTION_VERB_PATTERN = (
+    r"(?:addressed|analy[sz]ed|assessed|audited|benchmarked|bisected|"
+    r"(?:[A-Za-z][A-Za-z'-]*-)?checked|debugged|diagnosed|documented|"
+    r"evaluated|examined|fixed|implemented|inspected|investigated|measured|"
+    r"profiled|proofread|repaired|reproduced|resolved|retried|reviewed|run|"
+    r"tested|traced|triaged|updated|validated|verified)"
 )
 NONWORK_DIRECTIVE_ACTION_PATTERN = (
     rf"(?:{CLEAR_DIRECTIVE_ACTION_PATTERN}"
@@ -371,6 +378,26 @@ FREEFORM_ACTOR_OBLIGATION_RE = re.compile(
     r"releas(?:e|ing)|ship(?:ping)?)\b",
     re.I | re.M,
 )
+FREEFORM_PASSIVE_OBLIGATION_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    rf"(?![^.!?\n]*\b{REPORTED_SPEECH_CUE_PATTERN}\b)"
+    rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
+    r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
+    r"(?:must|needs?[ \t]+to|(?:has|have)[ \t]+to|"
+    r"(?:is|are)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}(?:requested|required)[ \t]+to|"
+    r"(?:requested|required)[ \t]+to)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!(?:not|never)\b)"
+    r"be[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    rf"{PASSIVE_ACTION_VERB_PATTERN}\b"
+    r"[^.!?\n]{0,120}\b(?:before|by|prior[ \t]+to)[ \t]+"
+    r"(?:(?:a|an|the|this|that)[ \t]+)?"
+    r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
+    r"releas(?:e|ing)|ship(?:ping)?)\b",
+    re.I | re.M,
+)
 ACTOR_HARD_PROHIBITION_RE = re.compile(
     rf"\b(?:{ACTION_SOURCE_PATTERN}|{AUTOMATION_ACTOR_PATTERN})\b[ \t]+"
     r"must[ \t]+"
@@ -445,6 +472,7 @@ MODAL_ACTOR_REQUEST_RE = re.compile(
 )
 MODAL_FREEFORM_ADDRESSEE_REQUEST_RE = re.compile(
     r"\b(?:can|could|may|might|should|will|would)[ \t]+"
+    r"(?!(?:be|have)\b)"
     rf"(?!(?:{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{0,7}}"
     r"(?:not|never)\b)"
     rf"{FREEFORM_ADDRESSEE_PATTERN}"
@@ -865,6 +893,7 @@ def declarative_action_request(clean):
         ACTOR_OBLIGATION_RE,
         AUTOMATION_ACTOR_OBLIGATION_RE,
         FREEFORM_ACTOR_OBLIGATION_RE,
+        FREEFORM_PASSIVE_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
@@ -880,7 +909,10 @@ def declarative_action_request(clean):
         for matched in pattern.finditer(clean):
             if matched.groupdict().get("negation"):
                 continue
-            if pattern is FREEFORM_ACTOR_OBLIGATION_RE:
+            if pattern in {
+                FREEFORM_ACTOR_OBLIGATION_RE,
+                FREEFORM_PASSIVE_OBLIGATION_RE,
+            }:
                 clause_prefix = re.split(
                     r"(?:[.!?][ \t]+|\n[ \t]*\n)",
                     clean[:matched.start()],
