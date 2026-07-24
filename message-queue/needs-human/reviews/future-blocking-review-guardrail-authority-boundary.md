@@ -1,12 +1,12 @@
 # Is the boundary between acknowledgement and exception authority correct?
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
 **Resolution evidence:** `memory/decisions/2026-07-23-guardrail-authority-review-disposition.md`
-**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
-**Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration

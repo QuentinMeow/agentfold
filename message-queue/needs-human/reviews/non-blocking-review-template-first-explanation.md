@@ -1,12 +1,12 @@
 # Does the design explain the decided template-first policy clearly?
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.
 **Full context:** `memory/decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md`; `docs/designs/risk-tiered-agent-guardrails.md`
 **Resolution evidence:** `memory/decisions/2026-07-23-template-first-review-disposition.md`
-**Review target:** `docs/designs/risk-tiered-agent-guardrails.md`
-**Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
 **If unanswered:** The 2026-07-22 ADR remains authoritative and the current expanded explanation stays; implementation may proceed.
