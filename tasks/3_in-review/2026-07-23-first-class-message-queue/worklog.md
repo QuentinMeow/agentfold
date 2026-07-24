@@ -53,3 +53,12 @@
   legitimate active-task follow-ups, response revision binding, and exact new-handover
   projection. The full repository test runner passed 4/4 files (55 core-scope tests
   with one skip, 50 queue tests, 5 quote-api tests, and 3 quote-cli tests).
+
+## 2026-07-24 — stacked-publication-coordination (codex)
+
+- Reconstructed the task's in-review status and continuation action directly on the
+  live coordination lane without copying reviewed-system code to `main`.
+- Kept the merge review artifact-pending because the final coordination base is not
+  authorized or published yet. A later queue-only edge will bind the exact range after
+  the approved base is incorporated into PR #7.
+- Preserved both rejected local coordination histories for audit; neither was pushed.
