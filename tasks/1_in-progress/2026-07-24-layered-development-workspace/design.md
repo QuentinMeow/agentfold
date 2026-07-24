@@ -78,7 +78,7 @@ expose a public fallback.
 **Repository substitution:** pass — any adopted public/private project faces the same local composition and leak problem
 **User-global writes:** none
 **Why AgentFold core:** folder-as-a-service, instruction provenance, queue interaction, and safe autonomous publication are harness-wide concerns
-**Thin adapter:** none; platform-specific mounts or sandboxes, if ever added, remain optional adapters
+**Thin adapter:** none
 
 ## Research anchors
 
