@@ -1,12 +1,12 @@
 # Does the first-class message-queue contract preserve the right amount of freedom?
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** After the PR is linked and status becomes waiting, review the queue-ownership invariant, timing prefixes, and enforcement before merge.
 **Full context:** `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`; `message-queue/AGENTS.md`; `handbook/principles/files-as-messages.md`
 **Resolution evidence:** `memory/decisions/2026-07-23-first-class-queue-review-disposition.md`
-**Review target:** git:acc23b6289f5ca66744718af379aba0468be93e2...9cda440dad17ac7ac3238e25e1ae62b1588c8d3f
-**Review revision:** git:acc23b6289f5ca66744718af379aba0468be93e2...9cda440dad17ac7ac3238e25e1ae62b1588c8d3f
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:merge task:2026-07-23-first-class-message-queue
