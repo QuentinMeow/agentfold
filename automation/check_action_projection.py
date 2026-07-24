@@ -398,6 +398,29 @@ FREEFORM_PASSIVE_OBLIGATION_RE = re.compile(
     r"releas(?:e|ing)|ship(?:ping)?)\b",
     re.I | re.M,
 )
+FREEFORM_LIFECYCLE_OBLIGATION_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    rf"(?![^.!?\n]*\b{REPORTED_SPEECH_CUE_PATTERN}\b)"
+    rf"{FREEFORM_OBLIGATION_SUBJECT_PATTERN}"
+    r"(?!(?:(?:do|does|is|are)[ \t]+not)\b)"
+    r"(?:must|should|ought[ \t]+to|"
+    r"needs?(?:[ \t]+to|(?![ \t]+to\b))|"
+    r"requires?(?:[ \t]+to|(?![ \t]+to\b))|"
+    r"(?:has|have)[ \t]+to|"
+    r"(?:is|are)[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?:(?:requested|required|expected)[ \t]+to|to))[ \t]+"
+    rf"{OBLIGATION_MODIFIER_PATTERN}"
+    r"(?!no\b)"
+    r"(?!be[ \t]+(?:able[ \t]+to|"
+    r"(?:[A-Za-z][A-Za-z'-]*[ \t]+){0,2}"
+    r"[A-Za-z][A-Za-z'-]*(?:able|ible)\b))"
+    r"[^.!?\n]{1,160}\b(?:before|by|prior[ \t]+to)[ \t]+"
+    r"(?:(?:a|an|the|this|that)[ \t]+)?"
+    r"(?:deploy(?:ing|ment)|merg(?:e|ing)|publication|publish(?:ing)?|"
+    r"releas(?:e|ing)|ship(?:ping)?)\b",
+    re.I | re.M,
+)
 ACTOR_HARD_PROHIBITION_RE = re.compile(
     rf"\b(?:{ACTION_SOURCE_PATTERN}|{AUTOMATION_ACTOR_PATTERN})\b[ \t]+"
     r"must[ \t]+"
@@ -894,6 +917,7 @@ def declarative_action_request(clean):
         AUTOMATION_ACTOR_OBLIGATION_RE,
         FREEFORM_ACTOR_OBLIGATION_RE,
         FREEFORM_PASSIVE_OBLIGATION_RE,
+        FREEFORM_LIFECYCLE_OBLIGATION_RE,
         FIRST_PERSON_VERB_REQUEST_RE,
         MODAL_ACTOR_REQUEST_RE,
         MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
@@ -912,6 +936,7 @@ def declarative_action_request(clean):
             if pattern in {
                 FREEFORM_ACTOR_OBLIGATION_RE,
                 FREEFORM_PASSIVE_OBLIGATION_RE,
+                FREEFORM_LIFECYCLE_OBLIGATION_RE,
             }:
                 clause_prefix = re.split(
                     r"(?:[.!?][ \t]+|\n[ \t]*\n)",

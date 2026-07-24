@@ -1259,6 +1259,12 @@ class ActionProjectionTests(unittest.TestCase):
             "This must be reviewed before release.",
             "The migration has to be fixed before deployment.",
             "This is currently required to be validated before publication.",
+            "This must be approved before merge.",
+            "This needs fixing before merge.",
+            "This should be fixed before merge.",
+            "This requires approval before merge.",
+            "This needs a fix before merge.",
+            "This ought to be reviewed before release.",
         )
         descriptions = (
             "This no longer needs to be repaired before merge.",
@@ -1266,6 +1272,8 @@ class ActionProjectionTests(unittest.TestCase):
             "This needed to be repaired before the old release.",
             "This needs to be able to be repaired before merge.",
             "This should be repairable before merge.",
+            "This should be highly repairable before merge.",
+            "This needs no repair before merge.",
         )
         for action in actions:
             with self.subTest(action=action):
@@ -2692,22 +2700,27 @@ class ActionProjectionTests(unittest.TestCase):
                     repo=root,
                 ),
             )
-            commented_action = json.dumps([{
-                "actor": "needs-agent",
-                "identity": "provider:review:commented-action",
-                "body": "This needs to be repaired before merge.",
-                "force": False,
-            }])
-            findings = PROJECTION.external_action_source_findings(
-                commented_action,
-                ("What to review",),
-                repo=root,
-            )
-            self.assertEqual(1, len(findings))
-            self.assertIn(
-                "provider:review:commented-action",
-                findings[0],
-            )
+            for index, body in enumerate((
+                "This needs to be repaired before merge.",
+                "This must be approved before merge.",
+                "This needs fixing before merge.",
+                "This should be fixed before merge.",
+            ), start=1):
+                identity_value = f"provider:review:commented-action-{index}"
+                commented_action = json.dumps([{
+                    "actor": "needs-agent",
+                    "identity": identity_value,
+                    "body": body,
+                    "force": False,
+                }])
+                with self.subTest(commented_action=body):
+                    findings = PROJECTION.external_action_source_findings(
+                        commented_action,
+                        ("What to review",),
+                        repo=root,
+                    )
+                    self.assertEqual(1, len(findings))
+                    self.assertIn(identity_value, findings[0])
             forced = json.dumps([{
                 "actor": "needs-agent",
                 "identity": identity,

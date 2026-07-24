@@ -583,3 +583,20 @@
   the full panel, including the earlier lens 1 pass.
 - Session handover:
   `history/conversations/2026-07-23-1702PDT-repair-passive-review-obligation/handover.md`.
+
+## 2026-07-23 — lifecycle-obligation shape repair (codex)
+
+- Two fresh reviewers of `90d346d6` independently found that finite passive vocabulary
+  still missed ordinary current requirements: passive approval, `needs fixing`, and
+  `should be fixed`.
+- Added a voice- and verb-shape-independent fallback whose evidence is the present
+  obligation marker plus an explicit lifecycle deadline. It recognizes active, passive,
+  gerund, approval-noun, and `needs a fix` forms without enumerating every action word.
+- Kept precision boundaries for reported speech, negative need, `no longer`, capability
+  requirements, and `-able` or `-ible` property descriptions. Removed optional-token
+  backtracking that initially let `needs to be able to` evade the capability exclusion.
+- Expanded end-to-end provider-source cases for passive approval, gerund fixing, and
+  soft passive obligations. All 101 projection tests passed. Both blocking verdicts
+  invalidated the full panel.
+- Session handover:
+  `history/conversations/2026-07-23-1719PDT-lifecycle-obligation-shape-coverage/handover.md`.
