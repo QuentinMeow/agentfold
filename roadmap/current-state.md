@@ -63,6 +63,14 @@ What is true today, mapped to the desired-state lines.
   explicitly approved design.
 - **Stacked review publication (2026-07-24)**: authority and scope are recorded in
   [the direct-main coordination decision](../memory/decisions/2026-07-24-direct-main-coordination-push-authorized.md).
+- **Layered workspace proposal (2026-07-24)**: the durable design in
+  `docs/designs/layered-development-workspace.md` replaces the unsafe ignored nested
+  mirror sketch with a private integration checkout, external no-Git zones, a clean
+  distinct-object-store publisher, explicit provenance/failure states, and a separate
+  capability-isolation requirement. A manually invoked read-only topology inspector
+  now verifies only declared root/Git-metadata separation and reports every stronger
+  claim as uninspected, unverified, or blocked. Manifests, admitted sessions, mounts,
+  export, and publication are not yet real.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
-  public/private overlay, queue viewer, design-review hardening — see
+  layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

@@ -11,6 +11,7 @@ executes; Python stdlib only, so automation runs on a bare clone.
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
 | `hooks/pre-commit` | blocks commits when core scope, repository invariants, or tests fail | every commit (installed) |
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
+| `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
 | `run_tests.py` | runs test files under services, canonical skills, and automation | pre-commit, CI, on demand |
 
 Rules:
@@ -55,6 +56,5 @@ Rules:
 - Adopters may delete an empty/resolved harness folder; the deletion edge may not erase
   live actions, and removing only the queue v1 marker remains an anti-downgrade failure.
   After clean removal, its registry check no-ops with the absent folder.
-- Tracked executables use repository-local state only. Agent/provider shims are thin,
-  policy-free forwarders; personal installers stay outside AgentFold (`templates/task/design.md`).
+- Tracked executables use repository-local state only. Agent/provider shims are thin, policy-free forwarders; personal installers stay outside AgentFold (`templates/task/design.md`).
 - Never weaken a check to pass; fix it or file the reason as a decision.
