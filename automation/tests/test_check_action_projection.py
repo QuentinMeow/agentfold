@@ -1343,6 +1343,38 @@ class ActionProjectionTests(unittest.TestCase):
                         findings[0],
                     )
 
+    def test_kindly_action_directives_are_actions_not_descriptions(self):
+        actions = (
+            "Kindly review the migration before merge.",
+            "Kindly approve the recovery plan.",
+            "Also kindly verify the credential rotation.",
+        )
+        descriptions = (
+            "Kindly worded review comments reduce friction.",
+            "The response was kindly written.",
+        )
+        for action in actions:
+            with self.subTest(action=action):
+                self.assertTrue(PROJECTION.action_like_plain_prose(action))
+                self.assertTrue(PROJECTION.action_like_prose(action))
+                self.assertTrue(PROJECTION.action_like_summary_prose(action))
+        for description in descriptions:
+            with self.subTest(description=description):
+                self.assertFalse(
+                    PROJECTION.action_like_plain_prose(description)
+                )
+
+        with self.repo() as root:
+            findings = self.findings(
+                root,
+                actions[0],
+                allow_missing_action_section_if_no_action=True,
+                queue_actor="any",
+                require_all_live=False,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("missing a declared action section", findings[0])
+
     def test_modal_requests_to_named_people_and_groups_are_actions(self):
         actions = (
             "Could the security team sanity-check this.",

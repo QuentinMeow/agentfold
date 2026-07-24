@@ -203,6 +203,15 @@ PLEASE_COMMAND_PATTERN = (
     rf"{DIRECTIVE_PREFIX_PATTERN}"
     rf"{OPEN_COMMAND_WORD_PATTERN}"
 )
+KINDLY_COMMAND_PATTERN = (
+    rf"{DIRECTIVE_PREFIX_PATTERN}kindly"
+    r"(?:[ \t]*,[ \t]*|[ \t]+)"
+    rf"{DIRECTIVE_PREFIX_PATTERN}"
+    rf"{DIRECTIVE_ACTION_PATTERN}"
+)
+COURTESY_COMMAND_PATTERN = (
+    rf"(?:{PLEASE_COMMAND_PATTERN}|{KINDLY_COMMAND_PATTERN})"
+)
 HUMAN_ACTION_NOUN_PATTERN = (
     r"(?:advice|approval|authorization|choice|clarification|comments?|"
     r"confirmation|decision|feedback|guidance|input|opinions?|perspective|"
@@ -253,7 +262,7 @@ ACTION_VERB_RE = re.compile(
 DIRECTIVE_RE = re.compile(
     r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{PLEASE_COMMAND_PATTERN}"
+    rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
     r")\b",
@@ -263,7 +272,7 @@ ADDITIONAL_DIRECTIVE_RE = re.compile(
     r"(?:^|(?:[,.!;:—]|[ \t]+-)[ \t]+)"
     r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{PLEASE_COMMAND_PATTERN}"
+    rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{DIRECTIVE_ACTION_PATTERN}"
     r")\b",
@@ -272,7 +281,7 @@ ADDITIONAL_DIRECTIVE_RE = re.compile(
 SUMMARY_DIRECTIVE_RE = re.compile(
     r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{PLEASE_COMMAND_PATTERN}"
+    rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{NONWORK_DIRECTIVE_ACTION_PATTERN}"
     r")\b",
@@ -282,7 +291,7 @@ ADDITIONAL_SUMMARY_DIRECTIVE_RE = re.compile(
     r"(?:^|(?:[,.!;:—]|[ \t]+-)[ \t]+)"
     r"(?:(?:[-+*]|\d+[.)])[ \t]+)?"
     r"(?:"
-    rf"{PLEASE_COMMAND_PATTERN}"
+    rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}{NONWORK_DIRECTIVE_ACTION_PATTERN}"
     r")\b",

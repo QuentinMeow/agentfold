@@ -1370,7 +1370,7 @@ def queue_revision_edges(activations):
     if _GIT_HEAD_OID != range_head:
         commits.append(_GIT_HEAD_OID)
     for commit in commits:
-        governed, governance_error = descended_from_any(
+        governed, governance_error = governed_by_activation_join(
             commit, activations
         )
         if governance_error:

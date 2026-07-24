@@ -4546,6 +4546,60 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual(1, len(findings))
 
+    def test_synthetic_merge_governs_parallel_history_joined_with_activation(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(root, "common.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            trunk = self.git(root, "branch", "--show-current")
+
+            self.git(root, "checkout", "-b", "feature")
+            item = self.write(
+                root,
+                "message-queue/needs-agent/requests/blocking-parallel.md",
+                "# Parallel action\n\n**Status:** open\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create parallel action")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "erase parallel action")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", trunk)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "feature")
+            self.git(root, "merge", "--no-ff", "--no-commit", trunk)
+            self.git(root, "commit", "-m", "synthetic merge")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                finding.subject == Path(
+                    "message-queue/needs-agent/requests/"
+                    "blocking-parallel.md"
+                )
+                and "deleted unresolved" in finding.message
+                for finding in findings
+            ))
+
     def make_task(self, root, status, queue_actions):
         task_id = "2026-07-23-example"
         task = root / "tasks" / status / task_id

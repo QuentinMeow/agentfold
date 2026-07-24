@@ -660,3 +660,25 @@
   invalidated the panel.
 - Session handover:
   `history/conversations/2026-07-23-1806PDT-effective-review-triage/handover.md`.
+
+## 2026-07-23 — activation-join and effective-source repair (codex)
+
+- Three fresh reviewers of `3af20145` found that a synthetic merge could hide an
+  unresolved action created and deleted on history parallel to queue-v1 activation, an
+  opinion-only approved review used a weaker force policy, and `Kindly review ...`
+  escaped provider-prose classification.
+- Reused the existing activation-join predicate when enumerating queue lifecycle edges.
+  A candidate that admits parallel history with v1 now governs that history, while
+  sequential commits ancestral to every activation remain legacy.
+- Centralized effective formal-review force policy in the validated source constructor,
+  so both GitHub review connections force every non-empty effective review and every
+  changes-requested review. Identical provider records still deduplicate by versioned
+  identity.
+- Added a bounded `kindly` courtesy-command form that recognizes known action verbs
+  without classifying descriptions such as `Kindly worded review comments`.
+- Added exact parallel-history, opinion-only, duplicate-source, blank-opinion,
+  polite-command, descriptive-control, merge-edge, and legacy-history regressions.
+  The focused provider/projection run passed 119 tests and the three queue lifecycle
+  cases passed. All three reviewer blocks invalidated the panel.
+- Session handover:
+  `history/conversations/2026-07-23-1831PDT-activation-join-source-repair/handover.md`.

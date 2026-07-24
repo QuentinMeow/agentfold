@@ -78,7 +78,14 @@ class CollectGitHubReviewActionsTests(unittest.TestCase):
                     review("empty-comment", "", "COMMENTED"),
                 ])
             if query == COLLECTOR.LATEST_OPINIONS_QUERY:
-                return payload("latestOpinionatedReviews", [])
+                return payload("latestOpinionatedReviews", [
+                    review(
+                        "opinion-approved",
+                        "One remaining typo should be fixed.",
+                        "APPROVED",
+                    ),
+                    review("opinion-blank", "   ", "APPROVED"),
+                ])
             return payload("reviewThreads", [])
 
         sources = COLLECTOR.collect_sources(
@@ -88,6 +95,10 @@ class CollectGitHubReviewActionsTests(unittest.TestCase):
         self.assertEqual("needs-agent", by_body[body]["actor"])
         self.assertTrue(by_body[body]["force"])
         self.assertTrue(by_body["Looks good."]["force"])
+        self.assertTrue(
+            by_body["One remaining typo should be fixed."]["force"]
+        )
+        self.assertFalse(by_body["   "]["force"])
         empty_sources = [
             source for source in sources if source["body"] == ""
         ]
@@ -211,7 +222,7 @@ class CollectGitHubReviewActionsTests(unittest.TestCase):
         self.assertGreaterEqual(len(calls), 5)
 
     def test_opinion_force_merges_with_same_latest_review(self):
-        same = review("same", "Please fix the race.", "CHANGES_REQUESTED")
+        same = review("same", "One remaining typo should be fixed.", "APPROVED")
 
         def request(query, variables):
             name = (

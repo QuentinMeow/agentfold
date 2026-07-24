@@ -222,7 +222,7 @@ def fetch_thread_comments(request, thread):
     return thread_id, all_nodes
 
 
-def review_source(review, force=False):
+def review_source(review):
     review = require_object(review, "latest review")
     review_id = require_string(review.get("id"), "latest review id")
     body = require_string(
@@ -249,7 +249,10 @@ def review_source(review, force=False):
             f"github:pull-request-review:{review_id}:sha256:{version}"
         ),
         "body": body,
-        "force": force,
+        "force": (
+            state not in {"DISMISSED", "PENDING"}
+            and (state == "CHANGES_REQUESTED" or bool(body.strip()))
+        ),
         "url": url,
     }
 
@@ -339,24 +342,11 @@ def collect_sources(request, owner, name, number):
 
     by_identity = {}
     for review in latest:
-        review_state = review.get("state")
-        review_body = review.get("body", "")
-        source = review_source(
-            review,
-            force=(
-                review_state == "CHANGES_REQUESTED"
-                or (
-                    review_state in {"APPROVED", "COMMENTED"}
-                    and bool(review_body.strip())
-                )
-            ),
-        )
+        source = review_source(review)
         if review["state"] not in {"DISMISSED", "PENDING"}:
             by_identity[source["identity"]] = source
     for review in opinions:
-        source = review_source(
-            review, force=review.get("state") == "CHANGES_REQUESTED"
-        )
+        source = review_source(review)
         if review["state"] in {"DISMISSED", "PENDING"}:
             continue
         existing = by_identity.get(source["identity"])

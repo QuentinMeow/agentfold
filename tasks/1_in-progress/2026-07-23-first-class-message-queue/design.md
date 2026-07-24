@@ -94,9 +94,11 @@ portable adoption:
   approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
   and generated-retry exceptions prove their own state transitions, and activation
-  cannot be removed to disable history checks. A governed v1 handover path has one
-  immutable incarnation; deletion is allowed, but correction or parallel re-entry uses
-  a new conversation path.
+  cannot be removed to disable history checks. A candidate that joins activation with
+  parallel queue history governs the newly admitted history; only commits ancestral to
+  every activation remain legacy. A governed v1 handover path has one immutable
+  incarnation; deletion is allowed, but correction or parallel re-entry uses a new
+  conversation path.
 - Force-ref admission names the displaced old tip explicitly, so continuity compares it
   with the new range head without treating ordinary PR divergence as a force push.
   Whole queue-service removal remains modular only when its edge erases no live action.
