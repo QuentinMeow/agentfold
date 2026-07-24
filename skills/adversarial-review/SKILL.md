@@ -37,9 +37,9 @@ Prefix an item `blocking-` when named work cannot proceed now, `future-blocking-
 work may continue only until a stated date/event/transition, or `non-blocking-` when it
 never stops work. A human review must explain how the verdicts or choices differ, give
 a concrete consequence, state the safe unattended result (normally do not merge), and
-link the diff, task, and complete evidence. The queue is canonical for pending human
-actions and durable cross-session agent actions; chat, tasks, and review tools only
-project it.
+link the diff, task, and complete evidence. Arbitrary event/transition/operation
+evidence is agent-attested unless a controlled adapter enforces it. The queue is
+canonical for pending human and durable cross-session agent actions; other tools project it.
 
 ## Costs and calibration
 

@@ -4,9 +4,11 @@
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm the separate failure state and its mode-dependent transition behavior, or describe the desired alternative.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Resolution evidence:** `memory/decisions/2026-07-23-detector-failure-review-disposition.md`
 **Review target:** pending
 **Review revision:** pending
 **Reviewed revision:** ______
+**Review outcome:** pending
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Treat the verifier as attack surface” and “Detector assurance”

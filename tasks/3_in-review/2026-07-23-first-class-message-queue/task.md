@@ -31,7 +31,9 @@ or never blocks.
       questions and instead surface links to queue items.
 - [x] The owner's answers about guard modes and review clarity are folded into durable
       design/decision records through the queue lifecycle.
-- [ ] Repository checks and an independent adversarial review pass with real evidence.
+- [x] The full repository test runner passes with real evidence in `verification.md`.
+- [ ] [After the PR is linked and status becomes waiting, review the queue-ownership invariant, timing prefixes, and enforcement before merge.](../../../message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md)
+      A fresh final independent adversarial review also completes before merge.
 
 ## Links
 

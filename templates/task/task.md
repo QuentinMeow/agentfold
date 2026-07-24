@@ -6,6 +6,8 @@
 **Parent:** <parent task id, or "none">
 **Repository scope:** <core | service:<name> | records-only>
 **Queue actions:** <exactly none, or backticked live queue paths separated by ; or , with no prose>
+<!-- Human asks and durable cross-session agent asks in any task artifact must be exact
+action-labeled links to paths above. Plain questions or requests are not projections. -->
 
 ## Goal
 

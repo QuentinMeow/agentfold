@@ -49,3 +49,5 @@ now; `future-blocking-<slug>.md` means work may continue only until a stated
 date/event/transition; `non-blocking-<slug>.md` means it never stops work and records
 the safe unattended result. The queue is canonical for all pending human actions and
 durable cross-session agent actions; every other channel is only a linked projection.
+An arbitrary event/transition/operation receipt is agent-attested unless a controlled
+adapter supplies hard assurance.

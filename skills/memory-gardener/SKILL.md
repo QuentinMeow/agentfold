@@ -43,3 +43,5 @@ cannot proceed now, `future-blocking-` when work may continue only until a state
 date/event/transition (normally the deletion boundary), and `non-blocking-` when it
 never stops work and has a safe unattended outcome. File any deferred repair found by
 the gardening pass as a needs-agent item rather than leaving it only in the report.
+Treat arbitrary event/transition/operation evidence as agent-attested unless a controlled
+adapter enforces the boundary.

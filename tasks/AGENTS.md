@@ -1,5 +1,6 @@
 # tasks/ — work items
 
+**Task admission schema:** v1
 One folder per task; **the status folder it sits in is its status** — there is no
 status field to drift (`handbook/principles/single-source-of-truth.md`).
 
@@ -23,11 +24,11 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   `ls tasks/*/<task-id>`. The sole exception is a `task-pickup` request: it links the
   backlog path; its verified claim/move is the sole open-status queue deletion.
 - `Queue actions` is exactly lowercase `none` or unique backticked canonical queue paths
-  separated by `;` or `,`; no prose or duplicate field. Tasks do not originate asks:
-  linked queue files own delivery/status and must link back when naming `task:<id>` or
-  using the task as pickup context; the reconciler checks both directions.
-- Every unclaimed backlog task links a non-blocking agent request with
-  `Request kind: task-pickup`. Claiming resolves and deletes it in the claim commit.
+  separated by `;` or `,`; no prose or duplicate field. Tasks never originate pending
+  human or durable cross-session agent asks: task-local assignments use exact task-owned
+  action links. Queue files own delivery/status and reciprocal task context.
+- Every unclaimed backlog task links a non-blocking `Request kind: task-pickup`;
+  claiming resolves and deletes it in the claim commit.
 - **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the
   task from backlog to in-progress, and resolve its pickup request; push, then start.
   One agent per task; a rejected push means someone beat you — pick another.
@@ -36,13 +37,13 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   that item reciprocally naming `task:<id>` in `Blocks now`. `1_in-progress` is valid
   only after a committed one-line `open` → `in-repair` agent claim, or an answered
   `waiting` → `folding` human-action claim. Waiting/open blockers require `2_blocked`.
-- A task cannot cross `transition:start`, `transition:review`, or
-  `transition:complete` while a linked `future-blocking-*` item remains; its boundary
-  names `task:<id>`. Git/provider admission supplies external boundaries such as merge.
-  A non-task branch uses changed task records and commit `task: <id>` tags to infer scope;
-  without either it checks only global boundaries.
-- `4_done` requires `verification.md` with real command output — the reconciler checks
-  it exists; the adversarial-review gate (mode-dependent) checks it's honest.
+- Every post-adoption Git edge rechecks task structure. A linked future blocker stops
+  `start`, `review`, or `complete`; its review binds a stable local artifact. Fresh
+  approval stays live in the crossing commit, and cleanup requires the task to remain
+  past that receipt. Its boundary names `task:<id>`; Git/provider admission handles merge.
+  Non-task branches infer scope from changed task records or `task: <id>` commit tags.
+- `4_done` requires real `verification.md` output and normally `Queue actions: none`;
+  only the exact approved completion receipt survives its crossing commit for cleanup.
 - Done tasks are pruned by the memory gardener after ~90 days: durable learnings are
   promoted into `memory/`, then the folder is deleted (git history archives it).
 
@@ -56,5 +57,4 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 | `worklog.md` | always by first session | append-only; each session adds what happened |
 | `verification.md` | for `3_in-review`/`4_done` | commands actually run + real output |
 
-A task too big to plan in ~10 steps gets split: child tasks link the parent in
-`**Parent:**`; the parent tracks only coordination.
+A task too big for ~10 steps is split; children link `**Parent:**`, which tracks coordination.

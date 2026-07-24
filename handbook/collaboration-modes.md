@@ -41,6 +41,8 @@ git revert and the retry queue are for.
 - **`async`**: the contract is "never block silently, never proceed silently". Every
   queued action names its current or future boundary/unattended outcome; the session
   reply re-surfaces open human items every time (humans skim — repeat the ask).
+  Naming an arbitrary event, transition, or operation supplies agent acknowledgement,
+  not hard assurance, unless a controlled adapter observes and enforces that boundary.
 - **`pair`**: the agent proposes, the human disposes. Optimize for short steps and
   cheap questions. Create the queue item before asking live; chat is a projection and
   the response is folded through the file before work resumes. Handover prose may stay

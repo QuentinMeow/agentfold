@@ -22,6 +22,8 @@ anything.
    date/event/transition, or `non-blocking-<slug>.md` when it never stops work. A human
    item briefly distinguishes the choices, gives a concrete example, states the safe
    result if unattended (remaining stopped is valid), and links the full context.
+   Describe arbitrary event/transition/operation evidence as agent-attested unless a
+   controlled adapter supplies hard assurance.
 4. **Memory**: a decision folded → ADR in `memory/decisions/`; a failure understood →
    lesson in `memory/lessons/<area>/` (merge into an existing lesson first —
    `memory/AGENTS.md`); then `reconcile.py --fix-index`.

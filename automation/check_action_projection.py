@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Require external action sections to project live queue items."""
 import argparse
+from collections import Counter
 import json
 import os
 import re
@@ -224,6 +225,11 @@ NAMED_HUMAN_GROUP_PATTERN = (
     r"(?:[A-Za-z][A-Za-z0-9&'._-]*[ \t]+){0,3}"
     r"(?:committee|council|crew|department|group|office|staff|squad|team)"
 )
+NAMED_HUMAN_ROLE_PATTERN = (
+    r"(?:(?:a|an|the)[ \t]+)?"
+    r"(?:[A-Za-z][A-Za-z0-9&'._-]*[ \t]+){0,3}"
+    r"(?:architect|director|engineer|lead|manager|officer)s?"
+)
 NAMED_HUMAN_IDENTITY_PATTERN = (
     r"(?:@[A-Za-z0-9][A-Za-z0-9_.-]*|anyone|somebody|someone|"
     r"(?-i:[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)?))"
@@ -250,6 +256,7 @@ AUTOMATION_ACTOR_PATTERN = (
 )
 ACTION_SOURCE_PATTERN = (
     rf"(?:you|{NAMED_HUMAN_IDENTITY_PATTERN}|{NAMED_HUMAN_GROUP_PATTERN}|"
+    rf"{NAMED_HUMAN_ROLE_PATTERN}|"
     r"(?:(?:a|an|the)[ \t]+)?"
     r"(?:(?:authorized|code|designated|lead|project|responsible|senior)"
     r"[ \t]+){0,2}"
@@ -309,6 +316,12 @@ SELF_ANSWERED_EXPLANATORY_QUESTION_RE = re.compile(
     r"recommendation|should|think|you|your|we|will|would)\b))"
     r"[^?!\n]{0,120}\?"
     r"(?=(?:[ \t]+|\n[ \t]*)\S)",
+    re.I | re.M,
+)
+SELF_ANSWERED_POLAR_QUESTION_RE = re.compile(
+    r"^[ \t]*(?:is|are|can|could|did|do|does|has|have|"
+    r"was|were|will|would)\b[^?!\n]{0,120}\?"
+    r"(?=(?:[ \t]+|\n[ \t]*)(?:yes|no|it|they|this|that|the)\b)",
     re.I | re.M,
 )
 EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3})")
@@ -548,6 +561,7 @@ MODAL_ACTOR_REQUEST_RE = re.compile(
     rf"{ACTION_SOURCE_PATTERN}[ \t]+"
     r"(?:please[ \t]+)?"
     r"(?P<negation>)(?:(?:not|never)[ \t]+)?"
+    r"(?!(?:be|have)\b)"
     rf"{OPEN_COMMAND_WORD_PATTERN}\b",
     re.I,
 )
@@ -560,6 +574,17 @@ MODAL_FREEFORM_ADDRESSEE_REQUEST_RE = re.compile(
     r"(?:please[ \t]+)?"
     rf"{DIRECTIVE_ACTION_PATTERN}\b",
     re.I,
+)
+TASK_MODAL_FREEFORM_ADDRESSEE_REQUEST_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    r"(?:can|could|may|might|should|will|would)[ \t]+"
+    r"(?!(?:be|have)\b)"
+    rf"(?!(?:{FREEFORM_ADDRESSEE_TOKEN_PATTERN}[ \t]+){{0,7}}"
+    r"(?:not|never)\b)"
+    rf"{FREEFORM_ADDRESSEE_PATTERN}"
+    r"(?:please[ \t]+)?"
+    rf"{DIRECTIVE_ACTION_PATTERN}\b",
+    re.I | re.M,
 )
 COURTESY_ACTION_NOUN_PATTERN = r"(?:feedback|input|reviews?)"
 FIRST_PERSON_COURTESY_REQUEST_RE = re.compile(
@@ -601,6 +626,47 @@ PASSIVE_WORK_APPRECIATION_RE = re.compile(
     r"useful|valued|welcome)"
     r"(?:[ \t]+(?:before|if|when)[ \t]+[^.!?\n]{1,80})?"
     r"[ \t]*[.!]?[ \t]*(?=$|\n)",
+    re.I | re.M,
+)
+HUMAN_HANDOFF_RE = re.compile(
+    r"(?:^|[.!?][ \t]+|\n)[ \t]*"
+    r"(?:please[ \t]+)?"
+    r"(?:ask|consult|contact|notify|ping)[ \t]+"
+    rf"{ACTION_SOURCE_PATTERN}\b"
+    r"[^.!?\n]{0,120}\b"
+    rf"{ACTION_VERB_PATTERN}\b",
+    re.I | re.M,
+)
+TASK_AUTHORITY_DIRECTIVE_RE = re.compile(
+    r"(?:^|(?:[,.!;:—]|[ \t]+-)[ \t]+)"
+    r"[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:"
+    rf"{COURTESY_COMMAND_PATTERN}"
+    r"|"
+    rf"{DIRECTIVE_PREFIX_PATTERN}"
+    r"(?:accept|approve|authorize|"
+    r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|"
+    r"let[ \t]+(?:me|us)[ \t]+know|"
+    r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)|"
+    r"ping[ \t]+(?:me|us)|sign[ \t]+off)"
+    r")\b",
+    re.I | re.M,
+)
+ADDRESSED_HUMAN_DIRECTIVE_RE = re.compile(
+    r"(?:^|[.!?\n])[ \t]*"
+    rf"(?:{ACTION_SOURCE_PATTERN})[ \t]*(?:,|:|—)[ \t]*"
+    rf"(?:please[ \t]+)?{DIRECTIVE_ACTION_PATTERN}\b",
+    re.I | re.M,
+)
+PENDING_HUMAN_ACTION_RE = re.compile(
+    rf"(?:^|[.!?\n])[ \t]*(?:pending|awaiting)[ \t]+"
+    rf"(?:{ACTION_SOURCE_PATTERN}(?:['’]s)?[ \t]+)?"
+    rf"{HUMAN_ACTION_NOUN_PATTERN}\b",
+    re.I | re.M,
+)
+TABLE_HUMAN_ACTION_RE = re.compile(
+    rf"^[ \t]*\|[ \t]*(?:{ACTION_SOURCE_PATTERN})[ \t]*\|"
+    rf"[ \t]*(?:{DIRECTIVE_ACTION_PATTERN}|{HUMAN_ACTION_NOUN_PATTERN})\b",
     re.I | re.M,
 )
 IMPERSONAL_WORK_APPRECIATION_RE = re.compile(
@@ -963,35 +1029,60 @@ def strip_checked_task_list_items(text):
     return "\n".join(output)
 
 
-def declarative_action_request(clean):
+DECLARATIVE_ACTION_PATTERNS = (
+    DECLARATIVE_ACTION_RE,
+    HUMAN_REQUEST_RE,
+    FIRST_PERSON_REQUEST_RE,
+    ACTOR_HARD_PROHIBITION_RE,
+    NAMED_ASSIGNMENT_RE,
+    ACTOR_OBLIGATION_RE,
+    AUTOMATION_ACTOR_OBLIGATION_RE,
+    FREEFORM_ACTOR_OBLIGATION_RE,
+    FREEFORM_PASSIVE_OBLIGATION_RE,
+    FREEFORM_LIFECYCLE_OBLIGATION_RE,
+    PREDICATE_LIFECYCLE_REQUIREMENT_RE,
+    FREEFORM_ACTION_OBJECT_OBLIGATION_RE,
+    PREDICATE_ACTION_REQUIREMENT_RE,
+    NEGATIVE_IMPERATIVE_RE,
+    FIRST_PERSON_VERB_REQUEST_RE,
+    MODAL_ACTOR_REQUEST_RE,
+    MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
+    FIRST_PERSON_COURTESY_REQUEST_RE,
+    PASSIVE_COURTESY_REQUEST_RE,
+    PASSIVE_WORK_APPRECIATION_RE,
+    IMPERSONAL_WORK_APPRECIATION_RE,
+    ELLIPTICAL_COURTESY_REQUEST_RE,
+    FIRST_PERSON_CURIOSITY_RE,
+    FIRST_PERSON_WONDER_RE,
+    ELLIPTICAL_CURIOSITY_RE,
+    HUMAN_HANDOFF_RE,
+)
+TASK_HUMAN_ACTION_PATTERNS = (
+    DECLARATIVE_ACTION_RE,
+    HUMAN_REQUEST_RE,
+    FIRST_PERSON_REQUEST_RE,
+    ACTOR_HARD_PROHIBITION_RE,
+    NAMED_ASSIGNMENT_RE,
+    NEGATIVE_IMPERATIVE_RE,
+    ACTOR_OBLIGATION_RE,
+    FIRST_PERSON_VERB_REQUEST_RE,
+    MODAL_ACTOR_REQUEST_RE,
+    TASK_MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
+    FIRST_PERSON_COURTESY_REQUEST_RE,
+    PASSIVE_COURTESY_REQUEST_RE,
+    PASSIVE_WORK_APPRECIATION_RE,
+    IMPERSONAL_WORK_APPRECIATION_RE,
+    ELLIPTICAL_COURTESY_REQUEST_RE,
+    FIRST_PERSON_CURIOSITY_RE,
+    FIRST_PERSON_WONDER_RE,
+    ELLIPTICAL_CURIOSITY_RE,
+    HUMAN_HANDOFF_RE,
+)
+
+
+def declarative_action_request(clean, patterns=DECLARATIVE_ACTION_PATTERNS):
     """Recognize narrow declarative/courtesy requests, excluding local negation."""
-    for pattern in (
-        DECLARATIVE_ACTION_RE,
-        HUMAN_REQUEST_RE,
-        FIRST_PERSON_REQUEST_RE,
-        ACTOR_HARD_PROHIBITION_RE,
-        NAMED_ASSIGNMENT_RE,
-        ACTOR_OBLIGATION_RE,
-        AUTOMATION_ACTOR_OBLIGATION_RE,
-        FREEFORM_ACTOR_OBLIGATION_RE,
-        FREEFORM_PASSIVE_OBLIGATION_RE,
-        FREEFORM_LIFECYCLE_OBLIGATION_RE,
-        PREDICATE_LIFECYCLE_REQUIREMENT_RE,
-        FREEFORM_ACTION_OBJECT_OBLIGATION_RE,
-        PREDICATE_ACTION_REQUIREMENT_RE,
-        NEGATIVE_IMPERATIVE_RE,
-        FIRST_PERSON_VERB_REQUEST_RE,
-        MODAL_ACTOR_REQUEST_RE,
-        MODAL_FREEFORM_ADDRESSEE_REQUEST_RE,
-        FIRST_PERSON_COURTESY_REQUEST_RE,
-        PASSIVE_COURTESY_REQUEST_RE,
-        PASSIVE_WORK_APPRECIATION_RE,
-        IMPERSONAL_WORK_APPRECIATION_RE,
-        ELLIPTICAL_COURTESY_REQUEST_RE,
-        FIRST_PERSON_CURIOSITY_RE,
-        FIRST_PERSON_WONDER_RE,
-        ELLIPTICAL_CURIOSITY_RE,
-    ):
+    for pattern in patterns:
         for matched in pattern.finditer(clean):
             if matched.groupdict().get("negation"):
                 continue
@@ -1143,6 +1234,238 @@ def action_like_rendered_prose(text):
         strip_action_emphasis(clean),
         allow_self_answered_explanations=True,
     )
+
+
+def action_like_task_record_prose(text):
+    """Recognize human/authority asks without treating ordinary task work as one.
+
+    A task checklist is already agent-owned work state, so its checkbox and a bare
+    work directive such as ``Run tests`` or ``Review changed files`` do not create a
+    human action. Questions, TODOs, courtesy requests, authority verbs, explicit
+    human obligations, and indirect human handoffs still do. The regex vocabulary
+    remains the same centralized grammar used by provider projection checks.
+    """
+    clean = rendered_human_text(text or "")
+    clean = strip_indented_code(strip_inline_code(clean))
+    clean = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"),
+        clean,
+    )
+    task_lines = []
+    for line in clean.split("\n"):
+        matched = TASK_LIST_ITEM_RE.match(line)
+        task_lines.append(line[matched.end():] if matched else line)
+    clean = "\n".join(task_lines)
+    clean = strip_default_ignorable_characters(
+        strip_action_emphasis(clean)
+    )
+    clean = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", clean)
+    clean = SELF_ANSWERED_EXPLANATORY_QUESTION_RE.sub(
+        lambda matched: matched.group(0)[:-1] + ".",
+        clean,
+    )
+    clean = SELF_ANSWERED_POLAR_QUESTION_RE.sub(
+        lambda matched: matched.group(0)[:-1] + ".",
+        clean,
+    )
+    if question_mark_count(clean) or TODO_RE.search(clean):
+        return True
+    return any(
+        TASK_AUTHORITY_DIRECTIVE_RE.search(variant)
+        or ADDRESSED_HUMAN_DIRECTIVE_RE.search(variant)
+        or PENDING_HUMAN_ACTION_RE.search(variant)
+        or TABLE_HUMAN_ACTION_RE.search(variant)
+        or declarative_action_request(
+            variant, patterns=TASK_HUMAN_ACTION_PATTERNS
+        )
+        or BOUNDARY_UNTIL_HUMAN_ACTION_RE.search(variant)
+        for variant in action_prose_variants(clean)
+    )
+
+
+def _without_explicit_block_quotes(text):
+    """Keep visible blockquotes actionable; fenced/inline code remains data."""
+    return text or ""
+
+
+def task_queue_path_from_destination(destination, source_path):
+    """Resolve one source-relative Markdown destination to a human queue path."""
+    parsed = urlsplit((destination or "").strip())
+    if parsed.scheme or parsed.netloc:
+        return None
+    raw = unquote(parsed.path)
+    if not raw or raw.startswith("/") or "\\" in raw or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in raw
+    ):
+        return None
+    source = Path(source_path)
+    if source.is_absolute() or ".." in source.parts:
+        return None
+    combined = source.parent / raw
+    normalized = []
+    for part in combined.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not normalized:
+                return None
+            normalized.pop()
+            continue
+        normalized.append(part)
+    path = Path(*normalized).as_posix()
+    return path if queue_item_actor(path) == "needs-human" else None
+
+
+def _task_projection_stripped_text(
+    text,
+    source_path,
+    allowed_queue_paths,
+    repo=REPO,
+    candidate_revision=None,
+):
+    """Return rendered task prose with only exact task-owned actions removed."""
+    source = _without_explicit_block_quotes(text)
+    _semantic_source, matches = visible_markdown_link_source(source)
+    allowed = set(allowed_queue_paths or ())
+    valid_sources = []
+    invalid_human_projections = []
+    for matched in matches:
+        destination = (
+            matched.group("angle")
+            if matched.group("angle") is not None
+            else matched.group("bare")
+        )
+        label = matched.group("label")
+        queue_path = task_queue_path_from_destination(
+            destination, source_path
+        )
+        if queue_path is None:
+            raw_destination = unquote(
+                urlsplit((destination or "").strip()).path
+            )
+            if "message-queue/needs-human/" in raw_destination:
+                invalid_human_projections.append(
+                    "Invalid human-action projection: " + label.strip()
+                )
+            continue
+        valid = queue_path in allowed and tracked_regular_file(
+            queue_path,
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
+        canonical = (
+            canonical_queue_action(
+                queue_path,
+                repo=repo,
+                candidate_revision=candidate_revision,
+            )
+            if valid else None
+        )
+        exact_action = bool(
+            canonical is not None
+            and normalized_action_tokens(label)
+            == normalized_action_tokens(canonical)
+        )
+        valid = bool(
+            valid
+            and canonical is not None
+            and exact_action
+        )
+        if valid:
+            valid_sources.append(matched.group(0))
+        else:
+            invalid_human_projections.append(
+                "Invalid human-action projection: " + label.strip()
+            )
+
+    rendered = rendered_human_text(source)
+    for projection_source in valid_sources:
+        offset = rendered.find(projection_source)
+        if offset < 0:
+            continue
+        rendered = (
+            rendered[:offset]
+            + " " * len(projection_source)
+            + rendered[offset + len(projection_source):]
+        )
+    return rendered, invalid_human_projections
+
+
+def task_action_prose_units(text):
+    """Split rendered task prose into stable paragraphs and list-item units."""
+    units = []
+    current = []
+
+    def flush():
+        if current and any(line.strip() for line in current):
+            units.append("\n".join(current).strip())
+        current[:] = []
+
+    for line in (text or "").splitlines():
+        if not line.strip():
+            flush()
+            continue
+        if LIST_ITEM_RE.match(line) or HEADING_RE.match(line):
+            flush()
+        current.append(line)
+        if HEADING_RE.match(line):
+            flush()
+    flush()
+    combined = []
+    offset = 0
+    while offset < len(units):
+        unit = units[offset]
+        heading = re.fullmatch(
+            r"#{1,6}[ \t]+(?:how|what|why)\b[^\n?]{0,120}\?",
+            unit,
+            flags=re.I,
+        )
+        if heading and offset + 1 < len(units):
+            combined.append(unit + "\n" + units[offset + 1])
+            offset += 2
+            continue
+        combined.append(unit)
+        offset += 1
+    return tuple(combined)
+
+
+def task_action_unit_counts(
+    text,
+    source_path,
+    allowed_queue_paths=(),
+    repo=REPO,
+    candidate_revision=None,
+):
+    """Return a multiset of unprojected human-action units in one task artifact.
+
+    Counter keys are normalized visible excerpts, so an edge checker can subtract
+    the parent multiset from the candidate multiset without losing duplicate asks.
+    """
+    rendered, invalid_projections = _task_projection_stripped_text(
+        text,
+        source_path,
+        allowed_queue_paths,
+        repo=repo,
+        candidate_revision=candidate_revision,
+    )
+    units = list(task_action_prose_units(rendered))
+    units.extend(invalid_projections)
+    actionable = []
+    for unit in units:
+        if not (
+            unit.startswith("Invalid human-action projection:")
+            or action_like_task_record_prose(unit)
+        ):
+            continue
+        normalized = re.sub(
+            r"\s+",
+            " ",
+            strip_default_ignorable_characters(unit),
+        ).strip()
+        if normalized:
+            actionable.append(normalized)
+    return Counter(actionable)
 
 
 def question_mark_count(text):
@@ -2358,7 +2681,13 @@ def external_action_source_findings(
     allowed_url_prefixes=(),
     candidate_revision=None,
 ):
-    """Require each active provider source to project or bind one queue action."""
+    """Require each active provider source to have a durable queue binding.
+
+    A provider body may directly project its canonical queue action, but that
+    presentation link does not identify the source in repository state. Every
+    active source therefore also needs an actor-correct live queue item whose
+    External source field carries the exact opaque identity.
+    """
     states = external_action_source_states(value)
     if candidate_revision is not None:
         candidate_revision = candidate_revision_oid(
@@ -2397,8 +2726,6 @@ def external_action_source_findings(
             require_all_live=False,
             require_one_action_projection=source["force"],
         )
-        if not direct_findings:
-            continue
         matching_paths = sorted(
             path for path in all_paths
             if canonical_queue_external_source(
@@ -2429,12 +2756,19 @@ def external_action_source_findings(
                 f"{actor_requirement} queue items and no other actor; found: "
                 + ", ".join(matching_paths)
             )
+        elif not direct_findings:
+            findings.append(
+                f"external action source {source_number} "
+                f"`{source['identity']}`{context} is directly projected but "
+                f"must also bind one or more live {actor_requirement} queue "
+                "items so source release remains enforceable; add "
+                f"`**External source:** {source['identity']}`"
+            )
         else:
             findings.append(
                 f"external action source {source_number} "
-                f"`{source['identity']}`{context} is not projected: either "
-                "put one canonical queue link in its declared action section "
-                f"or add one or more live {actor_requirement} queue items with "
+                f"`{source['identity']}`{context} is not durably bound: add "
+                f"one or more live {actor_requirement} queue items with "
                 f"`**External source:** {source['identity']}`"
             )
     return findings
@@ -2487,8 +2821,9 @@ def main(argv=None):
         metavar="JSON_PATH",
         help=(
             "check provider-neutral durable action sources from one JSON array; "
-            "each active source must project a queue link or have one exact "
-            "opaque External source binding"
+            "each active source must have one exact actor-correct opaque "
+            "External source binding; a direct queue link remains a projection "
+            "and does not replace that durable binding"
         ),
     )
     source.add_argument(

@@ -96,11 +96,14 @@ portable adoption:
   predeclared evidence files and approved reviews revalidate the exact target.
   Terminal human response does not erase a future dependency: the folding review stays
   live through its boundary. A Git-range approval requires the same active base and
-  permits only queue-lifecycle tail changes. Live timing only escalates, freezes with a
-  human response, and retains any historical future boundary. Cleanup requires an exact
-  receipt-carrying merge already present in the adapter-supplied target base; topology
-  created inside the candidate proves nothing about admission. Negative outcomes never
-  authorize crossing. Requested changes
+  permits only queue-lifecycle tail changes. Task-lifecycle reviews instead bind stable
+  local artifacts. Live timing only escalates, freezes with a human response, and retains
+  its historical future boundary. Cleanup requires a still-crossed task receipt, a merge
+  receipt already admitted in the target base, or typed boundary evidence. Dates are
+  clock-checked; arbitrary events/transitions/operations remain agent attestations
+  unless a controlled adapter validates and enforces them. Negative outcomes remove the task
+  pursuit, restore a reviewed Git candidate to its base, or withdraw the local target
+  before distinct cancellation evidence changes. Requested changes
   leave a same-boundary agent repair plus a dependent artifact-pending human re-review;
   approval/rejection/abandonment forbid either successor. An
   unanswered stale binding retracts to pending before a separate republication. Pickup
@@ -110,6 +113,12 @@ portable adoption:
   every activation remain legacy. A governed v1 handover path has one immutable
   incarnation; deletion is allowed, but correction or parallel re-entry uses a new
   conversation path.
+- Task admission is activation-gated and checks every Git edge, not only the final tree.
+  It catches an intermediate lifecycle crossing even if later reverted. The same edge
+  check compares multisets of newly introduced human-action prose in every task-local
+  Markdown artifact: ordinary agent plan work remains free-form, while a human ask is an
+  exact action-labeled link to a live task-owned `needs-human` queue item. Code and
+  explicit blockquotes remain data; a heading named “example” is not an exemption.
 - Force-ref admission names the displaced old tip explicitly, so continuity compares it
   with the new range head without treating ordinary PR divergence as a force push.
   Whole queue-service removal remains modular only when its edge erases no live action.
@@ -118,13 +127,15 @@ portable adoption:
   action in `Queue actions`; inbound review and conversation sources project only the
   `needs-agent` actions carried by that surface. Every open issue is a forced
   directionless source: English and no-action prose cannot suppress it, while each
-  direct or source-bound queue path owns direction. Allowed
+  projected or bound queue path owns direction. Every active provider source also has
+  an exact actor-correct `External source` binding; a direct link never substitutes for
+  the durable identity used by release admission. Allowed
   absolute links bind to an adapter-supplied immutable prefix. A provider assignment
   requires a distinct actor-correct queue item whose opaque binding preserves provider,
   stable artifact, role, actor kind, and principal identity; another artifact cannot
   reuse it. Body headings are classified as visible prose. When
-  provider prose cannot be edited by the receiving agent, one or more queue items may
-  instead copy its exact opaque, versioned `External source` binding. Those items stay
+  provider prose cannot be edited by the receiving agent, one or more queue items copy
+  its exact opaque, versioned `External source` binding. Those items stay
   live while the source remains effective; an edit changes identity, a superseding or
   dismissed formal review removes the old source, and resolving a diff thread removes
   that source. GitHub routes every non-empty issue/PR conversation comment and every

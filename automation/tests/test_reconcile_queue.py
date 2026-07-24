@@ -470,6 +470,8 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             messages = self.messages(RECONCILE.check_queue_schema())
             self.assertTrue(any("**Your review:**" in message for message in messages))
+            self.assertTrue(any("Resolution evidence" in message
+                                for message in messages))
             self.assertTrue(any("does not point to an existing" in message
                                 for message in messages))
             self.assertTrue(any("## What you need to know" in message
@@ -498,6 +500,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review after publication\n"
                 "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 "**Review target:** pending\n"
                 "**Review revision:** pending\n"
                 "**Reviewed revision:** ______\n"
@@ -531,7 +534,7 @@ class ReconcileQueueTests(unittest.TestCase):
             item.write_text(
                 awaiting.replace("awaiting-artifact", "waiting").replace(
                     "**Review target:** pending",
-                    "**Review target:** https://example.test/pull/1",
+                    f"**Review target:** git:{base}...{head}",
                 ).replace(
                     "**Review revision:** pending",
                     f"**Review revision:** git:{base}...{head}",
@@ -563,6 +566,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review exact bytes\n"
                 "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 "**Review target:** `docs/source.md`\n"
                 f"**Review revision:** {digest}\n"
                 "**Reviewed revision:** ______\n"
@@ -678,6 +682,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review the artifact\n"
                 "**Full context:** [artifact](<docs/My Artifact.bin>)\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 "**Review target:** [artifact](<docs/My Artifact.bin>)\n"
                 f"**Review revision:** sha256:{digest}\n"
                 "**Reviewed revision:** ______\n"
@@ -711,6 +716,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review the exact diff\n"
                 "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 f"**Review target:** {target}\n"
                 f"**Review revision:** {target}\n"
                 "**Reviewed revision:** ______\n"
@@ -732,6 +738,108 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             messages = self.messages(RECONCILE.check_queue_schema())
             self.assertTrue(any("do not match" in message for message in messages))
+
+    def test_review_binding_kind_matches_its_boundary_receipt(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            target.write_text("# Head\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "head")
+            head = self.git(root, "rev-parse", "HEAD")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            common = (
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the exact artifact\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/disposition.md`\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Until then:** continue implementation\n\n"
+                "## What you need to know\n\nJudge one exact artifact.\n\n"
+                "## Differences\n\nApproval crosses; changes revise.\n\n"
+                "## Example\n\nOne proceeds; one remains blocked.\n\n"
+                "**Your review:** ______\n"
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-local-merge.md",
+                "# Local merge review\n\n"
+                + common.replace(
+                    "**Reviewed revision:** ______\n",
+                    "**Review target:** `docs/source.md`\n"
+                    f"**Review revision:** {digest}\n"
+                    "**Reviewed revision:** ______\n",
+                ).replace(
+                    "**Until then:** continue implementation\n",
+                    "**Blocks at:** transition:merge\n"
+                    "**Until then:** continue implementation\n",
+                ),
+            )
+            git_target = f"git:{base}...{head}"
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-git-task.md",
+                "# Git task review\n\n"
+                + common.replace(
+                    "**Reviewed revision:** ______\n",
+                    f"**Review target:** {git_target}\n"
+                    f"**Review revision:** {git_target}\n"
+                    "**Reviewed revision:** ______\n",
+                ).replace(
+                    "**Until then:** continue implementation\n",
+                    "**Blocks at:** transition:start "
+                    "task:2026-07-23-example\n"
+                    "**Until then:** continue implementation\n",
+                ),
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "merge-bound review must bind" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(any(
+                "task-lifecycle review must bind" in message
+                for message in messages
+            ), messages)
+
+    def test_review_target_and_cancellation_evidence_must_be_distinct(self):
+        with self.repo() as root:
+            target = self.write(root, "docs/source.md", "# Source\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/non-blocking-same.md",
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the source\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**If unanswered:** keep the source\n\n"
+                "## What you need to know\n\nJudge one source.\n\n"
+                "## Differences\n\nApproval keeps it; rejection withdraws it.\n\n"
+                "## Example\n\nA distinct record can preserve cancellation.\n\n"
+                "**Your review:** ______\n",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "same file" in message for message in messages
+            ), messages)
 
     def test_review_target_counts_missing_declared_local_artifact(self):
         with self.repo() as root:
@@ -807,6 +915,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review indexed bytes\n"
                 "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 "**Review target:** `docs/source.md`\n"
                 f"**Review revision:** {digest}\n"
                 "**Reviewed revision:** ______\n"
@@ -1374,13 +1483,14 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** review the current artifact\n"
                 "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 "**Why-you-might-care:** The bound revision controls acceptance.\n"
                 "**If-you-do-nothing:** The merge boundary remains pending.\n"
                 "**Review target:** `docs/source.md`\n"
                 f"**Review revision:** {digest_a}\n"
                 "**Reviewed revision:** ______\n"
                 "**Review outcome:** pending\n"
-                "**Blocks at:** transition:merge\n"
+                "**Blocks at:** event:publication\n"
                 "**Until then:** continue implementation\n\n"
                 "## What you need to know\n\nReview one exact revision.\n\n"
                 "## Differences\n\nApprove accepts it; changes revise it.\n\n"
@@ -1582,6 +1692,49 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual(1, len(findings))
             self.assertIn("immutable review binding", findings[0].message)
+
+    def test_review_cancellation_evidence_freezes_with_first_response(self):
+        path = (
+            "message-queue/needs-human/reviews/"
+            "non-blocking-review-evidence.md"
+        )
+        unanswered = (
+            "# Review\n\n"
+            "**Status:** waiting\n"
+            "**Action:** review the proposal\n"
+            "**Review target:** pending\n"
+            "**Review revision:** pending\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** pending\n"
+            "**If unanswered:** keep the proposal\n"
+            "**Your review:** ______\n"
+        )
+        with_evidence = unanswered.replace(
+            "**Review target:** pending",
+            "**Resolution evidence:** `docs/cancel-a.md`\n"
+            "**Review target:** pending",
+        )
+        self.assertIsNone(RECONCILE.queue_mutation_problem(
+            path, path, unanswered, with_evidence
+        ))
+        answered = with_evidence.replace(
+            "**Reviewed revision:** ______",
+            f"**Reviewed revision:** sha256:{'a' * 64}",
+        ).replace(
+            "**Review revision:** pending",
+            f"**Review revision:** sha256:{'a' * 64}",
+        ).replace(
+            "**Review outcome:** pending", "**Review outcome:** rejected"
+        ).replace(
+            "**Your review:** ______", "**Your review:** reject"
+        )
+        rebound = answered.replace(
+            "`docs/cancel-a.md`", "`docs/cancel-b.md`"
+        )
+        problem = RECONCILE.queue_mutation_problem(
+            path, path, answered, rebound
+        )
+        self.assertIn("after the first concrete response", problem)
 
     def test_timing_rename_cannot_rewrite_action_identity(self):
         for rewrites_action, rejected in ((False, False), (True, True)):
@@ -2252,7 +2405,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 ).hexdigest()
                 path = (
                     "message-queue/needs-human/reviews/"
-                    "blocking-review.md"
+                    "non-blocking-review.md"
                 )
                 item = self.write(
                     root,
@@ -2266,7 +2419,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     f"**Review revision:** {digest}\n"
                     f"**Reviewed revision:** {digest}\n"
                     "**Review outcome:** approved\n"
-                    "**Blocks now:** transition:merge\n"
+                    "**If unanswered:** leave the reviewed bytes unchanged\n"
                     "**Your review:** approve\n",
                 )
                 self.git(root, "add", ".")
@@ -2377,6 +2530,69 @@ class ReconcileQueueTests(unittest.TestCase):
                 findings[0].message,
             )
             self.assertIn("docs/source.md", findings[0].message)
+
+    def test_blocking_git_range_review_cannot_delete_before_merge_receipt(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            source.write_text("# Reviewed\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reviewed change")
+            reviewed_head = self.git(root, "rev-parse", "HEAD")
+            binding = f"git:{base}...{reviewed_head}"
+            path = (
+                "message-queue/needs-human/reviews/"
+                "blocking-review-range.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Review merge\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the exact merge range\n"
+                f"**Full context:** {binding}\n"
+                f"**Review target:** {binding}\n"
+                f"**Review revision:** {binding}\n"
+                f"**Reviewed revision:** {binding}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks now:** transition:merge\n"
+                "**Your review:** approve this range\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record blocking approval")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim blocking approval")
+            source.write_text("# Unreviewed tail\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "add unreviewed tail")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "merge cleanup needs" in finding.message
+                or "previously admitted target history" in finding.message
+                for finding in findings
+            ), self.messages(findings))
 
     def test_future_git_review_deletes_only_after_merge_carries_receipt(self):
         for merged, rejected in ((False, True), (True, False)):
@@ -3117,7 +3333,631 @@ class ReconcileQueueTests(unittest.TestCase):
                     )
                     self.assertIn(expected, findings[0].message)
 
-    def test_terminal_review_outcomes_close_without_successors(self):
+    def test_negative_merge_reviews_close_only_after_candidate_withdrawal(self):
+        for outcome in ("rejected", "abandoned"):
+            with self.subTest(outcome=outcome), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Base\n")
+                cancellation = self.write(
+                    root, "docs/cancellation.md", "# Pursuit active\n"
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                base = self.git(root, "rev-parse", "HEAD")
+                source.write_text("# Candidate\n", encoding="utf-8")
+                self.git(root, "add", "docs/source.md")
+                self.git(root, "commit", "-m", "candidate")
+                head = self.git(root, "rev-parse", "HEAD")
+                target = f"git:{base}...{head}"
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    f"blocking-{outcome}.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    "# Review proposal\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** decide whether this proposal continues\n"
+                    "**Full context:** `message-queue/AGENTS.md`\n"
+                    "**Resolution evidence:** `docs/cancellation.md`\n"
+                    "**Why-you-might-care:** The outcome controls the proposal.\n"
+                    "**If-you-do-nothing:** The merge boundary remains pending.\n"
+                    f"**Review target:** {target}\n"
+                    f"**Review revision:** {target}\n"
+                    f"**Reviewed revision:** {target}\n"
+                    f"**Review outcome:** {outcome}\n"
+                    "**Blocks now:** transition:merge\n\n"
+                    "## What you need to know\n\nJudge one exact proposal.\n\n"
+                    "## Differences\n\nReject ends it; changes request revision.\n\n"
+                    "## Example\n\nA rejected proposal creates no revision two.\n\n"
+                    f"**Your review:** {outcome}\n",
+                )
+                self.git(root, "add", ".")
+                schema_findings = list(RECONCILE.check_queue_schema())
+                self.assertEqual(
+                    [], schema_findings, self.messages(schema_findings)
+                )
+                self.git(root, "commit", "-m", f"record {outcome} outcome")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim terminal response")
+                cancellation.write_text(
+                    f"# Pursuit {outcome}\n", encoding="utf-8"
+                )
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertTrue(any(
+                    "reviewed proposal remains active" in finding.message
+                    for finding in findings
+                ), self.messages(findings))
+
+                source.write_text("# Base\n", encoding="utf-8")
+                self.git(root, "add", "docs/source.md")
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_review_cleanup_enforces_target_kind_at_the_named_boundary(self):
+        local_text = self.terminal_local_review(
+            "docs/source.md",
+            "sha256:" + "a" * 64,
+            "approved",
+            "**Blocks at:** transition:merge",
+            status="folding",
+        )
+        problem = RECONCILE.review_cleanup_boundary_problem(
+            "message-queue/needs-human/reviews/"
+            "future-blocking-local-merge.md",
+            local_text,
+            "a" * 40,
+            None,
+            local_text,
+            "future-blocking",
+        )
+        self.assertIn("candidate-range Git", problem)
+
+        git_revision = f"git:{'a' * 40}...{'b' * 40}"
+        git_text = (
+            "# Review\n\n"
+            "**Status:** folding\n"
+            "**Review target:** " + git_revision + "\n"
+            "**Review revision:** " + git_revision + "\n"
+            "**Reviewed revision:** " + git_revision + "\n"
+            "**Review outcome:** approved\n"
+            "**Blocks at:** transition:start task:2026-07-23-example\n"
+            "**Your review:** approved\n"
+        )
+        problem = RECONCILE.review_cleanup_boundary_problem(
+            "message-queue/needs-human/reviews/"
+            "future-blocking-git-task.md",
+            git_text,
+            "a" * 40,
+            None,
+            git_text,
+            "future-blocking",
+        )
+        self.assertIn("stable local review target", problem)
+
+    def test_event_and_custom_transition_approvals_close_with_fresh_evidence(self):
+        for slug, boundary in (
+            ("publication", "event:publication"),
+            ("deployment", "transition:deploy"),
+        ):
+            with self.subTest(boundary=boundary), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                evidence = self.write(
+                    root, "docs/review-disposition.md", "# Pending\n"
+                )
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    f"future-blocking-{slug}.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    self.terminal_local_review(
+                        "docs/source.md",
+                        digest,
+                        "approved",
+                        f"**Blocks at:** {boundary}",
+                    ),
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record approved review")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim approved review")
+                evidence.write_text("# Boundary acknowledged\n", encoding="utf-8")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_nonblocking_negative_local_review_requires_target_withdrawal(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            evidence = self.write(
+                root, "docs/review-disposition.md", "# Pending\n"
+            )
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-local-rejection.md"
+            )
+            item = self.write(
+                root,
+                path,
+                self.terminal_local_review(
+                    "docs/source.md",
+                    digest,
+                    "rejected",
+                    "**If unanswered:** keep the reviewed pursuit unchanged",
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record rejected review")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim rejected review")
+            evidence.write_text("# Rejected\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "target remains unchanged and active" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+            target.write_text("# Withdrawn\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_historical_negative_cleanup_rejects_later_reintroduction(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            evidence = self.write(
+                root, "docs/review-disposition.md", "# Pending\n"
+            )
+            original = target.read_text(encoding="utf-8")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-local-rejection.md"
+            )
+            item = self.write(
+                root,
+                path,
+                self.terminal_local_review(
+                    "docs/source.md",
+                    digest,
+                    "rejected",
+                    "**If unanswered:** keep the reviewed pursuit unchanged",
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record rejected review")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim rejected review")
+            target.write_text("# Withdrawn\n", encoding="utf-8")
+            evidence.write_text("# Rejected\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "withdraw rejected pursuit")
+            target.write_text(original, encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "reintroduce rejected pursuit")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "target remains unchanged and active" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_later_candidates_exclude_parallel_pre_deletion_snapshots(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "cleanup")
+            self.write(root, "docs/cleanup.md", "# Cleanup\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "cleanup")
+            deletion = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "parallel", base)
+            self.write(root, "docs/parallel.md", "# Parallel\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "parallel")
+            parallel = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "cleanup")
+            self.git(
+                root, "merge", "--no-ff", "parallel",
+                "-m", "join parallel work",
+            )
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                candidates = RECONCILE.deletion_and_later_candidates(
+                    deletion
+                )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(deletion, candidates[0])
+            self.assertIn(head, candidates)
+            self.assertNotIn(parallel, candidates)
+
+    def test_bare_task_review_cleanup_requires_evidence_or_withdrawal(self):
+        task_id = "2026-07-23-example"
+        for outcome in ("approved", "rejected"):
+            with self.subTest(outcome=outcome), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                evidence = self.write(
+                    root, "docs/review-disposition.md", "# Pending\n"
+                )
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    f"blocking-bare-task-{outcome}.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    self.terminal_local_review(
+                        "docs/source.md",
+                        digest,
+                        outcome,
+                        f"**Blocks now:** task:{task_id}",
+                    ),
+                )
+                task = self.make_task(root, "0_backlog", f"`{path}`")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", f"record {outcome} review")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", f"claim {outcome} review")
+                evidence.write_text(f"# {outcome}\n", encoding="utf-8")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                if outcome == "approved":
+                    self.assertEqual([], findings, self.messages(findings))
+                else:
+                    self.assertTrue(any(
+                        "rejected task pursuit remains live"
+                        in finding.message for finding in findings
+                    ), self.messages(findings))
+                    for artifact in sorted(
+                        task.rglob("*"), reverse=True
+                    ):
+                        if artifact.is_file():
+                            artifact.unlink()
+                        else:
+                            artifact.rmdir()
+                    task.rmdir()
+                    self.git(root, "add", "-A")
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        findings = list(RECONCILE.check_queue_resolution())
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_task_receipt_survives_same_timing_slug_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            self.write(root, "docs/review-disposition.md", "# Pending\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            old_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-original-start.md"
+            )
+            new_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-clearer-start.md"
+            )
+            review = self.write(
+                root,
+                old_path,
+                self.terminal_local_review(
+                    "docs/source.md",
+                    digest,
+                    "approved",
+                    "**Blocks at:** transition:start "
+                    "task:2026-07-23-example",
+                ),
+            )
+            task = self.make_task(root, "0_backlog", f"`{old_path}`")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record start approval")
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", old_path)
+            self.git(root, "commit", "-m", "claim start approval")
+
+            active = root / "tasks/1_in-progress/2026-07-23-example"
+            active.parent.mkdir(parents=True)
+            task.rename(active)
+            review.rename(root / new_path)
+            task_record = active / "task.md"
+            task_record.write_text(
+                task_record.read_text(encoding="utf-8").replace(
+                    old_path, new_path
+                ),
+                encoding="utf-8",
+            )
+            (active / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (active / "worklog.md").write_text("# Worklog\n", encoding="utf-8")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "start task and clarify review name")
+
+            task_record.write_text(
+                task_record.read_text(encoding="utf-8").replace(
+                    f"`{new_path}`", "none"
+                ),
+                encoding="utf-8",
+            )
+            (root / new_path).unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_merge_receipt_survives_same_timing_slug_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Base\n")
+            self.write(root, "docs/review-disposition.md", "# Pending\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            source.write_text("# Reviewed\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "reviewed change")
+            reviewed_head = self.git(root, "rev-parse", "HEAD")
+            binding = f"git:{base}...{reviewed_head}"
+            old_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-original-merge.md"
+            )
+            new_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-clearer-merge.md"
+            )
+            review = self.write(
+                root,
+                old_path,
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review the exact merge candidate\n"
+                f"**Full context:** {binding}\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
+                f"**Review target:** {binding}\n"
+                f"**Review revision:** {binding}\n"
+                f"**Reviewed revision:** {binding}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:merge\n"
+                "**Until then:** keep the candidate unmerged\n"
+                "**Your review:** approved\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record merge approval")
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", old_path)
+            self.git(root, "commit", "-m", "claim merge approval")
+            review.rename(root / new_path)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "clarify merge review name")
+            feature = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "target", base)
+            self.git(
+                root, "merge", "--no-ff", feature,
+                "-m", "carry renamed merge receipt",
+            )
+            (root / new_path).unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_approved_date_review_closes_at_boundary_with_evidence(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            evidence = self.write(
+                root, "docs/boundary.md", "# Before boundary\n"
+            )
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-date.md"
+            )
+            item = self.write(
+                root,
+                path,
+                "# Date review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the dated release\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/boundary.md`\n"
+                "**Why-you-might-care:** The date controls release.\n"
+                "**If-you-do-nothing:** The release remains blocked.\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** 2026-07-23\n"
+                "**Until then:** wait for the release date\n\n"
+                "## What you need to know\n\nJudge the dated release.\n\n"
+                "## Differences\n\nApproval crosses; changes revise.\n\n"
+                "## Example\n\nThe item survives until its date.\n\n"
+                "**Your review:** approved\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record dated approval")
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim dated approval")
+            evidence.write_text("# Boundary crossed\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_blocking_review_cannot_disappear_without_boundary_evidence(self):
         for outcome in ("approved", "rejected", "abandoned"):
             with self.subTest(outcome=outcome), self.repo() as root:
                 self.init_git(root)
@@ -3144,17 +3984,10 @@ class ReconcileQueueTests(unittest.TestCase):
                     f"**Review revision:** sha256:{'a' * 64}\n"
                     f"**Reviewed revision:** sha256:{'a' * 64}\n"
                     f"**Review outcome:** {outcome}\n"
-                    "**Blocks now:** transition:merge\n\n"
-                    "## What you need to know\n\nJudge one exact proposal.\n\n"
-                    "## Differences\n\nReject ends it; changes request revision.\n\n"
-                    "## Example\n\nA rejected proposal creates no revision two.\n\n"
+                    "**Blocks now:** transition:merge\n"
                     f"**Your review:** {outcome}\n",
                 )
                 self.git(root, "add", ".")
-                schema_findings = list(RECONCILE.check_queue_schema())
-                self.assertEqual(
-                    [], schema_findings, self.messages(schema_findings)
-                )
                 self.git(root, "commit", "-m", f"record {outcome} outcome")
                 item.write_text(
                     item.read_text(encoding="utf-8").replace(
@@ -3172,7 +4005,13 @@ class ReconcileQueueTests(unittest.TestCase):
                     findings = list(RECONCILE.check_queue_resolution())
                 finally:
                     RECONCILE.stop_git_snapshot_cache()
-                self.assertEqual([], findings)
+                self.assertEqual(1, len(findings), self.messages(findings))
+                expected = (
+                    "merge cleanup needs"
+                    if outcome == "approved"
+                    else "cancellation evidence"
+                )
+                self.assertIn(expected, findings[0].message)
 
     def test_terminal_review_outcomes_reject_successor_fields(self):
         for outcome in ("approved", "rejected", "abandoned"):
@@ -5013,6 +5852,36 @@ class ReconcileQueueTests(unittest.TestCase):
         if status in ("3_in-review", "4_done"):
             (task / "verification.md").write_text("# Verification\n", encoding="utf-8")
         return task
+
+    @staticmethod
+    def terminal_local_review(
+        target_path,
+        digest,
+        outcome,
+        timing_line,
+        evidence_path="docs/review-disposition.md",
+        status="waiting",
+    ):
+        timing_followup = (
+            ""
+            if timing_line.startswith("**If unanswered:**")
+            else "**Until then:** keep the reviewed pursuit unchanged\n"
+        )
+        return (
+            "# Review\n\n"
+            f"**Status:** {status}\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** review the exact pursuit\n"
+            f"**Full context:** `{target_path}`\n"
+            f"**Resolution evidence:** `{evidence_path}`\n"
+            f"**Review target:** `{target_path}`\n"
+            f"**Review revision:** {digest}\n"
+            f"**Reviewed revision:** {digest}\n"
+            f"**Review outcome:** {outcome}\n"
+            f"{timing_line}\n"
+            f"{timing_followup}"
+            f"**Your review:** {outcome}\n"
+        )
 
     def make_handover(self, root, folder, attention, marker="v1", extra=""):
         (root / "message-queue").mkdir(parents=True, exist_ok=True)
@@ -7908,7 +8777,13 @@ class ReconcileQueueTests(unittest.TestCase):
 
         for value in accepted:
             with self.subTest(accepted=value), self.repo() as root:
-                self.write(root, first, "# First\n")
+                self.write(
+                    root,
+                    first,
+                    "# First\n\n"
+                    "**Filed:** 2026-07-23, from task "
+                    "`2026-07-23-example`\n",
+                )
                 self.write(root, second, "# Second\n")
                 self.make_task(root, "1_in-progress", value)
                 messages = self.messages(RECONCILE.check_task_structure())
@@ -7970,6 +8845,330 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertTrue(any("crossed unresolved future-blocking boundary"
                                 in message
                                 for message in messages))
+
+    def test_approved_review_authorizes_task_start_and_cleanup_after_receipt(
+            self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            review_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-before-start.md"
+            )
+            pickup_rel = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-pick-up-example.md"
+            )
+            review = self.write(
+                root,
+                review_rel,
+                "# Review before start\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the exact design before task start\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Why-you-might-care:** The task must not start unreviewed.\n"
+                "**If-you-do-nothing:** The task remains in backlog.\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:start task:2026-07-23-example\n"
+                "**Until then:** leave the task in backlog\n"
+                "**Your review:** approve these exact bytes\n",
+            )
+            self.write(
+                root,
+                pickup_rel,
+                "# Pick up task\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** claim the task\n"
+                "**Full context:** "
+                "`tasks/0_backlog/2026-07-23-example/task.md`\n"
+                "**Request kind:** task-pickup\n"
+                "**If unanswered:** leave the task in backlog\n",
+            )
+            task = self.make_task(
+                root,
+                "0_backlog",
+                f"`{review_rel}`; `{pickup_rel}`",
+            )
+            task_md = task / "task.md"
+            task_md.write_text(
+                task_md.read_text(encoding="utf-8").replace(
+                    "**Claimed-by:** test", "**Claimed-by:** unclaimed"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record approved start review")
+
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", review_rel)
+            self.git(root, "commit", "-m", "claim approved review")
+
+            active = (
+                root / "tasks/1_in-progress/2026-07-23-example"
+            )
+            active.parent.mkdir(parents=True)
+            task.rename(active)
+            task_md = active / "task.md"
+            task_md.write_text(
+                task_md.read_text(encoding="utf-8").replace(
+                    "**Claimed-by:** unclaimed", "**Claimed-by:** test"
+                ).replace(
+                    f"`{review_rel}`; `{pickup_rel}`",
+                    f"`{review_rel}`",
+                ),
+                encoding="utf-8",
+            )
+            (active / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (active / "worklog.md").write_text("# Worklog\n", encoding="utf-8")
+            (root / pickup_rel).unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                messages = self.messages(RECONCILE.check_task_structure())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "crossed unresolved future-blocking boundary" in message
+                for message in messages
+            ), messages)
+            self.git(root, "commit", "-m", "start task with review receipt")
+
+            task_md.write_text(
+                task_md.read_text(encoding="utf-8").replace(
+                    f"`{review_rel}`", "none"
+                ),
+                encoding="utf-8",
+            )
+            review.unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_posthoc_approval_is_not_a_task_transition_receipt(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            review_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-before-start.md"
+            )
+            review = self.write(
+                root,
+                review_rel,
+                "# Review filed too late\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the exact design before task start\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:start task:2026-07-23-example\n"
+                "**Until then:** leave the task in backlog\n"
+                "**Your review:** approve these exact bytes\n",
+            )
+            task = self.make_task(
+                root, "1_in-progress", f"`{review_rel}`"
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file posthoc review")
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", review_rel)
+            self.git(root, "commit", "-m", "claim posthoc review")
+
+            (task / "task.md").write_text(
+                (task / "task.md").read_text(encoding="utf-8").replace(
+                    f"`{review_rel}`", "none"
+                ),
+                encoding="utf-8",
+            )
+            review.unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "committed task transition history" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_transition_receipt_cannot_be_reused_after_rollback(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            review_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-before-start.md"
+            )
+            review = self.write(
+                root,
+                review_rel,
+                "# Review before start\n\n"
+                "**Status:** waiting\n"
+                "**Action:** approve before task start\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:start task:2026-07-23-example\n"
+                "**Your review:** approved\n",
+            )
+            task = self.make_task(
+                root, "0_backlog", f"`{review_rel}`"
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record approval")
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", review_rel)
+            self.git(root, "commit", "-m", "claim approval")
+            active = root / "tasks/1_in-progress/2026-07-23-example"
+            active.parent.mkdir(parents=True)
+            task.rename(active)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "start with receipt")
+            task.parent.mkdir(parents=True, exist_ok=True)
+            active.rename(task)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "roll task back")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                problem = RECONCILE.task_transition_receipt_problem(
+                    review_rel,
+                    review.read_text(encoding="utf-8"),
+                    head,
+                    None,
+                    {
+                        "transition:start",
+                        "task:2026-07-23-example",
+                    },
+                )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertIn("does not remain past transition:start", problem)
+
+    def test_approved_completion_receipt_may_survive_crossing_commit(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+            review_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-before-complete.md"
+            )
+            review = self.write(
+                root,
+                review_rel,
+                "# Review before completion\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** approve the exact completion evidence\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:complete task:2026-07-23-example\n"
+                "**Until then:** keep the task in review\n"
+                "**Your review:** approve completion\n",
+            )
+            task = self.make_task(
+                root, "3_in-review", f"`{review_rel}`"
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record completion approval")
+            review.write_text(
+                review.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", review_rel)
+            self.git(root, "commit", "-m", "claim completion approval")
+            done = root / "tasks/4_done/2026-07-23-example"
+            done.parent.mkdir(parents=True)
+            task.rename(done)
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                messages = self.messages(RECONCILE.check_task_structure())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "done task must declare" in message for message in messages
+            ), messages)
+            self.git(root, "commit", "-m", "complete with review receipt")
+
+            (done / "task.md").write_text(
+                (done / "task.md").read_text(encoding="utf-8").replace(
+                    f"`{review_rel}`", "none"
+                ),
+                encoding="utf-8",
+            )
+            review.unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
 
     def test_task_cannot_cross_linked_immediate_transition_boundary(self):
         with self.repo() as root:
@@ -8153,6 +9352,27 @@ class ReconcileQueueTests(unittest.TestCase):
             messages = self.messages(RECONCILE.check_links())
             self.assertTrue(any("missing/target.md" in message
                                 for message in messages))
+
+    def test_link_check_allows_predeclared_future_resolution_evidence(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "# Source\n")
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/non-blocking-review.md",
+                "# Review\n\n"
+                "**Status:** awaiting-artifact\n"
+                "**Filed:** 2026-07-23, by test\n"
+                "**Action:** Review the source.\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** "
+                "`memory/decisions/future-disposition.md`\n"
+                "**Review target:** pending\n"
+                "**Review revision:** pending\n"
+                "**Reviewed revision:** ______\n"
+                "**If unanswered:** The source remains unchanged.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
 
     def test_explicit_transition_gate_scopes_task_or_checks_all(self):
         with self.repo() as root:
@@ -8669,6 +9889,716 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertTrue(any("crossed unresolved future-blocking boundary"
                                 in message
                                 for message in messages))
+
+    def test_task_admission_rejects_intermediate_crossing_then_revert(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            self.write(root, "docs/source.md", "# Source\n")
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-before-review.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review before task review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** review before the task enters review\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                f"**Review revision:** sha256:{'a' * 64}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks at:** transition:review task:2026-07-23-example\n"
+                "**Until then:** keep implementing\n"
+                "**Your review:** ______\n",
+            )
+            task = self.make_task(
+                root, "1_in-progress", f"`{queue_rel}`"
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            review_task = (
+                root / "tasks/3_in-review/2026-07-23-example"
+            )
+            review_task.parent.mkdir(parents=True)
+            task.rename(review_task)
+            (review_task / "verification.md").write_text(
+                "# Verification\n", encoding="utf-8"
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "cross review boundary")
+
+            task.parent.mkdir(parents=True, exist_ok=True)
+            review_task.rename(task)
+            (task / "verification.md").unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "revert task status")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "crossed unresolved future-blocking boundary" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_admission_marker_is_sticky_while_tasks_remain(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            contract.write_text("# Tasks\n", encoding="utf-8")
+            self.git(root, "add", "tasks/AGENTS.md")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_admission_history())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "removed after activation" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_admission_rejects_intermediate_marker_removal(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text("# Tasks\n", encoding="utf-8")
+            self.git(root, "add", "tasks/AGENTS.md")
+            self.git(root, "commit", "-m", "remove task admission")
+            contract.write_text(
+                "**Task admission schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", "tasks/AGENTS.md")
+            self.git(root, "commit", "-m", "restore task admission")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "removed Task admission schema v1" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_rejects_staged_owner_ask(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            design = self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\nThe current design is deterministic.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            design.write_text(
+                design.read_text(encoding="utf-8")
+                + "\n## Pending owner action\n\n"
+                "Owner, please choose whether this task may merge.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", str(design.relative_to(root)))
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("Owner, please choose", findings[0].message)
+
+    def test_task_action_origin_scans_extra_nested_markdown(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            question = self.write(
+                root,
+                task.relative_to(root) / "notes/questions.md",
+                "# Questions\n\nOwner, review the release.\n",
+            )
+            self.git(root, "add", str(question.relative_to(root)))
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Owner, review the release" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_accepts_exact_task_owned_projection(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            design = self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\nNo pending human action.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-rollout.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review rollout\n\n"
+                "**Filed:** 2026-07-23, from task "
+                "`2026-07-23-example`\n"
+                "**Action:** Review the rollout boundary.\n",
+            )
+            (task / "task.md").write_text(
+                (task / "task.md").read_text(encoding="utf-8").replace(
+                    "**Queue actions:** none",
+                    f"**Queue actions:** `{queue_rel}`",
+                ),
+                encoding="utf-8",
+            )
+            design.write_text(
+                "# Design\n\n"
+                "[Review the rollout boundary.]"
+                f"(../../../{queue_rel})\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_task_action_origin_rejects_intermediate_ask_then_delete(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            design = self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\nThe current design is deterministic.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            original = design.read_text(encoding="utf-8")
+            design.write_text(
+                original + "\nPlease approve the release.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "add orphan owner ask")
+            design.write_text(original, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "remove orphan owner ask")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Please approve the release" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_survives_whole_task_service_deletion(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            design = self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\nNo pending action.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            design.write_text(
+                "# Design\n\nOwner, approve the release.\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "introduce owner ask")
+            tasks = root / "tasks"
+            for path in sorted(
+                tasks.rglob("*"),
+                key=lambda candidate: len(candidate.parts),
+                reverse=True,
+            ):
+                path.unlink() if path.is_file() else path.rmdir()
+            tasks.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove task service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_action_origin()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Owner, approve the release" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_checks_root_activation_commit(self):
+        with self.repo() as root, mock.patch.object(
+            RECONCILE, "CHANGE_RANGE", None
+        ):
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\nPlease approve the initial release.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "root task state")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"root:{head}"
+                ):
+                    findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Please approve the initial release" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_removing_task_projection_ownership_reintroduces_the_ask(self):
+        with self.repo() as root:
+            self.init_git(root)
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-rollout.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review rollout\n\n"
+                "**Filed:** 2026-07-23, from task "
+                "`2026-07-23-example`\n"
+                "**Action:** Review the rollout boundary.\n",
+            )
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(
+                root, "1_in-progress", f"`{queue_rel}`"
+            )
+            self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\n"
+                "[Review the rollout boundary.]"
+                f"(../../../{queue_rel})\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projected task action")
+            (task / "task.md").write_text(
+                (task / "task.md").read_text(encoding="utf-8").replace(
+                    f"**Queue actions:** `{queue_rel}`",
+                    "**Queue actions:** none",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", str((task / "task.md").relative_to(root)))
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Review the rollout boundary" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_scans_dot_markdown_artifacts(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            question = self.write(
+                root,
+                task.relative_to(root) / "notes/questions.markdown",
+                "# Questions\n\nOwner, review the release.\n",
+            )
+            self.git(root, "add", str(question.relative_to(root)))
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Owner, review the release" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_action_origin_aggregates_across_artifact_renames(self):
+        with self.repo() as root:
+            self.init_git(root)
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-rollout.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review rollout\n\n"
+                "**Filed:** 2026-07-23, from task "
+                "`2026-07-23-example`\n"
+                "**Action:** Review the rollout boundary.\n",
+            )
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(
+                root, "1_in-progress", f"`{queue_rel}`"
+            )
+            design = self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\n"
+                "[Review the rollout boundary.]"
+                f"(../../../{queue_rel})\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate projected task action")
+            renamed = design.with_name("proposal.md")
+            design.rename(renamed)
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_task_projection_rejects_queue_owned_by_another_task(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-rollout.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review rollout\n\n"
+                "**Filed:** 2026-07-23, from task "
+                "`2026-07-23-somewhere-else`\n"
+                "**Action:** Review the rollout boundary.\n",
+            )
+            (task / "task.md").write_text(
+                (task / "task.md").read_text(encoding="utf-8").replace(
+                    "**Queue actions:** none",
+                    f"**Queue actions:** `{queue_rel}`",
+                ),
+                encoding="utf-8",
+            )
+            self.write(
+                root,
+                task.relative_to(root) / "design.md",
+                "# Design\n\n"
+                "[Review the rollout boundary.]"
+                f"(../../../{queue_rel})\n",
+            )
+            self.git(root, "add", ".")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                origin = list(RECONCILE.check_task_action_origin())
+                structure = list(RECONCILE.check_task_structure())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Invalid human-action projection" in finding.message
+                for finding in origin
+            ), self.messages(origin))
+            self.assertTrue(any(
+                "is not owned by task:2026-07-23-example" in finding.message
+                for finding in structure
+            ), self.messages(structure))
+
+    def test_task_admission_marker_removal_is_historical_with_only_readme(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            self.write(root, "tasks/README.md", "# Tasks\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text("# Tasks\n", encoding="utf-8")
+            self.git(root, "add", "tasks/AGENTS.md")
+            self.git(root, "commit", "-m", "remove task admission")
+            contract.write_text(
+                "**Task admission schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", "tasks/AGENTS.md")
+            self.git(root, "commit", "-m", "restore task admission")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "removed Task admission schema v1" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_admission_rejects_active_deletion_but_allows_archival(self):
+        for status, rejected in (
+            ("0_backlog", False),
+            ("1_in-progress", True),
+            ("3_in-review", True),
+            ("4_done", False),
+        ):
+            with self.subTest(status=status), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "tasks/AGENTS.md",
+                    "**Task admission schema:** v1\n",
+                )
+                task = self.make_task(root, status, "none")
+                if status == "0_backlog":
+                    task_md = task / "task.md"
+                    task_md.write_text(
+                        task_md.read_text(encoding="utf-8").replace(
+                            "**Claimed-by:** test",
+                            "**Claimed-by:** unclaimed",
+                        ),
+                        encoding="utf-8",
+                    )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate task admission")
+                base = self.git(root, "rev-parse", "HEAD")
+                for path in sorted(
+                    task.rglob("*"),
+                    key=lambda candidate: len(candidate.parts),
+                    reverse=True,
+                ):
+                    path.unlink() if path.is_file() else path.rmdir()
+                task.rmdir()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove task")
+                head = self.git(root, "rev-parse", "HEAD")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    with mock.patch.object(
+                        RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                    ):
+                        findings = list(
+                            RECONCILE.check_task_admission_history()
+                        )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                active_deletion = any(
+                    "active task:2026-07-23-example was deleted"
+                    in finding.message
+                    for finding in findings
+                )
+                self.assertEqual(
+                    rejected, active_deletion, self.messages(findings)
+                )
+
+    def test_task_admission_rejects_task_id_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            renamed = task.with_name("2026-07-23-renamed")
+            task.rename(renamed)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "rename task id")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "task id changed from 2026-07-23-example to "
+                "2026-07-23-renamed" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_admission_rejects_illegal_lifecycle_jump(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            done = task.parent.parent / "4_done" / task.name
+            done.parent.mkdir(parents=True)
+            task.rename(done)
+            (done / "verification.md").write_text(
+                "# Verification\n", encoding="utf-8"
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "skip task review")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "jumped from 1_in-progress to 4_done" in finding.message
+                for finding in findings
+            ), self.messages(findings))
 
     def test_duplicate_task_id_across_status_folders_is_rejected(self):
         with self.repo() as root:

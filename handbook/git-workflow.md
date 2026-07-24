@@ -70,9 +70,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   still require queue projection.
 - Every open GitHub issue is a structurally forced, content-versioned external source;
   neither English phrasing nor `No queued action requested.` can suppress it. The issue
-  body may link a canonical item directly, or a receiving agent may transcribe
-  uneditable title/body prose into item(s) carrying the exact `External source`.
-  Issue sources are directionless until each linked or bound path selects
+  body may project a canonical link directly, or an agent may transcribe its prose.
+  In both cases at least one actor-correct item carries the exact `External source`;
+  a presentation link never replaces the durable binding. Each path selects
   `needs-human/` or `needs-agent/`; an informational issue may select a non-blocking
   triage item. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
   `Bot` accounts to `needs-agent`, and fail closed on unknown account types or missing
@@ -93,9 +93,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   asking a prose heuristic whether the human meant work; its queue item may be
   non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from
   either review connection; unresolved threads remain forced when current state replays.
-  Provider-authored prose may carry canonical links directly; otherwise an agent
-  transcribes it into one or more live items with the adapter's exact versioned
-  `External source` binding. Editing the source creates a new identity. A bound item
+  Provider-authored prose may project canonical links directly; every active source
+  still has one or more live items with the adapter's exact versioned `External source`
+  binding. Editing the source creates a new identity. A bound item
   stays live until the effective review is superseded/dismissed or the thread resolves.
   `pull_request_target`, issue, and issue-comment checks run trusted default/base
   workflow code. Candidate and target jobs replay current review/conversation state on
@@ -119,6 +119,7 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   re-surfaced, reclassified, or explicitly resolved. Delete only after a one-line claim
   and changed durable evidence. Approved reviews revalidate their target;
   `changes-requested` (and legacy `not-approved`) leaves a same-boundary agent repair
-  and dependent artifact-pending re-review; `rejected` and `abandoned` end the action.
+  and dependent artifact-pending re-review. `rejected`/`abandoned` cleanup also proves
+  the task, local target, or reviewed Git candidate was withdrawn.
   Verified pickup/retry exceptions stay atomic. Git history can recover accidents, not
   replace live delivery state.

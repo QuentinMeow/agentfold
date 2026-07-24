@@ -4,9 +4,11 @@
 **Filed:** 2026-07-23, by codex, from task `2026-07-23-first-class-message-queue`
 **Action:** Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.
 **Full context:** `docs/designs/risk-tiered-agent-guardrails.md`
+**Resolution evidence:** `memory/decisions/2026-07-23-guardrail-authority-review-disposition.md`
 **Review target:** pending
 **Review revision:** pending
 **Reviewed revision:** ______
+**Review outcome:** pending
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Bind evidence to exact bytes and policy” and “Content-bound acknowledgement”

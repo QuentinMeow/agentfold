@@ -14,8 +14,8 @@ The filename prefix is canonical. Do not add a separate **Blocking:** field.
 <!-- For a provider assignment, add exactly one **External assignment:** <opaque
 stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
 Omit it otherwise. -->
-<!-- For transcribed or structurally triaged provider content, add exactly one **External source:** <opaque
-versioned source identity emitted by its adapter>. Omit it otherwise. -->
+<!-- For an active provider source, add exactly one **External source:** <opaque
+versioned identity emitted by its adapter>, even when provider prose links here. -->
 **Check:** <reconciler check id, or "manual">
 **Subject:** <file/folder the invariant is about — link>
 **Resolution evidence:** `<required for manual retries: durable non-queue file completion will create or change; generated retries use finding clearance>`
@@ -27,6 +27,8 @@ blocking-*:
 future-blocking-*:
 **Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 **Until then:** <the explicit safe path while work continues>
+Dates are clock-checkable. An event/custom transition is agent-attested unless a
+controlled adapter validates and enforces its crossing.
 
 non-blocking-*:
 **If unanswered:** <the explicit safe outcome; this message will never stop work>

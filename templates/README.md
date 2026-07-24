@@ -31,6 +31,11 @@ the message never stops work and records the safe unattended outcome. The filena
 the canonical delivery class. Each queue template shows the one matching timing block
 to retain; do not add a second `Blocking` field. Live timing can only escalate from
 non-blocking to future-blocking to blocking, and freezes with a human response.
+Every review predeclares non-queue Resolution evidence distinct from its target, so
+crossing or cancellation can be folded without inventing evidence after the answer.
+UTC date boundaries are clock-checkable. For arbitrary named events, transitions, or
+operations, repository evidence is an agent attestation unless a controlled adapter
+validates and enforces crossing; do not describe the former as hard assurance.
 
 `task/task.md` lists its live dependencies in `Queue actions`. `handover.md` projects
 open human queue items in delivery order; it never originates an action.

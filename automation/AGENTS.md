@@ -23,10 +23,10 @@ Rules:
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Timing only escalates while live and freezes on human response.
   `queue-resolution` checks staged/range deletion against its claim and evidence;
-  historical future reviews survive escalation. Git-range approval permits
-  queue-only tails; cleanup needs its merge in the admitted base. Requested changes
-  require repair plus pending re-review. `stale-queue` checks reached dates, not `non-blocking-*`;
-  event boundaries require actor reclassification.
+  historical future reviews survive escalation. Task reviews bind local artifacts;
+  merge reviews bind Git ranges. Cleanup proves a still-crossed receipt or withdrawn
+  target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
+  checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
   head remains the candidate; a divergent old-tip snapshot must retain every live action,
   and an unavailable nonzero old tip fails closed.
@@ -41,11 +41,11 @@ Rules:
   allows ordinary PR titles while rejecting asks. GitHub thread state has no Actions
   transition trigger: hard assurance needs native conversation resolution, a protected
   required release check, and separately controlled provider code.
-- Task status enforces `transition:start`, `transition:review`, and
-  `transition:complete`; admission adapters pass `--at-transition <name>` for external
-  boundaries such as merge. Handover projection checks activate from the repository
-  schema in `history/AGENTS.md`; staged/CI diffs make each new handover exactly project
-  the current live human queue. Git-edge checks freeze every pre-existing handover at
+- Task admission rechecks every post-activation Git edge and every task-local Markdown
+  artifact, so reversion/deletion cannot hide a crossing or human ask; exact links project.
+  Adapters pass `--at-transition <name>` for external boundaries such as merge.
+  Handover projection activates from `history/AGENTS.md`; staged/CI diffs make each new
+  handover project the live human queue. Git-edge checks freeze every pre-existing handover at
   adoption, including legacy records and intermediate/parallel history. Entry schema
   versions preserve creation-time grammar; a newly rejecting grammar needs a new
   version instead of retroactive validation.

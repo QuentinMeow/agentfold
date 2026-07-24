@@ -757,3 +757,69 @@
   The full runner passed all 8 test files: 112 projection tests, 55 core-scope tests
   (one skipped), 24 collector tests, 9 workflow tests, 224 queue tests, 9 source-release
   resolver tests, and 8 service tests.
+
+## 2026-07-23 — task-edge, cancellation, and durable-source repair (codex)
+
+- Four independent exact-SHA lenses rejected `70249643`. They reproduced a task-review
+  lifecycle deadlock, direct provider
+  links with no release identity, task prose absent from queue projection, and
+  final-tree-only task checks that missed intermediate crossings. The lifecycle lens
+  also found blocking review deletion without freshness or cancellation evidence.
+- Approval now remains live through the exact internal task transition or admitted
+  merge that consumes it. Internal cleanup searches committed status history for the
+  exact folding receipt; merge cleanup retains the stronger pre-admission-base rule.
+  Rejection and abandonment change predeclared non-queue cancellation evidence.
+- Task admission has an explicit repository-local activation marker. Every governed
+  Git edge rechecks task structure, so move-and-revert history remains visible.
+  A second edge check compares multisets of newly introduced human-action units across
+  all five task artifacts. Ordinary agent plan work remains free-form; exact task-owned
+  queue links are the only human-action projection.
+- Every active provider source now carries an exact actor-correct `External source`
+  binding even when provider prose directly links the queue. Presentation and durable
+  release identity are separate, so later exact-tree admission can classify the final
+  binding as current or released.
+- Added focused root, staged, intermediate, projection-ownership, transition-receipt,
+  post-hoc approval, negative-cancellation, and blocking-range regressions. The shared
+  action grammar suite passed 118 tests; the queue suite passed 234 tests before the
+  final focused additions. The rejected panel remains invalidated pending a fresh
+  immutable candidate.
+
+## 2026-07-23 — receipt-state and task-admission hardening (codex)
+
+- Two read-only audits found five flaws: receipt rollback, overly broad task rewrites,
+  arbitrary-byte merge cancellation, no cleanup path for unsupported future
+  boundaries, and local target/evidence collisions.
+- Task-lifecycle review now binds a stable local artifact and cleanup requires the task
+  to remain past the exact receipt. Merge review binds a candidate range; rejection
+  restores every reviewed proposal path to its base. Other negative boundaries require
+  a withdrawn local target, while task rejection remains live until the task is removed.
+  Every review predeclares distinct evidence; dates, escalated events, and adapter-named
+  transitions have explicit approved cleanup paths.
+- Task admission now catches marker removal/restoration and intermediate asks even when
+  the whole task service is later deleted. Action-origin scanning covers every nested
+  task Markdown artifact, resolves only real source-relative links, accepts exact
+  canonical labels, and recognizes direct human assignment/prohibition without treating
+  ordinary future-tense agent work or self-answered headings as human obligations.
+- Added seven lifecycle/admission tests plus expanded action-grammar cases. The queue
+  suite passed 244 tests, the projection suite passed 118, and the full runner passed
+  all 8 test files after these repairs.
+
+## 2026-07-23 — first human-review boundary (codex)
+
+- Stopped expanding implementation after the owner flagged the near-100-file review
+  surface and requested a human-review round before more hardening.
+- Closed only the already reproduced lifecycle and topology defects: deletion receipts
+  now use exact descendant snapshots; boundary target kinds are enforced; receipt
+  lineage survives same-timing renames; negative cleanup proves withdrawal; task
+  action accounting covers `.md` and `.markdown` across renames; and active deletion,
+  task-id rename, illegal lifecycle jumps, unrelated queue ownership, and marker
+  downgrade are rejected.
+- The focused lifecycle set passed 13 tests. The focused task-topology set passed 9
+  tests, and the complete queue suite passed 259 tests in 140.135 seconds.
+- Deferred first-adoption scanning of unchanged legacy task asks and task-history
+  performance work to task
+  `2026-07-23-post-review-task-admission-hardening`, with its own non-blocking agent
+  pickup message. No implementation of that follow-up began.
+- Refreshed origin/main at `acc23b6289f5ca66744718af379aba0468be93e2`;
+  the merged heads of PRs #4 (`999a6c4`) and #6 (`9e24478`) are ancestors of that
+  exact main revision.

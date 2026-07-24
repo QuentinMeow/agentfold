@@ -2149,6 +2149,172 @@ class ActionProjectionTests(unittest.TestCase):
                     task_id=task_id,
                 )
 
+    def test_task_action_units_allow_ordinary_agent_plan_work(self):
+        with self.repo() as root:
+            plan = (
+                "# Plan\n\n"
+                "- [ ] Run the focused tests.\n"
+                "- [ ] Review the changed files.\n"
+                "- [x] Implement the queue parser.\n\n"
+                "The test output records the completed review.\n"
+                "The agent will verify the release.\n"
+                "The agent will review the release.\n"
+            )
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    plan,
+                    "tasks/1_in-progress/2026-07-23-example/plan.md",
+                    repo=root,
+                ),
+            )
+
+    def test_task_action_units_detect_human_and_authority_asks(self):
+        asks = (
+            "Should we ship this release?",
+            "Please review the release boundary.",
+            "A maintainer should review this before merge.",
+            "Feedback welcome.",
+            "Approve the production release.",
+            "Ask the owner to approve the production release.",
+            "Assigned to Alice: review the release.",
+            "Owner, review the release.",
+            "Owner must not merge this release.",
+            "Could platform engineers review the release?",
+            "Pending owner review.",
+            "The release manager must approve the change.",
+            "Do not merge until security approves.",
+            "| Owner | Approve the release |",
+            "> [!IMPORTANT]\n> Owner, please approve the release.",
+            "- [ ] Please confirm the production rollout.",
+        )
+        with self.repo() as root:
+            for ask in asks:
+                with self.subTest(ask=ask):
+                    counts = PROJECTION.task_action_unit_counts(
+                        ask,
+                        "tasks/1_in-progress/2026-07-23-example/plan.md",
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
+        text = (
+            "```\nPlease review the fenced example.\n```\n\n"
+            "`Please confirm the inline example.`\n\n"
+            "Why use Git? Because the commit is durable evidence.\n"
+            "\n## Why Git?\n\nGit provides durable evidence.\n\n"
+            "Is the parser deterministic? Yes, its grammar is closed.\n"
+        )
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    "tasks/1_in-progress/2026-07-23-example/design.md",
+                    repo=root,
+                ),
+            )
+
+    def test_task_action_units_scan_visible_html_but_ignore_hidden_html(self):
+        with self.repo() as root:
+            visible = PROJECTION.task_action_unit_counts(
+                "<p>Please approve the production release.</p>",
+                "tasks/1_in-progress/2026-07-23-example/design.md",
+                repo=root,
+            )
+            self.assertEqual(1, sum(visible.values()), visible)
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    "<p hidden>Please approve the production release.</p>",
+                    "tasks/1_in-progress/2026-07-23-example/design.md",
+                    repo=root,
+                ),
+            )
+
+    def test_task_action_units_accept_only_exact_task_owned_projection(self):
+        with self.repo() as root:
+            item = self.queue_item(
+                root,
+                action="Review the rollout boundary.",
+            )
+            queue_path = item.relative_to(root).as_posix()
+            self.git(root, "add", ".")
+            source_path = (
+                "tasks/1_in-progress/2026-07-23-example/design.md"
+            )
+            link = (
+                "[Review the rollout boundary.]"
+                f"(../../../{queue_path})"
+            )
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    link,
+                    source_path,
+                    allowed_queue_paths=(queue_path,),
+                    repo=root,
+                ),
+            )
+
+            for body, allowed in (
+                (link, ()),
+                (
+                    f"[Review the rollout boundary.]({queue_path})",
+                    (queue_path,),
+                ),
+                (
+                    f"[Read the design.](../../../{queue_path})",
+                    (queue_path,),
+                ),
+                (
+                    f"[Review](../../../{queue_path})",
+                    (queue_path,),
+                ),
+                (
+                    link + " Please also approve the production rollout.",
+                    (queue_path,),
+                ),
+            ):
+                with self.subTest(body=body, allowed=allowed):
+                    counts = PROJECTION.task_action_unit_counts(
+                        body,
+                        source_path,
+                        allowed_queue_paths=allowed,
+                        repo=root,
+                    )
+                    self.assertTrue(counts)
+
+            contextual = self.queue_item(
+                root,
+                name="non-blocking-review-contextual.md",
+                action="Review whether this change may merge.",
+            )
+            contextual_path = contextual.relative_to(root).as_posix()
+            self.git(root, "add", ".")
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    "[Review whether this change may merge.]"
+                    f"(../../../{contextual_path})",
+                    source_path,
+                    allowed_queue_paths=(contextual_path,),
+                    repo=root,
+                ),
+            )
+
+    def test_task_action_unit_counts_preserve_duplicate_multiplicity(self):
+        with self.repo() as root:
+            counts = PROJECTION.task_action_unit_counts(
+                "Please approve the release.\n\n"
+                "Please approve the release.\n",
+                "tasks/1_in-progress/2026-07-23-example/task.md",
+                repo=root,
+            )
+            self.assertEqual(1, len(counts))
+            self.assertEqual(2, sum(counts.values()))
+
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:
             item = self.queue_item(root)
@@ -2676,7 +2842,7 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertIn("External assignment", findings[0])
             self.assertIn(artifact_b, findings[0])
 
-    def test_external_action_source_accepts_projection_or_opaque_binding(self):
+    def test_external_action_source_requires_opaque_binding(self):
         identity = "provider:review-thread:opaque-42"
         with self.repo() as root:
             linked = self.queue_item(
@@ -2736,7 +2902,7 @@ class ActionProjectionTests(unittest.TestCase):
                 repo=root,
             )
             self.assertEqual(1, len(findings))
-            self.assertIn("is not projected", findings[0])
+            self.assertIn("is not durably bound", findings[0])
             sources = json.dumps([{
                 "actor": "needs-agent",
                 "identity": "provider:review:linked",
@@ -2745,6 +2911,25 @@ class ActionProjectionTests(unittest.TestCase):
                     f"- [Fix the login race.]({linked_path})\n"
                 ),
             }])
+            findings = PROJECTION.external_action_source_findings(
+                sources,
+                ("What to review",),
+                repo=root,
+            )
+            self.assertEqual(1, len(findings))
+            self.assertIn("is directly projected", findings[0])
+            self.assertIn(
+                "**External source:** provider:review:linked",
+                findings[0],
+            )
+            self.queue_item(
+                root,
+                name="future-blocking-request-bind-linked-review.md",
+                action="Track the directly projected external review.",
+                actor="needs-agent",
+                external_source="provider:review:linked",
+            )
+            self.git(root, "add", ".")
             self.assertEqual(
                 [],
                 PROJECTION.external_action_source_findings(
@@ -2812,21 +2997,23 @@ class ActionProjectionTests(unittest.TestCase):
                     ),
                 )
 
-    def test_forced_directionless_source_accepts_direct_link_of_either_actor(
+    def test_forced_directionless_source_requires_bound_direct_link_actor(
             self):
         for actor in ("needs-human", "needs-agent"):
             with self.subTest(actor=actor), self.repo() as root:
+                identity = f"provider:issue:direct-{actor}"
                 item = self.queue_item(
                     root,
                     name="non-blocking-handle-provider-issue.md",
                     action="Handle the provider issue.",
                     actor=actor,
+                    external_source=identity,
                 )
                 path = item.relative_to(root).as_posix()
                 self.git(root, "add", ".")
                 sources = json.dumps([{
                     "actor": "any",
-                    "identity": f"provider:issue:direct-{actor}",
+                    "identity": identity,
                     "body": (
                         "## What to review\n\n"
                         f"- [Handle the provider issue.]({path})\n"

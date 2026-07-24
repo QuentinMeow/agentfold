@@ -1,7 +1,7 @@
 # message-queue/ — the canonical action bus
 
 **Queue resolution schema:** v1
-Every pending human↔agent or discoverable cross-session action lives here, one per file.
+Every pending human action and durable cross-session agent action lives here, one per file.
 PRs, issues, chat, tasks, and handovers may link a live item, never originate an ask.
 Background stays durable; the item owns delivery/state and an unfolded response (`handbook/principles/files-as-messages.md`).
 
@@ -40,7 +40,7 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 
 - Copy the matching template; human fields follow `handbook/human-action-guide.md`.
   Record an artifact-scoped `External assignment` or versioned `External source`.
-  Its last binding needs trusted release evidence; current/unavailable blocks admission.
+  Direct links never replace it; releasing the last binding needs trusted provider evidence.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
@@ -51,10 +51,10 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one reciprocal backlog `task.md` link. Its atomic claim/move deletes it; only
   pickups use moving task paths as live context, while retries may quote broken paths.
-- Ordinary actions predeclare changed non-queue `Resolution evidence`. Reviews bind one
-  target/revision. Future timing survives response and escalation through its boundary;
-  only fresh approval can satisfy it. Git-range tails are queue-only on the same base.
-  Cleanup needs a receipt-carrying merge in already-admitted target history, never
-  candidate-local topology. `changes-requested` creates repair plus pending re-review.
+- Every item predeclares non-queue `Resolution evidence`; a review keeps it distinct
+  from its target. Task reviews bind a stable local file; merge reviews bind the Git
+  range. Future timing survives response; cleanup needs a fresh crossed receipt/evidence.
+  UTC dates are clock-checked; other timing is agent-attested absent a validating
+  adapter; rejection withdraws its target, while changes requested creates re-review.
 - Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
 - Transcribe chat responses before use; timing never changes after that response.

@@ -28,12 +28,14 @@ concrete response, follow one durable source for depth, understand the meaningfu
 dispositions and their different consequences, see one small example, and know the
 boundary or safe unattended result.
 
-For review-specific target and revision syntax, follow `templates/queue/review.md`.
-Conceptually, one exact Git commit/range, repository file, or HTTPS artifact is bound
-to immutable bytes; navigation is not revision authority, and an older response cannot
-apply after the target changes. Task status paths move and are not durable context;
-only a pickup may use one as live context because its claim commit deletes that request.
-Retry repair records may quote one only as evidence of broken state.
+For review-specific syntax, follow `templates/queue/review.md`. `Review target` names
+exactly one repository file, Git commit/range, or HTTPS artifact; `Review revision`
+binds its bytes. Local/HTTPS targets use `sha256`, while a Git target repeats the exact
+`git:<...>` revision. `pending` is valid only before publication. Full context explains
+the judgment but never substitutes for its target or immutable revision. Task status
+paths move and are not durable context; only a pickup may use one as live context
+because its claim commit deletes that request. Retry records may quote one only as
+evidence of broken state.
 
 The summary must be sufficient to act; the full-context link is for depth, not a missing
 prerequisite. A recommendation is evidence, not permission to hide an alternative.
@@ -50,6 +52,10 @@ boundary; `non-blocking-` only when it can remain unanswered forever. Risk sever
 not determine the prefix. A live action may move only toward an earlier dependency:
 `non-blocking` → `future-blocking` → `blocking`. Weakening creates an authorized
 replacement, and no human timing changes with or after the first concrete response.
+UTC dates can be checked against the repository clock. An arbitrary named event,
+transition, or operation is only an agent-attested acknowledgement when its Resolution
+evidence changes; hard assurance requires a controlled adapter that observes and
+enforces that boundary.
 
 ## Project without forking the action
 
@@ -63,8 +69,8 @@ the adapter's opaque provider, stable-artifact, role, actor-kind, and principal 
 another artifact or generic review cannot reuse it for a new assignee or reviewer.
 When a person writes provider prose without a queue link, the receiving agent
 transcribes it instead of asking that person to rewrite their words. On GitHub, every
-open issue is a forced, directionless source: its direct or source-bound queue path
-chooses the concrete actor, and even informational wording needs at least a
+open issue is a forced, directionless source: its projected or bound queue path chooses
+the concrete actor, and even informational wording needs at least a
 non-blocking triage item. Every non-empty conversation comment on an issue/PR and every
 effective formal review is structural `needs-agent` triage. These rules do not consult
 English, and no-action prose cannot waive them. Changes-requested reviews are forced
@@ -76,8 +82,9 @@ thread cannot merge requires GitHub's native “Require conversation resolution 
 merging” rule (`required_review_thread_resolution` in rulesets or
 `required_conversation_resolution` in classic protection). That rule does not prove
 that every transient reopen-then-resolve toggle was durably queued.
-Each transcribed item copies the adapter's opaque, content-versioned `External source`;
-one source may bind several items, potentially across actor folders for an issue.
+Every active source has at least one item carrying the adapter's opaque,
+content-versioned `External source`; a direct provider link remains a projection and
+never replaces that durable binding. One source may bind several items across actors.
 Keep those items live while the provider still reports the source as current—on
 GitHub, an open artifact's current conversation comment, effective formal review, or
 unresolved diff thread at a replayed snapshot. A comment edit gets a new identity;
@@ -95,19 +102,28 @@ Chat answers are first transcribed into the item. Task and handover projections 
 carry a second status or answer slot.
 
 Commit the response while status is `waiting`, then claim it in a separate one-line
-`Status: folding` commit. Fold into the predeclared `Resolution evidence` file(s);
-deletion requires those files to change in that commit. An unanswered waiting review
-whose artifact changes first retracts to `awaiting-artifact` with pending binding and
-blank response fields; a later commit republishes the replacement as `waiting`.
+`Status: folding` commit. Every item predeclares `Resolution evidence`; a review's
+path is distinct from its target. Deletion changes that evidence in its commit. An
+unanswered review whose artifact changes first retracts to `awaiting-artifact` with
+pending binding and blank response fields; a later commit republishes the replacement.
 Publication and retraction never add a response, and the first response freezes its
-binding. `approved` accepts the exact revision. For `future-blocking-*`, that outcome
-is response-terminal but not boundary-terminal: keep the folding item live until the
-boundary is crossed. A Git-range approval stays fresh only on the same base with
-queue-lifecycle-only commits after its reviewed head. At merge it can satisfy the
-boundary while live; cleanup requires an exact two-parent merge carrying the receipt
-in target history already admitted before the cleanup candidate. A merge manufactured
-inside that candidate is not evidence of crossing. Historical future timing survives
-later escalation. Rejected or abandoned review never authorizes crossing. `changes-requested` creates one
+binding and evidence. `approved` accepts the exact revision. For `future-blocking-*`,
+that outcome is response-terminal but not boundary-terminal: keep the folding item
+live until the boundary is crossed. A task-lifecycle review binds a stable local artifact
+file; its linked folding approval is the transition receipt, and the task must remain
+past that transition before cleanup. A merge review instead binds the candidate Git
+range. Its approval stays fresh only through queue-only tail commits; cleanup requires
+an exact two-parent merge carrying the receipt in previously admitted target history.
+A candidate-local merge is not evidence. A dated review closes at or after its date.
+Named events/custom transitions first escalate to blocking; custom operations are
+already blocking. Without a controlled adapter, changed evidence records only the
+agent's acknowledgement.
+
+Rejected or abandoned review never authorizes crossing. A task-bound rejection remains
+live until that task is removed. A rejected Git candidate is restored path-for-path to
+its reviewed base; a rejected local target changes or disappears. Distinct cancellation
+evidence records the disposition without rewriting the reviewed bytes.
+`changes-requested` creates one
 same-timing `needs-agent` action that solely owns the concrete repair, context, and
 resolution evidence, plus one distinct `needs-human` re-review awaiting that artifact;
 the latter depends on the former, so the review boundary stays closed without duplicating

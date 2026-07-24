@@ -12,9 +12,12 @@ What is true today, mapped to the desired-state lines.
   schemas, queue timing names/fields, task↔queue links, new handover projections, link
   targets, line budgets (AGENTS.md, SKILL.md, root README), memory expiry, and
   dependency-aware stale items. Visible CommonMark is the evidence boundary; task
-  status and task-scoped admission enforce named transitions. Queue deletion is bound
-  to Git history, one-line claims, changed resolution evidence, explicit review
-  dispositions, displaced-ref continuity, and checked pickup/retry exceptions. Empty
+  admission rechecks every post-activation Git edge and task-local Markdown artifact
+  for named transitions and newly introduced human asks. Queue deletion is bound to
+  claims, distinct evidence, still-crossed task/merge receipts, withdrawn negative targets,
+  displaced-ref continuity, and checked pickup/retry exceptions. UTC dates are checked;
+  arbitrary event/transition/operation evidence is agent-attested unless an adapter
+  validates the boundary. Empty
   queue-service removal remains modular but cannot erase a live action. It files
   collision-safe, aggregated retry projections while preserving actor notes. A separate
   Git boundary gate requires
@@ -25,8 +28,9 @@ What is true today, mapped to the desired-state lines.
   run repository tests across services, skills, and automation. A provider-neutral
   external-action gate binds PR prose to an immutable candidate, makes each declared
   action entry link one live human queue item, and rejects action-like prose outside
-  that section; the GitHub workflow is a thin event adapter. No template↔check drift
-  detection yet.
+  that section. Provider sources always retain an actor-correct version binding even
+  when their prose directly links the queue; the GitHub workflow is a thin event
+  adapter. No template↔check drift detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet. Each treats the message queue as the

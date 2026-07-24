@@ -32,6 +32,7 @@ from check_action_projection import (
     parse_task_queue_action_value,
     prose_without_links,
     section_entries,
+    task_action_unit_counts,
     task_queue_action_paths_from_text,
     visible_outside_action_sections,
 )
@@ -53,6 +54,18 @@ RETRIES = QUEUE / "needs-agent" / "retries"
 TASKS = REPO / "tasks"
 TASK_STATUSES = ["0_backlog", "1_in-progress", "2_blocked", "3_in-review", "4_done"]
 TASK_LIFECYCLE_TRANSITIONS = {"start", "review", "complete"}
+TASK_ARTIFACT_NAMES = {
+    "task.md", "design.md", "plan.md", "worklog.md", "verification.md",
+}
+TASK_MARKDOWN_SUFFIXES = {".md", ".markdown"}
+TASK_ALLOWED_STATUS_TRANSITIONS = {
+    "0_backlog": {"1_in-progress"},
+    "1_in-progress": {"2_blocked", "3_in-review"},
+    "2_blocked": {"1_in-progress"},
+    "3_in-review": {"1_in-progress", "4_done"},
+    "4_done": set(),
+}
+TASK_DELETABLE_STATUSES = {"0_backlog", "4_done"}
 CONVERSATIONS = REPO / "history" / "conversations"
 MEMORY = REPO / "memory"
 MEMORY_ZONES = ["facts", "decisions", "lessons", "known-issues"]
@@ -1610,6 +1623,55 @@ def task_incarnations_at(revision, task_id):
     ]
 
 
+def task_incarnations_in_tree(revision):
+    """Return every canonical task record path at one exact revision."""
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", revision, "--", "tasks",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(
+            tree.stderr.strip()
+            or f"could not inspect tasks at {revision}"
+        )
+    return [
+        name for name in tree.stdout.splitlines()
+        if re.fullmatch(
+            rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+            r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*/task\.md",
+            name,
+        )
+    ]
+
+
+def task_service_present_at(revision):
+    """Return whether an exact revision retains any tracked task-service file."""
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", revision, "--", "tasks",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(
+            tree.stderr.strip()
+            or f"could not inspect the task service at {revision}"
+        )
+    return any(tree.stdout.splitlines())
+
+
 def pickup_completed(path, text, prior_revision, revision):
     got = text_fields(text)
     if got.get("Request kind", "").strip() != "task-pickup" \
@@ -1713,6 +1775,7 @@ def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
         mutable_fields.update({
             "Your review", "Review target", "Review revision",
             "Reviewed revision", "Review outcome", "Successor action",
+            "Resolution evidence",
         })
     elif actor == "needs-human":
         mutable_fields.update({"Your answer", "Your review"})
@@ -1774,6 +1837,7 @@ def human_response_fields(text):
             "Review revision",
             "Reviewed revision",
             "Review outcome",
+            "Resolution evidence",
         )
     }
 
@@ -2007,8 +2071,8 @@ def matching_lineage_paths(parent, revision, path, identity):
     ]
 
 
-def queue_lineage_snapshots(path, text, prior_revision):
-    """Yield one action's historical snapshots across unambiguous renames."""
+def queue_lineage_revision_snapshots(path, text, prior_revision):
+    """Yield revision, path, and text across one unambiguous action lineage."""
     identity = queue_action_identity(path, text)
     stack = [(prior_revision, path, text)]
     seen = set()
@@ -2020,7 +2084,7 @@ def queue_lineage_snapshots(path, text, prior_revision):
         seen.add(state)
         if queue_action_identity(current_path, current) != identity:
             continue
-        yield current_path, current
+        yield revision, current_path, current
         parents = revision_parents(
             revision, f"queue history for `{current_path}`"
         )
@@ -2044,6 +2108,14 @@ def queue_lineage_snapshots(path, text, prior_revision):
                 )
             )
         stack.extend(predecessors)
+
+
+def queue_lineage_snapshots(path, text, prior_revision):
+    """Yield one action's historical snapshots across unambiguous renames."""
+    for _revision, current_path, current in queue_lineage_revision_snapshots(
+        path, text, prior_revision
+    ):
+        yield current_path, current
 
 
 def historical_queue_timing(path, text, prior_revision, timing):
@@ -2150,7 +2222,7 @@ def resolution_evidence_problem(text, prior_revision, revision):
 
 
 @contextlib.contextmanager
-def git_revision_candidate(revision):
+def git_revision_candidate(revision, preserve_change_range=False):
     """Temporarily expose one committed tree through the candidate-read helpers."""
     global CHANGE_RANGE, _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
@@ -2202,7 +2274,8 @@ def git_revision_candidate(revision):
         _GIT_BLOB_CACHE,
     )
     close_git_cat_file()
-    CHANGE_RANGE = f"root:{revision}"
+    if not preserve_change_range:
+        CHANGE_RANGE = f"root:{revision}"
     _GIT_SNAPSHOT_CACHE_ACTIVE = True
     _GIT_INDEX_CACHE = modes
     _GIT_INDEX_OID_CACHE = oids
@@ -2257,7 +2330,8 @@ def candidate_artifact_bytes(path, revision):
     )
 
 
-def review_candidate_problem(text, revision):
+def review_binding_problem(text):
+    """Validate one human response's immutable artifact binding."""
     got = text_fields(text)
     target = review_target(got.get("Review target", ""))
     review_revision = got.get("Review revision", "").strip()
@@ -2265,6 +2339,23 @@ def review_candidate_problem(text, revision):
         return "review target or immutable revision is malformed"
     if got.get("Reviewed revision", "").strip() != review_revision:
         return "review response was not bound to its immutable revision"
+    kind, value = target
+    if kind == "git" and review_revision != value:
+        return "Git review target and immutable revision do not match"
+    if kind in {"local", "https"} \
+            and not review_revision.startswith("sha256:"):
+        return f"{kind} review target needs an immutable sha256 revision"
+    return None
+
+
+def review_candidate_problem(text, revision):
+    """Require the bound artifact to remain exact in one candidate."""
+    binding_problem = review_binding_problem(text)
+    if binding_problem:
+        return binding_problem
+    got = text_fields(text)
+    target = review_target(got.get("Review target", ""))
+    review_revision = got.get("Review revision", "").strip()
     kind, value = target
     if kind == "local":
         artifact = candidate_artifact_bytes(value, revision)
@@ -2300,6 +2391,33 @@ def git_is_ancestor(ancestor, descendant):
     return result.returncode == 0
 
 
+def deletion_and_later_candidates(revision):
+    """Return the exact deletion candidate and every later admitted snapshot."""
+    if revision is None:
+        return (None,)
+    head = committed_candidate_revision()
+    if head is None or head == revision or not git_is_ancestor(revision, head):
+        return (revision,)
+    history = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list",
+            "--reverse", "--topo-order", "--ancestry-path",
+            f"{revision}..{head}",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if history.returncode:
+        raise GitSnapshotError(
+            history.stderr.strip()
+            or "could not inspect post-deletion candidate history"
+        )
+    return (revision, *history.stdout.splitlines())
+
+
 def changed_paths_between_revisions(base, head):
     result = subprocess.run(
         [
@@ -2322,32 +2440,56 @@ def changed_paths_between_revisions(base, head):
     }
 
 
-def candidate_changed_paths_since(reviewed_head):
-    """Compare a review head with the captured staged or committed candidate."""
-    if CHANGE_RANGE is None:
-        result = subprocess.run(
-            [
-                "git", "diff", "--cached", "--name-only", "-z",
-                reviewed_head, "--",
-            ],
-            cwd=REPO,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+def reviewed_range_withdrawal_problem(text, candidate):
+    """Require every reviewed proposal path to return to its base bytes."""
+    got = text_fields(text)
+    review_revision = got.get("Review revision", "").strip()
+    if not review_revision.startswith("git:") or "..." not in review_revision:
+        return "cancellation needs a candidate-range Git review"
+    reviewed_base, reviewed_head = review_revision[len("git:"):].split("...")
+    evidence = set(resolution_evidence_paths(text))
+    proposal_paths = changed_paths_between_revisions(
+        reviewed_base, reviewed_head
+    )
+    overlapping = sorted(proposal_paths.intersection(evidence))
+    if overlapping:
+        return (
+            "cancellation evidence was part of the reviewed proposal: "
+            + ", ".join(f"`{path}`" for path in overlapping)
         )
-        if result.returncode:
-            raise GitSnapshotError(git_failure(
-                result, "could not compare the staged review candidate"
-            ))
-        return {
-            name.decode("utf-8", errors="surrogateescape")
-            for name in result.stdout.split(b"\0")
-            if name
-        }
-    candidate = committed_candidate_revision()
-    if candidate is None:
-        raise GitSnapshotError("review freshness needs a committed candidate")
-    return changed_paths_between_revisions(reviewed_head, candidate)
+    still_active = []
+    for path in sorted(proposal_paths):
+        if valid_queue_item_path(path):
+            continue
+        if candidate_artifact_bytes(path, candidate) \
+                != git_artifact_bytes_at(reviewed_base, path):
+            still_active.append(path)
+    if still_active:
+        return (
+            "reviewed proposal remains active at: "
+            + ", ".join(f"`{path}`" for path in still_active)
+        )
+    return None
+
+
+def git_range_review_tail_problem(review_revision, candidate):
+    """Require one candidate to extend a reviewed range by queue state only."""
+    object_ids = review_revision[len("git:"):].split("...")
+    if len(object_ids) != 2:
+        return None
+    _reviewed_base, reviewed_head = object_ids
+    if not git_is_ancestor(reviewed_head, candidate):
+        return "reviewed Git head is not an ancestor of the boundary receipt"
+    changed = changed_paths_between_revisions(reviewed_head, candidate)
+    unreviewed = sorted(
+        path for path in changed if not valid_queue_item_path(path)
+    )
+    if unreviewed:
+        return (
+            "boundary receipt contains unreviewed non-queue changes: "
+            + ", ".join(f"`{path}`" for path in unreviewed)
+        )
+    return None
 
 
 def git_range_review_freshness_problem(path, review_revision):
@@ -2365,23 +2507,21 @@ def git_range_review_freshness_problem(path, review_revision):
             f"{active_base}"
         )
     candidate = committed_candidate_revision()
-    if candidate is None or not git_is_ancestor(reviewed_head, candidate):
-        return "reviewed Git head is not an ancestor of the active candidate"
-    changed = candidate_changed_paths_since(reviewed_head)
-    unreviewed = sorted(
-        candidate for candidate in changed
-        if not valid_queue_item_path(candidate)
+    if candidate is None:
+        return "review freshness needs a committed candidate"
+    problem = git_range_review_tail_problem(review_revision, candidate)
+    if problem is None:
+        return None
+    return problem.replace(
+        "boundary receipt", "active candidate"
+    ).replace(
+        "contains unreviewed non-queue changes",
+        "changed outside queue lifecycle after review",
     )
-    if unreviewed:
-        return (
-            "candidate changed outside queue lifecycle after review: "
-            + ", ".join(f"`{candidate}`" for candidate in unreviewed)
-        )
-    return None
 
 
-def future_review_boundary_problem(item, reached):
-    """Return why one live future review does not satisfy its reached boundary."""
+def review_boundary_problem(item, reached):
+    """Return why one live review does not satisfy its reached boundary."""
     rel = item.relative_to(REPO).as_posix()
     parts = Path(rel).parts
     if parts[1:3] != ("needs-human", "reviews"):
@@ -2406,21 +2546,196 @@ def future_review_boundary_problem(item, reached):
     return None
 
 
-def future_review_merge_receipt_problem(
-    path, text, prior_revision, boundary_text=None
+def task_status_at(revision, task_id):
+    """Return one task's unique status and task record at a Git revision."""
+    incarnations = task_incarnations_at(revision, task_id)
+    if len(incarnations) != 1:
+        return None, None
+    path = incarnations[0]
+    artifact = git_artifact_bytes_at(revision, path)
+    if artifact is None:
+        return None, None
+    return (
+        Path(path).parts[1],
+        text_fields(decode_utf8_artifact(
+            artifact, f"`{path}` at {revision}"
+        )),
+    )
+
+
+def task_status_in_candidate(revision, task_id):
+    """Return one task's unique status in an index or committed candidate."""
+    if revision is not None:
+        status, _task = task_status_at(revision, task_id)
+        return status
+    incarnations = sorted(
+        path for path, mode in git_index_entries("tasks").items()
+        if mode in ("100644", "100755")
+        and re.fullmatch(
+            rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+            + re.escape(task_id)
+            + r"/task\.md",
+            path,
+        )
+    )
+    return (
+        Path(incarnations[0]).parts[1]
+        if len(incarnations) == 1 else None
+    )
+
+
+def task_ids_linking_queue_at(revision, queue_path):
+    """Return task ids whose exact revision links one canonical queue item."""
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", revision, "--", "tasks",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(
+            tree.stderr.strip()
+            or f"could not inspect task links in {revision}"
+        )
+    task_ids = set()
+    for candidate in tree.stdout.splitlines():
+        matched = re.fullmatch(
+            rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+            r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/task\.md",
+            candidate,
+        )
+        if not matched:
+            continue
+        artifact = git_artifact_bytes_at(revision, candidate)
+        if artifact is None:
+            continue
+        task = text_fields(decode_utf8_artifact(
+            artifact, f"`{candidate}` at {revision}"
+        ))
+        if queue_path in task_queue_paths(task.get("Queue actions", "")):
+            task_ids.add(matched.group(1))
+    return task_ids
+
+
+def task_transition_receipt_problem(
+    path, text, prior_revision, revision, boundary_tokens
+):
+    """Require a committed task transition carrying an exact approved review."""
+    transitions = boundary_transitions(boundary_tokens).intersection(
+        TASK_LIFECYCLE_TRANSITIONS
+    )
+    if len(transitions) != 1:
+        return "task-boundary cleanup needs one task lifecycle transition"
+    transition = next(iter(transitions))
+    task_ids = boundary_task_ids(boundary_tokens)
+    if not task_ids:
+        task_ids = task_ids_linking_queue_at(prior_revision, path)
+    if not task_ids:
+        return (
+            "task-boundary cleanup needs a task:<id> boundary or a task "
+            "record that still links the review"
+        )
+
+    history = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list",
+            "--topo-order", prior_revision,
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if history.returncode:
+        raise GitSnapshotError(
+            history.stderr.strip()
+            or "could not inspect task-boundary receipt history"
+        )
+    receipt_paths_at = {}
+    for commit, receipt_path, receipt_text in queue_lineage_revision_snapshots(
+        path, text, prior_revision
+    ):
+        if receipt_text == text:
+            receipt_paths_at.setdefault(commit, set()).add(receipt_path)
+    missing = []
+    stale = {}
+    for task_id in sorted(task_ids):
+        prior_status, _prior_task = task_status_at(
+            prior_revision, task_id
+        )
+        invalid_snapshots = [
+            candidate for candidate in deletion_and_later_candidates(revision)
+            if transition not in inferred_task_transitions(
+                task_status_in_candidate(candidate, task_id)
+            )
+        ]
+        if transition not in inferred_task_transitions(prior_status) \
+                or invalid_snapshots:
+            missing.append(task_id)
+            stale[task_id] = (
+                "task does not remain past transition:"
+                + transition + (
+                    " at " + ", ".join(
+                        "index" if candidate is None else candidate
+                        for candidate in invalid_snapshots
+                    )
+                    if invalid_snapshots else ""
+                )
+            )
+            continue
+        found = False
+        for commit in history.stdout.splitlines():
+            receipt_paths = receipt_paths_at.get(commit, set())
+            if not receipt_paths:
+                continue
+            after_status, after_task = task_status_at(commit, task_id)
+            if after_status is None \
+                    or transition not in inferred_task_transitions(after_status) \
+                    or not receipt_paths.intersection(task_queue_paths(
+                        after_task.get("Queue actions", "")
+                    )):
+                continue
+            for parent in revision_parents(
+                commit, f"task-boundary receipt for {task_id}"
+            ):
+                before_status, _before_task = task_status_at(parent, task_id)
+                if before_status is None:
+                    continue
+                if transition not in inferred_task_transitions(before_status):
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            missing.append(task_id)
+    if missing:
+        detail = "; ".join(
+            f"{task_id}: {stale[task_id]}"
+            for task_id in missing if task_id in stale
+        )
+        return (
+            "review must remain live until committed task transition "
+            "history carries its exact approved receipt for: "
+            + ", ".join(missing)
+            + (f" ({detail})" if detail else "")
+        )
+    return None
+
+
+def approved_review_merge_receipt_problem(
+    path, text, prior_revision, boundary_tokens
 ):
     """Require the admitted target history to carry the live merge receipt."""
     got = text_fields(text)
-    if got.get("Review outcome", "").strip() != "approved":
+    if "transition:merge" not in boundary_tokens:
         return (
-            "a negative future review must remain live until durable "
-            "cancellation evidence exists"
-        )
-    boundary = text_fields(boundary_text if boundary_text is not None else text)
-    tokens = future_boundary_tokens(boundary.get("Blocks at", ""))
-    if "transition:merge" not in tokens:
-        return (
-            "future review must remain live until its boundary adapter records "
+            "review must remain live until its boundary adapter records "
             "durable crossing evidence"
         )
     review_revision = got.get("Review revision", "").strip()
@@ -2458,7 +2773,12 @@ def future_review_merge_receipt_problem(
         raise GitSnapshotError(
             merges.stderr.strip() or "could not inspect merge-boundary receipts"
         )
-    expected = text.encode("utf-8")
+    receipt_paths_at = {}
+    for commit, receipt_path, receipt_text in queue_lineage_revision_snapshots(
+        path, text, prior_revision
+    ):
+        if receipt_text == text:
+            receipt_paths_at.setdefault(commit, set()).add(receipt_path)
     for merge in merges.stdout.splitlines():
         parents = revision_parents(merge, "merge-boundary receipt")
         if len(parents) != 2 or parents[0] != reviewed_base:
@@ -2466,7 +2786,7 @@ def future_review_merge_receipt_problem(
         feature_parent = parents[1]
         if not git_is_ancestor(reviewed_head, feature_parent):
             continue
-        if git_artifact_bytes_at(merge, path) != expected:
+        if not receipt_paths_at.get(merge):
             continue
         same_tree = subprocess.run(
             [
@@ -2489,9 +2809,142 @@ def future_review_merge_receipt_problem(
             continue
         return None
     return (
-        "future review must remain live until the previously admitted target "
+        "review must remain live until the previously admitted target "
         "history contains an exact two-parent merge carrying its approved receipt"
     )
+
+
+def negative_review_cancellation_problem(
+    path, text, prior_revision, revision, boundary_tokens=()
+):
+    """Require a rejected artifact or task pursuit to be mechanically withdrawn."""
+    evidence_problem = resolution_evidence_problem(
+        text, prior_revision, revision
+    )
+    if evidence_problem:
+        return evidence_problem
+    got = text_fields(text)
+    target = review_target(got.get("Review target", ""))
+    evidence = set(resolution_evidence_paths(text))
+    if target is not None and target[0] == "local" \
+            and target[1] in evidence:
+        return "review target and cancellation evidence must be distinct files"
+
+    transitions = boundary_transitions(boundary_tokens)
+    task_transitions = transitions.intersection(TASK_LIFECYCLE_TRANSITIONS)
+    task_ids = boundary_task_ids(boundary_tokens)
+    if task_transitions and not task_ids:
+        task_ids = task_ids_linking_queue_at(prior_revision, path)
+    candidates = deletion_and_later_candidates(revision)
+    if task_ids:
+        remaining = sorted(
+            (task_id, candidate)
+            for task_id in task_ids
+            for candidate in candidates
+            if task_status_in_candidate(candidate, task_id) is not None
+        )
+        if remaining:
+            return (
+                "rejected task pursuit remains live for: "
+                + ", ".join(
+                    task_id + "@"
+                    + ("index" if candidate is None else candidate)
+                    for task_id, candidate in remaining
+                )
+            )
+        return None
+    if task_transitions:
+        return "task cancellation needs an associated task:<id>"
+
+    if target is not None and target[0] == "git":
+        for candidate in candidates:
+            problem = reviewed_range_withdrawal_problem(text, candidate)
+            if problem:
+                return problem
+        return None
+    if target is None or target[0] != "local":
+        return (
+            "negative review cleanup needs a local target that can be "
+            "withdrawn, or a candidate-range Git review"
+        )
+    expected = got.get("Review revision", "").strip()
+    for candidate in candidates:
+        artifact = candidate_artifact_bytes(target[1], candidate)
+        if artifact is not None \
+                and expected == "sha256:" + hashlib.sha256(artifact).hexdigest():
+            return "rejected local review target remains unchanged and active"
+    return None
+
+
+def review_cleanup_boundary_problem(
+    path, text, prior_revision, revision, boundary_text, timing
+):
+    """Require cancellation or a durable receipt before a review disappears."""
+    got = text_fields(text)
+    outcome = got.get("Review outcome", "").strip()
+    if outcome in {"rejected", "abandoned"}:
+        problem = negative_review_cancellation_problem(
+            path, text, prior_revision, revision, (
+                future_boundary_tokens(
+                    text_fields(boundary_text).get("Blocks at", "")
+                )
+                if timing == "future-blocking"
+                else blocking_boundary_tokens(
+                    text_fields(boundary_text).get("Blocks now", "")
+                )
+            )
+        )
+        return (
+            "negative review needs durable cancellation evidence: " + problem
+            if problem else None
+        )
+    if outcome != "approved":
+        return "review has no terminal outcome that can close its boundary"
+
+    boundary = text_fields(boundary_text)
+    tokens = (
+        future_boundary_tokens(boundary.get("Blocks at", ""))
+        if timing == "future-blocking"
+        else blocking_boundary_tokens(boundary.get("Blocks now", ""))
+    )
+    transitions = boundary_transitions(tokens)
+    if "merge" in transitions:
+        target = review_target(got.get("Review target", ""))
+        if target is None or target[0] != "git":
+            return "merge cleanup needs a candidate-range Git review receipt"
+        return approved_review_merge_receipt_problem(
+            path, text, prior_revision, tokens
+        )
+    if transitions.intersection(TASK_LIFECYCLE_TRANSITIONS):
+        target = review_target(got.get("Review target", ""))
+        if target is None or target[0] != "local":
+            return "task-boundary cleanup needs a stable local review target"
+        return task_transition_receipt_problem(
+            path, text, prior_revision, revision, tokens
+        )
+    if boundary_task_ids(tokens):
+        return resolution_evidence_problem(
+            text, prior_revision, revision
+        )
+    if timing == "future-blocking":
+        first = tokens[0] if tokens else ""
+        date_boundary = parse_date(first)
+        if date_boundary is not None and date_boundary > TODAY:
+            return "future review cannot close before its recorded date boundary"
+        return resolution_evidence_problem(
+            text, prior_revision, revision
+        )
+    if transitions or any(
+        OPERATION_BOUNDARY_RE.fullmatch(token) for token in tokens
+    ):
+        problem = resolution_evidence_problem(
+            text, prior_revision, revision
+        )
+        return (
+            "blocking review needs durable boundary evidence: " + problem
+            if problem else None
+        )
+    return None
 
 
 def review_successor_problem(path, text, prior_revision, revision):
@@ -2620,27 +3073,18 @@ def queue_deletion_problem(path, text, prior_revision, revision):
         if lifecycle:
             return lifecycle
         if leaf == "reviews":
-            target_problem = review_candidate_problem(text, revision)
+            outcome = got.get("Review outcome", "").strip()
+            target_problem = (
+                review_binding_problem(text)
+                if outcome in {"rejected", "abandoned"}
+                else review_candidate_problem(text, revision)
+            )
             if target_problem:
                 return target_problem
-            outcome = got.get("Review outcome", "").strip()
             if outcome in REVIEW_SUCCESSOR_OUTCOMES:
                 return review_successor_problem(
                     path, text, prior_revision, revision
                 )
-            historical_future = historical_queue_timing(
-                path, text, prior_revision, "future-blocking"
-            )
-            if historical_future is not None \
-                    and outcome in REVIEW_TERMINAL_OUTCOMES:
-                boundary_problem = future_review_merge_receipt_problem(
-                    path,
-                    text,
-                    prior_revision,
-                    boundary_text=historical_future[1],
-                )
-                if boundary_problem:
-                    return boundary_problem
             if outcome in REVIEW_TERMINAL_OUTCOMES \
                     and context_path_candidates(
                         got.get("Successor action", "")
@@ -2649,6 +3093,42 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                     f"{outcome} review is terminal and must not declare "
                     "**Successor action:**"
                 )
+            historical_future = historical_queue_timing(
+                path, text, prior_revision, "future-blocking"
+            )
+            if historical_future is not None \
+                    and outcome in REVIEW_TERMINAL_OUTCOMES:
+                boundary_problem = review_cleanup_boundary_problem(
+                    path,
+                    text,
+                    prior_revision,
+                    revision,
+                    historical_future[1],
+                    "future-blocking",
+                )
+                if boundary_problem:
+                    return boundary_problem
+            elif delivery_class(Path(path).name) == "blocking" \
+                    and outcome in REVIEW_TERMINAL_OUTCOMES:
+                boundary_problem = review_cleanup_boundary_problem(
+                    path,
+                    text,
+                    prior_revision,
+                    revision,
+                    text,
+                    "blocking",
+                )
+                if boundary_problem:
+                    return boundary_problem
+            elif outcome in {"rejected", "abandoned"}:
+                cancellation_problem = negative_review_cancellation_problem(
+                    path, text, prior_revision, revision
+                )
+                if cancellation_problem:
+                    return (
+                        "negative review needs durable cancellation evidence: "
+                        + cancellation_problem
+                    )
             return None
         return resolution_evidence_problem(text, prior_revision, revision)
     item = REPO / path
@@ -2981,7 +3461,7 @@ def check_queue_schema():
                     "may contain only unstructured diagnostic prose",
                 )
         needs_resolution_evidence = (
-            actor == "needs-human" and leaf != "reviews"
+            actor == "needs-human"
         ) or (
             actor == "needs-agent" and not (is_pickup or is_generated_retry)
         )
@@ -2992,6 +3472,56 @@ def check_queue_schema():
                 "ordinary action needs non-queue **Resolution evidence:** file path(s)",
                 "name the durable file(s) that completion will create or change",
             )
+        if actor == "needs-human" and leaf == "reviews":
+            target = review_target(got.get("Review target", ""))
+            evidence_paths = set(resolution_evidence_paths(text))
+            if target is not None and target[0] == "local" \
+                    and target[1] in evidence_paths:
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "review target and Resolution evidence are the same file",
+                    "predeclare a distinct cancellation record so a negative "
+                    "outcome can withdraw the target without rewriting its evidence",
+                )
+            boundary_tokens = (
+                future_boundary_tokens(got.get("Blocks at", ""))
+                if timing == "future-blocking"
+                else blocking_boundary_tokens(got.get("Blocks now", ""))
+                if timing == "blocking"
+                else []
+            )
+            transitions = boundary_transitions(boundary_tokens)
+            review_revision = got.get("Review revision", "").strip()
+            is_git_range = bool(
+                review_revision.startswith("git:")
+                and "..." in review_revision
+            )
+            if "merge" in transitions \
+                    and review_revision != "pending" \
+                    and has_concrete_value(review_revision) \
+                    and (
+                        target is None
+                        or target[0] != "git"
+                        or not is_git_range
+                    ):
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "merge-bound review must bind the candidate Git range",
+                    "publish Review target/revision as git:<base>...<head>",
+                )
+            if transitions.intersection(TASK_LIFECYCLE_TRANSITIONS) \
+                    and review_revision != "pending" \
+                    and has_concrete_value(review_revision) \
+                    and (target is None or target[0] != "local"):
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "task-lifecycle review must bind a stable local artifact",
+                    "review the task's design or verification file; reserve "
+                    "candidate-range reviews for merge admission",
+                )
         if moving_task_paths and not (is_pickup or is_repair_record):
             yield Finding(
                 "queue-schema",
@@ -3122,6 +3652,14 @@ def check_queue_schema():
                         item.relative_to(REPO),
                         "Git **Review target:** and **Review revision:** do not match",
                         "use the same literal git:<commit> or git:<base>...<head>",
+                    )
+                if https_target and REVIEW_REVISION_RE.fullmatch(revision) \
+                        and not revision.startswith("sha256:"):
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        "HTTPS **Review target:** needs a sha256 revision",
+                        "bind the external artifact to sha256:<64 hex>",
                     )
                 if len(local_candidates) == 1 \
                         and len(local_targets) == 1 \
@@ -3266,6 +3804,46 @@ def task_queue_paths(value):
     except ValueError:
         return []
     return sorted(paths)
+
+
+def queue_item_owned_by_task(path, task_id, revision=None):
+    """Return whether one human queue item declares this task as its owner."""
+    normalized = Path(path).as_posix()
+    parts = Path(normalized).parts
+    if len(parts) != 4 or parts[:2] != (
+        "message-queue", "needs-human"
+    ):
+        return False
+    artifact = (
+        repo_artifact_bytes(REPO / normalized)
+        if revision is None
+        else git_artifact_bytes_at(revision, normalized)
+    )
+    if artifact is None:
+        return False
+    text = decode_utf8_artifact(
+        artifact,
+        (
+            f"candidate `{normalized}`"
+            if revision is None else f"`{normalized}` at {revision}"
+        ),
+    )
+    got = text_fields(text)
+    owned_boundaries = boundary_task_ids(
+        blocking_boundary_tokens(got.get("Blocks now", ""))
+    )
+    owned_boundaries.update(boundary_task_ids(
+        future_boundary_tokens(got.get("Blocks at", ""))
+    ))
+    if task_id in owned_boundaries:
+        return True
+    return bool(re.search(
+        r"(?<![A-Za-z0-9_-])from[ \t]+task[ \t]+`"
+        + re.escape(task_id)
+        + r"`(?![A-Za-z0-9-])",
+        got.get("Filed", ""),
+        flags=re.I,
+    ))
 
 
 def queue_endpoint(path):
@@ -3531,7 +4109,7 @@ def check_active_queue_boundaries():
             reached.update(ACTIVE_TRANSITIONS)
         if reached:
             if timing == "future-blocking":
-                boundary_problem = future_review_boundary_problem(item, reached)
+                boundary_problem = review_boundary_problem(item, reached)
                 if boundary_problem is None:
                     continue
             else:
@@ -3817,6 +4395,19 @@ def check_task_structure():
                             "rename it to blocking-*, future-blocking-*, or non-blocking-*",
                         )
                         continue
+                    if queue_endpoint(target).startswith("needs-human/") \
+                            and not queue_item_owned_by_task(
+                                queue_path, task.name
+                            ):
+                        yield Finding(
+                            "task-structure",
+                            rel / "task.md",
+                            f"human Queue actions path `{queue_path}` is not "
+                            f"owned by task:{task.name}",
+                            "name the task in a valid Blocks now/Blocks at "
+                            "boundary or add exact Filed provenance `from task "
+                            f"{task.name}`",
+                        )
                     live_queue_paths.append(target)
                 if entry_name == "0_backlog":
                     requests = [
@@ -3864,6 +4455,12 @@ def check_task_structure():
                         continue
                     crossed = boundary_transitions(tokens).intersection(reached)
                     if crossed:
+                        if timing in {"future-blocking", "blocking"}:
+                            boundary_problem = review_boundary_problem(
+                                target, crossed
+                            )
+                            if boundary_problem is None:
+                                continue
                         yield Finding(
                             "task-structure",
                             rel / "task.md",
@@ -3872,12 +4469,35 @@ def check_task_structure():
                             "resolve or reclassify the queue action before moving task status",
                         )
                 if entry_name == "4_done" and not queue_is_none:
-                    yield Finding(
-                        "task-structure",
-                        rel / "task.md",
-                        "done task must declare **Queue actions:** none",
-                        "resolve or transfer every pending action before moving to 4_done",
-                    )
+                    receipt_actions = bool(live_queue_paths)
+                    for target in live_queue_paths:
+                        timing = delivery_class(target.name)
+                        got = fields(target)
+                        tokens = (
+                            future_boundary_tokens(got.get("Blocks at", ""))
+                            if timing == "future-blocking"
+                            else blocking_boundary_tokens(
+                                got.get("Blocks now", "")
+                            )
+                            if timing == "blocking"
+                            else []
+                        )
+                        if "complete" not in boundary_transitions(tokens) \
+                                or review_boundary_problem(
+                                    target, {"complete"}
+                                ) is not None:
+                            receipt_actions = False
+                            break
+                    if len(live_queue_paths) != len(queue_paths):
+                        receipt_actions = False
+                    if not receipt_actions:
+                        yield Finding(
+                            "task-structure",
+                            rel / "task.md",
+                            "done task must declare **Queue actions:** none",
+                            "resolve or transfer pending actions; only an exact "
+                            "approved completion receipt may survive its crossing commit",
+                        )
                 if entry_name == "2_blocked":
                     reciprocal = "task:" + task.name
                     blockers = [
@@ -3908,6 +4528,521 @@ def check_task_structure():
                 yield Finding("stale-task", rel,
                               f"untouched for over {STALE_TASK_DAYS} days",
                               "continue it, or move back to 0_backlog and unclaim")
+
+
+def task_admission_enabled(revision=None):
+    """Return whether one exact task tree enables edge-by-edge admission."""
+    artifact = (
+        repo_artifact_bytes(REPO / "tasks/AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "tasks/AGENTS.md")
+    )
+    return bool(
+        artifact is not None
+        and text_fields(decode_utf8_artifact(
+            artifact,
+            (
+                "candidate `tasks/AGENTS.md`"
+                if revision is None else f"`tasks/AGENTS.md` at {revision}"
+            ),
+        )).get("Task admission schema", "").strip() == "v1"
+    )
+
+
+def task_admission_activation_commits(head):
+    activations, error = schema_activation_commits(
+        head,
+        "tasks/AGENTS.md",
+        "Task admission schema",
+    )
+    if error:
+        raise GitSnapshotError(error)
+    return activations
+
+
+def git_empty_tree():
+    result = subprocess.run(
+        ["git", "hash-object", "-t", "tree", "--stdin"],
+        cwd=REPO,
+        input=b"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise GitSnapshotError(git_failure(
+            result, "could not identify Git's empty tree"
+        ))
+    return result.stdout.decode("ascii").strip()
+
+
+def task_admission_edges(activations):
+    """Yield governed task edges, including a repository's root edge."""
+    yielded = set()
+    for edge in queue_revision_edges(activations):
+        yielded.add(edge)
+        yield edge
+    if CHANGE_RANGE is None:
+        if not _GIT_HEAD_OID and task_admission_enabled():
+            yield git_empty_tree(), None
+        return
+    range_head = (
+        CHANGE_RANGE[len("root:"):]
+        if CHANGE_RANGE.startswith("root:")
+        else CHANGE_RANGE.split("...", 1)[1]
+    )
+    roots = subprocess.run(
+        [
+            "git", "--no-replace-objects", "rev-list",
+            "--max-parents=0", range_head,
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if roots.returncode:
+        raise GitSnapshotError(
+            roots.stderr.strip() or "could not inspect root task edges"
+        )
+    empty = git_empty_tree()
+    for root in roots.stdout.splitlines():
+        governed, error = governed_by_activation_join(root, activations)
+        if error:
+            raise GitSnapshotError(error)
+        edge = (empty, root)
+        if governed and edge not in yielded:
+            yield edge
+
+
+def governed_task_artifact_path(path):
+    parts = Path(path).parts
+    return bool(
+        len(parts) >= 4
+        and parts[0] == "tasks"
+        and parts[1] in TASK_STATUSES
+        and TASK_ID_RE.fullmatch(parts[2])
+        and Path(path).suffix.casefold() in TASK_MARKDOWN_SUFFIXES
+    )
+
+
+def task_ids_changed_on_edge(parent, revision):
+    """Return logical task ids touched on one exact Git/index edge."""
+    command = (
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            "--diff-filter=ADMRT", parent, "--",
+        ]
+        if revision is None else
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status", "-z", "-M",
+            "--diff-filter=ADMRT", parent, revision, "--",
+        ]
+    )
+    changed = subprocess.run(
+        command,
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, "could not inspect task action-origin changes"
+        ))
+    task_ids = set()
+    for _status, source, destination in name_status_records(changed.stdout):
+        for candidate in (source, destination):
+            if governed_task_artifact_path(candidate):
+                task_ids.add(Path(candidate).parts[2])
+    return task_ids
+
+
+def task_snapshot(revision, task_id):
+    """Return one task's queue ownership and all exact Markdown artifacts."""
+    if revision is None:
+        entries = git_index_entries("tasks")
+        incarnations = sorted(
+            path for path, mode in entries.items()
+            if mode in ("100644", "100755")
+            and re.fullmatch(
+                rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
+                + re.escape(task_id)
+                + r"/task\.md",
+                path,
+            )
+        )
+    else:
+        incarnations = task_incarnations_at(revision, task_id)
+    if len(incarnations) != 1:
+        return None
+    task_path = Path(incarnations[0])
+    task_bytes = (
+        repo_artifact_bytes(REPO / task_path)
+        if revision is None
+        else git_artifact_bytes_at(revision, task_path.as_posix())
+    )
+    if task_bytes is None:
+        return None
+    task_text = decode_utf8_artifact(
+        task_bytes,
+        (
+            f"candidate `{task_path}`"
+            if revision is None else f"`{task_path}` at {revision}"
+        ),
+    )
+    allowed = {
+        path for path in task_queue_paths(
+            text_fields(task_text).get("Queue actions", "")
+        )
+        if queue_item_owned_by_task(path, task_id, revision)
+    }
+    task_directory = task_path.parent
+    prefix = task_directory.as_posix() + "/"
+    if revision is None:
+        artifact_paths = sorted(
+            Path(path)
+            for path, mode in git_index_entries(prefix).items()
+            if mode in ("100644", "100755")
+            and path.startswith(prefix)
+            and Path(path).suffix.casefold() in TASK_MARKDOWN_SUFFIXES
+        )
+    else:
+        tree = subprocess.run(
+            [
+                "git", "--no-replace-objects", "ls-tree", "-r",
+                "--name-only", "-z", revision, "--", task_directory.as_posix(),
+            ],
+            cwd=REPO,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if tree.returncode:
+            raise GitSnapshotError(git_failure(
+                tree, f"could not inspect task artifacts for {task_id}"
+            ))
+        artifact_paths = sorted(
+            Path(raw.decode("utf-8", errors="surrogateescape"))
+            for raw in tree.stdout.split(b"\0")
+            if raw and Path(
+                raw.decode("utf-8", errors="surrogateescape")
+            ).suffix.casefold() in TASK_MARKDOWN_SUFFIXES
+        )
+    artifacts = {}
+    for path in artifact_paths:
+        artifact = (
+            repo_artifact_bytes(REPO / path)
+            if revision is None
+            else git_artifact_bytes_at(revision, path.as_posix())
+        )
+        if artifact is None:
+            continue
+        key = path.relative_to(task_directory).as_posix()
+        artifacts[key] = (
+            path.as_posix(),
+            decode_utf8_artifact(
+                artifact,
+                (
+                    f"candidate `{path}`"
+                    if revision is None else f"`{path}` at {revision}"
+                ),
+            ),
+        )
+    return allowed, artifacts
+
+
+def task_action_origin_problems(parent, revision):
+    """Yield newly introduced unprojected human actions on one task edge."""
+    for task_id in sorted(task_ids_changed_on_edge(parent, revision)):
+        before = task_snapshot(parent, task_id)
+        after = task_snapshot(revision, task_id)
+        before_allowed, before_artifacts = before or (set(), {})
+        after_allowed, after_artifacts = after or (set(), {})
+        before_counts = {}
+        after_counts = {}
+        after_paths = {}
+        for _filename, (before_path, before_text) in sorted(
+            before_artifacts.items()
+        ):
+            for excerpt, count in task_action_unit_counts(
+                before_text,
+                before_path,
+                before_allowed,
+                repo=REPO,
+                candidate_revision=parent,
+            ).items():
+                before_counts[excerpt] = (
+                    before_counts.get(excerpt, 0) + count
+                )
+        for _filename, (after_path, after_text) in sorted(
+            after_artifacts.items()
+        ):
+            for excerpt, count in task_action_unit_counts(
+                after_text,
+                after_path,
+                after_allowed,
+                repo=REPO,
+                candidate_revision=revision,
+            ).items():
+                after_counts[excerpt] = after_counts.get(excerpt, 0) + count
+                after_paths.setdefault(excerpt, after_path)
+        for excerpt in sorted(after_counts):
+            count = after_counts[excerpt] - before_counts.get(excerpt, 0)
+            if count <= 0:
+                continue
+            yield (
+                Path(after_paths[excerpt]),
+                count,
+                excerpt,
+            )
+
+
+def task_record_paths_at(revision):
+    """Return canonical task records grouped by immutable task id."""
+    paths = (
+        [
+            path for path, mode in git_index_entries("tasks").items()
+            if mode in ("100644", "100755")
+        ]
+        if revision is None else task_incarnations_in_tree(revision)
+    )
+    records = {}
+    for path in paths:
+        matched = re.fullmatch(
+            rf"tasks/({'|'.join(TASK_STATUSES)})/"
+            r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/task\.md",
+            path,
+        )
+        if matched:
+            records.setdefault(matched.group(2), []).append(
+                (matched.group(1), path)
+            )
+    return records
+
+
+def task_artifact_renames_on_edge(parent, revision):
+    """Return detected task-local renames on one exact Git/index edge."""
+    command = (
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            "--diff-filter=R", parent, "--", "tasks",
+        ]
+        if revision is None else
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status", "-z", "-M",
+            "--diff-filter=R", parent, revision, "--", "tasks",
+        ]
+    )
+    changed = subprocess.run(
+        command,
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed, "could not inspect task artifact renames"
+        ))
+    return [
+        (source, destination)
+        for status, source, destination in name_status_records(changed.stdout)
+        if status.startswith("R")
+        and governed_task_artifact_path(source)
+        and governed_task_artifact_path(destination)
+    ]
+
+
+def task_topology_problems(parent, revision, adopting=False):
+    """Yield immutable-id and lifecycle violations on one task edge."""
+    before = task_record_paths_at(parent)
+    after = task_record_paths_at(revision)
+    renamed_ids = set()
+    for source, destination in task_artifact_renames_on_edge(
+        parent, revision
+    ):
+        source_id = Path(source).parts[2]
+        destination_id = Path(destination).parts[2]
+        if source_id == destination_id:
+            continue
+        identity = (source_id, destination_id)
+        if identity in renamed_ids:
+            continue
+        renamed_ids.add(identity)
+        yield (
+            Path(destination),
+            f"task id changed from {source_id} to {destination_id}",
+            "keep the original task id; create a separate backlog task if "
+            "the work has a new identity",
+        )
+
+    for task_id in sorted(set(before) | set(after)):
+        prior = before.get(task_id, [])
+        current = after.get(task_id, [])
+        if len(prior) > 1 or len(current) > 1:
+            continue  # task-structure owns duplicate incarnations
+        if not prior:
+            if adopting or not current:
+                continue
+            status, path = current[0]
+            if status != "0_backlog":
+                yield (
+                    Path(path),
+                    f"new task:{task_id} was created directly in {status}",
+                    "create new tasks in 0_backlog, then claim and move them "
+                    "through the lifecycle",
+                )
+            continue
+        prior_status, prior_path = prior[0]
+        if not current:
+            if prior_status not in TASK_DELETABLE_STATUSES:
+                yield (
+                    Path(prior_path),
+                    f"active task:{task_id} was deleted from {prior_status}",
+                    "restore the task; only backlog cancellation or done-task "
+                    "pruning may delete a task record",
+                )
+            continue
+        status, path = current[0]
+        if status == prior_status:
+            continue
+        if status not in TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]:
+            allowed = ", ".join(sorted(
+                TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]
+            )) or "no further status"
+            yield (
+                Path(path),
+                f"task:{task_id} jumped from {prior_status} to {status}",
+                f"use one declared lifecycle edge at a time; from "
+                f"{prior_status} the allowed destination is {allowed}",
+            )
+
+
+def check_task_action_origin():
+    """Require every newly introduced human task ask to be a queue projection."""
+    if not (REPO / ".git").exists():
+        return
+    activations = task_admission_activation_commits(_GIT_HEAD_OID)
+    enabled = task_admission_enabled()
+    if not activations and not enabled:
+        return
+    edges = (
+        ((_GIT_HEAD_OID, None),)
+        if enabled and not activations and _GIT_HEAD_OID
+        else task_admission_edges(activations)
+    )
+    reported = set()
+    for parent, revision in edges:
+        for path, count, excerpt in task_action_origin_problems(
+            parent, revision
+        ):
+            identity = (
+                revision or "index",
+                path.as_posix(),
+                excerpt,
+            )
+            if identity in reported:
+                continue
+            reported.add(identity)
+            suffix = f" ({count} copies)" if count > 1 else ""
+            yield Finding(
+                "task-action-origin",
+                path,
+                "task artifact introduced an unqueued human action"
+                f"{suffix}: {excerpt}",
+                "create one needs-human queue item, list it in task.md "
+                "Queue actions, and replace the ask with its exact action link",
+            )
+
+
+def check_task_admission_history():
+    """Recheck every governed committed task snapshot in an admitted range."""
+    if not (REPO / ".git").exists():
+        return
+    activations = task_admission_activation_commits(_GIT_HEAD_OID)
+    enabled = task_admission_enabled()
+    if not activations and not enabled:
+        return
+    candidate_has_tasks = bool(git_index_entries("tasks"))
+    if activations and not enabled and candidate_has_tasks:
+        yield Finding(
+            "task-admission",
+            Path("tasks/AGENTS.md"),
+            "Task admission schema v1 was removed after activation",
+            "restore **Task admission schema:** v1 while tasks remain",
+        )
+    if not activations:
+        return  # a staged first activation has no earlier governed Git edge
+
+    reported = set()
+    for parent, revision in task_admission_edges(activations):
+        adopting = bool(
+            revision is not None
+            and not task_admission_enabled(parent)
+            and task_admission_enabled(revision)
+        )
+        for subject, message, fix in task_topology_problems(
+            parent, revision, adopting=adopting
+        ):
+            identity = (
+                revision or "index",
+                "task-topology",
+                str(subject),
+                message,
+            )
+            if identity in reported:
+                continue
+            reported.add(identity)
+            yield Finding(
+                "task-admission",
+                subject,
+                (
+                    f"task snapshot {revision} violated lifecycle topology: "
+                    if revision is not None
+                    else "staged task candidate violated lifecycle topology: "
+                ) + message,
+                fix,
+            )
+        if revision is None:
+            continue  # task-structure checks the staged candidate directly
+        if not task_admission_enabled(revision) \
+                and task_service_present_at(revision):
+            identity = (revision, "task-admission-marker")
+            if identity not in reported:
+                reported.add(identity)
+                yield Finding(
+                    "task-admission",
+                    Path("tasks/AGENTS.md"),
+                    f"task snapshot {revision} removed Task admission schema v1",
+                    "restore **Task admission schema:** v1; a later commit "
+                    "cannot erase an admitted downgrade",
+                )
+        with git_revision_candidate(
+            revision, preserve_change_range=True
+        ):
+            findings = list(check_task_structure())
+        for finding in findings:
+            identity = (
+                revision,
+                finding.check,
+                str(finding.subject),
+                finding.message,
+            )
+            if identity in reported:
+                continue
+            reported.add(identity)
+            yield Finding(
+                "task-admission",
+                finding.subject,
+                f"task snapshot {revision} violated "
+                f"{finding.check}: {finding.message}",
+                "repair the introducing commit; a later revert cannot erase "
+                "an admitted task-boundary violation",
+            )
 
 
 def live_conversation_directories():
@@ -5174,6 +6309,15 @@ def check_links():
         if parts[:3] == ("message-queue", "needs-agent", "retries"):
             continue  # repair items cite broken/deleted subjects by design
         text = semantic_text(repo_text(md))
+        if parts[0] == "message-queue":
+            # Resolution evidence is deliberately predeclared before it exists.
+            # Its lifecycle check requires creation/change when the action closes.
+            text = re.sub(
+                r"^\*\*Resolution evidence:\*\*[^\n]*$",
+                "",
+                text,
+                flags=re.M,
+            )
         candidates = set(BACKTICK_RE.findall(text))
         candidates.update(markdown_link_destinations(text))
         for cand in sorted(candidates):
@@ -5268,6 +6412,8 @@ CHECKS = {
     "queue-task-reciprocity": check_queue_task_reciprocity,
     "stale-queue": check_stale_queue,
     "task-structure": check_task_structure,
+    "task-admission": check_task_admission_history,
+    "task-action-origin": check_task_action_origin,
     "handover-present": check_handover_present,
     "handover-queue-projection": check_handover_queue_projection,
     "memory-schema": check_memory_schema,
