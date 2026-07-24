@@ -331,11 +331,13 @@ def reject_external_config_dependencies(root, label):
                 header = lowered[1:closing].strip()
                 section = header.split(None, 1)[0].split(b'"', 1)[0]
                 section = section.split(b".", 1)[0]
-                if section.startswith(b"include"):
+                if section in (b"include", b"includeif"):
                     raise InspectionError(
                         f"{label} local Git configuration uses external includes"
                     )
-                continue
+                lowered = lowered[closing + 1 :].strip()
+                if not lowered or lowered.startswith((b"#", b";")):
+                    continue
             key = (
                 lowered.split(b"=", 1)[0]
                 .strip()
@@ -351,7 +353,7 @@ def reject_external_config_dependencies(root, label):
 
 
 def require_git_worktree(root, label, git_executable):
-    """Return canonical common/object directories for an exact Git worktree root."""
+    """Return canonical metadata directories for an exact Git worktree root."""
     reject_external_config_dependencies(root, label)
     bare = run_git(git_executable, root, "rev-parse", "--is-bare-repository")
     if bare.returncode == 0 and bare.stdout.strip() == "true":
@@ -363,11 +365,12 @@ def require_git_worktree(root, label, git_executable):
 
     prefix = run_git(git_executable, root, "rev-parse", "--show-prefix")
     top_level = run_git(git_executable, root, "rev-parse", "--show-toplevel")
+    git_dir = run_git(git_executable, root, "rev-parse", "--git-dir")
     common_dir = run_git(git_executable, root, "rev-parse", "--git-common-dir")
     object_dir = run_git(git_executable, root, "rev-parse", "--git-path", "objects")
     if any(
         result.returncode
-        for result in (bare, prefix, top_level, common_dir, object_dir)
+        for result in (bare, prefix, top_level, git_dir, common_dir, object_dir)
     ):
         raise InspectionError(f"could not inspect {label} Git metadata")
 
@@ -391,6 +394,11 @@ def require_git_worktree(root, label, git_executable):
         "objects": resolve_git_path(
             root,
             git_output_value(object_dir, label),
+            label,
+        ),
+        "gitdir": resolve_git_path(
+            root,
+            git_output_value(git_dir, label),
             label,
         ),
     }

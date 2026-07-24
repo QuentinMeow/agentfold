@@ -29,7 +29,7 @@ different evidence.
 | Storage topology | Declared roots do not overlap, declared Git repositories report separate metadata/object paths, and the publisher reports no alternates. | Strict path resolution, filesystem identity/ancestor comparisons, and read-only Git metadata inspection. Hard-link sharing, undeclared roots, mounts, configuration authority, and file bytes remain uninspected. |
 | Content admission | An exact public candidate's bytes, modes, paths, metadata, and detector coverage were inspected. | Content-addressed projection, explicit clean/finding/incomplete/error/unsupported state, authority result, and receipt. |
 | Capability isolation | The publishing process cannot read private objects, restricted/raw roots, private credentials, or an unrestricted output sink. | Independently trusted enforcement fixes a non-expanding capability set for the bound process tree and operation lifetime; in-runtime attestation and continuous monitoring cover mounts, descriptors, IPC, agent/control sockets, identities/connectors, credentials, subprocesses, and network/telemetry egress. |
-| Publication admission | A named export was reviewed and admitted to a named public destination. | Immutable export digest, scan evidence, source/base identity, human or policy receipt, and destination identity. |
+| Publication admission | A named export was reviewed and admitted to a named public destination. | Immutable envelope digest, exact scan evidence and policy revisions, instruction-admission receipt and control generation, source/base identity, a human or policy receipt bound to that complete publication binding, and destination identity. |
 | Backup evidence | Replication/coverage/freshness facts were observed for an exact target. | Destination/snapshot identity, covered target/version, time/expiry, key and destination availability, plus a separate restore-verification state. Observation alone is not a recoverability claim. |
 
 The first implementation slice verifies only declared storage topology. It always
@@ -441,10 +441,18 @@ serialization, performs an atomic compare-create, and attaches immutable retry r
 to the existing unanswered action. The reconciler rejects duplicate live canonical
 keys.
 
-A changed operation input, candidate, policy revision, finding set, consequence, or
-authority requirement creates a different action rather than mutating the old decision
-question. A response freezes its action; later evidence uses an explicitly linked
-successor. The unattended state remains blocked, so identical concurrent retries do
+For publication, the exact operation includes the immutable publication binding defined
+below, its destination/ref/OIDs/object manifest, epoch, nonce, expiry, and required
+authority. A candidate tree, old/new OIDs, or nonce is never an alternate key for that
+binding. An idempotent retry must present the identical canonical serialization; it may
+append attempt evidence but cannot replace scan evidence, a policy revision, an
+instruction-admission receipt, or its control generation.
+
+A changed operation input, candidate, envelope or evidence binding, policy revision,
+finding set, consequence, or authority requirement creates a different action rather
+than mutating the old decision question. A response freezes its action; later evidence
+uses an explicitly linked successor and must obtain a new publication nonce when
+applicable. The unattended state remains blocked, so identical concurrent retries do
 not create prompt storms or parallel decisions.
 
 ## Export and publication protocol
@@ -460,21 +468,50 @@ A future exporter creates a content-addressed envelope containing only:
 - scan binary digest, invocation, version, ruleset/config/database/model identities,
   exclusions, exact input manifest/object identities, coverage/result, and scanner
   output-sink policy;
-- instruction-admission result;
+- canonical exporter scan-evidence digest, observation time and expiry, and the exact
+  scan-policy and publication-admission-policy revisions;
+- exact admission-authority revocation epoch;
+- instruction-admission result and receipt digest, admitted instruction-stack digest,
+  and exact instruction-control generation;
 - envelope digest; and
 - exact public remote URL, authenticated server/adapter key, immutable destination
   repository identity, credential audience, admitted transport/redirect identity,
   expected new commit metadata, and the one requested old-to-new ref update.
 
+The envelope digest is a domain-separated digest of the canonical serialization of
+every other envelope field; the digest field itself is excluded. After the clean
+publisher's required re-scan, the immutable **publication binding** is the exact tuple
+`<envelope-digest, complete-scan-evidence-set-digest, scan-evidence-expiry,
+scan-policy-revision, publication-admission-policy-revision,
+admission-authority-revocation-epoch, instruction-admission-receipt-digest,
+instruction-control-generation>`. The scan-evidence set covers both the exporter
+evidence in the envelope and the clean-publisher re-scan receipt. The scan-policy
+revision defines the maximum evidence age and minimum accepted
+ruleset/database/model generations; changing one of those floors creates a new revision.
+Every component must agree with the envelope or with a receipt that directly names its
+envelope digest.
+
+The human or policy admission receipt is outside the self-digested envelope. It binds
+the complete publication binding plus the envelope's candidate/source/base, epoch,
+nonce, expiry, destination identities, object manifest, ref, old/new OIDs, and refspec.
+A human receipt also names the reviewer's authority and scope; an automated receipt
+names the admitting policy identity and exact revision. Its receipt digest is carried
+by every later capability, reservation, and outcome record. Candidate equality, OID
+equality, or nonce equality cannot transfer authority to another envelope or evidence
+set. Any change to a bound field requires a newly digested envelope, new single-use
+nonce, new admission receipt, and new destination reservation.
+
 The envelope contains no integration Git objects, private pathnames, absolute paths,
 credentials, raw packs/bundles/patch mail, or unrestricted symlinks. The clean publisher
 verifies the digest, applies the explicit projection to an expected public base, scans
-again, and reconstructs a candidate commit with separately admitted author/message
-metadata and exactly one expected public parent. It starts with only the admitted public
-base closure and generated candidate objects, no extra refs, tags, notes, stashes, or
-reflogs. Before any push it enumerates every newly reachable commit, tree, blob, and tag
-object in the exact `candidate ^base` closure and proves each object was admitted or
-generated from the envelope.
+again under the envelope-bound scan-policy revision, and emits a re-scan receipt bound
+to the envelope digest, reconstructed projection, policy revision, scanner identities,
+coverage, and result. It reconstructs a candidate commit with separately admitted
+author/message metadata and exactly one expected public parent. It starts with only the
+admitted public base closure and generated candidate objects, no extra refs, tags,
+notes, stashes, or reflogs. Before any push it enumerates every newly reachable commit,
+tree, blob, and tag object in the exact `candidate ^base` closure and proves each object
+was admitted or generated from the envelope.
 
 The destination independently hashes and inventories every object received before
 finalization. Its received object set must equal the reserved object manifest exactly,
@@ -503,19 +540,52 @@ follow-tags, configured default refspecs, and extra ref updates are rejected. Pr
 local and advertised-remote inventories must be consistent with the requested
 transaction, but the receipt reports remote reflogs, hidden refs, quarantine packs,
 hooks, mirrors, and retention as unknown unless a destination-side attestation covers
-them.
+them. The ref triple is a necessary state precondition, not an admission,
+authorization, reservation, or idempotency identity.
 
 Before accepting content, the client authenticates the exact server/adapter key,
 immutable repository identity, credential audience, and transport endpoint; redirects
 are disabled unless the exact redirect identity is separately admitted. The destination
 adapter then durably reserves a single-use nonce/current epoch and exact
-`<server-key, repository-id, audience, transport, ref, old, new, object-manifest>`
-transaction. Only that authenticated reservation may authorize a revocable
-per-envelope credential to transmit admitted objects into an isolated slot. Finalization
-revalidates those identities, atomically consumes the reservation, verifies the complete
-candidate closure, and updates the ref. The destination keeps a nonce-keyed durable
-outcome bound to the same identities and distinguishing committed, aborted-and-erased,
-aborted-but-retained, and unknown.
+`<publication-binding, admission-receipt-digest, server-key, repository-id, audience,
+transport, ref, old, new, object-manifest>` transaction. The nonce record is write-once:
+an exact retry returns the same reservation state, while the same nonce with any
+different tuple is a conflict and authorizes no credential or upload. Only that
+authenticated reservation may proceed to capability admission; the reservation alone
+authorizes no credential or byte.
+
+The enforcement adapter next issues the capability receipt bound below. Before issuing
+a credential or accepting the first byte, the destination validates that receipt and
+binds the credential/channel to its enforcement instance, process-tree generation, and
+live capability lease. It continuously gates byte acceptance on that lease and its
+revocation epoch through upload completion; an adapter that can check capability
+evidence only after upload cannot publish automatically. Reservation, credential
+issuance, and byte acceptance also require unexpired scan evidence and the bound
+scan/admission-policy revisions, admission-authority revocation epoch, and
+instruction-control generation to equal their authoritative current values. Exact
+replay never overrides expiry, revocation, or a later revision/generation.
+
+Finalization rehashes the envelope; verifies that the explicit scan/policy and
+instruction/control components match it and their receipts; revalidates the human or
+policy admission receipt, capability receipt, destination identities, object manifest,
+and complete candidate closure; and requires the scan evidence to remain unexpired and
+the bound policy revisions, admission-authority epoch, instruction-control generation,
+and capability lease to remain authoritative-current. They are fencing conditions, not
+descriptive metadata. The adapter must compare them within the atomic finalization
+boundary or compare destination-enforced monotonic policy/authority and capability
+revocation epochs that their authorities advance synchronously with every relevant
+change. Without that guarantee, automatic publication is unavailable.
+
+In one atomic destination transaction, finalization consumes the exact reservation and
+compare-and-swaps the ref, and writes its committed outcome. No updated ref is visible
+without that authoritative outcome record. Every non-committed outcome is durably
+recorded before any permitted erasure or slot release; retained or unknown slots remain
+quarantined. The old/new OIDs alone cannot authorize that CAS. The finalization request
+and durable outcome also bind the exact accepted capability-receipt digest. A retry with
+the identical finalization binding returns an existing terminal outcome without another
+ref update, even when its lease has since expired; that read cannot authorize another
+upload. If no outcome exists, every freshness and liveness check still applies. A
+different binding cannot resume or consume the reservation.
 
 Once transmission begins, status is `publication-in-flight`, never private. A missing,
 lost, negative, or unknown destination outcome becomes `potentially-disclosed` and
@@ -538,18 +608,22 @@ Publication remains blocked until:
 5. no extra local refs, tags, notes, stashes, or reflogs are present; remote hidden
    state is explicitly unknown absent destination attestation;
 6. instruction authority checks pass;
-7. a human or approved policy binds the candidate digest, epoch, nonce, expiry,
-   authenticated destination identities, credential audience, transport/redirect
-   identity, old/new OIDs, and refspec; and
+7. a human or approved policy issues a receipt binding the exact immutable publication
+   binding and admission-policy revision, its candidate/source/base and object manifest,
+   epoch, nonce, expiry, authenticated destination identities, credential audience,
+   transport/redirect identity, old/new OIDs, and refspec; and
 8. independently trusted enforcement prevents the bound process tree's capability set
    from expanding for the operation lifetime; continuous in-runtime evidence denies
    unadmitted mounts, inherited file descriptors, IPC/ptrace, credential-agent and
    container/host-control sockets, cloud metadata identities, tool connectors, private
    credentials, and unrestricted network/output channels, failing closed on unknown or
-   changing ambient capability. Its receipt binds the envelope digest, nonce, epoch,
-   enforcement-instance identity, exact process-tree generation, and live status; the
-   destination revalidates that receipt at finalization so evidence from another
-   process cannot be replayed.
+   changing ambient capability. Its receipt binds the complete publication binding,
+   human-or-policy admission-receipt digest, destination reservation identity, nonce,
+   epoch, enforcement-instance identity, exact process-tree generation, capability-lease
+   identity and expiry, and liveness/revocation epoch. The destination validates it
+   before credential issuance and byte acceptance, continuously fences the upload on
+   that lease, and revalidates every binding atomically with finalization so evidence
+   from another envelope, admission, reservation, or process cannot be replayed.
 
 A same-user local publisher can satisfy the first seven as content controls but not the
 eighth.

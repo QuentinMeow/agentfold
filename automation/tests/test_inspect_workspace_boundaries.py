@@ -191,6 +191,55 @@ class WorkspaceBoundaryInspectorTests(unittest.TestCase):
         self.assertNotIn(str(integration), result.stdout)
         self.assertNotIn(str(publisher), result.stdout)
 
+    def test_publisher_gitdir_inside_integration_metadata_fails(self):
+        integration = self.scratch / "private-integration"
+        integration_metadata = self.scratch / "integration-metadata"
+        run_git(
+            "init",
+            "-q",
+            f"--separate-git-dir={integration_metadata}",
+            integration,
+        )
+        publisher_source = self.initialize_repository("publisher-source", commit=True)
+        publisher = self.scratch / "attached-publisher"
+        run_git(
+            "-C",
+            publisher_source,
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            publisher,
+        )
+        marker = publisher / ".git"
+        marker_value = marker.read_text().strip()
+        original_gitdir = Path(marker_value.split(":", 1)[1].strip())
+        if not original_gitdir.is_absolute():
+            original_gitdir = publisher / original_gitdir
+        relocated_gitdir = (
+            integration_metadata / "objects" / "publisher-worktree-gitdir"
+        )
+        shutil.move(str(original_gitdir), relocated_gitdir)
+        marker.write_text(f"gitdir: {relocated_gitdir}\n")
+        (relocated_gitdir / "commondir").write_text(
+            f"{(publisher_source / '.git').resolve()}\n"
+        )
+
+        result = self.run_inspector(
+            "--integration-root",
+            integration,
+            "--publisher-root",
+            publisher,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assert_safety_limits(result, "failed")
+        self.assertIn(
+            "publisher-root Git gitdir metadata overlaps "
+            "integration-root Git common metadata",
+            result.stdout,
+        )
+
     def test_publisher_with_external_effective_worktree_fails(self):
         integration = self.initialize_repository("private-integration")
         publisher = self.initialize_repository("clean-publisher")
@@ -209,6 +258,26 @@ class WorkspaceBoundaryInspectorTests(unittest.TestCase):
             "publisher-root local Git configuration selects an external path",
             result.stdout,
         )
+
+    def test_same_line_core_worktree_is_rejected_before_git_query(self):
+        publisher = self.initialize_repository("clean-publisher")
+        with (publisher / ".git" / "config").open("a") as config:
+            config.write(
+                f"\n[core] worktree = {self.scratch / 'external-worktree'}\n"
+            )
+
+        with mock.patch.object(INSPECTOR, "run_git") as git_query:
+            with self.assertRaisesRegex(
+                INSPECTOR.InspectionError,
+                "local Git configuration selects an external path",
+            ):
+                INSPECTOR.require_git_worktree(
+                    publisher,
+                    "publisher-root",
+                    "/usr/bin/git",
+                )
+
+        git_query.assert_not_called()
 
     def test_bare_publisher_fails_non_bare_worktree_requirement(self):
         integration = self.initialize_repository("private-integration")
@@ -624,6 +693,47 @@ class WorkspaceBoundaryInspectorTests(unittest.TestCase):
             result.stdout,
         )
         self.assertNotIn(str(include_target), result.stdout)
+
+    def test_harmless_included_section_is_not_treated_as_an_include(self):
+        integration = self.initialize_repository("private-integration")
+        publisher = self.initialize_repository("declared-publisher")
+        with (publisher / ".git" / "config").open("a") as config:
+            config.write(
+                f"\n[included]\n\tpath = {self.scratch / 'external-config'}\n"
+            )
+
+        result = self.run_inspector(
+            "--integration-root",
+            integration,
+            "--publisher-root",
+            publisher,
+        )
+
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assert_safety_limits(result, "verified")
+
+    def test_local_git_config_include_if_section_is_rejected(self):
+        integration = self.initialize_repository("private-integration")
+        publisher = self.initialize_repository("declared-publisher")
+        with (publisher / ".git" / "config").open("a") as config:
+            config.write(
+                '\n[includeIf "gitdir:**/declared-publisher/**"]\n'
+                f"\tpath = {self.scratch / 'external-config'}\n"
+            )
+
+        result = self.run_inspector(
+            "--integration-root",
+            integration,
+            "--publisher-root",
+            publisher,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assert_safety_limits(result, "failed")
+        self.assertIn(
+            "publisher-root local Git configuration uses external includes",
+            result.stdout,
+        )
 
     def test_utf8_bom_cannot_hide_local_git_config_include(self):
         integration = self.initialize_repository("private-integration")
