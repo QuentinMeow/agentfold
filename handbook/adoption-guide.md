@@ -38,11 +38,21 @@ this service does (one paragraph), how to verify changes (the test command), wha
 boundaries are (what it must never import/touch), and where its dependencies' contracts
 live (links). See `services/quote-api/AGENTS.md` for the shape at its smallest.
 
-## Advanced: public/private overlay
+## Advanced: layered public/private workspace
 
-To open-source tooling while personal or company data stays private: keep a second git
-repo mounted at a git-ignored `private/` path that mirrors the public folder structure
-(`private/message-queue/`, `private/memory/`, …), point config at it, and add a leak
-check that scans commits for tokens derived from config (never hardcoded). It's on
-`roadmap/desired-state.md` as a packaged module; until then, the pattern description
-above is the spec.
+An ignored nested repository, symlinked mirror, hook, or private branch is a navigation
+convention, not a confidentiality or publication boundary. Do not use the earlier
+mirror-structure sketch as a specification.
+
+The current proposal is
+`docs/designs/layered-development-workspace.md`: a non-Git envelope, private integration
+source plus supervised admitted sessions for public-base and private versioned work,
+separate no-Git restricted/raw/temporary siblings, and a clean public publisher with a
+distinct object store. Even that topology proves only separation of declared storage
+locations; it does not inspect file bytes, hard-link sharing, undeclared mounts, Git
+configuration authority, or content admission. A claim that the publisher cannot read
+private roots requires a separately attested capability boundary.
+
+Until the packaged workflow exists, keep sensitive/raw material outside every worktree,
+keep public publication manual and blocked by explicit review, and report missing
+private state rather than silently falling back to public content.

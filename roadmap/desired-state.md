@@ -16,9 +16,13 @@ In priority order. Each line is specific enough to spawn tasks against.
    wires the hooks — the claude-code-templates playbook. *(Not started.)*
 4. **Per-skill eval canaries.** 3–6 scripted scenarios per skill with expected
    behaviors; behavioral skill edits must pass them before merge. *(Not started.)*
-5. **Public/private overlay as a packaged module.** The mirror-structure pattern from
-   `handbook/adoption-guide.md` shipped as tooling: mount script + config indirection +
-   token-derived leak guard. *(Pattern documented; tooling not started.)*
+5. **Layered public/private workspace as a packaged module.** The topology and
+   provenance model from `docs/designs/layered-development-workspace.md` shipped as
+   repository-local tooling: explicit zone manifest/status, same-path override lineage,
+   sealed public export, capability adapters, and observed backup/scan evidence.
+   Mounts remain optional adapters rather than the boundary. *(Design proposed; the
+   first read-only topology inspector is implemented, and later stages are specified
+   but await coordination filing.)*
 6. **A queue/task viewer.** Read-only board rendered from the folders (the folders stay
    the source of truth). *(Not started.)*
 7. **The harness survives its own design review.** Finding severity tiers so advisory
