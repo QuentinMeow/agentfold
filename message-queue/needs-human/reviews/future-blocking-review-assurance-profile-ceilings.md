@@ -9,6 +9,7 @@
 **Review revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
 **Reviewed revision:** sha256:e2314db67388c8aaf7980b6b66c945605db0822c2f52502c0a38c401d5458392
 **Review outcome:** changes-requested
+**Successor action:** `message-queue/needs-agent/requests/future-blocking-revise-assurance-profile-scope-and-egress.md`
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Deployment assurance profiles”

@@ -6310,10 +6310,16 @@ def check_links():
             continue  # repair items cite broken/deleted subjects by design
         text = semantic_text(repo_text(md))
         if parts[0] == "message-queue":
-            # Resolution evidence is deliberately predeclared before it exists.
-            # Its lifecycle check requires creation/change when the action closes.
+            # These lifecycle paths deliberately name artifacts that need not be
+            # present in the current tree. Resolution evidence is predeclared and
+            # must change when the action closes. A changes-requested review names
+            # its successor before the resolution edge creates it; successor and
+            # follow-up records retain historical lineage after their predecessors
+            # are deleted. Queue lifecycle checks validate those relationships
+            # against Git history instead of current-tree link existence.
             text = re.sub(
-                r"^\*\*Resolution evidence:\*\*[^\n]*$",
+                r"^\*\*(?:Resolution evidence|Successor action|"
+                r"Supersedes|Follow-up review|Depends on):\*\*[^\n]*$",
                 "",
                 text,
                 flags=re.M,

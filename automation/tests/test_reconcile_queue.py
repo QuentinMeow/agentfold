@@ -9374,6 +9374,59 @@ class ReconcileQueueTests(unittest.TestCase):
 
             self.assertEqual([], list(RECONCILE.check_links()))
 
+    def test_link_check_allows_queue_lifecycle_lineage_paths(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "# Source\n")
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-revision.md",
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-24, by test\n"
+                "**Action:** Review the source.\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** "
+                "`memory/decisions/future-disposition.md`\n"
+                "**Successor action:** "
+                "`message-queue/needs-agent/requests/"
+                "future-blocking-future-repair.md`\n"
+                "**Follow-up review:** "
+                "`message-queue/needs-human/reviews/"
+                "future-blocking-future-review.md`\n"
+                "**Supersedes:** "
+                "`message-queue/needs-human/reviews/"
+                "future-blocking-prior-review.md`\n"
+                "**Depends on:** "
+                "`message-queue/needs-agent/requests/"
+                "future-blocking-completed-repair.md`\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_still_rejects_unrelated_missing_queue_path(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "# Source\n")
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "future-blocking-repair.md",
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-24, by test\n"
+                "**Action:** Repair the source.\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/future-result.md`\n"
+                "**Supersedes:** "
+                "`message-queue/needs-human/reviews/"
+                "future-blocking-prior-review.md`\n\n"
+                "Ordinary evidence: `docs/missing-evidence.md`\n",
+            )
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("docs/missing-evidence.md", messages[0])
+
     def test_explicit_transition_gate_scopes_task_or_checks_all(self):
         with self.repo() as root:
             self.write(
