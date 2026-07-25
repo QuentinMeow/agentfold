@@ -179,3 +179,29 @@ proposed fix   (accept EITHER)  : False
 
 form1 == form2 : True
 ```
+
+## Pull-request body projection
+
+```
+$ python3 automation/check_action_projection.py --from-env ACTION_PROJECTION_BODY \
+    --additional-summary-env ACTION_PROJECTION_TITLE --action-section "What to review" \
+    --queue-actor any --required-queue-actor needs-human \
+    --branch task/2026-07-25-fix-handover-projection-code-span-copy \
+    --base-revision <origin/main> --candidate-revision <branch head> \
+    --label github-pull-request-description
+action-projection: 0 finding(s)
+exit=0
+```
+
+## Pull request 14 checks
+
+Both admission jobs failed on the `opened` event against the already-filed
+`merge_commit_sha` race, then passed once an `edited` event recomputed the candidate.
+
+```
+$ gh pr checks 14
+Authoritative action projection from trusted workflow code   pass   10s
+Current review-state action projection                        pass    6s
+External source release admission                             pass    9s
+reconcile-and-test                                            pass   39s
+```

@@ -26,3 +26,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   against the pre-fix checker on entry 2 and passes with the repair, which is the end-to-end
   evidence. Its Dead ends section records that the ritual was blocked, that the gate was
   repaired rather than bypassed, and that the earlier diagnosis was wrong in its mechanism.
+- Opened pull request 14 against `main`. Its body declares `No queued action requested.`,
+  because the task's only live queue action is a `needs-agent` path and the pull-request
+  gate requires `needs-human` paths. Both admission jobs failed within seconds of the
+  `opened` event on the already-filed `merge_commit_sha` race, and all four checks passed
+  after an `edited` event recomputed the candidate.
