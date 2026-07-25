@@ -185,3 +185,15 @@
 - Range-level core scope and the reconciler passed with zero findings. The exact
   candidate contains no backlog task or agent-request changes, preserving all 18
   follow-up coordination records for the post-parent live coordination lane.
+
+## 2026-07-24 — recovered publication stack (codex)
+
+- Published the test-runner isolation recovery as draft PR #11 from current main and
+  this task as stacked draft PR #12. Both PR descriptions pass the canonical
+  action-projection check, and their latest trusted projection and external-source
+  admission checks passed.
+- Kept both merge boundaries closed: PR #11 awaits the owner's exact-range review;
+  this task remains artifact-pending until that lower layer merges and PR #12 can be
+  retargeted and bound to a stable main base.
+- Recorded the session handover with every live human action and the deferred
+  follow-up publication action. No deferred task was activated early.
