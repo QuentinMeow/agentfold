@@ -140,3 +140,7 @@
   could still copy a linked-worktree `.git` file or nested `.git` directory. Support
   discovery now prunes both shapes, and materialization independently rejects every
   path containing a `.git` component.
+- The next panel reproduced the same escape with a `.GIT` case variant on the
+  supported default case-insensitive macOS filesystem. Both discovery and the
+  independent materialization guard now compare every path component with
+  `casefold()`.

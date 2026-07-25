@@ -44,6 +44,11 @@ enumeration could copy a linked-worktree `.git` file or nested `.git` directory.
 Support discovery now prunes both, materialization rejects metadata-bearing paths,
 and the focused 17-test regression passes.
 
+The panel for `8499ed2bb18cd7627c85b292060c91d24fe7b6ba` reproduced the metadata
+escape with a `.GIT` case variant on the supported default case-insensitive macOS
+filesystem. Both guards now compare path components with `casefold()`, and the focused
+17-test regression passes.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

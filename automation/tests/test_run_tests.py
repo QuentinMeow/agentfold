@@ -375,7 +375,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             test_file = test_directory / "test_generated.py"
             test_file.write_text("from helper import VALUE\n")
             (test_directory / "helper.py").write_text("VALUE = 1\n")
-            (test_directory / ".git").write_text(
+            (test_directory / ".GIT").write_text(
                 "gitdir: /outside/original/worktree\n"
             )
             nested_git = test_directory / "fixture/.git"
@@ -402,7 +402,7 @@ class RunTestsIsolationTests(unittest.TestCase):
                 support,
             )
             self.assertNotIn(
-                Path("automation/generated/tests/.git"),
+                Path("automation/generated/tests/.GIT"),
                 support,
             )
             self.assertNotIn(
