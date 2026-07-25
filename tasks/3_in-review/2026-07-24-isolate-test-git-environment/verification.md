@@ -213,3 +213,46 @@ $ git diff --check c05e8002e495e4ee346e685213c48f8d6632fa85...HEAD
 ```
 
 No output; exit status 0.
+
+## Main-recovery review and repair
+
+The three-reviewer panel unanimously blocked the stranded combined revision
+`7fa18cade7a1a7aa1cff29645630a1f62ce8c9d0`:
+
+- correctness: tests executed the real checkout path and inherited caller
+  global/system Git behavior
+- contract: the exact range was not based on `main`, carried two unresolved merge
+  reviews, and prematurely activated layered-workspace follow-up coordination
+- blast radius: the real checkout path bypassed the disposable view, while retaining
+  every full projection multiplied scratch storage by the number of test files
+
+The isolation-specific findings were repaired on a fresh task branch based on
+`2372e4824c136af579da5665e6f632ca6f98dd59`.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 13 tests in 0.341s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```

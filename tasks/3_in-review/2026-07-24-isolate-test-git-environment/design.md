@@ -33,7 +33,12 @@ a bare-shaped ancestor; ordinary projected roots remain available for an explici
 The enumeration overrides `core.excludesFile` with the platform null file, so global
 Git configuration cannot remove inputs from the view. Repository-relative test reads
 keep their prior shape without recursively copying ignored dependency trees or
-restoring ambient Git discovery.
+restoring ambient Git discovery. The child points `HOME` and `XDG_CONFIG_HOME` at the
+scratch root, disables system configuration, and uses the platform null file as its
+global configuration, so a caller's hooks path or repository template cannot become
+executable test behavior. The projected test file—not the corresponding absolute path
+in the real checkout—is the child program. Only one per-test projection exists at a
+time; it is removed before the next test is materialized.
 
 ### Option C — require each test to clean its own environment
 
@@ -46,8 +51,9 @@ Option B. The canonical process boundary owns the isolation guarantee, works for
 caller, follows Git's dynamic list, and remains safe if a wrapper truncates that list
 because the prefix fallback removes unknown future Git variables too. The closed
 behavior allowlist preserves temporary-commit identity and noninteractive remote tests
-without retaining repository pointers or executable Git hooks. A validated fresh
-working-tree projection closes ambient parent-repository discovery while preserving
+without retaining repository pointers or executable Git hooks. A validated,
+configuration-isolated working-tree projection closes ambient parent-repository
+discovery while preserving
 relative paths, tracked directories named `tmp`, and even dangling/looping symlinks,
 without pretending to sandbox code that explicitly addresses the real repository.
 macOS and Linux are the supported baseline. Windows checkouts that materialize real

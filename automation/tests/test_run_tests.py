@@ -290,6 +290,7 @@ class RunTestsIsolationTests(unittest.TestCase):
     def test_main_passes_the_isolated_environment_to_each_test(self):
         child_environment = {"PATH": os.environ.get("PATH", "")}
         completed = subprocess.CompletedProcess(["python", "test.py"], 0)
+        relative_test = Path("automation/tests/test_probe.py")
 
         with mock.patch.object(
             RUN_TESTS,
@@ -316,9 +317,130 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertNotEqual(RUN_TESTS.REPO, test_cwd)
         self.assertNotIn(RUN_TESTS.REPO, test_cwd.parents)
         self.assertEqual(
-            str(test_cwd.parent),
+            str(test_cwd.parent.parent),
             child_environment["GIT_CEILING_DIRECTORIES"],
         )
+        self.assertEqual(
+            str(test_cwd / relative_test),
+            run.call_args[0][0][1],
+        )
+        self.assertNotEqual(
+            str(RUN_TESTS.REPO / relative_test),
+            run.call_args[0][0][1],
+        )
+        self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
+        self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
+        self.assertEqual(
+            str(test_cwd.parent.parent / "home"),
+            child_environment["HOME"],
+        )
+        self.assertEqual(
+            str(test_cwd.parent.parent / "xdg-config"),
+            child_environment["XDG_CONFIG_HOME"],
+        )
+
+    def test_main_releases_each_projected_view_before_materializing_the_next(self):
+        child_environment = {"PATH": os.environ.get("PATH", "")}
+        first_view = []
+
+        def materialize(destination, _environment):
+            if first_view:
+                self.assertFalse(first_view[0].exists())
+            else:
+                first_view.append(destination)
+
+        tests = [
+            RUN_TESTS.REPO / "automation/tests/test_first.py",
+            RUN_TESTS.REPO / "automation/tests/test_second.py",
+        ]
+        completed = subprocess.CompletedProcess(["python", "test.py"], 0)
+
+        with mock.patch.object(
+            RUN_TESTS,
+            "isolated_test_environment",
+            return_value=child_environment,
+        ):
+            with mock.patch.object(RUN_TESTS.Path, "glob", return_value=tests):
+                with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "materialize_repository_view",
+                        side_effect=materialize,
+                    ):
+                        with mock.patch.object(
+                            RUN_TESTS.subprocess,
+                            "run",
+                            return_value=completed,
+                        ):
+                            self.assertEqual(0, RUN_TESTS.main())
+
+        self.assertEqual(1, len(first_view))
+        self.assertFalse(first_view[0].exists())
+
+    def test_main_does_not_run_hooks_from_the_callers_global_git_config(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_root = Path(scratch)
+            caller_home = scratch_root / "caller-home"
+            hooks = scratch_root / "hooks"
+            marker = scratch_root / "global-hook-ran"
+            caller_home.mkdir()
+            hooks.mkdir()
+            pre_commit = hooks / "pre-commit"
+            pre_commit.write_text(
+                "#!/bin/sh\n"
+                f"printf triggered > {marker}\n"
+            )
+            pre_commit.chmod(0o755)
+            config_environment = {
+                name: value
+                for name, value in os.environ.items()
+                if not name.startswith("GIT_")
+            }
+            config_environment["HOME"] = str(caller_home)
+            subprocess.run(
+                ["git", "config", "--global", "core.hooksPath", str(hooks)],
+                check=True,
+                env=config_environment,
+            )
+            child_environment = dict(config_environment)
+            relative_test = Path("automation/tests/test_git_init_probe.py")
+            discovered_test = RUN_TESTS.REPO / relative_test
+
+            def materialize(destination, _environment):
+                projected_test = destination / relative_test
+                projected_test.parent.mkdir(parents=True)
+                projected_test.write_text(
+                    "import subprocess\n"
+                    "from pathlib import Path\n"
+                    "repository = Path('child-repository')\n"
+                    "subprocess.run(['git', 'init', '-q', str(repository)], check=True)\n"
+                    "subprocess.run([\n"
+                    "    'git', '-C', str(repository),\n"
+                    "    '-c', 'user.name=AgentFold Test',\n"
+                    "    '-c', 'user.email=test@example.invalid',\n"
+                    "    'commit', '--allow-empty', '-qm', 'probe',\n"
+                    "], check=True)\n"
+                )
+
+            with mock.patch.object(
+                RUN_TESTS,
+                "isolated_test_environment",
+                return_value=child_environment,
+            ):
+                with mock.patch.object(
+                    RUN_TESTS.Path,
+                    "glob",
+                    return_value=[discovered_test],
+                ):
+                    with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
+                        with mock.patch.object(
+                            RUN_TESTS,
+                            "materialize_repository_view",
+                            side_effect=materialize,
+                        ):
+                            self.assertEqual(0, RUN_TESTS.main())
+
+            self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

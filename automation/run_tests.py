@@ -205,16 +205,28 @@ def main():
     with tempfile.TemporaryDirectory(prefix="agentfold-tests-") as scratch:
         scratch_root = Path(scratch).resolve()
         validate_scratch_root(scratch_root, child_environment)
+        isolated_home = scratch_root / "home"
+        isolated_xdg_config = scratch_root / "xdg-config"
+        isolated_home.mkdir()
+        isolated_xdg_config.mkdir()
         child_environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
+        child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+        child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        child_environment["HOME"] = str(isolated_home)
+        child_environment["XDG_CONFIG_HOME"] = str(isolated_xdg_config)
         for index, test in enumerate(test_files):
             rel = test.relative_to(REPO)
-            test_cwd = scratch_root / f"{index:04d}"
-            materialize_repository_view(test_cwd, child_environment)
-            result = subprocess.run(
-                [sys.executable, str(test)],
-                cwd=test_cwd,
-                env=child_environment,
-            )
+            with tempfile.TemporaryDirectory(
+                prefix=f"{index:04d}-",
+                dir=scratch_root,
+            ) as test_scratch:
+                test_cwd = Path(test_scratch).resolve() / "view"
+                materialize_repository_view(test_cwd, child_environment)
+                result = subprocess.run(
+                    [sys.executable, str(test_cwd / rel)],
+                    cwd=test_cwd,
+                    env=child_environment,
+                )
             (print(f"PASS {rel}") if result.returncode == 0 else failed.append(rel))
     for rel in failed:
         print(f"FAIL {rel}")

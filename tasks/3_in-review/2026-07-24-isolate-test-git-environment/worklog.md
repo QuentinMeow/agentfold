@@ -101,3 +101,19 @@
   exact base will be bound only after the preceding message-queue PR merges.
 - The reconstructed range passes the exact task-scope gate, reconciler, and diff
   hygiene checks. The branch is published without rewriting its reviewed predecessor.
+
+## 2026-07-24 — main-recovery-review (codex)
+
+- Confirmed that PR #8 had been merged into PR #7's task branch after PR #7 had
+  already merged to `main`; its implementation therefore never reached `main`.
+- Replayed the exact PR #8 implementation on the latest origin/main and reviewed it
+  as part of the stranded PR #8/#10 range with three independent reviewers.
+- The panel unanimously blocked the old candidate. Two reviewers found that tests
+  still executed by absolute path from the real checkout; one also found inherited
+  global/system Git hooks, and one found all per-test repository copies remained live
+  until the suite ended.
+- Changed the runner to execute the projected test path, isolate `HOME`,
+  `XDG_CONFIG_HOME`, global Git configuration, and system Git configuration, and
+  delete each projection before creating the next one.
+- Added regressions for projected execution, caller-global hooks, isolated Git
+  configuration, and bounded projection lifetime. The focused and full suites pass.
