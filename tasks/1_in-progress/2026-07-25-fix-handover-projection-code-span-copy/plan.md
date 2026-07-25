@@ -13,5 +13,5 @@
       projectable code-spanned `needs-human` item.
 - [x] 6. Record the chosen normalisation and both rulings in `design.md` with a complete
       `## Core fit` receipt.
-- [ ] 7. Commit the blocked session's handover at a fresh conversation path on this branch.
+- [x] 7. Commit the blocked session's handover at a fresh conversation path on this branch.
 - [ ] 8. Record real `--check` and test output in `verification.md` and open the pull request.

@@ -20,3 +20,9 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   tightening was taken and pinned with a test.
 - Added six regression tests; the three code-span projection tests and the agent-entry
   test fail against the pre-fix checker, while the two rejection tests pass on both sides.
+- Committed the blocked session's handover at
+  `history/conversations/2026-07-25-1140PDT-fold-edge-graph-decisions-and-ship-stage-0/`,
+  projecting all ten live `needs-human/` items in canonical order. The identical file fails
+  against the pre-fix checker on entry 2 and passes with the repair, which is the end-to-end
+  evidence. Its Dead ends section records that the ritual was blocked, that the gate was
+  repaired rather than bypassed, and that the earlier diagnosis was wrong in its mechanism.

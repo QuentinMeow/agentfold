@@ -76,6 +76,34 @@ The three code-span projection tests fail before the repair, which is the defect
 agent-entry test fails before the repair, which is the hole Ruling 2 closes. The two
 rejection tests pass on both sides, which is the evidence that nothing was weakened.
 
+## The blocked handover, end to end on the real artifact
+
+The blocked session's handover was committed at a fresh conversation path. Its second
+`Needs your attention` entry copies the code-spanned fields of the live decision item, which
+is the case that was impossible before the repair.
+
+```
+$ git add history/conversations/2026-07-25-1140PDT-fold-edge-graph-decisions-and-ship-stage-0/handover.md
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+exit=0
+```
+
+The identical file staged against the pre-fix checker, in a detached worktree at `0456738`,
+fails with exactly the finding this task repairs.
+
+```
+$ git add history/conversations/2026-07-25-1140PDT-fold-edge-graph-decisions-and-ship-stage-0/handover.md
+$ python3 automation/reconcile/reconcile.py --check
+[handover-queue-projection] history/conversations/2026-07-25-1140PDT-fold-edge-graph-decisions-and-ship-stage-0/handover.md: Needs your attention entry 2 must copy the creation-snapshot Why-you-might-care and If-you-do-nothing fields using the fixed handover suffix
+    fix: use one top-level list entry per live human action; put an exact Action-labeled queue link first and keep context declarative
+reconcile: 1 finding(s)
+exit=1
+```
+
+Entry 2 is the code-spanned item and the only entry that differs, so the repair is what
+made the handover committable. No `--no-verify` bypass was used at any point.
+
 ## Measurement behind Ruling 2 — the unguarded `needs-agent` tightening
 
 The repair was applied with no `actor` guard and then measured against the pre-fix
