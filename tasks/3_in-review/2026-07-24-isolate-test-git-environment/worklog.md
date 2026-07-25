@@ -171,3 +171,6 @@
   as its repository and still required `git ls-files`. The child now carries an exact
   projected-root marker. Only a matching non-Git root may use the metadata-pruning
   filesystem enumerator, and a real subprocess regression proves recursive execution.
+- The final immutable review of `fce6ecb` was unanimous: correctness, repository
+  contract, and blast radius all approved with no remaining blocking finding. The
+  exact main-based core-scope, range reconciler, and diff-hygiene checks also pass.

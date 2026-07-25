@@ -94,6 +94,36 @@ Ran 19 tests in 1.476s
 OK
 ```
 
+## Final main-based candidate
+
+The three independent reviewers evaluated
+`2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2`:
+
+- correctness: approved
+- repository contract: approved
+- blast radius: approved
+- panel result: unanimous approval
+
+```
+$ python3 automation/check_core_scope.py \
+    --range 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2 \
+    --branch task/2026-07-24-isolate-test-git-environment
+core-scope: pass (2 core path(s), task 2026-07-24-isolate-test-git-environment; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check \
+    --range 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2 \
+    --branch task/2026-07-24-isolate-test-git-environment
+reconcile: 0 finding(s)
+```
+
+```
+$ git diff --check 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2
+```
+
+No output; exit status 0.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count
