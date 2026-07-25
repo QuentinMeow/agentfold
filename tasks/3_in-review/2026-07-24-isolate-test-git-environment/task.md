@@ -28,13 +28,34 @@ symlink-creation limitation and may require Developer Mode or WSL.
       `git rev-parse --local-env-vars` removed.
 - [x] Failure to discover Git's local environment variable names stops the test runner
       instead of silently running contaminated children.
-- [x] Every test file starts in a fresh directory outside the repository with Git
-      discovery capped at the scratch root.
+- [x] Every test subprocess starts in one fresh suite view outside the repository with
+      Git discovery capped at the scratch root.
 - [x] Existing repository-relative test reads continue through a repository-metadata-
       free working tree view, and safe Git identity/noninteractive settings remain
       available.
+- [x] Each subprocess executes the projected test file, so `__file__` and ordinary
+      repository-relative path derivation stay inside the disposable view.
+- [x] Caller global/system Git configuration, hooks paths, and initialization
+      templates are unavailable to test subprocesses while resolved caller identity
+      values and the caller home used by non-Git tools remain available.
+- [x] A test that invokes the repository runner recursively reuses the original Git
+      executable instead of stacking wrappers with the parent runner's isolated home.
+- [x] A recursively invoked runner recognizes only its exact inherited projection
+      root, re-enumerates it without Git metadata or symlink traversal, and runs its
+      own projected tests successfully.
+- [x] One repository projection is materialized for the suite, including every
+      discovered ignored/generated test with its sibling support tree, and removed
+      when the runner exits.
+- [x] Test discovery and support projection do not follow directory symlinks, and no
+      projected path can write through a symlink outside the scratch view.
+- [x] Ignored support trees prune every case variant of a `.git` file/directory, and
+      materialization rejects any additional path containing a Git-metadata component
+      on case-sensitive or case-insensitive filesystems.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
-      user-global ignore configuration cannot alter its contents.
+      Git's exact pinned probe seals every discoverable nested metadata layout with a
+      `HEAD` entry, including bare and linked-worktree admin directories, without
+      spawning Git once per ordinary directory; user-global ignore configuration
+      cannot alter the view's contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with
       whitespace-bearing paths project without dereferencing or path normalization.
 - [x] The focused regression, repository test suite, reconciler, and a real

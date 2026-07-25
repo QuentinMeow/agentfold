@@ -101,3 +101,76 @@
   exact base will be bound only after the preceding message-queue PR merges.
 - The reconstructed range passes the exact task-scope gate, reconciler, and diff
   hygiene checks. The branch is published without rewriting its reviewed predecessor.
+
+## 2026-07-24 — main-recovery-review (codex)
+
+- Confirmed that PR #8 had been merged into PR #7's task branch after PR #7 had
+  already merged to `main`; its implementation therefore never reached `main`.
+- Replayed the exact PR #8 implementation on the latest origin/main and reviewed it
+  as part of the stranded PR #8/#10 range with three independent reviewers.
+- The panel unanimously blocked the old candidate. Two reviewers found that tests
+  still executed by absolute path from the real checkout; one also found inherited
+  global/system Git hooks, and one found all per-test repository copies remained live
+  until the suite ended.
+- Changed the runner to execute the projected test path, isolate `HOME`,
+  `XDG_CONFIG_HOME`, global Git configuration, and system Git configuration, and
+  delete each projection before creating the next one.
+- Added regressions for projected execution, caller-global hooks, isolated Git
+  configuration, and bounded projection lifetime. The focused and full suites pass.
+- A fresh blast-radius review found that the first repair also removed ordinary
+  config-backed Git identity, still copied the repository once per test, and could
+  discover an ignored/generated test that was absent from the projected view.
+- The runner now resolves only caller name/email into explicit author/committer
+  variables, builds one suite-wide disposable view, and explicitly includes every
+  discovered test path even when Git ignore rules exclude it.
+- The next final-candidate review found that an ignored test's sibling helper/fixture
+  tree was still absent, a test discovered through a directory symlink could write
+  outside the scratch root during projection, and redirecting the whole child `HOME`
+  would break unrelated toolchains.
+- Test support directories are now projected without following directory symlinks,
+  every destination path is checked against already projected symlinks, and only Git
+  receives an isolated home through a disposable `PATH` wrapper. This remains
+  compatible with the repository's Git 2.23 baseline, where
+  `GIT_CONFIG_GLOBAL` alone is not enforced.
+- The first full-suite run exposed a nested-runner case in the global-hook regression:
+  an inner wrapper could select the already wrapped Git path and therefore reuse the
+  outer wrapper's isolated configuration. The child now carries the validated original
+  executable path, and both the focused regression and full projected suite pass.
+- The following immutable-candidate panel found that ignored test support enumeration
+  could still copy a linked-worktree `.git` file or nested `.git` directory. Support
+  discovery now prunes both shapes, and materialization independently rejects every
+  path containing a `.git` component.
+- The next panel reproduced the same escape with a `.GIT` case variant on the
+  supported default case-insensitive macOS filesystem. Both discovery and the
+  independent materialization guard now compare every path component with
+  `casefold()`.
+- The next immutable review found that a bare-repository fixture needs no `.git`
+  component and could remain active when copied below the suite root. The completed
+  projection now finds and seals every bare-shaped directory without following
+  symlinks, not only the root.
+- The next panel found two candidate-detection gaps: metadata names are
+  case-insensitive on the default macOS filesystem, and a bare repository does not
+  require a config file. Candidate names are now case-folded and the exact Git probe
+  runs whenever a directory has `HEAD` plus `objects` or `refs`.
+- The following panel found that pruning directory symlinks before candidate
+  detection could hide symlinked `objects` or `refs`. Structural names are now
+  captured before symlinks are removed from traversal, so the directory is sealed
+  without following the links during the scan.
+- The next panel showed the name catalogue was still incomplete because a valid
+  linked-worktree admin directory can use only `HEAD` plus `commondir`. The heuristic
+  was removed: the completed projection now runs Git's exact pinned probe on every
+  non-symlink directory, which covers present and future metadata layouts.
+- The next blast-radius review measured the every-directory probe at roughly 13
+  seconds for 2,021 directories, while the correctness review found that the
+  case-variant fixture assertion was invalid on case-sensitive Linux. The final scan
+  uses a case-folded `HEAD` prefilter—the required Git-directory marker—then runs the
+  exact probe only for candidates; the regression uses canonical metadata names and
+  proves 100 ordinary directories launch no extra Git process.
+- The next panel majority approved, but the blast-radius dissent reproduced an
+  end-to-end nested-runner failure: the inner process saw the metadata-free projection
+  as its repository and still required `git ls-files`. The child now carries an exact
+  projected-root marker. Only a matching non-Git root may use the metadata-pruning
+  filesystem enumerator, and a real subprocess regression proves recursive execution.
+- The final immutable review of `fce6ecb` was unanimous: correctness, repository
+  contract, and blast radius all approved with no remaining blocking finding. The
+  exact main-based core-scope, range reconciler, and diff-hygiene checks also pass.

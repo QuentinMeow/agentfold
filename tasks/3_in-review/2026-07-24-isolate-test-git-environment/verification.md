@@ -38,6 +38,179 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 9/9 files passed
 ```
 
+The immutable-candidate panel for
+`a996c1a02cb23463aef6180bc6e6ae77c5a08379` found that ignored test support
+enumeration could copy a linked-worktree `.git` file or nested `.git` directory.
+Support discovery now prunes both, materialization rejects metadata-bearing paths,
+and the focused 17-test regression passes.
+
+The panel for `8499ed2bb18cd7627c85b292060c91d24fe7b6ba` reproduced the metadata
+escape with a `.GIT` case variant on the supported default case-insensitive macOS
+filesystem. Both guards now compare path components with `casefold()`, and the focused
+17-test regression passes.
+
+The panel for `af4ec99e4b4b2705fd52317347e017c717ed9fdb` found that an ignored
+bare-repository fixture below the test directory remained active even without a
+`.git` component. The completed projection now seals every bare-shaped directory
+without following symlinks, and the focused 17-test regression passes.
+
+The panel for `8a92afcb1883c840d77c92faf57401070b91fe0f` found that bare candidate
+detection was case-sensitive and incorrectly required a config file. Detection now
+case-folds metadata names and probes every directory with `HEAD` plus `objects` or
+`refs`; the focused 17-test regression passes.
+
+The panel for `cd8fd59623eea142cc070be352a4464013b36067` found that pruning
+directory symlinks before bare-shape detection hid symlinked `objects` or `refs`.
+Candidate names are now captured before symlinks are removed from traversal, and the
+focused 17-test regression passes with a symlinked object directory.
+
+The panel for `71aec2ef167c464e6d5ddba4823559ca118749f9` found that a linked-worktree
+admin directory with `HEAD` plus `commondir` bypassed the remaining shape catalogue.
+The catalogue is gone: Git's exact pinned probe now checks every non-symlink directory.
+The focused 17-test regression passes with an external-common-directory fixture.
+
+The panel for `7359bcff849ae30df3dcbb8d647deb9d727fff4d` found that an exact probe
+per directory scaled poorly, while a case-variant metadata fixture was not portable to
+case-sensitive Linux. The scan now uses a case-folded `HEAD` prefilter and exact Git
+probe only for candidates. The canonical fixture and a 100-ordinary-directory probe
+regression pass:
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 18 tests in 0.826s
+
+OK
+```
+
+The panel for `971b82c8011ccda18fdd55e975a57ede4e1c2638` reached a two-to-one
+approval majority, but its blast-radius dissent reproduced failure when the runner
+recursed from its metadata-free projection. The fallback now requires an exact
+inherited projection-root match and excludes Git metadata and symlink traversal.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 19 tests in 1.476s
+
+OK
+```
+
+## Final main-based candidate
+
+The three independent reviewers evaluated
+`2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2`:
+
+- correctness: approved
+- repository contract: approved
+- blast radius: approved
+- panel result: unanimous approval
+
+```
+$ python3 automation/check_core_scope.py \
+    --range 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2 \
+    --branch task/2026-07-24-isolate-test-git-environment
+core-scope: pass (2 core path(s), task 2026-07-24-isolate-test-git-environment; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check \
+    --range 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2 \
+    --branch task/2026-07-24-isolate-test-git-environment
+reconcile: 0 finding(s)
+```
+
+```
+$ git diff --check 2372e4824c136af579da5665e6f632ca6f98dd59...fce6ecbc1b86b56d42df1aa2cfdc497995a9cde2
+```
+
+No output; exit status 0.
+
+A fresh blast-radius review of
+`238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
+repair removed normal config-backed identity, retained repository-size-times-test-count
+copy I/O, and omitted ignored/generated discovered tests. Those findings were repaired
+in the next candidate.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 14 tests in 0.428s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
+The first full-suite run after the Git-only-home repair failed the nested-runner
+global-hook regression because the inner wrapper selected the outer wrapper as its Git
+executable. The runner now carries the validated original executable into nested
+invocations.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 17 tests in 0.835s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```
+
+The next final-candidate review of
+`9198f83f356d59b05363eb49f26f91ab86aa2a82` blocked publication because ignored
+test support files were incomplete, a discovered path through a directory symlink
+could escape the scratch destination, and redirecting the entire child home would
+break unrelated toolchains. Those findings were repaired in the next candidate.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 16 tests in 0.790s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```
+
 ## Hook-driven repository suite
 
 ```
@@ -213,3 +386,46 @@ $ git diff --check c05e8002e495e4ee346e685213c48f8d6632fa85...HEAD
 ```
 
 No output; exit status 0.
+
+## Main-recovery review and repair
+
+The three-reviewer panel unanimously blocked the stranded combined revision
+`7fa18cade7a1a7aa1cff29645630a1f62ce8c9d0`:
+
+- correctness: tests executed the real checkout path and inherited caller
+  global/system Git behavior
+- contract: the exact range was not based on `main`, carried two unresolved merge
+  reviews, and prematurely activated layered-workspace follow-up coordination
+- blast radius: the real checkout path bypassed the disposable view, while retaining
+  every full projection multiplied scratch storage by the number of test files
+
+The isolation-specific findings were repaired on a fresh task branch based on
+`2372e4824c136af579da5665e6f632ca6f98dd59`.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 13 tests in 0.341s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```
