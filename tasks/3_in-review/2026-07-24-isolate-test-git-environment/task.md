@@ -49,7 +49,8 @@ symlink-creation limitation and may require Developer Mode or WSL.
       materialization rejects any additional path containing a Git-metadata component
       on case-sensitive or case-insensitive filesystems.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
-      user-global ignore configuration cannot alter its contents.
+      every nested bare-repository-shaped support directory is sealed; user-global
+      ignore configuration cannot alter the view's contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with
       whitespace-bearing paths project without dereferencing or path normalization.
 - [x] The focused regression, repository test suite, reconciler, and a real

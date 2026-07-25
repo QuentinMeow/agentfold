@@ -49,6 +49,11 @@ escape with a `.GIT` case variant on the supported default case-insensitive macO
 filesystem. Both guards now compare path components with `casefold()`, and the focused
 17-test regression passes.
 
+The panel for `af4ec99e4b4b2705fd52317347e017c717ed9fdb` found that an ignored
+bare-repository fixture below the test directory remained active even without a
+`.git` component. The completed projection now seals every bare-shaped directory
+without following symlinks, and the focused 17-test regression passes.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

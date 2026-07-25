@@ -290,6 +290,26 @@ def seal_bare_repository_view(destination, child_environment):
         raise RuntimeError("could not verify the projected test-view Git boundary")
 
 
+def seal_bare_repository_views(destination, child_environment):
+    """Seal every bare repository shape without following projected symlinks."""
+    for current_root, directory_names, file_names in os.walk(
+        str(destination),
+        followlinks=False,
+    ):
+        current = Path(current_root)
+        directory_names[:] = [
+            name
+            for name in directory_names
+            if not (current / name).is_symlink()
+        ]
+        if (
+            "HEAD" in file_names
+            and "config" in file_names
+            and ("objects" in directory_names or "refs" in directory_names)
+        ):
+            seal_bare_repository_view(current, child_environment)
+
+
 def materialize_repository_view(
     destination,
     child_environment,
@@ -339,7 +359,8 @@ def materialize_repository_view(
             raise RuntimeError(
                 f"unsupported repository test-view entry: {relative_path}"
             )
-    seal_bare_repository_view(destination, child_environment)
+    if is_root_repository:
+        seal_bare_repository_views(destination, child_environment)
     seen_repositories.remove(repository)
 
 

@@ -144,3 +144,7 @@
   supported default case-insensitive macOS filesystem. Both discovery and the
   independent materialization guard now compare every path component with
   `casefold()`.
+- The next immutable review found that a bare-repository fixture needs no `.git`
+  component and could remain active when copied below the suite root. The completed
+  projection now finds and seals every bare-shaped directory without following
+  symlinks, not only the root.

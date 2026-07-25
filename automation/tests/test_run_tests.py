@@ -235,6 +235,11 @@ class RunTestsIsolationTests(unittest.TestCase):
             (repository / "generated/tests/helper.py").write_text(
                 "VALUE = 'generated test'\n"
             )
+            ignored_bare = repository / "generated/tests/bare-fixture"
+            (ignored_bare / "objects").mkdir(parents=True)
+            (ignored_bare / "refs").mkdir()
+            (ignored_bare / "HEAD").write_text("ref: refs/heads/main\n")
+            (ignored_bare / "config").write_text("[core]\n\tbare = true\n")
             (nested_repository / "tracked.txt").write_text("nested\n")
             symlinks_supported = True
             try:
@@ -284,6 +289,10 @@ class RunTestsIsolationTests(unittest.TestCase):
                     destination,
                     clean_environment,
                     additional_paths=(
+                        Path("generated/tests/bare-fixture/HEAD"),
+                        Path("generated/tests/bare-fixture/config"),
+                        Path("generated/tests/bare-fixture/objects"),
+                        Path("generated/tests/bare-fixture/refs"),
                         Path("generated/tests/helper.py"),
                         Path("generated/tests/test_ignored.py"),
                     ),
@@ -327,6 +336,26 @@ class RunTestsIsolationTests(unittest.TestCase):
                 "VALUE = 'generated test'\n",
                 (destination / "generated/tests/helper.py").read_text(),
             )
+            self.assertEqual(
+                RUN_TESTS.GIT_BOUNDARY_MARKER,
+                (
+                    destination
+                    / "generated/tests/bare-fixture/.git"
+                ).read_text(),
+            )
+            nested_bare_git = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(destination / "generated/tests/bare-fixture"),
+                    "rev-parse",
+                    "--git-dir",
+                ],
+                env=clean_environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, nested_bare_git.returncode)
             self.assertEqual(
                 RUN_TESTS.GIT_BOUNDARY_MARKER,
                 (destination / ".git").read_text(),
