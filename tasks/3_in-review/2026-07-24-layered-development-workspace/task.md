@@ -58,13 +58,13 @@ review is recorded.
       with redacted evidence and no claim that automated PII detection is proof.
 - [x] macOS and Linux define the supported baseline. Windows is included only where
       support is simple and does not complicate or weaken the macOS/Linux design.
-- [ ] Independent adversarial reviewers evaluate developer ergonomics, confidentiality
+- [x] Independent adversarial reviewers evaluate developer ergonomics, confidentiality
       boundaries, instruction authority, recovery, portability, and human-interruption
       cost against one immutable candidate.
 - [x] Only a small reversible first slice is implemented and tested after the design
       is coherent; mounts, destructive migrations, private-repository creation, and
       automatic public publication are out of scope for that first slice.
-- [ ] Reconciler and relevant tests pass with real output in `verification.md`, and
+- [x] Reconciler and relevant tests pass with real output in `verification.md`, and
       remaining work is split into separately claimable queue-owned tasks.
 
 ## Links

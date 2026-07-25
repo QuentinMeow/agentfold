@@ -136,3 +136,8 @@
   decision-subject identities; makes mount/target/writer/quarantine safety non-waivable
   for every recursive deletion; and binds publication to authenticated destination
   identities plus a destination-hashed complete base-and-received candidate closure.
+- A fresh three-lens review unanimously approved immutable candidate `2fa68ce` after
+  retesting the executable, control-plane, confidentiality, publication, and recovery
+  counterexamples. The 35 focused cases, all 10 repository test files, range-level
+  core-scope check, diff hygiene, and reconciler passed with real output recorded in
+  `verification.md`.
