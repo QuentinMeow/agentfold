@@ -197,3 +197,14 @@
   retargeted and bound to a stable main base.
 - Recorded the session handover with every live human action and the deferred
   follow-up publication action. No deferred task was activated early.
+
+## 2026-07-25 — post-merge coordination recovery (codex)
+
+- GitHub records PR #12 merged into main as `c9f5244` at `2026-07-25T13:07:54Z`
+  from head `7e54b91`; its reviewed implementation candidate remains the immutable
+  `d87b755...8ca62bc` range.
+- Published the six backlog tasks, six pickup requests, and six dependency actions
+  preserved at `9d7bb1d`, then retired their fulfilled publication request.
+- Bound the existing human review item to the admitted candidate without treating the
+  provider merge event as an answer. The task remains in review until that explicit
+  human disposition is folded.

@@ -1,12 +1,12 @@
 # Is the layered workspace design and read-only first slice ready to merge?
 
-**Status:** awaiting-artifact
+**Status:** waiting
 **Filed:** 2026-07-24, by codex, from task `2026-07-24-layered-development-workspace`
 **Action:** After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, review the layered workspace design and read-only inspector, then approve the exact Git range, request a named change, or reject it before merge.
 **Full context:** task `2026-07-24-layered-development-workspace`; `docs/designs/layered-development-workspace.md`; `automation/inspect_workspace_boundaries.py`
 **Resolution evidence:** `memory/decisions/2026-07-24-layered-development-workspace-review-disposition.md`
-**Review target:** pending
-**Review revision:** pending
+**Review target:** git:d87b755e6259101bf76b0a2783b35dfb3f163fb0...8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b
+**Review revision:** git:d87b755e6259101bf76b0a2783b35dfb3f163fb0...8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:merge task:2026-07-24-layered-development-workspace

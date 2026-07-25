@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-24
+**Last-updated:** 2026-07-25
 
 What is true today, mapped to the desired-state lines.
 
@@ -41,9 +41,10 @@ What is true today, mapped to the desired-state lines.
   Tasks declare live queue actions, every unclaimed backlog task has an agent pickup
   message, and human items mechanically require differences, a concrete example, an
   unattended/boundary outcome, and a full-context pointer. Reviews cannot accept a
-  response before their exact artifact exists. The superseded branch-local PR #7
-  continuation action was claimed and retired during stacked-history preparation; the
-  canonical main action owns the remaining review and exact-receipt work.
+  response before their exact artifact exists. PRs #7, #11, and #12 are admitted on
+  main; their still-unanswered human review items are now bound to immutable ranges
+  without treating those provider merges as review answers. PRs #8 and #10 landed on
+  PR #7's already-merged branch and were superseded by the hardened main recoveries.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
 - **Design review (2026-07-22)**: a full grill of the harness — report in
@@ -69,8 +70,10 @@ What is true today, mapped to the desired-state lines.
   distinct-object-store publisher, explicit provenance/failure states, and a separate
   capability-isolation requirement. A manually invoked read-only topology inspector
   now verifies only declared root/Git-metadata separation and reports every stronger
-  claim as uninspected, unverified, or blocked. Manifests, admitted sessions, mounts,
-  export, and publication are not yet real.
+  claim as uninspected, unverified, or blocked. Its six follow-up tasks are now live in
+  backlog with queue-owned pickups and mechanical start dependencies; manifest work
+  remains blocked until the parent review is explicitly resolved and the parent task
+  reaches done. Admitted sessions, mounts, export, and publication are not yet real.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

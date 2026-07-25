@@ -35,5 +35,4 @@ remove obsolete branch snapshots after their useful content is preserved.
 ## Links
 
 - Git workflow: `handbook/git-workflow.md`
-- Deferred publication:
-  `message-queue/needs-agent/requests/future-blocking-publish-layered-workspace-follow-ups.md`
+- Layered workspace parent task: `2026-07-24-layered-development-workspace`

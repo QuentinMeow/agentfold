@@ -174,3 +174,11 @@
 - The final immutable review of `fce6ecb` was unanimous: correctness, repository
   contract, and blast radius all approved with no remaining blocking finding. The
   exact main-based core-scope, range reconciler, and diff-hygiene checks also pass.
+
+## 2026-07-25 — post-merge state reconciliation (codex)
+
+- GitHub records recovery PR #11 merged into main as `d87b755` at
+  `2026-07-25T13:06:50Z` from head `c154d87`.
+- The existing review remains bound to immutable candidate
+  `25d0325...fd2374d`. Its human review field remains unanswered, so the task stays
+  in review even though the provider boundary was crossed.

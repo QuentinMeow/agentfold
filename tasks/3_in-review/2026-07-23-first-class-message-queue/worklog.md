@@ -854,3 +854,14 @@
   authorized or published yet. A later queue-only edge will bind the exact range after
   the approved base is incorporated into PR #7.
 - Preserved both rejected local coordination histories for audit; neither was pushed.
+
+## 2026-07-25 — post-merge state reconciliation (codex)
+
+- GitHub records PR #7 merged into main as `2372e48` at `2026-07-24T20:54:57Z`
+  from base `00690e8` and head `d7eefce`.
+- Bound the existing merge-review item to that exact provider range. The blank human
+  review field remains blank; the merge event is admission evidence, not an inferred
+  answer, so this task remains in review.
+- PRs #8 and #10 subsequently merged into PR #7's already-merged head branch as
+  `d515d28` and `7fa18ca`; their hardened replacements reached main through PRs #11
+  and #12.
