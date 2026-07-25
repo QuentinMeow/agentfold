@@ -58,6 +58,59 @@ PASS automation/tests/test_probe.py
 tests: 1/1 files passed
 ```
 
+The first full-suite run after the Git-only-home repair failed the nested-runner
+global-hook regression because the inner wrapper selected the outer wrapper as its Git
+executable. The runner now carries the validated original executable into nested
+invocations.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 17 tests in 0.835s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```
+
+The next final-candidate review of
+`9198f83f356d59b05363eb49f26f91ab86aa2a82` blocked publication because ignored
+test support files were incomplete, a discovered path through a directory symlink
+could escape the scratch destination, and redirecting the entire child home would
+break unrelated toolchains. Those findings were repaired in the next candidate.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 16 tests in 0.790s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
 ```
 $ python3 automation/run_tests.py
 PASS automation/tests/test_check_action_projection.py

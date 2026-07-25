@@ -8,6 +8,7 @@ importable-free and any test crash isolated. This is not a sandbox against delib
 absolute paths. Exit 0 only if every file passes.
 """
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,7 @@ GIT_IDENTITY_CONFIG = (
     ("user.name", "GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"),
     ("user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"),
 )
+REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
 
 
 def git_local_environment_names():
@@ -164,6 +166,107 @@ def repository_view_paths(child_environment, repository=None):
     )
 
 
+def path_crosses_symlink(path, repository=None):
+    """Return whether a repository path is or descends through a symlink."""
+    repository = (REPO if repository is None else Path(repository)).absolute()
+    relative_path = Path(path).absolute().relative_to(repository)
+    current = repository
+    for part in relative_path.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def repository_test_files(repository=None):
+    """Discover repository tests without following symlinked paths."""
+    repository = REPO if repository is None else Path(repository)
+    discovered = {
+        test
+        for pattern in TEST_GLOBS
+        for test in repository.glob(pattern)
+    }
+    return tuple(
+        sorted(
+            test
+            for test in discovered
+            if not path_crosses_symlink(test, repository)
+        )
+    )
+
+
+def test_support_paths(test_files, repository=None):
+    """Include ignored sibling modules and fixtures without following symlinks."""
+    repository = (REPO if repository is None else Path(repository)).absolute()
+    support_paths = set()
+    for parent in sorted({test.parent for test in test_files}):
+        for current_root, directory_names, file_names in os.walk(
+            str(parent),
+            followlinks=False,
+        ):
+            current = Path(current_root)
+            for directory_name in tuple(directory_names):
+                directory = current / directory_name
+                if directory.is_symlink():
+                    support_paths.add(directory.relative_to(repository))
+                    directory_names.remove(directory_name)
+            for file_name in file_names:
+                support_paths.add((current / file_name).relative_to(repository))
+    return tuple(sorted(support_paths))
+
+
+def reject_projected_symlink_traversal(destination, relative_path):
+    """Fail before a later path can write through a projected directory symlink."""
+    current = destination
+    for part in relative_path.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(
+                f"repository test-view path traversed a symlink: {relative_path}"
+            )
+
+
+def install_isolated_git_wrapper(scratch_root, child_environment):
+    """Put Git behind a config-isolated wrapper without changing other tools' HOME."""
+    git_executable = child_environment.get(REAL_GIT_ENVIRONMENT)
+    if git_executable is None:
+        git_executable = shutil.which(
+            "git",
+            path=child_environment.get("PATH"),
+        )
+    if (
+        not git_executable
+        or not Path(git_executable).is_file()
+        or not os.access(git_executable, os.X_OK)
+    ):
+        raise RuntimeError("could not locate Git for the isolated test environment")
+    git_executable = str(Path(git_executable).resolve())
+    wrapper_directory = scratch_root / "git-wrapper"
+    isolated_home = scratch_root / "git-home"
+    isolated_xdg_config = scratch_root / "git-xdg-config"
+    wrapper_directory.mkdir(parents=True)
+    isolated_home.mkdir()
+    isolated_xdg_config.mkdir()
+    wrapper = wrapper_directory / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f"HOME={shlex.quote(str(isolated_home))} "
+        f"XDG_CONFIG_HOME={shlex.quote(str(isolated_xdg_config))} "
+        "GIT_CONFIG_NOSYSTEM=1 "
+        f"exec {shlex.quote(git_executable)} \"$@\"\n"
+    )
+    wrapper.chmod(0o700)
+    original_path = child_environment.get("PATH", "")
+    child_environment["PATH"] = (
+        str(wrapper_directory)
+        if not original_path
+        else str(wrapper_directory) + os.pathsep + original_path
+    )
+    child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    child_environment[REAL_GIT_ENVIRONMENT] = git_executable
+
+
 def seal_bare_repository_view(destination, child_environment):
     """Block a projected root only when its files already form a bare repository."""
     check_environment = dict(child_environment)
@@ -207,6 +310,7 @@ def materialize_repository_view(
             raise RuntimeError("repository test view contained an unsafe path")
         source = repository / relative_path
         target = destination / relative_path
+        reject_projected_symlink_traversal(destination, relative_path)
         if source.is_symlink():
             target.parent.mkdir(parents=True, exist_ok=True)
             os.symlink(os.readlink(str(source)), str(target))
@@ -237,7 +341,7 @@ def main():
     child_environment = isolated_test_environment()
     for name, value in configured_identity.items():
         child_environment.setdefault(name, value)
-    test_files = sorted({test for pattern in TEST_GLOBS for test in REPO.glob(pattern)})
+    test_files = repository_test_files()
     if not test_files:
         print("no repository tests found")
         return 0
@@ -245,21 +349,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix="agentfold-tests-") as scratch:
         scratch_root = Path(scratch).resolve()
         validate_scratch_root(scratch_root, child_environment)
-        isolated_home = scratch_root / "home"
-        isolated_xdg_config = scratch_root / "xdg-config"
-        isolated_home.mkdir()
-        isolated_xdg_config.mkdir()
+        install_isolated_git_wrapper(scratch_root, child_environment)
         child_environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
-        child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
-        child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
-        child_environment["HOME"] = str(isolated_home)
-        child_environment["XDG_CONFIG_HOME"] = str(isolated_xdg_config)
         test_cwd = scratch_root / "view"
         relative_tests = tuple(test.relative_to(REPO) for test in test_files)
         materialize_repository_view(
             test_cwd,
             child_environment,
-            additional_paths=relative_tests,
+            additional_paths=test_support_paths(test_files),
         )
         for test, rel in zip(test_files, relative_tests):
             result = subprocess.run(

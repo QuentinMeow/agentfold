@@ -123,3 +123,16 @@
 - The runner now resolves only caller name/email into explicit author/committer
   variables, builds one suite-wide disposable view, and explicitly includes every
   discovered test path even when Git ignore rules exclude it.
+- The next final-candidate review found that an ignored test's sibling helper/fixture
+  tree was still absent, a test discovered through a directory symlink could write
+  outside the scratch root during projection, and redirecting the whole child `HOME`
+  would break unrelated toolchains.
+- Test support directories are now projected without following directory symlinks,
+  every destination path is checked against already projected symlinks, and only Git
+  receives an isolated home through a disposable `PATH` wrapper. This remains
+  compatible with the repository's Git 2.23 baseline, where
+  `GIT_CONFIG_GLOBAL` alone is not enforced.
+- The first full-suite run exposed a nested-runner case in the global-hook regression:
+  an inner wrapper could select the already wrapped Git path and therefore reuse the
+  outer wrapper's isolated configuration. The child now carries the validated original
+  executable path, and both the focused regression and full projected suite pass.

@@ -37,9 +37,14 @@ symlink-creation limitation and may require Developer Mode or WSL.
       repository-relative path derivation stay inside the disposable view.
 - [x] Caller global/system Git configuration, hooks paths, and initialization
       templates are unavailable to test subprocesses while resolved caller identity
-      values remain available.
+      values and the caller home used by non-Git tools remain available.
+- [x] A test that invokes the repository runner recursively reuses the original Git
+      executable instead of stacking wrappers with the parent runner's isolated home.
 - [x] One repository projection is materialized for the suite, including every
-      discovered ignored/generated test file, and removed when the runner exits.
+      discovered ignored/generated test with its sibling support tree, and removed
+      when the runner exits.
+- [x] Test discovery and support projection do not follow directory symlinks, and no
+      projected path can write through a symlink outside the scratch view.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
       user-global ignore configuration cannot alter its contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with

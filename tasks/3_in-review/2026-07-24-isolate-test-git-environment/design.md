@@ -36,12 +36,17 @@ keep their prior shape without recursively copying ignored dependency trees or
 restoring ambient Git discovery. The child points `HOME` and `XDG_CONFIG_HOME` at the
 scratch root, disables system configuration, and uses the platform null file as its
 global configuration, so a caller's hooks path or repository template cannot become
-executable test behavior. Resolved caller name/email values are passed through explicit
+executable test behavior. Because the supported Git baseline predates
+`GIT_CONFIG_GLOBAL`, the test `PATH` starts with a disposable wrapper that gives Git
+alone an empty home/XDG config and disables system config; non-Git tools retain the
+caller's normal home. Resolved caller name/email values are passed through explicit
 author/committer environment variables without retaining the configuration that supplied
 them. The projected test file—not the corresponding absolute path in the real checkout—
-is the child program. The repository view is materialized once per suite, bounds disk
-usage to one projection, and preserves the runner's prior cross-test working-tree
-semantics without multiplying repository-sized copy I/O.
+is the child program. Its test directory includes ignored sibling modules and fixtures
+without following directory symlinks, and materialization rejects any target path that
+would traverse a projected symlink. The repository view is materialized once per suite,
+bounds disk usage to one projection, and preserves the runner's prior cross-test
+working-tree semantics without multiplying repository-sized copy I/O.
 
 ### Option C — require each test to clean its own environment
 

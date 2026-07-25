@@ -230,7 +230,10 @@ class RunTestsIsolationTests(unittest.TestCase):
             (repository / "untracked.txt").write_text("untracked\n")
             (repository / ".venv/ignored.txt").write_text("ignored\n")
             (repository / "generated/tests/test_ignored.py").write_text(
-                "print('generated test')\n"
+                "from helper import VALUE\nprint(VALUE)\n"
+            )
+            (repository / "generated/tests/helper.py").write_text(
+                "VALUE = 'generated test'\n"
             )
             (nested_repository / "tracked.txt").write_text("nested\n")
             symlinks_supported = True
@@ -281,6 +284,7 @@ class RunTestsIsolationTests(unittest.TestCase):
                     destination,
                     clean_environment,
                     additional_paths=(
+                        Path("generated/tests/helper.py"),
                         Path("generated/tests/test_ignored.py"),
                     ),
                 )
@@ -316,8 +320,12 @@ class RunTestsIsolationTests(unittest.TestCase):
             self.assertTrue((nested_view / ".git").is_dir())
             self.assertFalse((destination / ".venv").exists())
             self.assertEqual(
-                "print('generated test')\n",
+                "from helper import VALUE\nprint(VALUE)\n",
                 (destination / "generated/tests/test_ignored.py").read_text(),
+            )
+            self.assertEqual(
+                "VALUE = 'generated test'\n",
+                (destination / "generated/tests/helper.py").read_text(),
             )
             self.assertEqual(
                 RUN_TESTS.GIT_BOUNDARY_MARKER,
@@ -331,8 +339,106 @@ class RunTestsIsolationTests(unittest.TestCase):
             )
             self.assertNotEqual(0, projected_git.returncode)
 
+    def test_symlinked_test_paths_cannot_escape_the_projected_view(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_root = Path(scratch)
+            repository = scratch_root / "repository"
+            external = scratch_root / "external"
+            destination = scratch_root / "view"
+            repository.mkdir()
+            external.mkdir()
+            destination.mkdir()
+            (external / "test_external.py").write_text("print('external')\n")
+            try:
+                os.symlink(str(external), str(repository / "linked-tests"))
+                os.symlink(str(external), str(destination / "linked-tests"))
+            except (NotImplementedError, OSError):
+                self.skipTest("directory symlinks are unavailable")
+
+            discovered = repository / "linked-tests" / "test_external.py"
+            self.assertTrue(
+                RUN_TESTS.path_crosses_symlink(discovered, repository),
+            )
+            with self.assertRaisesRegex(RuntimeError, "traversed a symlink"):
+                RUN_TESTS.reject_projected_symlink_traversal(
+                    destination,
+                    Path("linked-tests/test_external.py"),
+                )
+
+    def test_ignored_test_support_includes_siblings_without_following_links(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            test_directory = repository / "automation/generated/tests"
+            external = Path(scratch) / "external"
+            test_directory.mkdir(parents=True)
+            external.mkdir()
+            test_file = test_directory / "test_generated.py"
+            test_file.write_text("from helper import VALUE\n")
+            (test_directory / "helper.py").write_text("VALUE = 1\n")
+            (external / "secret.py").write_text("SECRET = True\n")
+            symlinks_supported = True
+            try:
+                os.symlink(str(external), str(test_directory / "linked"))
+            except (NotImplementedError, OSError):
+                symlinks_supported = False
+
+            support = RUN_TESTS.test_support_paths(
+                (test_file,),
+                repository,
+            )
+
+            self.assertIn(
+                Path("automation/generated/tests/test_generated.py"),
+                support,
+            )
+            self.assertIn(
+                Path("automation/generated/tests/helper.py"),
+                support,
+            )
+            if symlinks_supported:
+                self.assertIn(
+                    Path("automation/generated/tests/linked"),
+                    support,
+                )
+                self.assertNotIn(
+                    Path("automation/generated/tests/linked/secret.py"),
+                    support,
+                )
+
+    def test_nested_runner_wrapper_reuses_the_original_git_executable(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_root = Path(scratch)
+            first_environment = {"PATH": os.environ.get("PATH", "")}
+            RUN_TESTS.install_isolated_git_wrapper(
+                scratch_root / "first",
+                first_environment,
+            )
+            original_git = first_environment[RUN_TESTS.REAL_GIT_ENVIRONMENT]
+            first_wrapper = first_environment["PATH"].split(os.pathsep, 1)[0]
+
+            second_environment = dict(first_environment)
+            RUN_TESTS.install_isolated_git_wrapper(
+                scratch_root / "second",
+                second_environment,
+            )
+
+            self.assertEqual(
+                original_git,
+                second_environment[RUN_TESTS.REAL_GIT_ENVIRONMENT],
+            )
+            second_wrapper = second_environment["PATH"].split(os.pathsep, 1)[0]
+            self.assertNotEqual(first_wrapper, second_wrapper)
+            self.assertIn(
+                original_git,
+                (Path(second_wrapper) / "git").read_text(),
+            )
+
     def test_main_passes_the_isolated_environment_to_each_test(self):
-        child_environment = {"PATH": os.environ.get("PATH", "")}
+        child_environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": "/caller/home",
+            "XDG_CONFIG_HOME": "/caller/xdg",
+        }
         completed = subprocess.CompletedProcess(["python", "test.py"], 0)
         relative_test = Path("automation/tests/test_probe.py")
 
@@ -344,21 +450,28 @@ class RunTestsIsolationTests(unittest.TestCase):
         ):
             with mock.patch.object(RUN_TESTS, "configured_git_identity", return_value={}):
                 with mock.patch.object(
-                    RUN_TESTS.Path,
-                    "glob",
-                    return_value=[RUN_TESTS.REPO / "automation/tests/test_probe.py"],
+                    RUN_TESTS,
+                    "repository_test_files",
+                    return_value=(
+                        RUN_TESTS.REPO / "automation/tests/test_probe.py",
+                    ),
                 ):
-                    with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
-                        with mock.patch.object(
-                            RUN_TESTS,
-                            "materialize_repository_view",
-                        ):
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "test_support_paths",
+                        return_value=(relative_test,),
+                    ):
+                        with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
                             with mock.patch.object(
-                                RUN_TESTS.subprocess,
-                                "run",
-                                return_value=completed,
-                            ) as run:
-                                self.assertEqual(0, RUN_TESTS.main())
+                                RUN_TESTS,
+                                "materialize_repository_view",
+                            ):
+                                with mock.patch.object(
+                                    RUN_TESTS.subprocess,
+                                    "run",
+                                    return_value=completed,
+                                ) as run:
+                                    self.assertEqual(0, RUN_TESTS.main())
 
         self.assertIs(child_environment, run.call_args[1]["env"])
         test_cwd = Path(run.call_args[1]["cwd"]).resolve()
@@ -378,14 +491,8 @@ class RunTestsIsolationTests(unittest.TestCase):
         )
         self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
-        self.assertEqual(
-            str(test_cwd.parent / "home"),
-            child_environment["HOME"],
-        )
-        self.assertEqual(
-            str(test_cwd.parent / "xdg-config"),
-            child_environment["XDG_CONFIG_HOME"],
-        )
+        self.assertEqual("/caller/home", child_environment["HOME"])
+        self.assertEqual("/caller/xdg", child_environment["XDG_CONFIG_HOME"])
 
     def test_main_materializes_one_view_for_every_discovered_test(self):
         child_environment = {"PATH": os.environ.get("PATH", "")}
@@ -401,18 +508,29 @@ class RunTestsIsolationTests(unittest.TestCase):
             return_value=child_environment,
         ):
             with mock.patch.object(RUN_TESTS, "configured_git_identity", return_value={}):
-                with mock.patch.object(RUN_TESTS.Path, "glob", return_value=tests):
-                    with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
-                        with mock.patch.object(
-                            RUN_TESTS,
-                            "materialize_repository_view",
-                        ) as materialize:
+                with mock.patch.object(
+                    RUN_TESTS,
+                    "repository_test_files",
+                    return_value=tuple(tests),
+                ):
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "test_support_paths",
+                        return_value=tuple(
+                            test.relative_to(RUN_TESTS.REPO) for test in tests
+                        ),
+                    ):
+                        with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
                             with mock.patch.object(
-                                RUN_TESTS.subprocess,
-                                "run",
-                                return_value=completed,
-                            ) as run:
-                                self.assertEqual(0, RUN_TESTS.main())
+                                RUN_TESTS,
+                                "materialize_repository_view",
+                            ) as materialize:
+                                with mock.patch.object(
+                                    RUN_TESTS.subprocess,
+                                    "run",
+                                    return_value=completed,
+                                ) as run:
+                                    self.assertEqual(0, RUN_TESTS.main())
 
         materialize.assert_called_once()
         self.assertEqual(
@@ -490,17 +608,22 @@ class RunTestsIsolationTests(unittest.TestCase):
 
             with mock.patch.dict(os.environ, child_environment, clear=True):
                 with mock.patch.object(
-                    RUN_TESTS.Path,
-                    "glob",
-                    return_value=[discovered_test],
+                    RUN_TESTS,
+                    "repository_test_files",
+                    return_value=(discovered_test,),
                 ):
-                    with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
-                        with mock.patch.object(
-                            RUN_TESTS,
-                            "materialize_repository_view",
-                            side_effect=materialize,
-                        ):
-                            self.assertEqual(0, RUN_TESTS.main())
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "test_support_paths",
+                        return_value=(relative_test,),
+                    ):
+                        with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
+                            with mock.patch.object(
+                                RUN_TESTS,
+                                "materialize_repository_view",
+                                side_effect=materialize,
+                            ):
+                                self.assertEqual(0, RUN_TESTS.main())
 
             self.assertFalse(marker.exists())
 
