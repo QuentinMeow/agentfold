@@ -1,6 +1,6 @@
 # Is the revised edge-graph architecture right, and which of its eight options do you pick?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-25, by claude, from chat — design session for `docs/designs/markdown-edge-graph.md`
 **Action:** approve the revised architecture and answer decisions N1 to N8, or request a named change
 **Full context:** `docs/designs/markdown-edge-graph.md`

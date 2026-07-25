@@ -1,6 +1,6 @@
 # Should a document edge default to a repo-root path instead of a relative one?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-25, by claude, from chat — design session for `docs/designs/markdown-edge-graph.md`
 **Action:** confirm the repo-root default, or keep the relative default you specified
 **Full context:** `docs/designs/markdown-edge-graph-decisions.md`

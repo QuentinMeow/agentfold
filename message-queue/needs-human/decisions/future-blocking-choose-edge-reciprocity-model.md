@@ -1,6 +1,6 @@
 # Should a document edge be authored on one side and the reverse direction derived?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-25, by claude, from chat — design session for `docs/designs/markdown-edge-graph.md`
 **Action:** choose Option A or Option B, or state another model
 **Full context:** `docs/designs/markdown-edge-graph-decisions.md`
