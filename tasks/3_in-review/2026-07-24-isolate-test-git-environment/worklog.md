@@ -152,3 +152,7 @@
   case-insensitive on the default macOS filesystem, and a bare repository does not
   require a config file. Candidate names are now case-folded and the exact Git probe
   runs whenever a directory has `HEAD` plus `objects` or `refs`.
+- The following panel found that pruning directory symlinks before candidate
+  detection could hide symlinked `objects` or `refs`. Structural names are now
+  captured before symlinks are removed from traversal, so the directory is sealed
+  without following the links during the scan.

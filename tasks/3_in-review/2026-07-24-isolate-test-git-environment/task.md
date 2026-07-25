@@ -50,8 +50,9 @@ symlink-creation limitation and may require Developer Mode or WSL.
       on case-sensitive or case-insensitive filesystems.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
       every nested bare-repository-shaped support directory is sealed even when its
-      config is absent or its metadata names use case variants; user-global ignore
-      configuration cannot alter the view's contents.
+      config is absent, its metadata names use case variants, or its object/ref
+      directories are symlinks; user-global ignore configuration cannot alter the
+      view's contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with
       whitespace-bearing paths project without dereferencing or path normalization.
 - [x] The focused regression, repository test suite, reconciler, and a real

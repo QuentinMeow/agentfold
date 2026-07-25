@@ -59,6 +59,11 @@ detection was case-sensitive and incorrectly required a config file. Detection n
 case-folds metadata names and probes every directory with `HEAD` plus `objects` or
 `refs`; the focused 17-test regression passes.
 
+The panel for `cd8fd59623eea142cc070be352a4464013b36067` found that pruning
+directory symlinks before bare-shape detection hid symlinked `objects` or `refs`.
+Candidate names are now captured before symlinks are removed from traversal, and the
+focused 17-test regression passes with a symlinked object directory.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

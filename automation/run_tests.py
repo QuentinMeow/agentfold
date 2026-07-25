@@ -297,13 +297,13 @@ def seal_bare_repository_views(destination, child_environment):
         followlinks=False,
     ):
         current = Path(current_root)
+        folded_directories = {name.casefold() for name in directory_names}
+        folded_files = {name.casefold() for name in file_names}
         directory_names[:] = [
             name
             for name in directory_names
             if not (current / name).is_symlink()
         ]
-        folded_directories = {name.casefold() for name in directory_names}
-        folded_files = {name.casefold() for name in file_names}
         if (
             "head" in folded_files
             and ("objects" in folded_directories or "refs" in folded_directories)

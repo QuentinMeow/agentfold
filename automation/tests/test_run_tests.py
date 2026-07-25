@@ -236,7 +236,18 @@ class RunTestsIsolationTests(unittest.TestCase):
                 "VALUE = 'generated test'\n"
             )
             ignored_bare = repository / "generated/tests/bare-fixture"
-            (ignored_bare / "OBJECTS").mkdir(parents=True)
+            ignored_bare.mkdir()
+            external_objects = Path(scratch) / "external-objects"
+            external_objects.mkdir()
+            bare_objects_symlinked = True
+            try:
+                os.symlink(
+                    str(external_objects),
+                    str(ignored_bare / "OBJECTS"),
+                )
+            except (NotImplementedError, OSError):
+                bare_objects_symlinked = False
+                (ignored_bare / "OBJECTS").mkdir()
             (ignored_bare / "refs").mkdir()
             (ignored_bare / "head").write_text("ref: refs/heads/main\n")
             (nested_repository / "tracked.txt").write_text("nested\n")
@@ -341,6 +352,13 @@ class RunTestsIsolationTests(unittest.TestCase):
                     / "generated/tests/bare-fixture/.git"
                 ).read_text(),
             )
+            if bare_objects_symlinked:
+                self.assertTrue(
+                    (
+                        destination
+                        / "generated/tests/bare-fixture/OBJECTS"
+                    ).is_symlink(),
+                )
             nested_bare_git = subprocess.run(
                 [
                     "git",
