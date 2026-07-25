@@ -411,9 +411,22 @@ class MineCochangeTests(unittest.TestCase):
                  if line.strip() and not line.startswith("#")],
             )
 
-    def test_shipped_ledger_documents_its_format_and_holds_no_verdicts(self):
+    def test_shipped_ledger_documents_its_format_and_parses_every_verdict(self):
+        # Asserting the shipped ledger is *empty* would forbid ever using the feature:
+        # the verbs write only to this tracked file and expose no path override, so the
+        # first real verdict would fail the suite and block every later commit. What has
+        # to hold for any ledger state is that every verdict line parses.
         shipped = MODULE_PATH.parent / "cochange-ledger.txt"
-        self.assertEqual(([], []), MINE.load_ledger(shipped))
+        verdicts, malformed = MINE.load_ledger(shipped)
+        self.assertEqual([], malformed)
+        for verdict, source, target, when, reason in verdicts:
+            self.assertIn(verdict, ("accept", "reject"))
+            self.assertRegex(when, r"^\d{4}-\d{2}-\d{2}$")
+            for field in (source, target, reason):
+                self.assertNotIn("\t", field)
+            self.assertNotEqual(source, target)
+            if verdict == "reject":
+                self.assertTrue(reason.strip(), (source, target))
         text = shipped.read_text(encoding="utf-8")
         self.assertIn("append-only", text)
         self.assertIn(MINE.LEDGER_RE.pattern, text)
