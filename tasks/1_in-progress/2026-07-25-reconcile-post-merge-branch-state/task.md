@@ -1,11 +1,11 @@
 # Reconcile merged stack records and obsolete branch state
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Mode:** async
 **Filed:** 2026-07-25, by codex, from the owner's branch recovery and cleanup request in chat
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-reconcile-post-merge-branch-state.md`
+**Queue actions:** none
 
 ## Goal
 
