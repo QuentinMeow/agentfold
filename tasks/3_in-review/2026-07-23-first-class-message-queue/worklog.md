@@ -159,7 +159,7 @@
   deletions, orphan handovers, and sticky marker removal. Nine focused regressions and
   the complete queue suite passed: 185 tests in 41.951 seconds. The system `python3`
   was Python 3.7 and could not parse an existing walrus expression, so verification
-  used `/Users/quentinmiao/.local/bin/python3.13`.
+  used a local Python 3.13 interpreter.
 
 ## 2026-07-23 — external action-projection hardening (codex subagent)
 
