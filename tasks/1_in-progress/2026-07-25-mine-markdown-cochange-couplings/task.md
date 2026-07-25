@@ -1,10 +1,10 @@
 # Mine markdown co-change couplings and validate heading anchors
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-25, by claude, from chat direction after the edge-graph approval — `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-mine-markdown-cochange-couplings.md`
+**Queue actions:** none
 
 ## Goal
 
