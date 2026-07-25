@@ -1,12 +1,12 @@
 # Is the test-runner Git-isolation boundary safe and compatible enough to merge?
 
-**Status:** awaiting-artifact
+**Status:** waiting
 **Filed:** 2026-07-24, by codex, from task `2026-07-24-isolate-test-git-environment`
 **Action:** After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, inspect the exact Git range and approve it, request a named change, or reject it before merge.
 **Full context:** `roadmap/current-state.md`
 **Resolution evidence:** `roadmap/current-state.md`
-**Review target:** pending
-**Review revision:** pending
+**Review target:** git:25d03257b5ee61753fa9bada609722c4e84a8064...fd2374d99796300ed4325c2961e696092c17875e
+**Review revision:** git:25d03257b5ee61753fa9bada609722c4e84a8064...fd2374d99796300ed4325c2961e696092c17875e
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Blocks at:** transition:merge task:2026-07-24-isolate-test-git-environment
