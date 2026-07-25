@@ -1,6 +1,6 @@
 # Publish the layered-workspace follow-up tasks after parent admission
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-24, by codex, from task `2026-07-24-layered-development-workspace`
 **Action:** After the layered-workspace parent PR is admitted, publish the six preserved follow-up backlog tasks, pickup requests, and dependency actions through the live main coordination lane, then resolve this action.
 **Full context:** `roadmap/current-state.md`
