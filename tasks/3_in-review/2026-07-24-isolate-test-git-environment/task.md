@@ -45,6 +45,8 @@ symlink-creation limitation and may require Developer Mode or WSL.
       when the runner exits.
 - [x] Test discovery and support projection do not follow directory symlinks, and no
       projected path can write through a symlink outside the scratch view.
+- [x] Ignored support trees prune every `.git` file/directory, and materialization
+      rejects any additional path containing a Git-metadata component.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
       user-global ignore configuration cannot alter its contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with

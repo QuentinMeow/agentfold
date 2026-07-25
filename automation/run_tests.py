@@ -205,12 +205,17 @@ def test_support_paths(test_files, repository=None):
             followlinks=False,
         ):
             current = Path(current_root)
+            directory_names[:] = [
+                name for name in directory_names if name != ".git"
+            ]
             for directory_name in tuple(directory_names):
                 directory = current / directory_name
                 if directory.is_symlink():
                     support_paths.add(directory.relative_to(repository))
                     directory_names.remove(directory_name)
             for file_name in file_names:
+                if file_name == ".git":
+                    continue
                 support_paths.add((current / file_name).relative_to(repository))
     return tuple(sorted(support_paths))
 
@@ -308,6 +313,8 @@ def materialize_repository_view(
     for relative_path in sorted(relative_paths):
         if relative_path.is_absolute() or ".." in relative_path.parts:
             raise RuntimeError("repository test view contained an unsafe path")
+        if ".git" in relative_path.parts:
+            raise RuntimeError("repository test view contained Git metadata")
         source = repository / relative_path
         target = destination / relative_path
         reject_projected_symlink_traversal(destination, relative_path)

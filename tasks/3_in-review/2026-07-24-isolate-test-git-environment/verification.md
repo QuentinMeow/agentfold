@@ -38,6 +38,12 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 9/9 files passed
 ```
 
+The immutable-candidate panel for
+`a996c1a02cb23463aef6180bc6e6ae77c5a08379` found that ignored test support
+enumeration could copy a linked-worktree `.git` file or nested `.git` directory.
+Support discovery now prunes both, materialization rejects metadata-bearing paths,
+and the focused 17-test regression passes.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

@@ -136,3 +136,7 @@
   an inner wrapper could select the already wrapped Git path and therefore reuse the
   outer wrapper's isolated configuration. The child now carries the validated original
   executable path, and both the focused regression and full projected suite pass.
+- The following immutable-candidate panel found that ignored test support enumeration
+  could still copy a linked-worktree `.git` file or nested `.git` directory. Support
+  discovery now prunes both shapes, and materialization independently rejects every
+  path containing a `.git` component.

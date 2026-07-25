@@ -375,6 +375,12 @@ class RunTestsIsolationTests(unittest.TestCase):
             test_file = test_directory / "test_generated.py"
             test_file.write_text("from helper import VALUE\n")
             (test_directory / "helper.py").write_text("VALUE = 1\n")
+            (test_directory / ".git").write_text(
+                "gitdir: /outside/original/worktree\n"
+            )
+            nested_git = test_directory / "fixture/.git"
+            nested_git.mkdir(parents=True)
+            (nested_git / "config").write_text("[core]\n\tbare = false\n")
             (external / "secret.py").write_text("SECRET = True\n")
             symlinks_supported = True
             try:
@@ -393,6 +399,14 @@ class RunTestsIsolationTests(unittest.TestCase):
             )
             self.assertIn(
                 Path("automation/generated/tests/helper.py"),
+                support,
+            )
+            self.assertNotIn(
+                Path("automation/generated/tests/.git"),
+                support,
+            )
+            self.assertNotIn(
+                Path("automation/generated/tests/fixture/.git/config"),
                 support,
             )
             if symlinks_supported:
