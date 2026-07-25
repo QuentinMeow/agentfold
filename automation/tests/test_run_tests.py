@@ -250,6 +250,22 @@ class RunTestsIsolationTests(unittest.TestCase):
                 (ignored_bare / "OBJECTS").mkdir()
             (ignored_bare / "refs").mkdir()
             (ignored_bare / "head").write_text("ref: refs/heads/main\n")
+            common_repository = Path(scratch) / "common-repository.git"
+            subprocess.run(
+                ["git", "init", "--bare", "-q", str(common_repository)],
+                check=True,
+                env={
+                    name: value
+                    for name, value in os.environ.items()
+                    if not name.startswith("GIT_")
+                },
+            )
+            linked_admin = repository / "generated/tests/linked-admin"
+            linked_admin.mkdir()
+            (linked_admin / "HEAD").write_text("ref: refs/heads/main\n")
+            (linked_admin / "commondir").write_text(
+                str(common_repository) + "\n"
+            )
             (nested_repository / "tracked.txt").write_text("nested\n")
             symlinks_supported = True
             try:
@@ -303,6 +319,8 @@ class RunTestsIsolationTests(unittest.TestCase):
                         Path("generated/tests/bare-fixture/head"),
                         Path("generated/tests/bare-fixture/refs"),
                         Path("generated/tests/helper.py"),
+                        Path("generated/tests/linked-admin/HEAD"),
+                        Path("generated/tests/linked-admin/commondir"),
                         Path("generated/tests/test_ignored.py"),
                     ),
                 )
@@ -372,6 +390,13 @@ class RunTestsIsolationTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertNotEqual(0, nested_bare_git.returncode)
+            self.assertEqual(
+                RUN_TESTS.GIT_BOUNDARY_MARKER,
+                (
+                    destination
+                    / "generated/tests/linked-admin/.git"
+                ).read_text(),
+            )
             self.assertEqual(
                 RUN_TESTS.GIT_BOUNDARY_MARKER,
                 (destination / ".git").read_text(),

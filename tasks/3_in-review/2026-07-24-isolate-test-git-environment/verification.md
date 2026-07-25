@@ -64,6 +64,11 @@ directory symlinks before bare-shape detection hid symlinked `objects` or `refs`
 Candidate names are now captured before symlinks are removed from traversal, and the
 focused 17-test regression passes with a symlinked object directory.
 
+The panel for `71aec2ef167c464e6d5ddba4823559ca118749f9` found that a linked-worktree
+admin directory with `HEAD` plus `commondir` bypassed the remaining shape catalogue.
+The catalogue is gone: Git's exact pinned probe now checks every non-symlink directory.
+The focused 17-test regression passes with an external-common-directory fixture.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

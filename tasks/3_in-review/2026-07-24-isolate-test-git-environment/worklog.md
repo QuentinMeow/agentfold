@@ -156,3 +156,7 @@
   detection could hide symlinked `objects` or `refs`. Structural names are now
   captured before symlinks are removed from traversal, so the directory is sealed
   without following the links during the scan.
+- The next panel showed the name catalogue was still incomplete because a valid
+  linked-worktree admin directory can use only `HEAD` plus `commondir`. The heuristic
+  was removed: the completed projection now runs Git's exact pinned probe on every
+  non-symlink directory, which covers present and future metadata layouts.

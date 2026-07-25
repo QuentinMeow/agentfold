@@ -44,9 +44,12 @@ author/committer environment variables without retaining the configuration that 
 them. The projected test file—not the corresponding absolute path in the real checkout—
 is the child program. Its test directory includes ignored sibling modules and fixtures
 without following directory symlinks, and materialization rejects any target path that
-would traverse a projected symlink. The repository view is materialized once per suite,
-bounds disk usage to one projection, and preserves the runner's prior cross-test
-working-tree semantics without multiplying repository-sized copy I/O.
+would traverse a projected symlink. After materialization, Git's exact pinned
+`--git-dir=.` probe checks every non-symlink directory and seals every discoverable
+metadata layout, including bare repositories and linked-worktree admin directories.
+The repository view is materialized once per suite, bounds disk usage to one
+projection, and preserves the runner's prior cross-test working-tree semantics without
+multiplying repository-sized copy I/O.
 
 ### Option C — require each test to clean its own environment
 
