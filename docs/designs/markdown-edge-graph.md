@@ -2,6 +2,9 @@
 
 **Status:** proposal, not an accepted decision
 **Open questions:** `docs/designs/markdown-edge-graph-decisions.md`
+**Owner answers:** N1 to N8 answered 2026-07-25 — the per-folder freshness modes below and
+the justified per-file cap exception are the owner's N5 and N7, recorded in
+`memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`.
 **Revision:** v3 — adds a mined co-change layer that ships before the schema, after
 measurement showed textual mention and real coupling are nearly disjoint here. v2 kept
 one-directional edges, the graph artifact as the product, and eventual consistency through
@@ -405,7 +408,22 @@ have it, using published operational thresholds from large-scale static-analysis
 The ledger's rejection rate *is* the effective-false-positive rate, which makes the
 governance rule self-measuring.
 
-## Review debt: freshness without stored pins
+## Review debt: three freshness modes, chosen per folder
+
+Deriving freshness costs tokens, so the choice of how much to spend belongs to whoever owns
+the folder, not to this design. All three mechanisms exist, each folder configures its own
+independently, and the default is a **review window of 7 days**.
+
+| Mode | What it does | Recurring cost |
+|---|---|---|
+| `each-run` | clause-scoped debt derived from git, below | one history pass per run |
+| `review-window` (**default, 7 days**) | an absolute re-review date per edge, the mechanism this repository already runs on memory entries; cannot see a target change, and cannot thrash | none |
+| `advisory` | nothing mechanical — `Update-when` stays prose a reader acts on | none |
+
+No folder's mode constrains another's, so activating a directory is also the moment its
+freshness cost is chosen.
+
+### The `each-run` mode: clause-scoped debt derived from git
 
 This replaces v1's content digests, which were rejected for churn. The mechanism is derived
 from git on every run, so there is no stored state to thrash.
@@ -586,7 +604,11 @@ are trustworthy; the git index is the source of truth for what exists.
   where it would be vacuous, require a clause anchor so the claim is specific, cap edges
   per file, and put every new sentence in front of a human exactly once. **Fluent filler
   defeats all of them**, and the volume cap is the real defence, which means the design
-  must choose between coverage and quality and chooses quality.
+  must choose between coverage and quality and chooses quality. The cap admits exactly one
+  exception: a file may go beyond it when the agent records a written justification naming
+  **both** why that file needs to exceed the cap **and** why decoupling it would be worse.
+  Both halves, or it is a finding rather than a judgment call — and a rising exception count
+  is itself the signal that the cap is set wrong.
 - **The graph is never complete**, and every answer says so.
 - **A narrow `Update-when` can mislead** — it reads as a licence not to read. Triggers must
   be written inclusively, and the `CHECK BY HAND` section exists for dependents whose
@@ -642,8 +664,8 @@ are trustworthy; the git index is the source of truth for what exists.
   agent-maintained markdown with metadata — states a link's kind "is conveyed by the
   surrounding prose, not by the link itself", with a typed-link proposal open and
   unaccepted. It does ship an absolute `stale_after` date as a freshness mechanism, the
-  same shape as this repository's existing memory review dates, and a plausible fallback if
-  clause-scoped debt proves too noisy.
+  same shape as this repository's existing memory review dates — which is the shape of the
+  `review-window` mode, and this design's default.
 - **Frameworks that built reference validation died or walked it back.** The one library
   with real build-time validation is unmaintained and checked file existence only; the
   most-cited framework removed its build-time guarantee in a major version and closed the
