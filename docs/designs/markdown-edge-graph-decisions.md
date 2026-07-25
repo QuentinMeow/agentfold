@@ -1,6 +1,6 @@
 # Markdown edge graph — direction and decisions (v3)
 
-**Status:** awaiting your answers on eight decisions
+**Status:** answered — the eight answers below are folded into `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`
 **Full design (you do not need to read it):** `docs/designs/markdown-edge-graph.md`
 
 Self-contained. What we're building, the best practices I'd adopt and why they beat the
