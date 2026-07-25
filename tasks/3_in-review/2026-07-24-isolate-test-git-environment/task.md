@@ -28,17 +28,18 @@ symlink-creation limitation and may require Developer Mode or WSL.
       `git rev-parse --local-env-vars` removed.
 - [x] Failure to discover Git's local environment variable names stops the test runner
       instead of silently running contaminated children.
-- [x] Every test file starts in a fresh directory outside the repository with Git
-      discovery capped at the scratch root.
+- [x] Every test subprocess starts in one fresh suite view outside the repository with
+      Git discovery capped at the scratch root.
 - [x] Existing repository-relative test reads continue through a repository-metadata-
       free working tree view, and safe Git identity/noninteractive settings remain
       available.
 - [x] Each subprocess executes the projected test file, so `__file__` and ordinary
       repository-relative path derivation stay inside the disposable view.
 - [x] Caller global/system Git configuration, hooks paths, and initialization
-      templates are unavailable to test subprocesses.
-- [x] At most one full repository projection exists at a time, and it is removed
-      before the next test view is materialized.
+      templates are unavailable to test subprocesses while resolved caller identity
+      values remain available.
+- [x] One repository projection is materialized for the suite, including every
+      discovered ignored/generated test file, and removed when the runner exits.
 - [x] Bare-repository-shaped tracked files cannot make the view discoverable, and
       user-global ignore configuration cannot alter its contents.
 - [x] On macOS/Linux, valid dangling/looping symlinks and nested repositories with

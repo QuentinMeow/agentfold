@@ -32,6 +32,10 @@ SAFE_GIT_BEHAVIOR_VARIABLES = frozenset(
         "GIT_TERMINAL_PROMPT",
     )
 )
+GIT_IDENTITY_CONFIG = (
+    ("user.name", "GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"),
+    ("user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"),
+)
 
 
 def git_local_environment_names():
@@ -76,6 +80,34 @@ def isolated_test_environment(parent_environment=None):
         child_environment.pop(name, None)
     child_environment.update(safe_behavior)
     return child_environment
+
+
+def configured_git_identity(parent_environment=None):
+    """Resolve safe identity values before removing caller Git configuration."""
+    parent_environment = (
+        os.environ if parent_environment is None else parent_environment
+    )
+    identity = {}
+    for key, author_name, committer_name in GIT_IDENTITY_CONFIG:
+        result = subprocess.run(
+            ["git", "config", "--get", key],
+            cwd=REPO,
+            env=parent_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        if result.returncode == 1:
+            continue
+        if result.returncode:
+            detail = result.stderr.strip()
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"could not resolve Git identity {key}{suffix}")
+        value = result.stdout.rstrip("\n")
+        if value:
+            identity[author_name] = value
+            identity[committer_name] = value
+    return identity
 
 
 def validate_scratch_root(scratch_root, child_environment):
@@ -155,8 +187,10 @@ def materialize_repository_view(
     child_environment,
     repository=None,
     seen_repositories=None,
+    additional_paths=(),
 ):
     """Copy versionable working-tree entries without Git metadata."""
+    is_root_repository = repository is None
     repository = (REPO if repository is None else Path(repository)).resolve()
     seen_repositories = (
         set() if seen_repositories is None else seen_repositories
@@ -165,7 +199,10 @@ def materialize_repository_view(
         raise RuntimeError("repository test view contained a recursive repository")
     seen_repositories.add(repository)
     destination.mkdir(parents=True)
-    for relative_path in repository_view_paths(child_environment, repository):
+    relative_paths = set(repository_view_paths(child_environment, repository))
+    if is_root_repository:
+        relative_paths.update(additional_paths)
+    for relative_path in sorted(relative_paths):
         if relative_path.is_absolute() or ".." in relative_path.parts:
             raise RuntimeError("repository test view contained an unsafe path")
         source = repository / relative_path
@@ -196,7 +233,10 @@ def materialize_repository_view(
 
 
 def main():
+    configured_identity = configured_git_identity()
     child_environment = isolated_test_environment()
+    for name, value in configured_identity.items():
+        child_environment.setdefault(name, value)
     test_files = sorted({test for pattern in TEST_GLOBS for test in REPO.glob(pattern)})
     if not test_files:
         print("no repository tests found")
@@ -214,19 +254,19 @@ def main():
         child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
         child_environment["HOME"] = str(isolated_home)
         child_environment["XDG_CONFIG_HOME"] = str(isolated_xdg_config)
-        for index, test in enumerate(test_files):
-            rel = test.relative_to(REPO)
-            with tempfile.TemporaryDirectory(
-                prefix=f"{index:04d}-",
-                dir=scratch_root,
-            ) as test_scratch:
-                test_cwd = Path(test_scratch).resolve() / "view"
-                materialize_repository_view(test_cwd, child_environment)
-                result = subprocess.run(
-                    [sys.executable, str(test_cwd / rel)],
-                    cwd=test_cwd,
-                    env=child_environment,
-                )
+        test_cwd = scratch_root / "view"
+        relative_tests = tuple(test.relative_to(REPO) for test in test_files)
+        materialize_repository_view(
+            test_cwd,
+            child_environment,
+            additional_paths=relative_tests,
+        )
+        for test, rel in zip(test_files, relative_tests):
+            result = subprocess.run(
+                [sys.executable, str(test_cwd / rel)],
+                cwd=test_cwd,
+                env=child_environment,
+            )
             (print(f"PASS {rel}") if result.returncode == 0 else failed.append(rel))
     for rel in failed:
         print(f"FAIL {rel}")

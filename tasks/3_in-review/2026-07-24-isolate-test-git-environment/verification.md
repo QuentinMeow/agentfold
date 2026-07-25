@@ -38,6 +38,40 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 9/9 files passed
 ```
 
+A fresh blast-radius review of
+`238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
+repair removed normal config-backed identity, retained repository-size-times-test-count
+copy I/O, and omitted ignored/generated discovered tests. Those findings were repaired
+in the next candidate.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 14 tests in 0.428s
+
+OK
+PASS automation/tests/test_git_init_probe.py
+tests: 1/1 files passed
+PASS automation/tests/test_first.py
+PASS automation/tests/test_second.py
+tests: 2/2 files passed
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+```
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 9/9 files passed
+```
+
 ## Hook-driven repository suite
 
 ```

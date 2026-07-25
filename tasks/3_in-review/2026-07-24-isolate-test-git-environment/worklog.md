@@ -117,3 +117,9 @@
   delete each projection before creating the next one.
 - Added regressions for projected execution, caller-global hooks, isolated Git
   configuration, and bounded projection lifetime. The focused and full suites pass.
+- A fresh blast-radius review found that the first repair also removed ordinary
+  config-backed Git identity, still copied the repository once per test, and could
+  discover an ignored/generated test that was absent from the projected view.
+- The runner now resolves only caller name/email into explicit author/committer
+  variables, builds one suite-wide disposable view, and explicitly includes every
+  discovered test path even when Git ignore rules exclude it.

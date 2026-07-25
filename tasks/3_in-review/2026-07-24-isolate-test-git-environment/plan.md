@@ -7,3 +7,6 @@
 - [x] 5. Repair the panel's discovery, quarantine, ambient working-directory, and probe-coverage blockers.
 - [x] 6. Re-run focused/full tests and the stronger probe on a new immutable candidate.
 - [x] 7. Record real verification and obtain a fresh independent panel majority.
+- [x] 8. Rebuild PR #8 on latest main and repair projected-path, Git-config,
+      identity, ignored-test, and copy-amplification findings.
+- [ ] 9. Bind the final main-based range for human merge review and publish it.

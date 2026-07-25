@@ -25,7 +25,7 @@ noninteractive behavior settings that cannot select a repository. Run each test 
 from a fresh directory outside the repository, verify that Git discovers no repository
 there, and set that scratch root as Git's discovery ceiling. Ask Git for the tracked
 plus non-ignored untracked paths and copy those entries, preserving symlink objects but
-never repository metadata, into each child directory. A deliberately invalid `.git`
+never repository metadata, into one disposable suite view. A deliberately invalid `.git`
 marker is added only when the projected files already form a discoverable bare
 repository. The check pins `--git-dir=.` so a nested view cannot inherit discovery from
 a bare-shaped ancestor; ordinary projected roots remain available for an explicit
@@ -36,9 +36,12 @@ keep their prior shape without recursively copying ignored dependency trees or
 restoring ambient Git discovery. The child points `HOME` and `XDG_CONFIG_HOME` at the
 scratch root, disables system configuration, and uses the platform null file as its
 global configuration, so a caller's hooks path or repository template cannot become
-executable test behavior. The projected test file—not the corresponding absolute path
-in the real checkout—is the child program. Only one per-test projection exists at a
-time; it is removed before the next test is materialized.
+executable test behavior. Resolved caller name/email values are passed through explicit
+author/committer environment variables without retaining the configuration that supplied
+them. The projected test file—not the corresponding absolute path in the real checkout—
+is the child program. The repository view is materialized once per suite, bounds disk
+usage to one projection, and preserves the runner's prior cross-test working-tree
+semantics without multiplying repository-sized copy I/O.
 
 ### Option C — require each test to clean its own environment
 
