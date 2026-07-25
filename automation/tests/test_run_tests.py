@@ -728,6 +728,39 @@ class RunTestsIsolationTests(unittest.TestCase):
 
             seal.assert_called_once_with(candidate, {})
 
+    def test_runner_recurses_from_a_metadata_free_projected_view(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            projection = Path(scratch) / "projection"
+            automation = projection / "automation"
+            test_directory = automation / "tests"
+            test_directory.mkdir(parents=True)
+            projected_runner = automation / "run_tests.py"
+            projected_runner.write_text(MODULE_PATH.read_text())
+            (test_directory / "test_probe.py").write_text(
+                "from pathlib import Path\n"
+                "assert not (Path(__file__).parents[2] / '.git').exists()\n"
+            )
+            environment = {
+                name: value
+                for name, value in os.environ.items()
+                if not name.startswith("GIT_")
+            }
+            environment[RUN_TESTS.PROJECTED_REPOSITORY_ENVIRONMENT] = str(
+                projection
+            )
+
+            result = subprocess.run(
+                [os.sys.executable, str(projected_runner)],
+                cwd=projection,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("tests: 1/1 files passed", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

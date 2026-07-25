@@ -82,6 +82,18 @@ Ran 18 tests in 0.826s
 OK
 ```
 
+The panel for `971b82c8011ccda18fdd55e975a57ede4e1c2638` reached a two-to-one
+approval majority, but its blast-radius dissent reproduced failure when the runner
+recursed from its metadata-free projection. The fallback now requires an exact
+inherited projection-root match and excludes Git metadata and symlink traversal.
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 19 tests in 1.476s
+
+OK
+```
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

@@ -40,6 +40,9 @@ symlink-creation limitation and may require Developer Mode or WSL.
       values and the caller home used by non-Git tools remain available.
 - [x] A test that invokes the repository runner recursively reuses the original Git
       executable instead of stacking wrappers with the parent runner's isolated home.
+- [x] A recursively invoked runner recognizes only its exact inherited projection
+      root, re-enumerates it without Git metadata or symlink traversal, and runs its
+      own projected tests successfully.
 - [x] One repository projection is materialized for the suite, including every
       discovered ignored/generated test with its sibling support tree, and removed
       when the runner exits.

@@ -33,10 +33,7 @@ a bare-shaped ancestor; ordinary projected roots remain available for an explici
 The enumeration overrides `core.excludesFile` with the platform null file, so global
 Git configuration cannot remove inputs from the view. Repository-relative test reads
 keep their prior shape without recursively copying ignored dependency trees or
-restoring ambient Git discovery. The child points `HOME` and `XDG_CONFIG_HOME` at the
-scratch root, disables system configuration, and uses the platform null file as its
-global configuration, so a caller's hooks path or repository template cannot become
-executable test behavior. Because the supported Git baseline predates
+restoring ambient Git discovery. Because the supported Git baseline predates
 `GIT_CONFIG_GLOBAL`, the test `PATH` starts with a disposable wrapper that gives Git
 alone an empty home/XDG config and disables system config; non-Git tools retain the
 caller's normal home. Resolved caller name/email values are passed through explicit
@@ -51,7 +48,10 @@ discoverable metadata layout, including bare repositories and linked-worktree ad
 directories. Ordinary directories require only the filesystem walk, not one Git
 process each. The repository view is materialized once per suite, bounds disk usage to
 one projection, and preserves the runner's prior cross-test working-tree semantics
-without multiplying repository-sized copy I/O.
+without multiplying repository-sized copy I/O. A recursively invoked runner inherits
+the exact projected-root marker; only when that marker resolves to its current
+metadata-free repository may enumeration fall back from `git ls-files` to a
+non-symlink-following filesystem walk that excludes every `.git` case variant.
 
 ### Option C — require each test to clean its own environment
 

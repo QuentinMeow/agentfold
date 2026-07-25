@@ -38,6 +38,7 @@ GIT_IDENTITY_CONFIG = (
     ("user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"),
 )
 REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
+PROJECTED_REPOSITORY_ENVIRONMENT = "AGENTFOLD_TEST_VIEW_ROOT"
 
 
 def git_local_environment_names():
@@ -156,6 +157,13 @@ def repository_view_paths(child_environment, repository=None):
         stderr=subprocess.PIPE,
     )
     if result.returncode:
+        projected_root = child_environment.get(PROJECTED_REPOSITORY_ENVIRONMENT)
+        if (
+            result.returncode == 128
+            and projected_root
+            and Path(projected_root).resolve() == repository.resolve()
+        ):
+            return filesystem_view_paths(repository)
         detail = os.fsdecode(result.stderr).strip()
         suffix = f": {detail}" if detail else ""
         raise RuntimeError(f"could not enumerate the repository test view{suffix}")
@@ -164,6 +172,30 @@ def repository_view_paths(child_environment, repository=None):
         for raw_path in result.stdout.split(b"\0")
         if raw_path
     )
+
+
+def filesystem_view_paths(repository):
+    """Enumerate an already sanitized projection without following symlinks."""
+    repository = Path(repository).resolve()
+    relative_paths = set()
+    for current_root, directory_names, file_names in os.walk(
+        str(repository),
+        followlinks=False,
+    ):
+        current = Path(current_root)
+        for directory_name in tuple(directory_names):
+            directory = current / directory_name
+            if directory_name.casefold() == ".git":
+                directory_names.remove(directory_name)
+            elif directory.is_symlink():
+                relative_paths.add(directory.relative_to(repository))
+                directory_names.remove(directory_name)
+        for file_name in file_names:
+            if file_name.casefold() != ".git":
+                relative_paths.add(
+                    (current / file_name).relative_to(repository)
+                )
+    return tuple(sorted(relative_paths))
 
 
 def path_crosses_symlink(path, repository=None):
@@ -382,6 +414,7 @@ def main():
             child_environment,
             additional_paths=test_support_paths(test_files),
         )
+        child_environment[PROJECTED_REPOSITORY_ENVIRONMENT] = str(test_cwd)
         for test, rel in zip(test_files, relative_tests):
             result = subprocess.run(
                 [sys.executable, str(test_cwd / rel)],

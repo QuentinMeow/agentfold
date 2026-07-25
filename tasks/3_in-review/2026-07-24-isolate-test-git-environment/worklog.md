@@ -166,3 +166,8 @@
   uses a case-folded `HEAD` prefilter—the required Git-directory marker—then runs the
   exact probe only for candidates; the regression uses canonical metadata names and
   proves 100 ordinary directories launch no extra Git process.
+- The next panel majority approved, but the blast-radius dissent reproduced an
+  end-to-end nested-runner failure: the inner process saw the metadata-free projection
+  as its repository and still required `git ls-files`. The child now carries an exact
+  projected-root marker. Only a matching non-Git root may use the metadata-pruning
+  filesystem enumerator, and a real subprocess regression proves recursive execution.
