@@ -148,3 +148,7 @@
   component and could remain active when copied below the suite root. The completed
   projection now finds and seals every bare-shaped directory without following
   symlinks, not only the root.
+- The next panel found two candidate-detection gaps: metadata names are
+  case-insensitive on the default macOS filesystem, and a bare repository does not
+  require a config file. Candidate names are now case-folded and the exact Git probe
+  runs whenever a directory has `HEAD` plus `objects` or `refs`.

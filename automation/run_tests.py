@@ -302,10 +302,11 @@ def seal_bare_repository_views(destination, child_environment):
             for name in directory_names
             if not (current / name).is_symlink()
         ]
+        folded_directories = {name.casefold() for name in directory_names}
+        folded_files = {name.casefold() for name in file_names}
         if (
-            "HEAD" in file_names
-            and "config" in file_names
-            and ("objects" in directory_names or "refs" in directory_names)
+            "head" in folded_files
+            and ("objects" in folded_directories or "refs" in folded_directories)
         ):
             seal_bare_repository_view(current, child_environment)
 

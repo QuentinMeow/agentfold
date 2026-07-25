@@ -236,10 +236,9 @@ class RunTestsIsolationTests(unittest.TestCase):
                 "VALUE = 'generated test'\n"
             )
             ignored_bare = repository / "generated/tests/bare-fixture"
-            (ignored_bare / "objects").mkdir(parents=True)
+            (ignored_bare / "OBJECTS").mkdir(parents=True)
             (ignored_bare / "refs").mkdir()
-            (ignored_bare / "HEAD").write_text("ref: refs/heads/main\n")
-            (ignored_bare / "config").write_text("[core]\n\tbare = true\n")
+            (ignored_bare / "head").write_text("ref: refs/heads/main\n")
             (nested_repository / "tracked.txt").write_text("nested\n")
             symlinks_supported = True
             try:
@@ -289,9 +288,8 @@ class RunTestsIsolationTests(unittest.TestCase):
                     destination,
                     clean_environment,
                     additional_paths=(
-                        Path("generated/tests/bare-fixture/HEAD"),
-                        Path("generated/tests/bare-fixture/config"),
-                        Path("generated/tests/bare-fixture/objects"),
+                        Path("generated/tests/bare-fixture/OBJECTS"),
+                        Path("generated/tests/bare-fixture/head"),
                         Path("generated/tests/bare-fixture/refs"),
                         Path("generated/tests/helper.py"),
                         Path("generated/tests/test_ignored.py"),

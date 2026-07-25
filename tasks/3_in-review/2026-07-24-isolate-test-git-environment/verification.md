@@ -54,6 +54,11 @@ bare-repository fixture below the test directory remained active even without a
 `.git` component. The completed projection now seals every bare-shaped directory
 without following symlinks, and the focused 17-test regression passes.
 
+The panel for `8a92afcb1883c840d77c92faf57401070b91fe0f` found that bare candidate
+detection was case-sensitive and incorrectly required a config file. Detection now
+case-folds metadata names and probes every directory with `HEAD` plus `objects` or
+`refs`; the focused 17-test regression passes.
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count
