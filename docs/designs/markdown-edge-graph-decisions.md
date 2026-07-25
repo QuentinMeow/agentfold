@@ -170,6 +170,8 @@ pair plus its shared commit subjects did not.
   measured to be the wrong signal.
 - **Or:** build the schema directly.
 
+A: Let's do recommended
+
 ### ☐ N2. Adopt the three-way join as the product?
 
 `confirmed` (declared and co-changed) / `undeclared` (co-changed, nothing declared — the
@@ -179,6 +181,8 @@ aspirational). This is the reflexion model, a thirty-year-old primitive, not an 
 - **Recommended:** yes — the delta between declared intent and mined reality is more
   informative than either alone, and it's what a shipping commercial product does.
 - **Or:** report the two separately and let the reader join them.
+
+A: Let's do recommended
 
 ### ☐ N3. The accepted/rejected ledger — in or out?
 
@@ -192,6 +196,8 @@ one-line reason), so a dismissal is durable and never re-surfaces.
   rejection rate *is* the false-positive rate, so the check measures its own usefulness.
 - **Or:** out, and accept re-proposals every run.
 
+A: Let's do recommended
+
 ### ☐ N4. Reinstate `references`? (reverses your earlier D4)
 
 With one-way edges the reason I dropped it is gone — impact filters by relation, so it's
@@ -201,6 +207,8 @@ inert there, costs two lines, and populates the map you want to render.
   forbidden.
 - **Or:** keep it dropped.
 
+A: Let's do recommended
+
 ### ☐ N5. Freshness: clause-scoped git debt?
 
 - **Recommended:** clause-scoped review debt (§3.5) — derived each run, closes automatically
@@ -208,6 +216,8 @@ inert there, costs two lines, and populates the map you want to render.
 - **Or:** an absolute re-review date per edge, the mechanism this repo already runs on memory
   entries. Can't detect a target changing, but can't thrash.
 - **Or:** nothing mechanical; `Update-when` stays advisory prose.
+
+If it cost a lot of AI tokens to do it, then don't do it automatically, we just put re-review date, or nothing mechanical (we want to allow user to choose). The best is to allow all 3 of them, and users can configure it for every folder independently. (each run vs. review window vs advisory only). By default use window of 7 days.
 
 ### ☐ N6. Commit the generated graph file, or generate on demand?
 
@@ -222,6 +232,8 @@ The reviews disagreed, so this is genuinely yours.
 - *A conflict-deadlock concern was raised and resolved:* the writer refuses only when a file
   it **reads** differs between index and worktree, not the file it writes.
 
+A: use recommended approach
+
 ### ☐ N7. Cap edges per file, or chase coverage?
 
 Prose degrades to formula — all twelve mandatory `Core fit` justifications in this repo read
@@ -232,6 +244,8 @@ deterministic check.** The only real defence is volume low enough that a human r
   incomplete graph that says so in every answer.
 - **Or:** chase coverage, and accept that some of the prose is decoration.
 
+A: use recommended approach, but allow exceptions to go beyound regular limits, but agent need to supply why this file needs to get beyond regular cap and why decoupling it would be worse.
+
 ### ☐ N8. Retry closure and the third gate state?
 
 - Review debt closes **automatically** when the dependent is next edited, or **explicitly**
@@ -240,6 +254,8 @@ deterministic check.** The only real defence is volume low enough that a human r
   names the finding, so an agent is never stranded by a finding whose fix belongs to another
   task. Without it the blocking tier becomes a hook-bypass factory.
 - **Recommended:** both. **Or:** blockers must always be fixed in place.
+
+A: use recommended approach
 
 ---
 
