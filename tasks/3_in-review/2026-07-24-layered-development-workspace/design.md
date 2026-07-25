@@ -1,6 +1,6 @@
 # Design notes — layered development workspace
 
-**Status:** exploring
+**Status:** decided for the reversible first slice; the broader topology remains a proposal
 
 ## Problem
 
@@ -32,15 +32,15 @@ per-path provenance and base digests. This gives the strongest explicit separati
 can treat stale overrides as conflicts, but editing, rename/delete routing, regeneration,
 watchers, and source-control UX require significant custom machinery.
 
-### Option C — private integration history with a sealed public publisher
+### Option C — private integration source with admitted sessions and a sealed publisher
 
-Use one ordinary private integration checkout whose history contains the admitted
-public base plus private commits. Same-path customizations, search, editors, tests,
-three-way merges, blame, and review all work natively. Publish public changes only
-through a physically separate clean clone/object store that receives sanitized content
-or patches, never by pushing the private integration branch. This has the best everyday
-UX, but requires strict destination identity and a semantic instruction-admission gate
-because Git can auto-merge authoritative changes without a textual conflict.
+Use one private integration repository whose history contains the admitted public base
+plus private commits, then launch normal editors/tests/Git behavior only through a
+supervised manifest-bound session. Publish public changes only through a physically
+separate clean object store that receives a sealed projection, never by pushing the
+private integration branch. This preserves native same-path and Git UX while making
+direct source access explicitly unsupported; strict destination identity and semantic
+instruction admission remain separate gates.
 
 ### Option D — resolver-native layering
 
@@ -56,13 +56,18 @@ renames, and team collaboration cumbersome. A union mount gives a compelling fil
 illusion, but upper-layer shadowing is not conflict resolution, Git ownership is
 ambiguous, and portable macOS/Linux behavior becomes provider-specific.
 
-## Provisional direction
+## Chosen direction
 
-Carry Option C forward as the everyday versioned-content model, inside a non-Git
-workspace envelope with physically separate restricted/raw/temp sibling roots. Add the
-provenance manifest and status-board ideas from Option B, use resolver-native merging
-only for schemas that declare it, and use a physically separate clean public publisher.
-This is a research hypothesis, not an accepted one-way-door decision.
+Carry Option C forward as the versioned-content source model, inside a non-Git workspace
+envelope with supervised admitted sessions and physically separate restricted/raw/temp
+sibling roots. Add the provenance manifest and status-board ideas from Option B, use
+resolver-native merging only for schemas that declare it, and use a physically separate
+clean public publisher. The complete proposal, operational matrix, trust claims, and
+failure states live in `docs/designs/layered-development-workspace.md`.
+
+This task implements only the manually invoked read-only topology inspector. The
+manifest, repository creation/migration, mounts, export envelope, capability boundary,
+and publication remain separately reviewed follow-up work.
 
 The effective-instruction algorithm must apply provenance before position. Hard safety
 constraints compose monotonically; a private customization cannot weaken the public
@@ -78,7 +83,7 @@ expose a public fallback.
 **Repository substitution:** pass — any adopted public/private project faces the same local composition and leak problem
 **User-global writes:** none
 **Why AgentFold core:** folder-as-a-service, instruction provenance, queue interaction, and safe autonomous publication are harness-wide concerns
-**Thin adapter:** none; platform-specific mounts or sandboxes, if ever added, remain optional adapters
+**Thin adapter:** none
 
 ## Research anchors
 
