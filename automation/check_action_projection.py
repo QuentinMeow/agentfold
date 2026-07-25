@@ -18,6 +18,7 @@ from markdown_semantics import (
     MARKDOWN_LINK_RE,
     markdown_links,
     normalized_action_tokens,
+    render_inline_code,
     rendered_human_text,
     semantic_text,
     strip_default_ignorable_characters,
@@ -964,6 +965,18 @@ def section_entries(body):
 def prose_without_links(entry):
     """Return visible prose outside Markdown links and code examples."""
     clean = strip_indented_code(strip_inline_code(semantic_text(entry)))
+    return MARKDOWN_LINK_RE.sub("", clean)
+
+
+def copied_prose_without_links(entry):
+    """Return visible prose outside Markdown links, keeping code-span contents.
+
+    Verbatim-copy comparisons normalize both sides through `render_inline_code`,
+    the same view `normalized_action_tokens` already uses for Action labels, so a
+    field carrying an inline code span stays comparable instead of being blanked
+    on one side only. Detection-only callers keep `prose_without_links`.
+    """
+    clean = strip_indented_code(render_inline_code(semantic_text(entry)))
     return MARKDOWN_LINK_RE.sub("", clean)
 
 
