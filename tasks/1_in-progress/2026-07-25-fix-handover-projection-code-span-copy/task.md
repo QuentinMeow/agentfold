@@ -1,10 +1,10 @@
 # Let a handover project a queue field that contains an inline code span
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-25, by claude, from the end-of-session handover of the markdown edge graph Stage 0 work — `docs/designs/markdown-edge-graph.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md`, `message-queue/needs-agent/requests/non-blocking-pick-up-fix-handover-projection-code-span-copy.md`
+**Queue actions:** `message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md`
 
 ## Goal
 
