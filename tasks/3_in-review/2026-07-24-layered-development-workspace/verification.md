@@ -117,3 +117,18 @@ No output; exit status 0.
 
 The concrete findings and repairs for every blocked revision are appended in
 `worklog.md`; no blocked verdict is counted toward acceptance.
+
+## Recovered-candidate no-Git marker regression
+
+```
+$ python3 automation/tests/test_inspect_workspace_boundaries.py
+.........................s..............
+----------------------------------------------------------------------
+Ran 40 tests in 11.897s
+
+OK (skipped=1)
+```
+
+The new case constructs an external `HEAD` plus `commondir` administration layout,
+confirms that Git discovers it from a nested raw root, and confirms the inspector
+rejects that root as Git-contained.

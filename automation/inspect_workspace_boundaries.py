@@ -444,7 +444,8 @@ def reject_repository_markers(candidate, label):
     head = path_entry_exists(candidate / "HEAD", label)
     objects = path_entry_exists(candidate / "objects", label)
     config = path_entry_exists(candidate / "config", label)
-    if head and (objects or config):
+    common = path_entry_exists(candidate / "commondir", label)
+    if head and (objects or config or common):
         raise InspectionError(f"{label} is inside or is a Git repository")
 
 

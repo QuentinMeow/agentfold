@@ -156,3 +156,18 @@
 - Added one canonical future merge review for the rebuilt exact range. Its binding
   remains artifact-pending until the preceding isolation PR merges and this PR's actual
   base is stable.
+
+## 2026-07-24 — recovered-candidate no-Git marker repair (codex)
+
+- A fresh three-lens review of recovered candidate `84f1edc` approved the queue and
+  contract shape but independently reproduced the same executable and confidentiality
+  blocker: an external linked-worktree administration directory containing `HEAD` and
+  `commondir` remained Git-discoverable while the no-Git ancestor check reported it
+  safe.
+- Rebuilt the task-pure layer onto the refreshed isolation branch, treated
+  `HEAD` plus `commondir` as a direct repository marker, and added an end-to-end
+  regression that first proves Git discovery succeeds from the declared raw root and
+  then requires the inspector to fail closed.
+- The focused inspector suite now passes 40 cases with the existing non-UTF-8 path-byte
+  case skipped on this macOS Git. A fresh immutable-candidate panel remains required
+  before publication.

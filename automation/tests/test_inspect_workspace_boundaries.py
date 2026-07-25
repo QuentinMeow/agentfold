@@ -488,6 +488,41 @@ class WorkspaceBoundaryInspectorTests(unittest.TestCase):
         self.assert_safety_limits(result, "failed")
         self.assertIn("raw-root is inside or is a Git repository", result.stdout)
 
+    def test_non_git_zone_nested_in_external_common_directory_layout_fails(self):
+        integration = self.initialize_repository("private-integration")
+        publisher = self.initialize_repository("clean-publisher")
+        common_repository = self.scratch / "external-common.git"
+        run_git("init", "--bare", "-q", common_repository)
+        linked_admin = self.scratch / "external-linked-admin"
+        linked_admin.mkdir()
+        (linked_admin / "HEAD").write_text("ref: refs/heads/main\n")
+        (linked_admin / "commondir").write_text(f"{common_repository}\n")
+        raw = linked_admin / "nested" / "raw"
+        raw.mkdir(parents=True)
+
+        discovered = subprocess.run(
+            ["git", "-C", str(raw), "rev-parse", "--git-dir"],
+            env=clean_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        self.assertEqual(0, discovered.returncode, discovered.stderr)
+        self.assertEqual(str(linked_admin), discovered.stdout.strip())
+
+        result = self.run_inspector(
+            "--integration-root",
+            integration,
+            "--publisher-root",
+            publisher,
+            "--raw-root",
+            raw,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assert_safety_limits(result, "failed")
+        self.assertIn("raw-root is inside or is a Git repository", result.stdout)
+
     def test_missing_private_integration_requires_explicit_public_only_mode(self):
         publisher = self.initialize_repository("clean-publisher")
 
