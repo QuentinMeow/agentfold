@@ -17,19 +17,19 @@ remove obsolete branch snapshots after their useful content is preserved.
 
 ## Acceptance criteria
 
-- [ ] Record the exact merged PR bases, heads, merge commits, and ordering, including
+- [x] Record the exact merged PR bases, heads, merge commits, and ordering, including
       that PRs #8 and #10 landed on PR #7's branch after PR #7 had already reached main.
-- [ ] Publish the six layered-workspace backlog tasks, six pickup requests, and six
+- [x] Publish the six layered-workspace backlog tasks, six pickup requests, and six
       dependency actions from immutable source `9d7bb1d`, then resolve the publication
       request and its parent-task backlink.
-- [ ] Bind artifact-pending human review records to their admitted immutable ranges
+- [x] Bind artifact-pending human review records to their admitted immutable ranges
       without inferring approval from a GitHub merge.
-- [ ] Refresh affected task worklogs and `roadmap/current-state.md` so they no longer
+- [x] Refresh affected task worklogs and `roadmap/current-state.md` so they no longer
       describe completed publication or merge operations as pending.
-- [ ] Remove audited obsolete worktrees and local/remote branches while retaining
+- [x] Remove audited obsolete worktrees and local/remote branches while retaining
       the remote PR #5 branch as rejected-scope audit
       history.
-- [ ] The reconciler and repository test runner pass with real output recorded, and
+- [x] The reconciler and repository test runner pass with real output recorded, and
       the primary checkout finishes clean on current `main`.
 
 ## Links
