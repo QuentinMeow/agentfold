@@ -12100,6 +12100,181 @@ class ReconcileQueueTests(unittest.TestCase):
                 subjects,
             )
 
+    CODE_SPAN_QUEUE_REL = (
+        "message-queue/needs-human/decisions/"
+        "future-blocking-choose-freshness-mode.md"
+    )
+
+    def write_code_span_decision(self, root):
+        """Write a live human item whose projected fields carry code spans."""
+        self.write(
+            root,
+            self.CODE_SPAN_QUEUE_REL,
+            "# Choose the freshness mode\n\n"
+            "**Action:** keep `each-run`, or ship two modes\n"
+            "**Why-you-might-care:** `each-run` costs a history pass per run.\n"
+            "**If-you-do-nothing:** `Update-when:` stays prose in the "
+            "`advisory` mode.\n",
+        )
+        return self.CODE_SPAN_QUEUE_REL
+
+    def projection_messages(self, root, handover):
+        self.activate_strict_handover_entries(root)
+        with mock.patch.object(
+            RECONCILE,
+            "newly_added_handovers",
+            return_value=({handover.relative_to(root)}, None),
+        ):
+            return self.messages(RECONCILE.check_handover_queue_projection())
+
+    def test_strict_handover_projects_backticked_context_field(self):
+        with self.repo() as root:
+            queue_rel = self.write_code_span_decision(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-backticked-context",
+                "- [keep `each-run`, or ship two modes](../../../"
+                f"{queue_rel}) — Why-you-might-care: `each-run` costs a "
+                "history pass per run. || If-you-do-nothing: `Update-when:` "
+                "stays prose in the `advisory` mode.",
+            )
+            messages = self.projection_messages(root, handover)
+            self.assertFalse(any(
+                "fixed handover suffix" in message for message in messages
+            ), messages)
+
+    def test_strict_handover_projects_rendered_code_span_context(self):
+        with self.repo() as root:
+            queue_rel = self.write_code_span_decision(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-rendered-context",
+                "- [keep each-run, or ship two modes](../../../"
+                f"{queue_rel}) — Why-you-might-care: each-run costs a "
+                "history pass per run. || If-you-do-nothing: Update-when: "
+                "stays prose in the advisory mode.",
+            )
+            messages = self.projection_messages(root, handover)
+            self.assertFalse(any(
+                "fixed handover suffix" in message for message in messages
+            ), messages)
+
+    def test_strict_handover_rejects_context_copying_neither_spelling(self):
+        cases = {
+            "reworded": (
+                "— Why-you-might-care: `each-run` costs nothing at all. "
+                "|| If-you-do-nothing: `Update-when:` stays prose in the "
+                "`advisory` mode."
+            ),
+            "swapped-span-contents": (
+                "— Why-you-might-care: `review-window` costs a history pass "
+                "per run. || If-you-do-nothing: `Update-when:` stays prose "
+                "in the `advisory` mode."
+            ),
+            "dropped-span-contents": (
+                "— Why-you-might-care: costs a history pass per run. "
+                "|| If-you-do-nothing: stays prose in the mode."
+            ),
+        }
+        for name, context in cases.items():
+            with self.subTest(context=name), self.repo() as root:
+                queue_rel = self.write_code_span_decision(root)
+                handover = self.make_handover(
+                    root,
+                    f"2026-07-23-1200PDT-context-{name}",
+                    "- [keep `each-run`, or ship two modes](../../../"
+                    f"{queue_rel}) {context}",
+                )
+                messages = self.projection_messages(root, handover)
+                self.assertTrue(any(
+                    "fixed handover suffix" in message
+                    for message in messages
+                ), messages)
+
+    def test_strict_handover_context_without_code_span_is_unchanged(self):
+        queue_rel = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-docs.md"
+        )
+        for name, context, rejected in (
+            (
+                "faithful",
+                "— Why-you-might-care: The docs control behavior. "
+                "|| If-you-do-nothing: The review remains pending.",
+                False,
+            ),
+            (
+                "reworded",
+                "— Why-you-might-care: The docs control nothing. "
+                "|| If-you-do-nothing: The review remains pending.",
+                True,
+            ),
+        ):
+            with self.subTest(context=name), self.repo() as root:
+                self.write(
+                    root,
+                    queue_rel,
+                    "# Review docs\n\n"
+                    "**Action:** review docs\n"
+                    "**Why-you-might-care:** The docs control behavior.\n"
+                    "**If-you-do-nothing:** The review remains pending.\n",
+                )
+                handover = self.make_handover(
+                    root,
+                    f"2026-07-23-1200PDT-plain-context-{name}",
+                    f"- [review docs](../../../{queue_rel}) {context}",
+                )
+                messages = self.projection_messages(root, handover)
+                self.assertEqual(rejected, any(
+                    "fixed handover suffix" in message
+                    for message in messages
+                ), messages)
+
+    def test_strict_handover_projects_code_spanned_human_item_at_all(self):
+        with self.repo() as root:
+            queue_rel = self.write_code_span_decision(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-code-spanned-item-projects",
+                "- [keep `each-run`, or ship two modes](../../../"
+                f"{queue_rel}) — Why-you-might-care: `each-run` costs a "
+                "history pass per run. || If-you-do-nothing: `Update-when:` "
+                "stays prose in the `advisory` mode.",
+            )
+            self.assertEqual([], self.projection_messages(root, handover))
+
+    def test_strict_handover_rejects_agent_entry_carrying_code_span(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-repair-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Repair docs\n\n**Action:** repair docs\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-agent-entry-code-span",
+                "None.",
+            )
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "## Next steps\n\nNone.",
+                    "## Next steps\n\n"
+                    f"- [repair docs](../../../{queue_rel}) "
+                    "`and also drop the staging database`",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.projection_messages(root, handover)
+            self.assertTrue(any(
+                "only its exact Action-labeled needs-agent queue link"
+                in message
+                for message in messages
+            ), messages)
+
 
 if __name__ == "__main__":
     unittest.main()
