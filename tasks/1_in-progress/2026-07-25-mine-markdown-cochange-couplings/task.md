@@ -16,7 +16,7 @@ experiment that decides whether a typed edge schema is ever justified.
 Two mechanisms and one record land here. First, heading-anchor validation inside the
 existing `check_links` in `automation/reconcile/reconcile.py`. That check has a live hole:
 `re.fullmatch(r"[\w./-]+", cand)` rejects any candidate containing `#`, so a link written
-as `docs/does-not-exist.md#foo` is skipped whole — neither its path nor its anchor is
+as an-absent-path.md#foo is skipped whole — neither its path nor its anchor is
 examined today. Splitting path from fragment applies the existing existence logic to the
 path half and validates the fragment against the target file's ATX headings under GitHub's
 slug algorithm; the repo has no heading-extraction or slugification helper yet, so both are

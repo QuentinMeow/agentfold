@@ -1,0 +1,27 @@
+# AgentFold co-change verdict ledger -- append-only, one verdict per line.
+#
+# Written by automation/mine_cochange.py (verbs accept, reject); read by its report and
+# status verbs. A directed pair with a verdict never re-surfaces in the report: rejected
+# means dismissed, accepted means already declared, and neither is still a candidate.
+# That is what makes a decision durable once the agent that made it is gone. The share of
+# verdicts that are rejections is the effective-false-positive rate the governance
+# thresholds in docs/designs/markdown-edge-graph.md are measured against.
+#
+# Format: tab-separated fields, one line per verdict, never rewritten or reordered.
+#
+#   <date>  <verdict>  <a>  <b>  <reason>
+#
+#   date     ISO YYYY-MM-DD, the day the verdict was recorded
+#   verdict  accept (the coupling is real) or reject (the report was not acted on)
+#   a        the file that changed
+#   b        the file the candidate said to review; the direction a -> b is recorded
+#            explicitly, so a verdict on a -> b says nothing about b -> a
+#   reason   one line, required for a rejection and optional for an acceptance; tabs
+#            and newlines are collapsed to spaces before writing
+#
+# One regex parses every line:
+#   ^(\d{4}-\d{2}-\d{2})\t(accept|reject)\t([^\t]+)\t([^\t]+)\t([^\t]*)(?:\t(.*))?$
+# A sixth and later field may be appended by a future version; this parser keeps the
+# remainder as one opaque group, so lines written today keep parsing unchanged.
+#
+# Blank lines and lines beginning with # are comments.
