@@ -30,7 +30,10 @@ What is true today, mapped to the desired-state lines.
   action entry link one live human queue item, and rejects action-like prose outside
   that section. Provider sources always retain an actor-correct version binding even
   when their prose directly links the queue; the GitHub workflow is a thin event
-  adapter. No template↔check drift detection yet.
+  adapter. Both of its admission jobs are currently red on every freshly opened pull
+  request, because the merge revision the payload has not computed yet is read as empty
+  or replaced by the base tip — filed as `2026-07-25-fix-pull-request-admission-event-race`.
+  No template↔check drift detection yet.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet. Each treats the message queue as the
@@ -74,6 +77,21 @@ What is true today, mapped to the desired-state lines.
   backlog with queue-owned pickups and mechanical start dependencies; manifest work
   remains blocked until the parent review is explicitly resolved and the parent task
   reaches done. Admitted sessions, mounts, export, and publication are not yet real.
+- **Markdown edge graph (2026-07-25)**: the owner answered all eight open decisions and
+  they are folded into three ADRs — the accepted architecture in
+  [the edge-graph architecture decision](../memory/decisions/2026-07-25-markdown-edge-graph-architecture.md),
+  plus the repo-root path-type default and the author-one-direction rule. The design is
+  in `docs/designs/markdown-edge-graph.md`. Stage 0 is implemented on pull request 13 and
+  not merged: heading anchors are now validated inside `link-check`, closing a hole where
+  a link carrying a fragment had neither its path nor its anchor checked; a stdlib
+  advisory co-change mining CLI walks git history and always exits 0; and an append-only
+  accept/reject ledger beside it now holds 29 real verdicts. The gating experiment
+  measured 3.4% effective false positives over 29 judged candidates but 10.0% over the
+  default report's top ten, which is the probation trigger, so the verdict of record is
+  to **narrow**: a reduced Stage 2, no Stage 3, half of Stage 4. Two owner decisions on
+  the narrowing are live in `message-queue/needs-human/decisions/`, the Stage 0
+  transcripts are still owed, and mining also surfaced a live drift plus a fivefold
+  restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
