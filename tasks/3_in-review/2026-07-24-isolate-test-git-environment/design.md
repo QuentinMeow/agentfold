@@ -45,11 +45,13 @@ them. The projected test file—not the corresponding absolute path in the real 
 is the child program. Its test directory includes ignored sibling modules and fixtures
 without following directory symlinks, and materialization rejects any target path that
 would traverse a projected symlink. After materialization, Git's exact pinned
-`--git-dir=.` probe checks every non-symlink directory and seals every discoverable
-metadata layout, including bare repositories and linked-worktree admin directories.
-The repository view is materialized once per suite, bounds disk usage to one
-projection, and preserves the runner's prior cross-test working-tree semantics without
-multiplying repository-sized copy I/O.
+`--git-dir=.` probe checks every non-symlink directory containing a case-folded
+`HEAD` entry—the required marker common to Git directory layouts—and seals every
+discoverable metadata layout, including bare repositories and linked-worktree admin
+directories. Ordinary directories require only the filesystem walk, not one Git
+process each. The repository view is materialized once per suite, bounds disk usage to
+one projection, and preserves the runner's prior cross-test working-tree semantics
+without multiplying repository-sized copy I/O.
 
 ### Option C — require each test to clean its own environment
 

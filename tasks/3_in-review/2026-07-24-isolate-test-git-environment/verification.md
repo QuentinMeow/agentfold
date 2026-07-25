@@ -69,6 +69,19 @@ admin directory with `HEAD` plus `commondir` bypassed the remaining shape catalo
 The catalogue is gone: Git's exact pinned probe now checks every non-symlink directory.
 The focused 17-test regression passes with an external-common-directory fixture.
 
+The panel for `7359bcff849ae30df3dcbb8d647deb9d727fff4d` found that an exact probe
+per directory scaled poorly, while a case-variant metadata fixture was not portable to
+case-sensitive Linux. The scan now uses a case-folded `HEAD` prefilter and exact Git
+probe only for candidates. The canonical fixture and a 100-ordinary-directory probe
+regression pass:
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 18 tests in 0.826s
+
+OK
+```
+
 A fresh blast-radius review of
 `238c00e9d090d831bc2170ac83c8597e3e92b105` blocked publication because the first
 repair removed normal config-backed identity, retained repository-size-times-test-count

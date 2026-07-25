@@ -243,13 +243,13 @@ class RunTestsIsolationTests(unittest.TestCase):
             try:
                 os.symlink(
                     str(external_objects),
-                    str(ignored_bare / "OBJECTS"),
+                    str(ignored_bare / "objects"),
                 )
             except (NotImplementedError, OSError):
                 bare_objects_symlinked = False
-                (ignored_bare / "OBJECTS").mkdir()
+                (ignored_bare / "objects").mkdir()
             (ignored_bare / "refs").mkdir()
-            (ignored_bare / "head").write_text("ref: refs/heads/main\n")
+            (ignored_bare / "HEAD").write_text("ref: refs/heads/main\n")
             common_repository = Path(scratch) / "common-repository.git"
             subprocess.run(
                 ["git", "init", "--bare", "-q", str(common_repository)],
@@ -315,8 +315,8 @@ class RunTestsIsolationTests(unittest.TestCase):
                     destination,
                     clean_environment,
                     additional_paths=(
-                        Path("generated/tests/bare-fixture/OBJECTS"),
-                        Path("generated/tests/bare-fixture/head"),
+                        Path("generated/tests/bare-fixture/HEAD"),
+                        Path("generated/tests/bare-fixture/objects"),
                         Path("generated/tests/bare-fixture/refs"),
                         Path("generated/tests/helper.py"),
                         Path("generated/tests/linked-admin/HEAD"),
@@ -374,7 +374,7 @@ class RunTestsIsolationTests(unittest.TestCase):
                 self.assertTrue(
                     (
                         destination
-                        / "generated/tests/bare-fixture/OBJECTS"
+                        / "generated/tests/bare-fixture/objects"
                     ).is_symlink(),
                 )
             nested_bare_git = subprocess.run(
@@ -710,6 +710,23 @@ class RunTestsIsolationTests(unittest.TestCase):
                                 self.assertEqual(0, RUN_TESTS.main())
 
             self.assertFalse(marker.exists())
+
+    def test_metadata_probe_runs_only_for_directories_with_head_entries(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            destination = Path(scratch) / "view"
+            for index in range(100):
+                (destination / f"ordinary-{index}").mkdir(parents=True)
+            candidate = destination / "candidate"
+            candidate.mkdir()
+            (candidate / "HEAD").write_text("ref: refs/heads/main\n")
+
+            with mock.patch.object(
+                RUN_TESTS,
+                "seal_bare_repository_view",
+            ) as seal:
+                RUN_TESTS.seal_bare_repository_views(destination, {})
+
+            seal.assert_called_once_with(candidate, {})
 
 
 if __name__ == "__main__":

@@ -302,7 +302,8 @@ def seal_bare_repository_views(destination, child_environment):
             for name in directory_names
             if not (current / name).is_symlink()
         ]
-        seal_bare_repository_view(current, child_environment)
+        if any(name.casefold() == "head" for name in file_names):
+            seal_bare_repository_view(current, child_environment)
 
 
 def materialize_repository_view(

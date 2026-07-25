@@ -160,3 +160,9 @@
   linked-worktree admin directory can use only `HEAD` plus `commondir`. The heuristic
   was removed: the completed projection now runs Git's exact pinned probe on every
   non-symlink directory, which covers present and future metadata layouts.
+- The next blast-radius review measured the every-directory probe at roughly 13
+  seconds for 2,021 directories, while the correctness review found that the
+  case-variant fixture assertion was invalid on case-sensitive Linux. The final scan
+  uses a case-folded `HEAD` prefilter—the required Git-directory marker—then runs the
+  exact probe only for candidates; the regression uses canonical metadata names and
+  proves 100 ordinary directories launch no extra Git process.
