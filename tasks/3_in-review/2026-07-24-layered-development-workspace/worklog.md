@@ -171,3 +171,17 @@
 - The focused inspector suite now passes 40 cases with the existing non-UTF-8 path-byte
   case skipped on this macOS Git. A fresh immutable-candidate panel remains required
   before publication.
+
+## 2026-07-24 — recovered-candidate final review (codex)
+
+- Corrected the reconstructed review-submission commit so its rationale and
+  `task: 2026-07-24-layered-development-workspace` trailer satisfy the Git audit
+  contract without changing the candidate tree.
+- Three independent reviewers unanimously approved immutable candidate
+  `8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b`: executable correctness retested the
+  external `HEAD` plus `commondir` case, the contract review rechecked every commit and
+  queue/task boundary, and the blast-radius review rechecked confidentiality,
+  portability, compatibility, and operator impact.
+- Range-level core scope and the reconciler passed with zero findings. The exact
+  candidate contains no backlog task or agent-request changes, preserving all 18
+  follow-up coordination records for the post-parent live coordination lane.

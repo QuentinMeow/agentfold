@@ -132,3 +132,16 @@ OK (skipped=1)
 The new case constructs an external `HEAD` plus `commondir` administration layout,
 confirms that Git discovers it from a nested raw root, and confirms the inspector
 rejects that root as Git-contained.
+
+## Recovered publication review verdicts
+
+**Reviewed revision:** `8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b`
+
+- executable correctness lens — approved
+- control-plane contract lens — approved
+- confidentiality and blast-radius lens — approved
+
+The exact range
+`c154d87737de7c141784e13f3eb520664b9838f6...8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b`
+also passed the core-scope check, reconciler, and diff hygiene; it contained no changed
+paths under `tasks/0_backlog/` or `message-queue/needs-agent/requests/`.
