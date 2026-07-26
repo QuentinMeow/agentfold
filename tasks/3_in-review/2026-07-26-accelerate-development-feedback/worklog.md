@@ -57,3 +57,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   seconds, the reconciler had zero findings, range core-scope passed for four paths,
   diff hygiene was clean, the narrow probe took 1.06 seconds, and a cross-cutting
   selection chose all 11 test files.
+
+## 2026-07-26 — publication-records (codex)
+
+- Pushed the reviewed task branch and opened draft pull request
+  https://github.com/QuentinMeow/agentfold/pull/16 from
+  the task/2026-07-26-accelerate-development-feedback branch into `main`; its remote body
+  contains the complete file map.
+- The GitHub connector returned HTTP 403 while publishing, so the authenticated GitHub
+  CLI completed the same branch and draft-pull-request operation instead.
+- The known fresh-pull-request admission-event race initially showed two red checks
+  while reconciliation and tests were still running. It is tracked by the existing
+  [task](../../0_backlog/2026-07-25-fix-pull-request-admission-event-race/task.md) and
+  [pickup request](../../../message-queue/needs-agent/requests/non-blocking-pick-up-fix-pull-request-admission-event-race.md);
+  this publication did not originate another action.

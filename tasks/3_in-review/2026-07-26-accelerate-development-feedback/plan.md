@@ -14,5 +14,5 @@
       suite; take only adjacent low-risk optimizations supported by the evidence.
 - [x] 7. Run independent correctness and blast-radius review over one immutable revision,
       then repair every accepted finding.
-- [ ] 8. Record exact verification output, publish the task branch, and open one draft
+- [x] 8. Record exact verification output, publish the task branch, and open one draft
       pull request with a complete file map.
