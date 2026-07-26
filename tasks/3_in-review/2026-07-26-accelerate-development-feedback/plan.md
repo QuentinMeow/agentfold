@@ -12,7 +12,7 @@
       fallback cases, and unchanged full-suite behavior.
 - [x] 6. Measure before and after runtime for the reconciler, narrow hook path, and full
       suite; take only adjacent low-risk optimizations supported by the evidence.
-- [ ] 7. Run independent correctness and blast-radius review over one immutable revision,
+- [x] 7. Run independent correctness and blast-radius review over one immutable revision,
       then repair every accepted finding.
 - [ ] 8. Record exact verification output, publish the task branch, and open one draft
       pull request with a complete file map.

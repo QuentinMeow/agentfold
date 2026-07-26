@@ -43,3 +43,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   changes the fingerprint between reads and proves the fallback.
 - The repaired focused suite passed 34 tests, and the real alternate-index narrow probe
   remained green at 1.27 seconds.
+
+## 2026-07-26 — verification-closeout (codex)
+
+- The first repair commit attempt failed after 223.59 seconds because its new test
+  fixture attempted Git discovery inside the metadata-free isolated test projection.
+  Replacing that test-only dependency with a stable projected file preserved the
+  fingerprint assertion, and the retry passed all 11 test files in 214.62 seconds.
+- The correctness recheck returned `approve` for
+  `66e87ed33fec8c58d9c5a563432dc7294e5f975a` after confirming both prior defects were
+  fixed and running all 34 focused tests in 1.486 seconds.
+- A separate Terra verification returned `approve`: 34 focused tests passed in 1.937
+  seconds, the reconciler had zero findings, range core-scope passed for four paths,
+  diff hygiene was clean, the narrow probe took 1.06 seconds, and a cross-cutting
+  selection chose all 11 test files.

@@ -147,6 +147,25 @@ tests: 1/1 files passed
 test elapsed: 1.27s
 ```
 
+## Failed repair commit gate
+
+The first repair commit attempt exposed a test-fixture error: its setup tried to find a
+Git index from inside the intentionally metadata-free isolated projection. The fixture
+was changed to use a stable projected regular file as its mocked fingerprint source,
+then the focused and complete suites passed.
+
+```
+$ git commit -m "Close staged test selection gaps" -m "Select complete discovered service test scopes and reject mixed index snapshots by fingerprinting the selected index across Git reads." -m "task: 2026-07-26-accelerate-development-feedback"
+fatal: not a git repository (or any of the parent directories): .git
+FAILED (errors=15)
+FAIL automation/tests/test_run_tests.py
+tests: 10/11 files passed
+test elapsed: 223.59s
+```
+
 ## Review verdicts (when a review was explicitly run)
 
-**Reviewed revision:** pending
+**Reviewed revision:** 66e87ed33fec8c58d9c5a563432dc7294e5f975a
+
+- correctness / independent agent: pass — verdict approve; both prior findings were fixed; all 34 focused tests passed in 1.486 seconds
+- blast radius / Terra agent: pass — verdict approve; all 34 focused tests passed in 1.937 seconds; reconciler reported 0 findings; core-scope range admission passed for 4 paths; diff hygiene was clean; the narrow probe passed in 1.06 seconds; and a cross-cutting selection chose the full 11-file suite
