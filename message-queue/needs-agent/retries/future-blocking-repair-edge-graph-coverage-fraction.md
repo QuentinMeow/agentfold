@@ -1,6 +1,6 @@
 # Edge-graph coverage fraction is stated inconsistently
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-25, by Codex while explaining the pending edge-graph artifact-storage decision
 **Action:** When folding the artifact-storage decision, replace “a sixth of the repository” with the exact measured coverage — 17 of 172 files, or 9.9% — and preserve that number in the resulting decision record.
 **Check:** manual
