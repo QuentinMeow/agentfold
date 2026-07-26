@@ -71,3 +71,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   [task](../../0_backlog/2026-07-25-fix-pull-request-admission-event-race/task.md) and
   [pickup request](../../../message-queue/needs-agent/requests/non-blocking-pick-up-fix-pull-request-admission-event-race.md);
   this publication did not originate another action.
+
+## 2026-07-26 — publication-closeout (codex)
+
+- Reworded the pull-request title/body presentation so the action-projection checker
+  treats the summary as descriptive rather than as an undeclared directive. The exact
+  local pull-request invocation returned zero findings, and the remote admission and
+  review checks became green.
+- Integrated current `main` through ordered, non-rewriting commits `97bee9c` and
+  `aca3c2c`, preserving the two lifecycle edges after a one-step merge failed its exact
+  boundary. The failed merge is retained only in local backup ref
+  codex/failed-integration-b89bae6.
+- At the exact integration boundary, reconciliation reported zero findings, core scope
+  passed for four paths, and the full hook passed all 11 test files in 221.17 seconds.
+- Refreshed remote workflow run 30200443994 succeeded with repository tests green. Its
+  superseded predecessor 30200420795 had one transient `test_mine_cochange.py`
+  TemporaryDirectory cleanup error (`Directory not empty: objects`); the preceding
+  local full run and the refreshed CI run passed, so no queue action was created.
