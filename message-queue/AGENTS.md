@@ -56,5 +56,5 @@ repository. Extra nesting is invalid, so filenames remain discoverable recursive
   range. Future timing survives response; cleanup needs a fresh crossed receipt/evidence.
   UTC dates are clock-checked; other timing is agent-attested absent a validating
   adapter; rejection withdraws its target, while changes requested creates re-review.
-- Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
+- Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. An ordinary agent request may resolve with evidence that landed after its unique current-incarnation creation commit, including before its claim, only when every declared evidence file differs from its creation bytes at both deletion and final admission; all other endpoints keep deletion-edge evidence. Git history archives resolutions.
 - Transcribe chat responses before use; timing never changes after that response.

@@ -97,6 +97,27 @@ class ReconcileQueueTests(unittest.TestCase):
         self.git(root, "config", "user.name", "Test")
         self.git(root, "config", "user.email", "test@example.invalid")
 
+    @staticmethod
+    def ordinary_request_text(evidence_paths, status="open"):
+        evidence = "; ".join(f"`{path}`" for path in evidence_paths)
+        return (
+            "# Repair\n\n"
+            f"**Status:** {status}\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** repair the source\n"
+            f"**Full context:** `{evidence_paths[0]}`\n"
+            f"**Resolution evidence:** {evidence}\n"
+            "**Blocks now:** transition:merge\n"
+        )
+
+    @staticmethod
+    def queue_resolution_findings():
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return list(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
     def test_github_adapter_handles_root_push_and_always_runs_tests(self):
         workflow = (
             MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
@@ -2732,6 +2753,735 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
             finally:
                 RECONCILE.stop_git_snapshot_cache()
+
+    def test_ordinary_request_accepts_surviving_change_before_claim_staged_and_range(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            base = self.git(root, "rev-parse", "HEAD")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            source.write_text("# Repaired before claim\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "repair before claim")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            self.assertEqual([], self.queue_resolution_findings())
+            self.git(root, "commit", "-m", "resolve repair")
+            head = self.git(root, "rev-parse", "HEAD")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    self.assertEqual(
+                        [], list(RECONCILE.check_queue_resolution())
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+    def test_ordinary_request_accepts_surviving_change_after_claim(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Repaired after claim\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "repair after claim")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            self.assertEqual([], self.queue_resolution_findings())
+
+    def test_ordinary_request_rejects_pre_creation_or_same_commit_evidence(self):
+        for same_commit in (False, True):
+            with self.subTest(same_commit=same_commit), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root, "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Broken\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate queue")
+                source.write_text("# Changed too early\n", encoding="utf-8")
+                if not same_commit:
+                    self.git(root, "add", "docs/source.md")
+                    self.git(root, "commit", "-m", "change before action")
+                path = (
+                    "message-queue/needs-agent/requests/blocking-repair.md"
+                )
+                item = self.write(
+                    root, path,
+                    self.ordinary_request_text(["docs/source.md"]),
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file repair")
+                item.write_text(
+                    self.ordinary_request_text(
+                        ["docs/source.md"], "in-repair"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim repair")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                findings = self.queue_resolution_findings()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_ordinary_request_rejects_change_reverted_to_creation_bytes(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Baseline\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            source.write_text("# Temporary change\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "change evidence")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Baseline\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_ordinary_request_requires_every_evidence_path_to_change(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            changed = self.write(root, "docs/changed.md", "# Broken\n")
+            self.write(root, "docs/unchanged.md", "# Unchanged\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path,
+                self.ordinary_request_text(
+                    ["docs/changed.md", "docs/unchanged.md"]
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(
+                    ["docs/changed.md", "docs/unchanged.md"], "in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            changed.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("`docs/unchanged.md`", findings[0].message)
+
+    def test_ordinary_request_accepts_evidence_absent_at_creation_then_created(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/result.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/result.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            self.write(root, "docs/result.md", "# Result\n")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            self.assertEqual([], self.queue_resolution_findings())
+
+    def test_ordinary_request_follows_unambiguous_rename_to_creation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            original = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-repair.md"
+            )
+            item = self.write(
+                root, original,
+                self.ordinary_request_text(["docs/source.md"])
+                .replace(
+                    "**Blocks now:** transition:merge",
+                    "**If unanswered:** leave the source unchanged",
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            renamed = (
+                "message-queue/needs-agent/requests/blocking-repair.md"
+            )
+            destination = root / renamed
+            item.rename(destination)
+            destination.write_text(
+                destination.read_text(encoding="utf-8").replace(
+                    "**If unanswered:** leave the source unchanged",
+                    "**Blocks now:** transition:merge",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "escalate repair")
+            destination.write_text(
+                destination.read_text(encoding="utf-8").replace(
+                    "**Status:** open", "**Status:** in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", renamed)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            self.assertEqual([], self.queue_resolution_findings())
+
+    def test_ordinary_request_rejects_duplicate_creation_roots_across_merge(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            trunk = self.git(root, "branch", "--show-current")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            text = self.ordinary_request_text(["docs/source.md"])
+
+            self.git(root, "checkout", "-b", "left")
+            self.write(root, path, text)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file left action")
+            self.git(root, "checkout", "-b", "right", trunk)
+            self.write(root, path, text)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file right action")
+            self.git(root, "checkout", "left")
+            self.git(root, "merge", "--no-ff", "right", "-m", "join actions")
+            item = root / path
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim joined action")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("found 2 creation roots", findings[0].message)
+
+    def test_merge_rename_cannot_reset_creation_evidence_baseline(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Creation bytes\n")
+            old_path = (
+                "message-queue/needs-agent/requests/blocking-old-name.md"
+            )
+            item = self.write(
+                root, old_path,
+                self.ordinary_request_text(["docs/source.md"]),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            trunk = self.git(root, "branch", "--show-current")
+            self.git(root, "checkout", "-b", "right")
+            source.write_text("# Merge-time bytes\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "right evidence")
+            self.git(root, "checkout", trunk)
+            self.write(root, "left.md", "# Left\n")
+            self.git(root, "add", "left.md")
+            self.git(root, "commit", "-m", "left work")
+            self.git(root, "merge", "--no-ff", "--no-commit", "right")
+            new_path = (
+                "message-queue/needs-agent/requests/blocking-new-name.md"
+            )
+            destination = root / new_path
+            item.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge and rename action")
+            destination.write_text(
+                self.ordinary_request_text(
+                    ["docs/source.md"], "in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", new_path)
+            self.git(root, "commit", "-m", "claim renamed action")
+            source.write_text("# Creation bytes\n", encoding="utf-8")
+            destination.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_merge_collects_exact_and_renamed_parent_action_roots(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            trunk = self.git(root, "branch", "--show-current")
+            left_path = (
+                "message-queue/needs-agent/requests/blocking-left.md"
+            )
+            right_path = (
+                "message-queue/needs-agent/requests/blocking-right.md"
+            )
+            action = self.ordinary_request_text(["docs/source.md"])
+            self.git(root, "checkout", "-b", "left")
+            self.write(root, left_path, action)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file left action")
+            self.git(root, "checkout", "-b", "right", trunk)
+            self.write(root, right_path, action)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file right action")
+            self.git(root, "checkout", "left")
+            self.git(root, "merge", "--no-ff", "--no-commit", "right")
+            (root / right_path).unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "join under left path")
+            item = root / left_path
+            item.write_text(
+                self.ordinary_request_text(
+                    ["docs/source.md"], "in-repair"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", left_path)
+            self.git(root, "commit", "-m", "claim joined action")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("found 2 creation roots", findings[0].message)
+
+    def test_range_rejects_evidence_reverted_after_deletion(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Baseline\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            base = self.git(root, "rev-parse", "HEAD")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "repair source")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete resolved action")
+            source.write_text("# Baseline\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "revert evidence")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_range_rejects_evidence_changed_only_after_deletion(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Baseline\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue")
+            base = self.git(root, "rev-parse", "HEAD")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete without evidence")
+            source.write_text("# Changed later\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "change evidence later")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths(self):
+        for invalid in ("../outside.md", "../outside file.md"):
+            with self.subTest(invalid=invalid), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root, "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Broken\n")
+                path = (
+                    "message-queue/needs-agent/requests/blocking-repair.md"
+                )
+                text = self.ordinary_request_text(
+                    ["docs/source.md"]
+                ).replace(
+                    "`docs/source.md`\n**Blocks now:",
+                    f"`docs/source.md`; `{invalid}`\n**Blocks now:",
+                )
+                item = self.write(root, path, text)
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file repair")
+                item.write_text(
+                    text.replace("**Status:** open", "**Status:** in-repair"),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim repair")
+                source.write_text("# Repaired\n", encoding="utf-8")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                findings = self.queue_resolution_findings()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn("missing non-queue", findings[0].message)
+
+    def test_creation_lineage_rejects_shallow_history_boundary(self):
+        text = self.ordinary_request_text(["docs/source.md"])
+        commit = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="tree deadbeef\nparent " + "a" * 40 + "\n\n",
+            stderr="",
+        )
+        with mock.patch.object(
+            RECONCILE, "revision_parents", return_value=[]
+        ), mock.patch.object(RECONCILE.subprocess, "run", return_value=commit):
+            with self.assertRaisesRegex(
+                RECONCILE.GitSnapshotError, "shallow or incomplete"
+            ):
+                RECONCILE.queue_action_creation_roots(
+                    "message-queue/needs-agent/requests/blocking-repair.md",
+                    text,
+                    "b" * 40,
+                )
+
+    def test_ordinary_request_rejects_missing_or_nonregular_final_evidence(self):
+        for final_kind in ("missing", "symlink"):
+            with self.subTest(final_kind=final_kind), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root, "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                source = self.write(root, "docs/source.md", "# Broken\n")
+                path = (
+                    "message-queue/needs-agent/requests/blocking-repair.md"
+                )
+                item = self.write(
+                    root, path,
+                    self.ordinary_request_text(["docs/source.md"]),
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file repair")
+                item.write_text(
+                    self.ordinary_request_text(
+                        ["docs/source.md"], "in-repair"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim repair")
+                source.unlink()
+                if final_kind == "symlink":
+                    source.symlink_to("../target.md")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                findings = self.queue_resolution_findings()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_ordinary_request_uses_staged_evidence_not_worktree_bytes(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Baseline\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Indexed repair\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            item.unlink()
+            self.git(root, "add", path)
+            source.write_text("# Baseline\n", encoding="utf-8")
+
+            self.assertEqual([], self.queue_resolution_findings())
+
+            source.write_text("# Worktree-only repair\n", encoding="utf-8")
+            self.git(root, "reset", "docs/source.md")
+            findings = self.queue_resolution_findings()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("no surviving post-creation", findings[0].message)
+
+    def test_ordinary_request_git_read_failure_fails_closed(self):
+        text = self.ordinary_request_text(
+            ["docs/source.md"], "in-repair"
+        )
+        with mock.patch.object(
+            RECONCILE,
+            "queue_action_creation_roots",
+            return_value=[("created", "queue.md", text)],
+        ), mock.patch.object(
+            RECONCILE,
+            "git_tree_path_entry",
+            return_value=("100644", "blob", "a" * 40),
+        ), mock.patch.object(
+            RECONCILE,
+            "git_artifact_bytes_at",
+            return_value=b"baseline",
+        ), mock.patch.object(
+            RECONCILE,
+            "candidate_path_entry",
+            return_value=("100644", "blob", "b" * 40),
+        ), mock.patch.object(
+            RECONCILE,
+            "candidate_artifact_bytes",
+            side_effect=RECONCILE.GitSnapshotError("unreadable final evidence"),
+        ):
+            with self.assertRaisesRegex(
+                RECONCILE.GitSnapshotError, "unreadable final evidence"
+            ):
+                RECONCILE.ordinary_request_resolution_evidence_problem(
+                    "message-queue/needs-agent/requests/blocking-repair.md",
+                    text,
+                    "prior",
+                    "final",
+                )
+
+    def test_ordinary_request_still_rejects_non_status_only_claim(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Broken\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair")
+                .replace("repair the source", "repair and publish the source"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "malformed claim")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            findings = self.queue_resolution_findings()
+            self.assertTrue(findings, self.messages(findings))
+            self.assertTrue(any(
+                "no committed one-line" in finding.message
+                or "live queue action was rewritten" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_only_ordinary_requests_use_creation_baseline_evidence(self):
+        request = self.ordinary_request_text(
+            ["docs/source.md"], "in-repair"
+        )
+        human = (
+            "# Answer\n\n**Status:** folding\n"
+            "**Resolution evidence:** `docs/source.md`\n"
+            "**Your answer:** approved\n"
+        )
+        custom = request
+        with mock.patch.object(
+            RECONCILE, "claimed_lifecycle_problem", return_value=None
+        ), mock.patch.object(
+            RECONCILE, "resolution_evidence_problem", return_value="legacy"
+        ) as legacy, mock.patch.object(
+            RECONCILE,
+            "ordinary_request_resolution_evidence_problem",
+            return_value="creation",
+        ) as creation, mock.patch.object(
+            RECONCILE, "pickup_completed", return_value=True
+        ) as pickup:
+            self.assertEqual(
+                "creation",
+                RECONCILE.queue_deletion_problem(
+                    "message-queue/needs-agent/requests/blocking-repair.md",
+                    request, "prior", "final",
+                ),
+            )
+            self.assertEqual(
+                "legacy",
+                RECONCILE.queue_deletion_problem(
+                    "message-queue/needs-agent/retries/blocking-repair.md",
+                    request, "prior", "final",
+                ),
+            )
+            self.assertEqual(
+                "legacy",
+                RECONCILE.queue_deletion_problem(
+                    "message-queue/needs-agent/custom/blocking-repair.md",
+                    custom, "prior", "final",
+                ),
+            )
+            self.assertEqual(
+                "legacy",
+                RECONCILE.queue_deletion_problem(
+                    "message-queue/needs-human/decisions/blocking-answer.md",
+                    human, "prior", "final",
+                ),
+            )
+            pickup_text = request.replace(
+                "**Blocks now:** transition:merge",
+                "**Request kind:** task-pickup\n"
+                "**Blocks now:** transition:merge",
+            )
+            self.assertIsNone(RECONCILE.queue_deletion_problem(
+                "message-queue/needs-agent/requests/"
+                "non-blocking-pick-up.md",
+                pickup_text, "prior", "final",
+            ))
+            self.assertEqual(1, creation.call_count)
+            self.assertEqual(3, legacy.call_count)
+            pickup.assert_called_once()
 
     def test_deleted_review_response_must_match_requested_revision(self):
         with self.repo() as root:

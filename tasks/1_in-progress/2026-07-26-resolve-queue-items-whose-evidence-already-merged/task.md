@@ -71,9 +71,10 @@ proves, not how.
 
 ## Acceptance criteria
 
-- [ ] WHEN an item's resolution evidence changed in any commit at or after its committed
-      `open` to `in-repair` claim edge, and no later commit reverted that change, THE CHECK
-      SHALL admit the deletion
+- [ ] WHEN an ordinary agent request's resolution evidence differs from its unique current-
+      incarnation creation snapshot at both the deletion edge and final admitted candidate,
+      and its separate committed `open` to `in-repair` claim is valid, THE CHECK SHALL admit
+      the deletion; evidence may therefore land before or after the claim
 - [ ] WHEN an item's resolution evidence never changed in any commit anywhere in its
       lineage, THE CHECK SHALL still report
       `deleted unresolved queue item: resolution evidence was not created or changed`
@@ -99,6 +100,11 @@ proves, not how.
 - [ ] `design.md` states which lineage window was chosen and what a reverted evidence change
       does under it, and carries a complete `## Core fit` receipt, because
       `automation/reconcile/reconcile.py` is a core path
+
+The creation-snapshot wording above intentionally corrects the earlier claim-edge wording.
+The checker proves byte persistence, not semantic causality: a later unrelated byte change is
+indistinguishable from the requested repair, while a later distinct action that legitimately
+restores the creation bytes in the same admitted range can fail closed.
 
 ## Links
 

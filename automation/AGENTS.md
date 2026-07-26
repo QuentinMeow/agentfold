@@ -25,7 +25,7 @@ Rules:
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Timing only escalates while live and freezes on human response.
   `queue-resolution` checks staged/range deletion against its claim and evidence;
-  historical future reviews survive escalation. Task reviews bind local artifacts;
+  historical future reviews survive escalation. Ordinary requests require unique-incarnation post-creation evidence; other evidence stays edge-scoped. Task reviews bind local artifacts;
   merge reviews bind Git ranges. Cleanup proves a still-crossed receipt or withdrawn
   target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
   checks reached dates, not `non-blocking-*`; event boundaries require reclassification.

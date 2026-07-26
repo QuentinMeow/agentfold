@@ -2483,6 +2483,44 @@ def matching_lineage_paths(parent, revision, path, identity):
     ]
 
 
+def matching_disappearing_lineage_paths(parent, revision, path, identity):
+    """Find one unambiguous same-identity path disappearing on an edge."""
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "-z", parent, "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not follow queue action lineage at {parent}"
+        ))
+    matches = []
+    for candidate, mode in parse_git_tree_records(tree.stdout).items():
+        if candidate == path or mode not in ("100644", "100755") \
+                or not governed_queue_path(candidate) \
+                or git_artifact_bytes_at(revision, candidate) is not None:
+            continue
+        artifact = git_artifact_bytes_at(parent, candidate)
+        if artifact is None:
+            continue
+        candidate_text = decode_utf8_artifact(
+            artifact, f"`{candidate}` at {parent}"
+        )
+        if queue_action_identity(candidate, candidate_text) == identity:
+            matches.append((candidate, candidate_text))
+    if len(matches) > 1:
+        raise GitSnapshotError(
+            f"queue action lineage is ambiguous at {parent}: "
+            + ", ".join(candidate for candidate, _text in matches)
+        )
+    return matches
+
+
 def queue_lineage_revision_snapshots(path, text, prior_revision):
     """Yield revision, path, and text across one unambiguous action lineage."""
     identity = queue_action_identity(path, text)
@@ -2629,6 +2667,172 @@ def resolution_evidence_problem(text, prior_revision, revision):
         return (
             "resolution evidence was not created or changed in the deletion commit: "
             + ", ".join(f"`{path}`" for path in unchanged)
+        )
+    return None
+
+
+def queue_action_creation_roots(path, text, prior_revision):
+    """Return the unique-root candidates for this immutable action incarnation."""
+    identity = queue_action_identity(path, text)
+    stack = [(prior_revision, path, text)]
+    seen = set()
+    roots = []
+    while stack:
+        current_revision, current_path, current = stack.pop()
+        state = (current_revision, current_path)
+        if state in seen:
+            continue
+        seen.add(state)
+        if queue_action_identity(current_path, current) != identity:
+            continue
+        parents = revision_parents(
+            current_revision, f"creation history for `{current_path}`"
+        )
+        commit = subprocess.run(
+            [
+                "git", "--no-replace-objects", "cat-file", "-p",
+                current_revision,
+            ],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if commit.returncode:
+            raise GitSnapshotError(git_failure(
+                commit,
+                f"could not verify complete creation history for `{current_path}`",
+            ))
+        object_parents = [
+            line[len("parent "):]
+            for line in commit.stdout.splitlines()
+            if line.startswith("parent ")
+        ]
+        if set(parents) != set(object_parents):
+            raise GitSnapshotError(
+                f"creation history for `{current_path}` is shallow or incomplete "
+                f"at {current_revision}"
+            )
+        predecessors = []
+        for parent in parents:
+            artifact = git_artifact_bytes_at(parent, current_path)
+            exact = False
+            if artifact is not None:
+                previous = decode_utf8_artifact(
+                    artifact, f"`{current_path}` at {parent}"
+                )
+                if queue_action_identity(current_path, previous) == identity:
+                    predecessors.append((parent, current_path, previous))
+                    exact = True
+            if len(parents) > 1 or not exact:
+                predecessors.extend(
+                    (parent, previous_path, previous)
+                    for previous_path, previous
+                    in matching_disappearing_lineage_paths(
+                        parent, current_revision, current_path, identity
+                    )
+                )
+        if predecessors:
+            stack.extend(predecessors)
+        else:
+            roots.append((current_revision, current_path, current))
+    return roots
+
+
+def ordinary_request_resolution_evidence_problem(
+        path, text, prior_revision, revision):
+    """Require every evidence path to retain a post-creation byte delta."""
+    value = text_fields(text).get("Resolution evidence", "")
+    token = re.compile(
+        r"(?:`([^`\n]*)`|\[[^\]\n]+\]\((?:<([^<>\n]*)>|([^()\s,]+))\))"
+    )
+    declared = []
+    offset = 0
+    malformed = False
+    while offset < len(value):
+        whitespace = re.match(r"\s*", value[offset:])
+        offset += len(whitespace.group(0))
+        matched = token.match(value, offset)
+        if matched is None:
+            malformed = True
+            break
+        declared.append(next(
+            group for group in matched.groups() if group is not None
+        ))
+        offset = matched.end()
+        whitespace = re.match(r"\s*", value[offset:])
+        offset += len(whitespace.group(0))
+        if offset == len(value):
+            break
+        if value[offset] not in ",;":
+            malformed = True
+            break
+        offset += 1
+    paths = []
+    for candidate in declared:
+        candidate = candidate.split("#", 1)[0]
+        candidate_path = Path(candidate)
+        if not candidate or candidate_path.is_absolute() \
+                or any(character.isspace() for character in candidate) \
+                or ".." in candidate_path.parts \
+                or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate) \
+                or candidate == "message-queue" \
+                or candidate.startswith("message-queue/"):
+            malformed = True
+            continue
+        paths.append(candidate)
+    paths = sorted(set(paths))
+    if malformed or not paths:
+        return "missing non-queue **Resolution evidence:** file path"
+    roots = queue_action_creation_roots(path, text, prior_revision)
+    if len(roots) != 1:
+        return (
+            "queue action creation lineage is not unique: found "
+            f"{len(roots)} creation roots"
+        )
+    created_at, _created_path, _created_text = roots[0]
+    candidates = [revision]
+    if CHANGE_RANGE is not None:
+        admitted = (
+            CHANGE_RANGE[len("root:"):]
+            if CHANGE_RANGE.startswith("root:")
+            else CHANGE_RANGE.split("...", 1)[1]
+        )
+        if admitted not in candidates:
+            candidates.append(admitted)
+    elif revision is not None:
+        # A committed deletion found on a merge side must also survive in the
+        # captured staged index that is being admitted.
+        candidates.append(None)
+    unresolved = []
+    for evidence_path in paths:
+        baseline_entry = git_tree_path_entry(created_at, evidence_path)
+        if baseline_entry is not None \
+                and baseline_entry[:2] not in {
+                    ("100644", "blob"), ("100755", "blob")
+                }:
+            unresolved.append(evidence_path)
+            continue
+        baseline = (
+            None
+            if baseline_entry is None
+            else git_artifact_bytes_at(created_at, evidence_path)
+        )
+        if any(
+            candidate_path_entry(candidate, evidence_path) is None
+            or candidate_path_entry(candidate, evidence_path)[:2] not in {
+                ("100644", "blob"), ("100755", "blob")
+            }
+            or candidate_artifact_bytes(evidence_path, candidate) is None
+            or candidate_artifact_bytes(evidence_path, candidate) == baseline
+            for candidate in candidates
+        ):
+            unresolved.append(evidence_path)
+    if unresolved:
+        return (
+            "resolution evidence has no surviving post-creation byte change: "
+            + ", ".join(f"`{evidence_path}`" for evidence_path in unresolved)
         )
     return None
 
@@ -3590,9 +3794,13 @@ def queue_deletion_problem(path, text, prior_revision, revision):
     lifecycle = claimed_lifecycle_problem(
         path, text, prior_revision, actor, leaf
     )
-    return lifecycle or resolution_evidence_problem(
-        text, prior_revision, revision
-    )
+    if lifecycle:
+        return lifecycle
+    if actor == "needs-agent" and leaf == "requests":
+        return ordinary_request_resolution_evidence_problem(
+            path, text, prior_revision, revision
+        )
+    return resolution_evidence_problem(text, prior_revision, revision)
 
 
 def check_queue_resolution():
