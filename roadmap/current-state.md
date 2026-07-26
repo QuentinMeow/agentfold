@@ -88,10 +88,16 @@ What is true today, mapped to the desired-state lines.
   accept/reject ledger beside it now holds 29 real verdicts. The gating experiment
   measured 3.4% effective false positives over 29 judged candidates but 10.0% over the
   default report's top ten, which is the probation trigger, so the verdict of record is
-  to **narrow**: a reduced Stage 2, no Stage 3, half of Stage 4. Two owner decisions on
-  the narrowing are live in `message-queue/needs-human/decisions/`, the Stage 0
-  transcripts are still owed, and mining also surfaced a live drift plus a fivefold
-  restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
+  to **narrow**: a reduced Stage 2, no Stage 3, half of Stage 4. The owner answered both
+  narrowing decisions and they are folded into
+  [the freshness-mode amendment](../memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md)
+  and [the artifact-storage amendment](../memory/decisions/2026-07-25-edge-graph-artifact-storage.md):
+  the `each-run` freshness mode and the committed graph artifact are both recorded as not
+  implemented rather than rejected, each with a stated revisit trigger. The two deferred
+  stage requests that asserted those decisions were still open were retired and re-filed
+  with corrected context, because a live queue item's action text cannot be edited in
+  place. The Stage 0 transcripts are still owed, and mining also surfaced a live drift
+  plus a fivefold restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
