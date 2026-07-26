@@ -29,6 +29,7 @@ if str(AUTOMATION) not in sys.path:
 from check_action_projection import (
     LIST_ITEM_RE,
     action_like_rendered_prose,
+    copied_prose_without_links,
     parse_task_queue_action_value,
     prose_without_links,
     section_entries,
@@ -42,6 +43,7 @@ from markdown_semantics import (
     markdown_link_destinations,
     markdown_links,
     normalized_action_tokens,
+    render_inline_code,
     rendered_human_text,
     semantic_text,
 )
@@ -6317,9 +6319,10 @@ def handover_projection_entries(
             if actor == "needs-human"
             else ""
         )
+        expected_context = render_inline_code(expected_context)
         for context in (
-            prose_without_links(entry),
-            prose_without_links(rendered_human_text(entry)),
+            copied_prose_without_links(entry),
+            copied_prose_without_links(rendered_human_text(entry)),
         ):
             marker = LIST_ITEM_RE.match(context)
             if marker:
