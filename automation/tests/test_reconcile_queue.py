@@ -12215,6 +12215,237 @@ class ReconcileQueueTests(unittest.TestCase):
 
             self.assertEqual([], list(RECONCILE.check_links()))
 
+    @staticmethod
+    def creation_topology_messages(findings):
+        return [
+            finding.message for finding in findings
+            if "created directly in" in finding.message
+        ]
+
+    def activate_task_admission(self, root):
+        self.init_git(root)
+        self.write(
+            root,
+            "tasks/AGENTS.md",
+            "**Task admission schema:** v1\n",
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "activate task admission")
+        return self.git(root, "branch", "--show-current")
+
+    def file_unclaimed_backlog_task(self, root):
+        task = self.make_task(root, "0_backlog", "none")
+        record = task / "task.md"
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                "**Claimed-by:** test", "**Claimed-by:** unclaimed"
+            ),
+            encoding="utf-8",
+        )
+        return task
+
+    def advance_task_record(self, root, task, status):
+        moved = root / "tasks" / status / task.name
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        task.rename(moved)
+        record = moved / "task.md"
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                "**Claimed-by:** unclaimed", "**Claimed-by:** test"
+            ),
+            encoding="utf-8",
+        )
+        for needed, heading in (("plan.md", "Plan"), ("worklog.md", "Worklog")):
+            (moved / needed).write_text(
+                f"# {heading}\n", encoding="utf-8"
+            )
+        if status in ("3_in-review", "4_done"):
+            (moved / "verification.md").write_text(
+                "# Verification\n", encoding="utf-8"
+            )
+        return moved
+
+    def admission_findings_over_range(self, base, head):
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                return list(RECONCILE.check_task_admission_history())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_task_admission_accepts_a_merge_parent_that_predates_a_task(self):
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            self.git(root, "checkout", "-b", "cut-before-the-task")
+            self.write(root, "side.md", "# Side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "side work")
+
+            self.git(root, "checkout", trunk)
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            self.advance_task_record(root, backlog, "1_in-progress")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "claim the task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(
+                root, "merge", "--no-ff", "-m", "merge the earlier cut",
+                "cut-before-the-task",
+            )
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertEqual(
+                [],
+                self.creation_topology_messages(findings),
+                self.messages(findings),
+            )
+
+    def test_task_admission_still_rejects_a_linear_in_progress_creation(self):
+        with self.repo() as root:
+            self.activate_task_admission(root)
+            base = self.git(root, "rev-parse", "HEAD")
+            self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create the task in progress")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(base, head)
+            self.assertTrue(any(
+                "new task:2026-07-23-example was created directly in "
+                "1_in-progress" in message
+                for message in self.creation_topology_messages(findings)
+            ), self.messages(findings))
+
+    def test_task_admission_still_rejects_a_merge_creation_no_parent_had(self):
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            self.git(root, "checkout", "-b", "unrelated-side")
+            self.write(root, "side.md", "# Side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "side work")
+
+            self.git(root, "checkout", trunk)
+            self.write(root, "left.md", "# Left\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "left work")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(
+                root, "merge", "--no-ff", "--no-commit", "unrelated-side",
+            )
+            self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge and create the task")
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertTrue(any(
+                "new task:2026-07-23-example was created directly in "
+                "1_in-progress" in message
+                for message in self.creation_topology_messages(findings)
+            ), self.messages(findings))
+
+    def test_task_admission_accepts_a_merge_claiming_a_backlog_task(self):
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            self.git(root, "checkout", "-b", "cut-before-the-task")
+            self.write(root, "side.md", "# Side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "side work")
+
+            self.git(root, "checkout", trunk)
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(
+                root, "merge", "--no-ff", "--no-commit", "cut-before-the-task",
+            )
+            self.advance_task_record(root, backlog, "1_in-progress")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge and claim the task")
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertEqual(
+                [],
+                self.creation_topology_messages(findings),
+                self.messages(findings),
+            )
+            self.assertEqual([], [
+                finding.message for finding in findings
+                if "jumped from" in finding.message
+            ], self.messages(findings))
+
+    def test_task_admission_still_rejects_an_illegal_merge_advance(self):
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            self.git(root, "checkout", "-b", "cut-before-the-task")
+            self.write(root, "side.md", "# Side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "side work")
+
+            self.git(root, "checkout", trunk)
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(
+                root, "merge", "--no-ff", "--no-commit", "cut-before-the-task",
+            )
+            self.advance_task_record(root, backlog, "4_done")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge and finish the task")
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertTrue(any(
+                "task:2026-07-23-example jumped from 0_backlog to 4_done"
+                in finding.message
+                for finding in findings
+            ), self.messages(findings))
+            self.assertEqual(
+                [],
+                self.creation_topology_messages(findings),
+                self.messages(findings),
+            )
+
+    def test_task_admission_keeps_the_adoption_escape_for_a_first_task(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "pre-adoption history")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            self.make_task(root, "1_in-progress", "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "adopt task admission with a task")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(base, head)
+            self.assertEqual(
+                [],
+                self.creation_topology_messages(findings),
+                self.messages(findings),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
