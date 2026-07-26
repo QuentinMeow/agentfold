@@ -10,7 +10,7 @@
       verification boundaries without claiming a staged-snapshot guarantee.
 - [x] 5. Add focused regression coverage for narrow selection, dependency unions,
       fallback cases, and unchanged full-suite behavior.
-- [ ] 6. Measure before and after runtime for the reconciler, narrow hook path, and full
+- [x] 6. Measure before and after runtime for the reconciler, narrow hook path, and full
       suite; take only adjacent low-risk optimizations supported by the evidence.
 - [ ] 7. Run independent correctness and blast-radius review over one immutable revision,
       then repair every accepted finding.

@@ -25,3 +25,7 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Added focused selector and isolation regression coverage. A temporary-index command
   exercised the real narrow path in 1.15 seconds and the reconciler reported zero
   findings before the implementation commit.
+- The implementation commit's pre-commit gate correctly fell back on the cross-cutting
+  staged paths and passed all 11 test files in 218.90 seconds. A timed post-change
+  reconciler run took 5.43 seconds, so no broader reconciler redesign was justified in
+  this bounded change.
