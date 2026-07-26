@@ -100,7 +100,7 @@ not an edit to that file. The recommendation rests on two measured facts rather 
 preference: zero items filed across the whole history of the strongest case, and silence on
 the one live drift inside that history.
 
-**Your answer:** ______
+**Your answer:** choose B for now, but keep A in mind (or mark as not implemented), we might review it later.
 
 <!-- A concrete response is immutable. If it is a counter-question, fold the answer into
 Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->

@@ -97,7 +97,7 @@ because a decided ADR is never rewritten. The case for B is that the six mechani
 plan's largest single cost, the graph they would protect currently spans 17 of 172 files,
 and the direction B forecloses is the cheaper one to reverse.
 
-**Your answer:** ______
+**Your answer:** choose B for now, but keep A in mind (or mark as not implemented), we might review it later.
 
 <!-- A concrete response is immutable. If it is a counter-question, fold the answer into
 Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->
