@@ -39,6 +39,12 @@ Re-running a failed run does not help: GitHub replays the original webhook paylo
 same empty and stale values return. Only a fresh event recomputes them. The workaround
 used on pull request 13 was to edit the pull-request body to trigger an `edited` event.
 
+The trigger is not limited to `opened`. Pull request 14 hit the identical failure on a
+`synchronize` event, after a push to an already-open pull request, and `edited` cleared it
+there too. So the payload is stale whenever the merge commit has not been recomputed yet,
+which a push causes as surely as an open does; a repair keyed to the `opened` event alone
+would leave the second, more frequent case red.
+
 The consequence is that the two gates which bind pull-request prose and external-source
 bindings to an immutable candidate are red on arrival for every pull request, which
 trains readers to treat a red required check as normal. Retrying by hand is not a fix,
@@ -57,6 +63,9 @@ from a legitimate one.
       body edit, completes both `Authoritative action projection from trusted workflow
       code` and `External source release admission` successfully, and the run URL is
       recorded in `verification.md`
+- [ ] A push to that already-open pull request completes both checks on the resulting
+      `synchronize` run, with no manual event and no re-run, and its run URL is recorded
+      in `verification.md` alongside the `opened` one
 - [ ] WHEN the payload carries no merge revision, THE WORKFLOW SHALL obtain the candidate
       from a provider source that is authoritative at that moment rather than treating the
       base-branch revision as the candidate

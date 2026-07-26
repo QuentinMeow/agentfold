@@ -12,6 +12,7 @@ executes; Python stdlib only, so automation runs on a bare clone.
 | `hooks/pre-commit` | blocks commits when core scope, repository invariants, or tests fail | every commit (installed) |
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
+| `mine_cochange.py` | advisory: ranks Markdown pairs that keep changing together, with their shared commit subjects as evidence; `accept`/`reject` append durable verdicts to `cochange-ledger.txt`, whose rejection rate is the effective-false-positive rate | on demand |
 | `run_tests.py` | runs test files under services, canonical skills, and automation | pre-commit, CI, on demand |
 
 Rules:
@@ -28,9 +29,8 @@ Rules:
   merge reviews bind Git ranges. Cleanup proves a still-crossed receipt or withdrawn
   target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
   checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
-- Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range
-  head remains the candidate; a divergent old-tip snapshot must retain every live action,
-  and an unavailable nonzero old tip fails closed.
+- Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range head remains the candidate;
+  a divergent old-tip snapshot must retain every live action, and an unavailable nonzero old tip fails closed.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned

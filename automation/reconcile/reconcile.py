@@ -5282,6 +5282,16 @@ def task_record_paths_at(revision):
     return records
 
 
+def task_recorded_at_other_parent(task_id, parent, revision):
+    """Return whether another parent of one candidate already recorded a task."""
+    for other in candidate_parent_oids(revision):
+        if other == parent:
+            continue
+        if task_id in task_record_paths_at(other):
+            return True
+    return False
+
+
 def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
@@ -5348,7 +5358,11 @@ def task_topology_problems(parent, revision, adopting=False):
             if adopting or not current:
                 continue
             status, path = current[0]
-            if status != "0_backlog":
+            # A merge parent that predates a task is no lifecycle step for it;
+            # the parent holding the record supplies the validating edge.
+            if status != "0_backlog" and not task_recorded_at_other_parent(
+                task_id, parent, revision
+            ):
                 yield (
                     Path(path),
                     f"new task:{task_id} was created directly in {status}",
@@ -6997,6 +7011,39 @@ def check_memory_index():
                       "run: python3 automation/reconcile/reconcile.py --fix-index")
 
 
+def markdown_headings(text):
+    """Return ATX heading titles in document order."""
+    return [
+        re.sub(r"[ \t]+#+[ \t]*$", "", matched.group(1))
+        for matched in re.finditer(r"^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*$", text, flags=re.M)
+    ]
+
+
+def anchor_slugs(headings):
+    """Return GitHub heading anchors, numbering repeats in document order."""
+    taken, slugs = {}, []
+    for heading in headings:
+        base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        slug = base
+        while slug in taken:
+            taken[base] += 1
+            slug = f"{base}-{taken[base]}"
+        taken[slug] = 0
+        slugs.append(slug)
+    return slugs
+
+
+def anchor_resolves(target, fragment):
+    """Whether a Markdown target defines the anchor; an unreadable target passes."""
+    if target is None or target.suffix != ".md":
+        return True
+    try:
+        text = semantic_text(repo_text(target))
+    except (GitSnapshotError, OSError, UnicodeDecodeError):
+        return True
+    return fragment in anchor_slugs(markdown_headings(text))
+
+
 def check_links():
     for md in live_markdown_files():
         rel = md.relative_to(REPO)
@@ -7026,6 +7073,7 @@ def check_links():
         candidates = set(BACKTICK_RE.findall(text))
         candidates.update(markdown_link_destinations(text))
         for cand in sorted(candidates):
+            cand, _, fragment = cand.partition("#")
             if cand.startswith(LINK_SKIP_PREFIXES) or any(c in cand for c in "*<>{}$"):
                 continue
             if cand.count("/") < 1 or (cand.count("/") == 1 and cand.endswith("/")):
@@ -7035,16 +7083,26 @@ def check_links():
             try:
                 root_target = REPO / cand
                 local_target = (md.parent / cand).resolve()
+                target = None
                 root_exists = repo_artifact_bytes(root_target) is not None \
                     or bool(git_index_entries(cand))
+                if root_exists:
+                    target = root_target
                 local_exists = False
                 try:
                     local_rel = local_target.relative_to(REPO.resolve()).as_posix()
                     local_exists = repo_artifact_bytes(REPO / local_rel) is not None \
                         or bool(git_index_entries(local_rel))
+                    if local_exists and target is None:
+                        target = REPO / local_rel
                 except ValueError:
                     local_exists = local_target.exists()
                 if root_exists or local_exists:
+                    if fragment and not anchor_resolves(target, fragment):
+                        yield Finding("link-check", rel,
+                                      f"`{cand}` has no `{fragment}` heading anchor",
+                                      f"point the link at a heading in `{cand}` or add "
+                                      f"one whose slug is `{fragment}`")
                     continue
             except (OSError, ValueError):
                 pass

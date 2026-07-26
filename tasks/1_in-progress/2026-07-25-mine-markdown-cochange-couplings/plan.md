@@ -18,10 +18,11 @@ written without backticks until they exist, so the `link-check` pass stays hones
       comments cannot donate fake headings. Milestone: a fixture link to an existing file
       with a wrong fragment yields a second, distinct finding that names the fragment, and a
       correct fragment yields nothing.
-- [ ] 4. Cover both halves with unit tests in a new file automation/tests/test_reconcile_links.py.
-      It stays out of `automation/tests/test_reconcile_queue.py`, which alone accounts for
-      roughly 98 seconds of the suite's ~205. Milestone: `python3 automation/run_tests.py`
-      green, with the new file listed in its PASS lines.
+- [ ] 4. Cover both halves with unit tests. Corrected 2026-07-25 to name where they actually
+      landed: the eight anchor tests were appended to `automation/tests/test_reconcile_queue.py`
+      rather than put in a separate file, so they ride the suite's slowest file — roughly 98
+      seconds of the ~205 — instead of avoiding it. Milestone: `python3 automation/run_tests.py`
+      green, with that file in its PASS lines.
 - [ ] 5. Add the mining CLI automation/mine_cochange.py: stdlib only, a `report` verb that
       always exits 0, walking `git log --name-only` over markdown-touching commits, counting
       directed file-pair co-occurrence, and printing pairs at support ≥ 3 commits and

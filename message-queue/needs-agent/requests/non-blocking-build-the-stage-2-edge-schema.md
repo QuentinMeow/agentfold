@@ -1,13 +1,19 @@
 # Build Stage 2 of the edge graph in its reduced, measured form
 
 **Status:** open
-**Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
+**Filed:** 2026-07-25, by claude, from the fold of the two answered edge-graph amendments — `memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md`
 **Action:** Build the typed edge schema in the reduced form the gating experiment supports: the relation vocabulary and its one-question test, one `Because:` line per edge, a clause anchor only where the target has two or more headings, `Update-when:` as prose the query prints, `handbook/` activated alone, and edges authored from the mined candidate list rather than from memory.
 **Full context:** `docs/designs/markdown-edge-graph.md`
 **Resolution evidence:** `roadmap/current-state.md`
 **If unanswered:** No typed edge exists; the mined advisory CLI stays the whole feature and relationships between documents keep being recorded nowhere.
 
 ## What you need to know
+
+This re-files the retired request "Build Stage 2 of the edge graph in its reduced, measured
+form" with its action unchanged and its context corrected. The original was written while
+the freshness decision was still open and named that decision item by path; a live queue
+item's action-defining text cannot be edited in place, so the item was retired and re-filed
+instead.
 
 The gating experiment found exactly one thing mining cannot express, and it is the reason
 this stage survives at all: **the relation type**. All 27 hot-file candidates draw their
@@ -31,9 +37,10 @@ What the same experiment cut from this stage:
   heading. A mandatory anchor has no legal answer there, and 12 of the 29 judged candidates
   (41%) point at that file.
 - **`Update-when:` as printed prose only**, on the relations that already require it. No
-  derived debt is built here; whether any derived-freshness mode ships at all is an open
-  owner decision at
-  `message-queue/needs-human/decisions/future-blocking-keep-or-drop-the-each-run-freshness-mode.md`.
+  derived debt is built here, and that is now settled rather than pending: the `each-run`
+  mode is recorded as not implemented in
+  `memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md`, so the two
+  modes this schema has to serve are the 7-day `review-window` default and `advisory`.
 - **`handbook/` activated alone**, as planned, with edges authored from the ledger's accept
   lines rather than from recollection. Stage 0 recorded 28 accepts, and those accept lines
   are the authoring queue — a fresh report will not re-propose them, because the ledger

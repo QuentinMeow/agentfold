@@ -9,8 +9,10 @@
 ## Goal
 
 A new handover cannot be committed while any live `needs-human/` item carries an inline code
-span in its `Why-you-might-care:` or `If-you-do-nothing:` field. One such item is live right
-now, so the end-of-session ritual is blocked for every session until this is repaired.
+span in its `Why-you-might-care:` or `If-you-do-nothing:` field. The item that was live when
+this task was filed has since been folded and deleted, so no session is blocked at this
+moment, but nothing prevents the next such field from blocking the end-of-session ritual
+again for every session until this is repaired.
 
 The asymmetry is inside `handover_projection_entries` in
 `automation/reconcile/reconcile.py`. The expected context is assembled from the queue item's
@@ -36,10 +38,12 @@ committed as folding with a concrete response". The one-time
 `human_projection_context_migration` exemption applies only on the queue-v1 activation edge,
 which is long past. The repair therefore belongs in the checker.
 
-The live blocker is
-`message-queue/needs-human/decisions/future-blocking-keep-or-drop-the-each-run-freshness-mode.md`,
-whose `Why-you-might-care` opens with a code span and whose `If-you-do-nothing` contains two
-more. Nothing in `templates/queue/decision.md`, `templates/handover.md`, or
+The blocker that exposed this was the edge-graph freshness-mode decision under
+`message-queue/needs-human/decisions/`, whose `Why-you-might-care` opened with a code span
+and whose `If-you-do-nothing` contained two more. That item is now folded into
+`memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md` and deleted,
+which removes the instance and not the asymmetry, and its exact bytes stay readable in git
+history. Nothing in `templates/queue/decision.md`, `templates/handover.md`, or
 `history/AGENTS.md` forbids a code span in those fields, and no existing test in
 `automation/tests/` exercises one, which is why the path was never covered.
 
@@ -77,7 +81,7 @@ handover text is reconstructable from that session's commits on `main`, `2abead8
 - The comparison that disagrees with itself: `automation/reconcile/reconcile.py`
 - The stripping side: `automation/check_action_projection.py` and
   `automation/markdown_semantics.py`
-- The live item that triggers it:
-  `message-queue/needs-human/decisions/future-blocking-keep-or-drop-the-each-run-freshness-mode.md`
+- The item that triggered it, now folded and deleted; its decision record is
+  `memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md`
 - Handover schema and its projection rule: `templates/handover.md` and `history/AGENTS.md`
 - Guardrail that forbids weakening a check to pass: `automation/AGENTS.md`
