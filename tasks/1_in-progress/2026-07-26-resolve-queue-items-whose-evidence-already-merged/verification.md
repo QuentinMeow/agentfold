@@ -484,3 +484,34 @@ Ran 5 tests in 0.120s — OK
 Ran 3 tests in 0.254s — OK
 tests: 11/11 files passed
 ```
+
+## Raw-Git-boundary code-commit hook
+
+**Verified revision:** 52fffacf48120baa0a137068acb2e1a25cb9ff1f
+
+The code-and-record repair was committed with hooks enabled and the exact task trailer. This
+later verification record reports the completed hook and does not predict the hook result of
+the commit that will contain this section.
+
+```
+$ git commit -m "fix: close raw Git admission boundary" -m "Ignore replacement refs across audited admission reads and accept angle-bracket evidence paths with spaces, with exploit and source-guard regressions." -m "task: 2026-07-26-resolve-queue-items-whose-evidence-already-merged"
+pre-commit: core scope
+core-scope: pass (2 core path(s), task 2026-07-26-resolve-queue-items-whose-evidence-already-merged; independent review manual; not invoked)
+pre-commit: reconciler
+reconcile: 0 finding(s)
+pre-commit: repository tests
+Ran 118 tests in 32.850s — OK
+Ran 55 tests in 1.320s — OK (skipped=1)
+Ran 24 tests in 0.009s — OK
+Ran 9 tests in 0.011s — OK
+Ran 40 tests in 10.432s — OK (skipped=1)
+Ran 28 tests in 7.324s — OK
+Ran 328 tests in 146.666s — OK
+Ran 9 tests in 0.003s — OK
+Ran 19 tests in 1.484s — OK
+Ran 5 tests in 0.104s — OK
+Ran 3 tests in 0.263s — OK
+tests: 11/11 files passed
+pre-commit: OK
+[task/2026-07-26-resolve-queue-items-whose-evidence-already-merged 52fffac] fix: close raw Git admission boundary
+```
