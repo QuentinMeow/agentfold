@@ -83,3 +83,29 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and the agents-budget run are still missing from `verification.md`.
 - Left step 9's checkbox and every other checkbox in `plan.md` alone, so the session that
   closes out step 10 owns the whole checklist.
+
+## 2026-07-26 — reconcile-merged-task-status (claude)
+
+- Pull request 13 merged into `main` as merge commit 74b9d0d, so the task record was the
+  only thing still saying the work was in progress. Advanced it from `1_in-progress` to
+  `4_done` without passing through `3_in-review`, since the merge had already happened; the
+  task id is unchanged.
+- Took over the checklist the gating-experiment session deliberately left whole, and
+  checked seven of ten `plan.md` steps and six of eleven acceptance criteria. Every checked
+  box was substantiated from `verification.md` or from the merged code, not from the plan's
+  own prose.
+- Steps 1, 8, and 10 stay unchecked, and so do the four criteria that owe the anchor-hole
+  before-state, the two new `link-check` findings, and the `agents-budget` run. Backlog task
+  2026-07-25-complete-stage-0-verification-transcripts is the named carrier of that gap, and
+  the future-blocking action that orders it against this task is unchanged and still live.
+- Found one criterion that no backfill can satisfy: it requires the CLI tests and the anchor
+  tests to live in their own files outside `automation/tests/test_reconcile_queue.py`, and
+  the eight anchor tests landed inside that file. The CLI half is met by
+  `automation/tests/test_mine_cochange.py`; the anchor half is a real miss, so the criterion
+  stays unchecked and `task.md` records the split. The owner's wording was left alone.
+- Noted a second wording-versus-measurement gap without touching the criterion: the
+  warm-up limitation is recorded against 200 commits, 144 in scope, over five days, where
+  the criterion names four days and ~107 commits. The limitation itself is recorded, so the
+  criterion is checked on substance.
+- Advancing this task to `4_done` is what unblocks the transcript backfill, whose ordering
+  action names this task reaching that status.

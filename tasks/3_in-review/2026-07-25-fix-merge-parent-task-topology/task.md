@@ -39,29 +39,39 @@ never saw the task is not a lifecycle step for it at all.
 
 ## Acceptance criteria
 
-- [ ] `python3 automation/reconcile/reconcile.py --check --range fef828849653ece624ecf5a9d2b92e7416fcf7f1...74b9d0dfd98f13c17124a9b40d955ff9461e0572`
+- [x] `python3 automation/reconcile/reconcile.py --check --range fef828849653ece624ecf5a9d2b92e7416fcf7f1...74b9d0dfd98f13c17124a9b40d955ff9461e0572`
       reports 0 findings and exits 0, with its real output in `verification.md`
-- [ ] WHEN a task record is absent at one parent of a merge candidate and present at
+- [x] WHEN a task record is absent at one parent of a merge candidate and present at
       another parent of the same merge candidate, THE CHECK SHALL NOT report it as newly
       created in a non-backlog status on the absent parent's edge
-- [ ] WHEN a task record is newly introduced in a non-backlog status across a
+- [x] WHEN a task record is newly introduced in a non-backlog status across a
       single-parent edge, THE CHECK SHALL still report
       `new task:<id> was created directly in <status>`
-- [ ] WHEN no parent of a merge candidate carries a task record and the merge introduces
+- [x] WHEN no parent of a merge candidate carries a task record and the merge introduces
       it in a non-backlog status, THE CHECK SHALL still report that finding
 - [ ] WHEN one parent of a merge candidate carries a task in `0_backlog` and the merge
       moves it to `1_in-progress`, THE CHECK SHALL behave exactly as it does today
-- [ ] The task-id rename rule, the duplicate-incarnation guard, the deletion rule, the
+- [x] The task-id rename rule, the duplicate-incarnation guard, the deletion rule, the
       status-transition table, and the `adopting` escape in the same function are
       unchanged, and a test covers the `adopting` escape across the repair
-- [ ] `automation/tests/test_reconcile_queue.py` gains tests built on real merge commits,
+- [x] `automation/tests/test_reconcile_queue.py` gains tests built on real merge commits,
       each recorded in `verification.md` with the verdict it produced before the repair,
       so the discriminating ones are identifiable
-- [ ] `python3 automation/reconcile/reconcile.py --check` exits 0 and
+- [x] `python3 automation/reconcile/reconcile.py --check` exits 0 and
       `python3 automation/run_tests.py` passes, with both outputs in `verification.md`
-- [ ] `design.md` states which of the two candidate shapes was chosen, what the rejected
+- [x] `design.md` states which of the two candidate shapes was chosen, what the rejected
       shape would do to each of the three preserved cases, and carries a complete
       `## Core fit` receipt
+
+**One criterion stays unchecked, and not because the work is missing.** The
+`0_backlog`-to-`1_in-progress` merge advance did *not* behave before the repair the way it
+behaves now: `verification.md` records
+`test_task_admission_accepts_a_merge_claiming_a_backlog_task` as FAIL against the pre-fix
+checker and ok after it, so that legal advance was being reported as a false creation too
+and the repair fixed a second false positive rather than preserving existing behaviour.
+The transition table still governs the case — `still_rejects_an_illegal_merge_advance`
+proves an illegal jump survives the suppression — so the intent behind the criterion holds
+even though its literal wording does not.
 
 ## Links
 

@@ -48,26 +48,36 @@ Those are deferred and filed separately.
 - [ ] WHEN a fragment matches a heading under GitHub's slug rules — lowercased, spaces to
       hyphens, punctuation dropped, duplicate slugs numbered — THE SYSTEM SHALL stay silent,
       and the existing 19 checks report the same findings on this repository as before
-- [ ] The mining CLI runs on stdlib only, reads git history through `git log`, and its
+- [x] The mining CLI runs on stdlib only, reads git history through `git log`, and its
       report verb exits 0 on every input including a report full of couplings
-- [ ] The report applies support ≥ 3 commits, confidence ≥ 0.8, a 40-file commit-size cap,
+- [x] The report applies support ≥ 3 commits, confidence ≥ 0.8, a 40-file commit-size cap,
       a stop-list of files the contract requires to change every session, suppression of
       same-directory pairs, and prints the shared commit subjects for each reported pair
-- [ ] Every reported candidate can be recorded once in the append-only ledger as accepted
+- [x] Every reported candidate can be recorded once in the append-only ledger as accepted
       or rejected with a one-line reason, and a rejected pair is absent from every later
       report
-- [ ] The report states the rejection rate as the effective-false-positive rate against
+- [x] The report states the rejection rate as the effective-false-positive rate against
       the design's bands: under 10% on target, 10–25% probation, above 25% off
 - [ ] Unit tests for the CLI and for anchor validation live in their own files under
       `automation/tests/`, outside `automation/tests/test_reconcile_queue.py`
 - [ ] `automation/AGENTS.md` names the new CLI in its tool table and still passes
       `agents-budget` at its 60-line ceiling, with no rule dropped to make room
-- [ ] `verification.md` records the gating experiment over two hot files: for each
+- [x] `verification.md` records the gating experiment over two hot files: for each
       top-ranked coupling, whether it is a real dependency, and whether a hand-authored
       edge would have added anything the mined pair plus its shared commit subjects did
       not — together with the four-day, ~107-commit warm-up limitation
-- [ ] `python3 automation/reconcile/reconcile.py --check` and `python3
+- [x] `python3 automation/reconcile/reconcile.py --check` and `python3
       automation/run_tests.py` both pass, with real output recorded
+
+**Why five criteria stay unchecked at `4_done`.** Four of them owe transcripts that never
+reached `verification.md` — the anchor-hole before-state, the two new `link-check` findings,
+and the `agents-budget` run — and backlog task
+2026-07-25-complete-stage-0-verification-transcripts is the named carrier of that gap. The
+fifth is a genuine miss rather than a missing transcript: the eight anchor tests landed
+inside `automation/tests/test_reconcile_queue.py` instead of a file of their own, so the CLI
+half of that criterion is met and the anchor half is not. The warm-up limitation is recorded
+with the history that actually existed at measurement time — 200 commits, 144 in scope, over
+five days — rather than the four-day, ~107-commit estimate the criterion names.
 
 ## Links
 
