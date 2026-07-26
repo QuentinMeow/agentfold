@@ -38,11 +38,11 @@ baseline.
 
 At the unique creation commit, each declared repository-local evidence path is baselined.
 Absence is a valid baseline; a non-regular baseline is not. Every path must be a readable
-regular file whose bytes differ from that baseline at both the deletion event and the final
-admitted range head or staged index. This rejects unchanged evidence, same-commit filing and
-evidence, changes made before filing, deletion, non-regular replacement, and any reversion to
-the baseline. The independent committed status-only `open` to `in-repair` claim remains
-mandatory.
+regular file whose bytes differ from that baseline at the deletion event, the admitted range
+head, and the actual captured candidate (the staged index or an exact base-plus-head synthetic
+merge). This rejects unchanged evidence, same-commit filing and evidence, changes made before
+filing, deletion, non-regular replacement, and any reversion to the baseline. The independent
+committed status-only `open` to `in-repair` claim remains mandatory.
 
 ## Chosen
 
@@ -58,6 +58,14 @@ the first action's creation bytes within the same audited range will false-block
 action. That fail-closed tradeoff prevents delete-then-revert laundering. A future durable,
 action-specific completion receipt could distinguish those histories; this task does not add
 a new queue schema or receipt type.
+
+The history proof uses one invocation-local parent-graph query and one persistent Git object
+reader. Raw commit headers are parsed only through their blank-line terminator, raw and
+effective parents must match exactly, and commit/tree/blob/path snapshots are cached. Linear
+history may jump only across commits whose complete `message-queue` subtree is unchanged;
+queue changes, merges, roots, malformed objects, and shallow boundaries stop or reject the
+jump. This keeps the creation proof complete without paying several Git process launches for
+every unrelated intervening commit.
 
 ## Core fit
 

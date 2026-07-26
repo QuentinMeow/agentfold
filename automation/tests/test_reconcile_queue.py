@@ -2862,6 +2862,10 @@ class ReconcileQueueTests(unittest.TestCase):
 
                 findings = self.queue_resolution_findings()
                 self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn(
+                    "resolution evidence was not created or changed",
+                    findings[0].message,
+                )
                 self.assertIn("no surviving post-creation", findings[0].message)
 
     def test_ordinary_request_rejects_change_reverted_to_creation_bytes(self):
@@ -3228,6 +3232,64 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(1, len(findings), self.messages(findings))
             self.assertIn("no surviving post-creation", findings[0].message)
 
+    def test_synthetic_merge_candidate_cannot_restore_creation_evidence(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Creation bytes\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            trunk = self.git(root, "branch", "--show-current")
+
+            self.git(root, "checkout", "-b", "feature")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Feature repair\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve on feature")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", trunk)
+            self.write(root, "base.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "advance base")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "feature")
+            self.git(root, "merge", "--no-ff", "--no-commit", trunk)
+            source.write_text("# Creation bytes\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            self.git(root, "commit", "-m", "synthetic merge")
+
+            output = io.StringIO()
+            with mock.patch.dict(
+                RECONCILE.CHECKS,
+                {"queue-resolution": RECONCILE.check_queue_resolution},
+                clear=True,
+            ), contextlib.redirect_stdout(output):
+                result = RECONCILE.main([
+                    "--check", "--range", f"{base}...{head}"
+                ])
+            self.assertEqual(1, result, output.getvalue())
+            self.assertIn(
+                "resolution evidence was not created or changed",
+                output.getvalue(),
+            )
+
     def test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths(self):
         for invalid in ("../outside.md", "../outside file.md"):
             with self.subTest(invalid=invalid), self.repo() as root:
@@ -3265,22 +3327,133 @@ class ReconcileQueueTests(unittest.TestCase):
 
     def test_creation_lineage_rejects_shallow_history_boundary(self):
         text = self.ordinary_request_text(["docs/source.md"])
-        commit = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout="tree deadbeef\nparent " + "a" * 40 + "\n\n",
-            stderr="",
-        )
         with mock.patch.object(
-            RECONCILE, "revision_parents", return_value=[]
-        ), mock.patch.object(RECONCILE.subprocess, "run", return_value=commit):
+            RECONCILE, "complete_creation_parents", return_value=["a" * 40]
+        ), mock.patch.object(
+            RECONCILE, "git_artifact_bytes_at",
+            side_effect=RECONCILE.GitSnapshotError(
+                "missing shallow parent object"
+            ),
+        ):
             with self.assertRaisesRegex(
-                RECONCILE.GitSnapshotError, "shallow or incomplete"
+                RECONCILE.GitSnapshotError, "missing shallow parent object"
             ):
                 RECONCILE.queue_action_creation_roots(
                     "message-queue/needs-agent/requests/blocking-repair.md",
                     text,
                     "b" * 40,
                 )
+
+    def test_commit_parent_parser_ignores_body_bytes_and_parent_like_body(self):
+        parent = b"a" * 40
+        raw = (
+            b"tree " + b"b" * 40 + b"\n"
+            b"parent " + parent + b"\n"
+            b"author Test <test@example.invalid> 0 +0000\n"
+            b"committer Test <test@example.invalid> 0 +0000\n\n"
+            b"non-utf8 body: \xff\nparent " + b"c" * 40 + b"\n"
+        )
+        with mock.patch.object(
+            RECONCILE, "git_object_bytes", return_value=raw
+        ), mock.patch.dict(RECONCILE._GIT_COMMIT_SNAPSHOT_CACHE, {}, clear=True):
+            self.assertEqual(
+                [parent.decode("ascii")],
+                RECONCILE.commit_parent_oids("d" * 40, "test commit"),
+            )
+
+    def test_commit_parent_parser_fails_closed_on_malformed_headers(self):
+        cases = (
+            b"parent " + b"a" * 40 + b"\n\nbody",
+            b"tree " + b"b" * 39 + b"\n\nbody",
+            b"tree " + b"b" * 40 + b"\nparent not-an-oid\n\nbody",
+            b"tree " + b"b" * 40 + b"\nparent \xff\n\nbody",
+            b"tree " + b"b" * 40 + b"\nbody without separator",
+        )
+        for raw in cases:
+            with self.subTest(raw=raw), mock.patch.object(
+                RECONCILE, "git_object_bytes", return_value=raw
+            ), mock.patch.dict(
+                RECONCILE._GIT_COMMIT_SNAPSHOT_CACHE, {}, clear=True
+            ):
+                with self.assertRaises(RECONCILE.GitSnapshotError):
+                    RECONCILE.commit_parent_oids(
+                        "d" * 40, "malformed test commit"
+                    )
+
+    def test_creation_lookup_bounds_git_calls_across_300_unrelated_commits(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.write(root, "docs/source.md", "# Broken\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            created_at = self.git(root, "rev-parse", "HEAD")
+            claimed = self.ordinary_request_text(
+                ["docs/source.md"], "in-repair"
+            )
+            item.write_text(claimed, encoding="utf-8")
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            for index in range(300):
+                self.git(
+                    root, "commit", "--allow-empty", "-m",
+                    f"unrelated {index}",
+                )
+            prior = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE.subprocess, "run", wraps=subprocess.run
+                ) as run, mock.patch.object(
+                    RECONCILE.subprocess, "Popen", wraps=subprocess.Popen
+                ) as popen:
+                    roots = RECONCILE.queue_action_creation_roots(
+                        path, claimed, prior
+                    )
+                    first_run_count = run.call_count
+                    first_popen_count = popen.call_count
+                    repeated = RECONCILE.queue_action_creation_roots(
+                        path, claimed, prior
+                    )
+                commands = [
+                    call[0][0] if call[0] else call[1]["args"]
+                    for call in run.call_args_list
+                ]
+                rev_lists = [
+                    command for command in commands
+                    if "rev-list" in command
+                ]
+                forbidden = [
+                    command for command in commands
+                    if any(part in command for part in (
+                        "ls-tree", "show", "cat-file"
+                    ))
+                ]
+                popen_commands = [
+                    call[0][0] if call[0] else call[1]["args"]
+                    for call in popen.call_args_list
+                ]
+                batch_readers = [
+                    command for command in popen_commands
+                    if command == ["git", "cat-file", "--batch"]
+                ]
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(created_at, roots[0][0])
+            self.assertEqual(roots, repeated)
+            self.assertEqual(1, len(rev_lists), commands)
+            self.assertEqual([], forbidden, commands)
+            self.assertEqual(1, len(batch_readers), popen_commands)
+            self.assertEqual(first_run_count, run.call_count)
+            self.assertEqual(first_popen_count, popen.call_count)
 
     def test_ordinary_request_rejects_missing_or_nonregular_final_evidence(self):
         for final_kind in ("missing", "symlink"):

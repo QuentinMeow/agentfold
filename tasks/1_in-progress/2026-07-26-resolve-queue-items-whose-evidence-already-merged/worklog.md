@@ -15,3 +15,24 @@
 - Corrected the task's claim-edge wording to the chosen post-creation rule and documented its byte-level false-positive/false-negative limits in `design.md`.
 - The focused 19-test matrix passed, followed by all 315 queue reconciler tests in 148.879 seconds.
 - Deleted the live resolved handover-projection request and changed only its reciprocal task's `Queue actions` field to `none`; final staged admission and full-suite evidence follow in `verification.md`.
+
+## 2026-07-26 — repair-review-blockers (codex)
+
+- The first independent panel blocked the implementation on three issues: an exact synthetic
+  merge candidate could restore creation bytes without being checked; raw commit parsing
+  decoded/scanned beyond the header block and the legacy diagnostic phrase had drifted; and
+  the creation walk launched several Git processes per intervening commit.
+- Added the actual captured candidate to the surviving-evidence proof and restored the
+  `resolution evidence was not created or changed` diagnostic contract.
+- Replaced per-commit process launches with one cached parent graph and one persistent batch
+  object reader. Commit headers, trees, blobs, paths, and queue-subtree boundaries are parsed
+  or cached invocation-locally; raw/effective parent disagreement detects shallow history;
+  both 40- and 64-character object IDs are accepted.
+- Added exact synthetic-merge, raw non-UTF-8 commit-body, malformed-header, and deterministic
+  300-unrelated-commit regressions. The performance regression proves one bulk parent query,
+  one batch object reader, no per-revision history/tree/show process, and no additional process
+  calls on a repeated lookup.
+- The first full queue run exposed that existing task-admission checks also pass a raw empty
+  tree object to historical artifact reads. Generalized the cached path reader to accept a
+  validated commit or tree root; the affected 13-test subset and the final 320-test queue suite
+  then passed.

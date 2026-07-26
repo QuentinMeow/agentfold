@@ -83,6 +83,7 @@ _GIT_HEAD_PATHS_CACHE = None
 _GIT_HEAD_OID = None
 _GIT_ARTIFACT_CACHE = {}
 _GIT_BLOB_CACHE = {}
+_GIT_OBJECT_CACHE = {}
 _GIT_CAT_FILE_PROCESS = None
 _GIT_STAGED_PARENTS_CACHE = None
 _GIT_STAGED_SIDE_COMMITS_CACHE = None
@@ -90,6 +91,10 @@ _GIT_STAGED_SIDE_CREATION_CACHE = {}
 _GIT_TREE_PATH_ENTRY_CACHE = {}
 _GIT_REVISION_PARENTS_CACHE = {}
 _GIT_SCHEMA_ACTIVATION_CACHE = {}
+_GIT_COMMIT_SNAPSHOT_CACHE = {}
+_GIT_TREE_ENTRIES_CACHE = {}
+_GIT_REVISION_PARENT_MAP = None
+_GIT_QUEUE_BOUNDARY_CACHE = {}
 _TASK_SNAPSHOT_CACHE = {}
 _HANDOVER_HISTORY_RECHECK_ACTIVE = False
 
@@ -273,10 +278,12 @@ def start_git_snapshot_cache():
     global _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
-    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
+    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE, _GIT_OBJECT_CACHE
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
+    global _GIT_COMMIT_SNAPSHOT_CACHE, _GIT_TREE_ENTRIES_CACHE
+    global _GIT_REVISION_PARENT_MAP, _GIT_QUEUE_BOUNDARY_CACHE
     global _TASK_SNAPSHOT_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = True
@@ -287,12 +294,17 @@ def start_git_snapshot_cache():
     _GIT_HEAD_OID = None
     _GIT_ARTIFACT_CACHE = {}
     _GIT_BLOB_CACHE = {}
+    _GIT_OBJECT_CACHE = {}
     _GIT_STAGED_PARENTS_CACHE = None
     _GIT_STAGED_SIDE_COMMITS_CACHE = None
     _GIT_STAGED_SIDE_CREATION_CACHE = {}
     _GIT_TREE_PATH_ENTRY_CACHE = {}
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
+    _GIT_COMMIT_SNAPSHOT_CACHE = {}
+    _GIT_TREE_ENTRIES_CACHE = {}
+    _GIT_REVISION_PARENT_MAP = None
+    _GIT_QUEUE_BOUNDARY_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
     load_git_index_snapshot()
     load_git_head_snapshot()
@@ -303,10 +315,12 @@ def stop_git_snapshot_cache():
     global _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
-    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
+    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE, _GIT_OBJECT_CACHE
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
+    global _GIT_COMMIT_SNAPSHOT_CACHE, _GIT_TREE_ENTRIES_CACHE
+    global _GIT_REVISION_PARENT_MAP, _GIT_QUEUE_BOUNDARY_CACHE
     global _TASK_SNAPSHOT_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = False
@@ -317,12 +331,17 @@ def stop_git_snapshot_cache():
     _GIT_HEAD_OID = None
     _GIT_ARTIFACT_CACHE = {}
     _GIT_BLOB_CACHE = {}
+    _GIT_OBJECT_CACHE = {}
     _GIT_STAGED_PARENTS_CACHE = None
     _GIT_STAGED_SIDE_COMMITS_CACHE = None
     _GIT_STAGED_SIDE_CREATION_CACHE = {}
     _GIT_TREE_PATH_ENTRY_CACHE = {}
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
+    _GIT_COMMIT_SNAPSHOT_CACHE = {}
+    _GIT_TREE_ENTRIES_CACHE = {}
+    _GIT_REVISION_PARENT_MAP = None
+    _GIT_QUEUE_BOUNDARY_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
 
 
@@ -864,11 +883,32 @@ def repo_artifact_bytes(path):
 
 def git_blob_bytes(oid):
     """Read a captured index object through one reusable cat-file process."""
-    global _GIT_CAT_FILE_PROCESS
     if not oid:
         return None
     if oid in _GIT_BLOB_CACHE:
         return _GIT_BLOB_CACHE[oid]
+    value = git_object_bytes(oid, "blob")
+    _GIT_BLOB_CACHE[oid] = value
+    return value
+
+
+def git_object_bytes(oid, expected_kind):
+    """Read one immutable Git object through the invocation's batch process."""
+    kind, value = git_object_snapshot(oid)
+    if kind != expected_kind:
+        raise GitSnapshotError(
+            f"captured object {oid} is not a Git {expected_kind}"
+        )
+    return value
+
+
+def git_object_snapshot(oid):
+    """Return one captured Git object's validated kind and raw bytes."""
+    global _GIT_CAT_FILE_PROCESS
+    if not oid or not FULL_GIT_OID_RE.fullmatch(oid):
+        raise GitSnapshotError(f"invalid captured Git object id {oid!r}")
+    if oid in _GIT_OBJECT_CACHE:
+        return _GIT_OBJECT_CACHE[oid]
     if _GIT_CAT_FILE_PROCESS is None:
         try:
             _GIT_CAT_FILE_PROCESS = subprocess.Popen(
@@ -890,13 +930,25 @@ def git_blob_bytes(oid):
         if len(header) != 3:
             raise GitSnapshotError(f"Git could not read captured object {oid}")
         else:
+            try:
+                returned_oid = header[0].decode("ascii")
+            except UnicodeDecodeError as error:
+                raise GitSnapshotError(
+                    f"Git returned a malformed object id for {oid}"
+                ) from error
+            if returned_oid != oid:
+                raise GitSnapshotError(
+                    f"Git returned the wrong captured object for {oid}"
+                )
             size = int(header[2])
             payload = process.stdout.read(size)
             delimiter = process.stdout.read(1)
-            if header[1] != b"blob":
+            try:
+                kind = header[1].decode("ascii")
+            except UnicodeDecodeError as error:
                 raise GitSnapshotError(
-                    f"captured object {oid} is not a Git blob"
-                )
+                    f"Git returned a malformed object kind for {oid}"
+                ) from error
             value = payload
             if delimiter != b"\n":
                 raise GitSnapshotError(
@@ -910,8 +962,8 @@ def git_blob_bytes(oid):
         raise GitSnapshotError(
             f"could not read captured Git object {oid}: {error}"
         )
-    _GIT_BLOB_CACHE[oid] = value
-    return value
+    _GIT_OBJECT_CACHE[oid] = (kind, value)
+    return kind, value
 
 
 def repo_text(path):
@@ -1119,6 +1171,12 @@ def mutated_queue_paths_from_name_status(data):
 
 def git_artifact_bytes_at(revision, path):
     """Read one regular repository file at an exact commit, or return absent."""
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        entry = object_path_entry(revision, path)
+        if entry is None or entry[0] not in ("100644", "100755") \
+                or entry[1] != "blob":
+            return None
+        return git_object_bytes(entry[2], "blob")
     tree = subprocess.run(
         ["git", "--no-replace-objects", "ls-tree", "-z", revision, "--", path],
         cwd=REPO,
@@ -2290,6 +2348,10 @@ def git_tree_path_entry(revision, path):
     if _GIT_SNAPSHOT_CACHE_ACTIVE \
             and cache_key in _GIT_TREE_PATH_ENTRY_CACHE:
         return _GIT_TREE_PATH_ENTRY_CACHE[cache_key]
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        result = object_path_entry(revision, path)
+        _GIT_TREE_PATH_ENTRY_CACHE[cache_key] = result
+        return result
     tree = subprocess.run(
         [
             "git", "--no-replace-objects", "ls-tree", "-z",
@@ -2485,6 +2547,28 @@ def matching_lineage_paths(parent, revision, path, identity):
 
 def matching_disappearing_lineage_paths(parent, revision, path, identity):
     """Find one unambiguous same-identity path disappearing on an edge."""
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        matches = []
+        for candidate, entry in object_files_under(
+            parent, "message-queue"
+        ).items():
+            mode = entry[0]
+            if candidate == path or mode not in ("100644", "100755") \
+                    or not governed_queue_path(candidate) \
+                    or git_artifact_bytes_at(revision, candidate) is not None:
+                continue
+            artifact = git_artifact_bytes_at(parent, candidate)
+            candidate_text = decode_utf8_artifact(
+                artifact, f"`{candidate}` at {parent}"
+            )
+            if queue_action_identity(candidate, candidate_text) == identity:
+                matches.append((candidate, candidate_text))
+        if len(matches) > 1:
+            raise GitSnapshotError(
+                f"queue action lineage is ambiguous at {parent}: "
+                + ", ".join(candidate for candidate, _text in matches)
+            )
+        return matches
     tree = subprocess.run(
         [
             "git", "--no-replace-objects", "ls-tree",
@@ -2671,6 +2755,208 @@ def resolution_evidence_problem(text, prior_revision, revision):
     return None
 
 
+def git_commit_snapshot(revision, label):
+    """Return a validated raw tree/parent snapshot for one commit object."""
+    if revision in _GIT_COMMIT_SNAPSHOT_CACHE:
+        return _GIT_COMMIT_SNAPSHOT_CACHE[revision]
+    commit = git_object_bytes(revision, "commit")
+    headers, separator, _body = commit.partition(b"\n\n")
+    if not separator:
+        raise GitSnapshotError(f"{label} has no complete commit header block")
+    trees = []
+    parents = []
+    saw_header = False
+    for line in headers.splitlines():
+        if line.startswith(b" "):
+            if not saw_header:
+                raise GitSnapshotError(f"{label} has a malformed commit header")
+            continue
+        key, delimiter, value = line.partition(b" ")
+        if not delimiter:
+            raise GitSnapshotError(f"{label} has a malformed commit header")
+        saw_header = True
+        if key == b"tree":
+            trees.append(value)
+        elif key == b"parent":
+            parents.append(value)
+    width = len(revision)
+    oid_pattern = rb"[0-9a-f]{" + str(width).encode("ascii") + rb"}"
+    if len(trees) != 1 or not re.fullmatch(oid_pattern, trees[0]):
+        raise GitSnapshotError(f"{label} has a malformed or missing tree header")
+    if any(not re.fullmatch(oid_pattern, parent) for parent in parents) \
+            or len(set(parents)) != len(parents):
+        raise GitSnapshotError(f"{label} has a malformed parent header")
+    result = (
+        trees[0].decode("ascii"),
+        tuple(parent.decode("ascii") for parent in parents),
+    )
+    _GIT_COMMIT_SNAPSHOT_CACHE[revision] = result
+    return result
+
+
+def commit_parent_oids(revision, label):
+    return list(git_commit_snapshot(revision, label)[1])
+
+
+def git_tree_entries_from_object(tree_oid):
+    """Parse one raw Git tree without a per-revision Git process."""
+    if tree_oid in _GIT_TREE_ENTRIES_CACHE:
+        return _GIT_TREE_ENTRIES_CACHE[tree_oid]
+    payload = git_object_bytes(tree_oid, "tree")
+    raw_oid_width = len(tree_oid) // 2
+    offset = 0
+    entries = {}
+    while offset < len(payload):
+        space = payload.find(b" ", offset)
+        nul = payload.find(b"\0", space + 1)
+        if space <= offset or nul < 0 \
+                or nul + 1 + raw_oid_width > len(payload):
+            raise GitSnapshotError(f"Git returned malformed tree {tree_oid}")
+        try:
+            mode = payload[offset:space].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise GitSnapshotError(
+                f"Git returned malformed tree {tree_oid}"
+            ) from error
+        name = payload[space + 1:nul].decode(
+            "utf-8", errors="surrogateescape"
+        )
+        oid = payload[nul + 1:nul + 1 + raw_oid_width].hex()
+        if not name or "/" in name or not FULL_GIT_OID_RE.fullmatch(oid):
+            raise GitSnapshotError(f"Git returned malformed tree {tree_oid}")
+        if name in entries:
+            raise GitSnapshotError(f"Git returned malformed tree {tree_oid}")
+        entries[name] = mode, oid
+        offset = nul + 1 + raw_oid_width
+    _GIT_TREE_ENTRIES_CACHE[tree_oid] = entries
+    return entries
+
+
+def object_path_entry(revision, path):
+    kind, _payload = git_object_snapshot(revision)
+    if kind == "commit":
+        tree_oid, _parents = git_commit_snapshot(
+            revision, f"commit snapshot for `{path}`"
+        )
+    elif kind == "tree":
+        tree_oid = revision
+    else:
+        raise GitSnapshotError(
+            f"snapshot for `{path}` is not a Git commit or tree"
+        )
+    parts = Path(path).parts
+    for index, part in enumerate(parts):
+        entry = git_tree_entries_from_object(tree_oid).get(part)
+        if entry is None:
+            return None
+        mode, oid = entry
+        if index == len(parts) - 1:
+            kind = "tree" if mode in {"40000", "040000"} else (
+                "commit" if mode == "160000" else "blob"
+            )
+            return mode, kind, oid
+        if mode not in {"40000", "040000"}:
+            return None
+        tree_oid = oid
+    return None
+
+
+def object_files_under(revision, prefix):
+    entry = object_path_entry(revision, prefix)
+    if entry is None or entry[1] != "tree":
+        return {}
+    found = {}
+    stack = [(prefix.rstrip("/"), entry[2])]
+    while stack:
+        parent_path, tree_oid = stack.pop()
+        for name, (mode, oid) in git_tree_entries_from_object(tree_oid).items():
+            candidate = parent_path + "/" + name
+            if mode in {"40000", "040000"}:
+                stack.append((candidate, oid))
+            else:
+                found[candidate] = mode, "blob", oid
+    return found
+
+
+def bulk_revision_parent_map(required_revision):
+    """Load one complete effective parent graph for this invocation."""
+    global _GIT_REVISION_PARENT_MAP
+    if _GIT_REVISION_PARENT_MAP is None:
+        starts = list(dict.fromkeys(staged_parent_oids()))
+        if required_revision not in starts:
+            starts.append(required_revision)
+        history = subprocess.run(
+            ["git", "--no-replace-objects", "rev-list", "--parents",
+             "--topo-order", *starts],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if history.returncode:
+            raise GitSnapshotError(git_failure(
+                history, "could not inspect complete queue creation history"
+            ))
+        parent_map = {}
+        for line in history.stdout.splitlines():
+            record = line.split()
+            if not record or any(
+                not FULL_GIT_OID_RE.fullmatch(oid) for oid in record
+            ) or record[0] in parent_map:
+                raise GitSnapshotError(
+                    "Git returned malformed complete queue creation history"
+                )
+            parent_map[record[0]] = tuple(record[1:])
+        _GIT_REVISION_PARENT_MAP = parent_map
+    if required_revision not in _GIT_REVISION_PARENT_MAP:
+        raise GitSnapshotError(
+            f"queue creation history does not contain {required_revision}"
+        )
+    return _GIT_REVISION_PARENT_MAP
+
+
+def complete_creation_parents(revision, path):
+    effective = bulk_revision_parent_map(revision)[revision]
+    raw = tuple(commit_parent_oids(
+        revision, f"creation history for `{path}`"
+    ))
+    if effective != raw:
+        raise GitSnapshotError(
+            f"creation history for `{path}` is shallow or incomplete at {revision}"
+        )
+    return effective
+
+
+def queue_tree_oid(revision):
+    entry = object_path_entry(revision, "message-queue")
+    return entry[2] if entry is not None and entry[1] == "tree" else None
+
+
+def linear_queue_history_boundary(revision, path):
+    """Skip cached commits until any queue change, merge, or root."""
+    if revision in _GIT_QUEUE_BOUNDARY_CACHE:
+        return _GIT_QUEUE_BOUNDARY_CACHE[revision]
+    traversed = []
+    current = revision
+    while True:
+        parents = complete_creation_parents(current, path)
+        if len(parents) != 1:
+            boundary = current
+            break
+        parent = parents[0]
+        traversed.append(current)
+        parent_parents = complete_creation_parents(parent, path)
+        if len(parent_parents) != 1 \
+                or queue_tree_oid(parent) != queue_tree_oid(parent_parents[0]):
+            boundary = parent
+            break
+        current = parent
+    for candidate in traversed:
+        _GIT_QUEUE_BOUNDARY_CACHE[candidate] = boundary
+    return boundary
+
+
 def queue_action_creation_roots(path, text, prior_revision):
     """Return the unique-root candidates for this immutable action incarnation."""
     identity = queue_action_identity(path, text)
@@ -2685,35 +2971,7 @@ def queue_action_creation_roots(path, text, prior_revision):
         seen.add(state)
         if queue_action_identity(current_path, current) != identity:
             continue
-        parents = revision_parents(
-            current_revision, f"creation history for `{current_path}`"
-        )
-        commit = subprocess.run(
-            [
-                "git", "--no-replace-objects", "cat-file", "-p",
-                current_revision,
-            ],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if commit.returncode:
-            raise GitSnapshotError(git_failure(
-                commit,
-                f"could not verify complete creation history for `{current_path}`",
-            ))
-        object_parents = [
-            line[len("parent "):]
-            for line in commit.stdout.splitlines()
-            if line.startswith("parent ")
-        ]
-        if set(parents) != set(object_parents):
-            raise GitSnapshotError(
-                f"creation history for `{current_path}` is shallow or incomplete "
-                f"at {current_revision}"
-            )
+        parents = complete_creation_parents(current_revision, current_path)
         predecessors = []
         for parent in parents:
             artifact = git_artifact_bytes_at(parent, current_path)
@@ -2723,8 +2981,33 @@ def queue_action_creation_roots(path, text, prior_revision):
                     artifact, f"`{current_path}` at {parent}"
                 )
                 if queue_action_identity(current_path, previous) == identity:
-                    predecessors.append((parent, current_path, previous))
                     exact = True
+                    if len(parents) == 1:
+                        boundary = linear_queue_history_boundary(
+                            current_revision, current_path
+                        )
+                        boundary_artifact = git_artifact_bytes_at(
+                            boundary, current_path
+                        )
+                        if boundary_artifact is None:
+                            raise GitSnapshotError(
+                                f"linear queue boundary lost `{current_path}`"
+                            )
+                        boundary_text = decode_utf8_artifact(
+                            boundary_artifact,
+                            f"`{current_path}` at {boundary}",
+                        )
+                        if queue_action_identity(
+                            current_path, boundary_text
+                        ) != identity:
+                            raise GitSnapshotError(
+                                "linear queue boundary changed action identity"
+                            )
+                        predecessors.append((
+                            boundary, current_path, boundary_text
+                        ))
+                    else:
+                        predecessors.append((parent, current_path, previous))
             if len(parents) > 1 or not exact:
                 predecessors.extend(
                     (parent, previous_path, previous)
@@ -2801,6 +3084,10 @@ def ordinary_request_resolution_evidence_problem(
         )
         if admitted not in candidates:
             candidates.append(admitted)
+        if _GIT_HEAD_OID and _GIT_HEAD_OID not in candidates:
+            # validate_range_candidate permits an exact base+head synthetic
+            # merge; its captured tree is the actual admission candidate.
+            candidates.append(_GIT_HEAD_OID)
     elif revision is not None:
         # A committed deletion found on a merge side must also survive in the
         # captured staged index that is being admitted.
@@ -2831,7 +3118,8 @@ def ordinary_request_resolution_evidence_problem(
             unresolved.append(evidence_path)
     if unresolved:
         return (
-            "resolution evidence has no surviving post-creation byte change: "
+            "resolution evidence was not created or changed; "
+            "no surviving post-creation byte change: "
             + ", ".join(f"`{evidence_path}`" for evidence_path in unresolved)
         )
     return None
@@ -2843,10 +3131,12 @@ def git_revision_candidate(revision, preserve_change_range=False):
     global CHANGE_RANGE, _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
-    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
+    global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE, _GIT_OBJECT_CACHE
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
+    global _GIT_COMMIT_SNAPSHOT_CACHE, _GIT_TREE_ENTRIES_CACHE
+    global _GIT_REVISION_PARENT_MAP, _GIT_QUEUE_BOUNDARY_CACHE
     global _TASK_SNAPSHOT_CACHE
 
     tree = subprocess.run(
@@ -2892,12 +3182,17 @@ def git_revision_candidate(revision, preserve_change_range=False):
         _GIT_HEAD_OID,
         _GIT_ARTIFACT_CACHE,
         _GIT_BLOB_CACHE,
+        _GIT_OBJECT_CACHE,
         _GIT_STAGED_PARENTS_CACHE,
         _GIT_STAGED_SIDE_COMMITS_CACHE,
         _GIT_STAGED_SIDE_CREATION_CACHE,
         _GIT_TREE_PATH_ENTRY_CACHE,
         _GIT_REVISION_PARENTS_CACHE,
         _GIT_SCHEMA_ACTIVATION_CACHE,
+        _GIT_COMMIT_SNAPSHOT_CACHE,
+        _GIT_TREE_ENTRIES_CACHE,
+        _GIT_REVISION_PARENT_MAP,
+        _GIT_QUEUE_BOUNDARY_CACHE,
         _TASK_SNAPSHOT_CACHE,
     )
     close_git_cat_file()
@@ -2911,6 +3206,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
     _GIT_HEAD_OID = revision
     _GIT_ARTIFACT_CACHE = {}
     _GIT_BLOB_CACHE = {}
+    _GIT_OBJECT_CACHE = {}
     # This context exposes a committed tree as both HEAD and index. The real
     # worktree's MERGE_HEAD must not become a synthetic parent of that history.
     _GIT_STAGED_PARENTS_CACHE = (revision,)
@@ -2919,6 +3215,10 @@ def git_revision_candidate(revision, preserve_change_range=False):
     _GIT_TREE_PATH_ENTRY_CACHE = {}
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
+    _GIT_COMMIT_SNAPSHOT_CACHE = {}
+    _GIT_TREE_ENTRIES_CACHE = {}
+    _GIT_REVISION_PARENT_MAP = None
+    _GIT_QUEUE_BOUNDARY_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
     try:
         yield
@@ -2934,12 +3234,17 @@ def git_revision_candidate(revision, preserve_change_range=False):
             _GIT_HEAD_OID,
             _GIT_ARTIFACT_CACHE,
             _GIT_BLOB_CACHE,
+            _GIT_OBJECT_CACHE,
             _GIT_STAGED_PARENTS_CACHE,
             _GIT_STAGED_SIDE_COMMITS_CACHE,
             _GIT_STAGED_SIDE_CREATION_CACHE,
             _GIT_TREE_PATH_ENTRY_CACHE,
             _GIT_REVISION_PARENTS_CACHE,
             _GIT_SCHEMA_ACTIVATION_CACHE,
+            _GIT_COMMIT_SNAPSHOT_CACHE,
+            _GIT_TREE_ENTRIES_CACHE,
+            _GIT_REVISION_PARENT_MAP,
+            _GIT_QUEUE_BOUNDARY_CACHE,
             _TASK_SNAPSHOT_CACHE,
         ) = saved
 
