@@ -1,6 +1,6 @@
 # Repair the handover projection so a code-spanned queue field can be copied
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-25, by claude, from the end-of-session handover of the markdown edge graph Stage 0 work — `docs/designs/markdown-edge-graph.md`
 **Action:** Normalise both sides of the handover projection's context comparison so an inline code span in a queue item's Why-you-might-care or If-you-do-nothing field can be copied into a handover entry, then commit the blocked session's handover at a fresh conversation path.
 **Full context:** `history/AGENTS.md`
