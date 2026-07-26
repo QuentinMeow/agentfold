@@ -473,7 +473,10 @@ def load_git_head_snapshot():
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", _GIT_HEAD_OID):
         raise GitSnapshotError("Git HEAD did not resolve to a full object ID")
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "-z", _GIT_HEAD_OID],
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", "-z", _GIT_HEAD_OID,
+        ],
         cwd=REPO,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -549,7 +552,10 @@ def git_head_paths(prefix):
             prefix,
         ))
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", "HEAD", "--", prefix,
+        ],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -604,7 +610,10 @@ def validate_range_candidate(change_range):
             ))
     if _GIT_HEAD_OID != range_head:
         ancestry = subprocess.run(
-            ["git", "rev-list", "--parents", "-n", "1", _GIT_HEAD_OID],
+            [
+                "git", "--no-replace-objects", "rev-list",
+                "--parents", "-n", "1", _GIT_HEAD_OID,
+            ],
             cwd=REPO,
             text=True,
             stdout=subprocess.PIPE,
@@ -624,7 +633,10 @@ def validate_range_candidate(change_range):
                 "base+head synthetic merge"
             )
     staged = subprocess.run(
-        ["git", "diff-index", "--cached", "--quiet", _GIT_HEAD_OID, "--"],
+        [
+            "git", "--no-replace-objects", "diff-index",
+            "--cached", "--quiet", _GIT_HEAD_OID, "--",
+        ],
         cwd=REPO,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -4936,13 +4948,15 @@ def task_ids_from_change_range(change_range):
     if change_range.startswith("root:"):
         head = change_range[len("root:"):]
         changed_command = [
-            "git", "ls-tree", "-r", "--name-only", head, "--", "tasks",
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "--name-only", head, "--", "tasks",
         ]
         log_range = head
     else:
         base, head = change_range.split("...", 1)
         changed_command = [
-            "git", "diff", "--no-renames", "--name-only",
+            "git", "--no-replace-objects", "diff",
+            "--no-renames", "--name-only",
             change_range, "--", "tasks",
         ]
         log_range = f"{base}..{head}"
@@ -4963,7 +4977,7 @@ def task_ids_from_change_range(change_range):
                     and TASK_ID_RE.fullmatch(parts[2]):
                 task_ids.add(parts[2])
     messages = subprocess.run(
-        ["git", "log", "--format=%B", log_range],
+        ["git", "--no-replace-objects", "log", "--format=%B", log_range],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,

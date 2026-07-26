@@ -69,6 +69,11 @@ queue changes, merges, roots, malformed objects, and shallow boundaries stop or 
 jump. This keeps the creation proof complete without paying several Git process launches for
 every unrelated intervening commit.
 
+Range admission applies the same raw-object rule before interpreting the checked-out
+candidate: candidate parent discovery, committed tree capture/comparison, and range-derived
+task scope all ignore replacement refs. A local replacement therefore cannot turn a raw
+one-parent or out-of-range commit into an apparent exact base-plus-head synthetic merge.
+
 ## Core fit
 
 **Agent substitution:** pass — the rule consumes repository files and Git history, not an agent-runtime identity or private state

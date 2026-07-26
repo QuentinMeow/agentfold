@@ -7,5 +7,5 @@
 - [x] 5. Correct and document the contradictory acceptance wording on the task branch: the comparison begins after creation, not before it.
 - [x] 6. Add discriminating regression tests, including merged-before-claim evidence, unchanged evidence, reverted evidence, and unavailable evidence paths.
 - [x] 7. Resolve the live ordinary request only after the checker admits its already-merged evidence; complete the dependent task lifecycle records.
-- [x] 8. Record full verification and the two blocked independent review rounds, including an explicit per-method pre-repair test matrix; repair every accepted finding.
+- [x] 8. Record full verification and the three blocked independent review rounds, including an explicit per-method pre-repair test matrix; repair every accepted finding.
 - [ ] 9. Obtain approving independent review of the final immutable revision and publish the reviewed branch.

@@ -55,3 +55,27 @@
   were also run against base checker `ab5a18e`; `verification.md` records every method verdict
   and distinguishes assertion failures from missing-new-helper errors and non-discriminating
   passes.
+
+## 2026-07-26 — repair-candidate-provenance-and-audit-linkage (codex)
+
+- The third independent panel unanimously blocked `e52cd9e`: candidate-parent discovery still
+  honored replacement refs, so a raw one-parent/out-of-range checkout could advertise forged
+  `{base, head}` parents and pass as an exact synthetic merge. The contract review also found
+  missing task trailers on `6df6010`/`e52cd9e`, literal `\n\n` in `ee0f36e`'s message, and no
+  durable final full-suite record for the repaired implementation.
+- Preserved the original unpushed chain at local backup branch
+  codex/pre-audit-linkage-e52cd9e. Rebuilt the three commits non-destructively from
+  `ab5a18e` with identical tree objects and parent order, clean paragraph bodies, and exact
+  `task: 2026-07-26-resolve-queue-items-whose-evidence-already-merged` trailers:
+  `ee0f36e` → `af447435`, `6df6010` → `e5bf650f`, and `e52cd9e` → `6dc7d496`.
+- Disabled replacement refs for candidate-parent discovery, candidate tree capture/comparison,
+  and adjacent range-derived task history reads. Added a real exploit regression: an ordinary
+  one-parent candidate remains rejected even when its replacement commit claims `{base, head}`
+  parents.
+- The exploit changed `(2, provenance error)` to `(0, no error)` on the old checker and passes
+  after the repair. Its base-checker failure was added to the pre-repair matrix, bringing the
+  explicit task-added method count to 25.
+- A first complete-suite attempt exposed one stale argv assertion for cached HEAD tree reads;
+  the expected command now includes `--no-replace-objects`. The focused cache/exploit pair and
+  the subsequent 11-file repository suite passed. The code-repair hook and its exact evidence
+  are recorded only after that commit exists.

@@ -10085,8 +10085,9 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual(
                 1,
-                sum(command[:5] == [
-                    "git", "ls-tree", "-r", "--name-only", "-z"
+                sum(command[:6] == [
+                    "git", "--no-replace-objects", "ls-tree",
+                    "-r", "--name-only", "-z"
                 ] for command in commands),
                 commands,
             )
@@ -11496,6 +11497,62 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertIn(
                 "neither the --range head nor an exact base+head synthetic merge",
                 stderr.getvalue(),
+            )
+
+    def test_replace_ref_cannot_forge_synthetic_candidate_parents(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "range-head")
+            self.write(root, "head.md", "# Head\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "head")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "range-base", common)
+            self.write(root, "base.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate")
+            self.write(root, "candidate.md", "# Candidate\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "raw one-parent candidate")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            tree = self.git(root, "rev-parse", "HEAD^{tree}")
+            replacement = self.git(
+                root, "commit-tree", tree,
+                "-p", base, "-p", head,
+                "-m", "forged synthetic parents",
+            )
+
+            def verdict():
+                stderr = io.StringIO()
+                with mock.patch.dict(
+                    RECONCILE.CHECKS, {}, clear=True
+                ), contextlib.redirect_stderr(stderr):
+                    result = RECONCILE.main([
+                        "--check", "--range", f"{base}...{head}"
+                    ])
+                return result, stderr.getvalue()
+
+            without_replace = verdict()
+            self.git(root, "replace", candidate, replacement)
+            try:
+                with_replace = verdict()
+            finally:
+                self.git(root, "replace", "-d", candidate)
+
+            self.assertEqual(without_replace, with_replace)
+            self.assertEqual(2, without_replace[0])
+            self.assertIn(
+                "neither the --range head nor an exact base+head synthetic merge",
+                without_replace[1],
             )
 
     def test_range_accepts_exact_synthetic_merge_candidate(self):
