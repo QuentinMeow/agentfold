@@ -18,6 +18,7 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.all_tests = RUN_TESTS.repository_test_files()
         self.api_test = RUN_TESTS.REPO / "services/quote-api/tests/test_quote_api.py"
         self.cli_test = RUN_TESTS.REPO / "services/quote-cli/tests/test_quote_cli.py"
+        self.index_path = MODULE_PATH
 
     @staticmethod
     def git_result(stdout=b"", returncode=0):
@@ -36,8 +37,13 @@ class StagedTestSelectionTests(unittest.TestCase):
             for path, mode in path_modes
         )
 
+    def index_path_result(self, index_path=None):
+        index_path = self.index_path if index_path is None else Path(index_path)
+        return self.git_result(os.fsencode(str(index_path)) + b"\n")
+
     def selection(self, diff_output, *path_modes):
         responses = (
+            self.index_path_result(),
             self.git_result(diff_output),
             self.git_result(self.index_output(*path_modes)),
         )
@@ -58,11 +64,11 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertEqual((self.cli_test,), selection.test_files)
         self.assertEqual(
             ["git", "diff", "--cached", "--name-status", "-z", "-M"],
-            run.call_args_list[0][0][0],
+            run.call_args_list[1][0][0],
         )
         self.assertEqual(
             ["git", "ls-files", "--stage", "-z"],
-            run.call_args_list[1][0][0],
+            run.call_args_list[2][0][0],
         )
 
     def test_api_modification_selects_api_and_dependent_cli_tests(self):
@@ -100,12 +106,15 @@ class StagedTestSelectionTests(unittest.TestCase):
                 with mock.patch.object(
                     RUN_TESTS.subprocess,
                     "run",
-                    return_value=self.git_result(diff),
+                    side_effect=(
+                        self.index_path_result(),
+                        self.git_result(diff),
+                    ),
                 ) as run:
                     selection = RUN_TESTS.staged_test_selection(self.all_tests)
                 self.assertEqual("full", selection.lane)
                 self.assertEqual(self.all_tests, selection.test_files)
-                self.assertEqual(1, run.call_count)
+                self.assertEqual(2, run.call_count)
 
     def test_cross_cutting_or_unknown_service_path_falls_back(self):
         for path in (
@@ -118,7 +127,10 @@ class StagedTestSelectionTests(unittest.TestCase):
                 with mock.patch.object(
                     RUN_TESTS.subprocess,
                     "run",
-                    return_value=self.git_result(b"M\0" + path + b"\0"),
+                    side_effect=(
+                        self.index_path_result(),
+                        self.git_result(b"M\0" + path + b"\0"),
+                    ),
                 ):
                     selection = RUN_TESTS.staged_test_selection(self.all_tests)
                 self.assertEqual("full", selection.lane)
@@ -134,7 +146,7 @@ class StagedTestSelectionTests(unittest.TestCase):
                 with mock.patch.object(
                     RUN_TESTS.subprocess,
                     "run",
-                    return_value=outcome,
+                    side_effect=(self.index_path_result(), outcome),
                 ):
                     selection = RUN_TESTS.staged_test_selection(self.all_tests)
                 self.assertEqual("full", selection.lane)
@@ -161,7 +173,7 @@ class StagedTestSelectionTests(unittest.TestCase):
                 with mock.patch.object(
                     RUN_TESTS.subprocess,
                     "run",
-                    side_effect=(diff, outcome),
+                    side_effect=(self.index_path_result(), diff, outcome),
                 ):
                     selection = RUN_TESTS.staged_test_selection(self.all_tests)
                 self.assertEqual("full", selection.lane)
@@ -185,8 +197,11 @@ class StagedTestSelectionTests(unittest.TestCase):
             cli_test = cli_tests / "test_quote_cli.py"
             api_test.write_text("pass\n")
             cli_test.write_text("pass\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"stable-index")
             path = b"services/quote-cli/quote_cli.py"
             responses = (
+                self.index_path_result(index_path),
                 self.git_result(b"M\0" + path + b"\0"),
                 self.git_result(self.index_output((path, b"100644"))),
             )
@@ -207,6 +222,7 @@ class StagedTestSelectionTests(unittest.TestCase):
         path = b"services/quote-api/quote_api.py"
 
         responses = (
+            self.index_path_result(),
             self.git_result(b"M\0" + path + b"\0"),
             self.git_result(self.index_output((path, b"100644"))),
         )
@@ -218,6 +234,81 @@ class StagedTestSelectionTests(unittest.TestCase):
             selection = RUN_TESTS.staged_test_selection((self.api_test,))
 
         self.assertEqual("full", selection.lane)
+
+    def test_newly_discovered_test_in_selected_service_is_not_skipped(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            tests = service / "tests"
+            tests.mkdir(parents=True)
+            changed = service / "quote_cli.py"
+            existing = tests / "test_quote_cli.py"
+            new_test = tests / "test_new_behavior.py"
+            changed.write_text("pass\n")
+            existing.write_text("pass\n")
+            new_test.write_text("raise AssertionError('must be selected')\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"stable-index")
+            raw_changed = b"services/quote-cli/quote_cli.py"
+            responses = (
+                self.index_path_result(index_path),
+                self.git_result(b"M\0" + raw_changed + b"\0"),
+                self.git_result(
+                    self.index_output((raw_changed, b"100644"))
+                ),
+            )
+
+            with mock.patch.object(
+                RUN_TESTS.subprocess,
+                "run",
+                side_effect=responses,
+            ):
+                selection = RUN_TESTS.staged_test_selection(
+                    (existing, new_test),
+                    repository,
+                )
+
+            self.assertEqual("staged", selection.lane)
+            self.assertEqual((new_test, existing), selection.test_files)
+
+    def test_index_change_between_git_reads_falls_back_to_full(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            tests = service / "tests"
+            tests.mkdir(parents=True)
+            changed = service / "quote_cli.py"
+            test = tests / "test_quote_cli.py"
+            changed.write_text("pass\n")
+            test.write_text("pass\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"before")
+            raw_changed = b"services/quote-cli/quote_cli.py"
+            responses = iter(
+                (
+                    self.index_path_result(index_path),
+                    self.git_result(b"M\0" + raw_changed + b"\0"),
+                    self.git_result(
+                        self.index_output((raw_changed, b"100644"))
+                    ),
+                )
+            )
+
+            def run_with_index_change(*_args, **_kwargs):
+                result = next(responses)
+                if result.args == ["git"] and result.stdout.startswith(b"100644 "):
+                    index_path.write_bytes(b"after")
+                return result
+
+            with mock.patch.object(
+                RUN_TESTS.subprocess,
+                "run",
+                side_effect=run_with_index_change,
+            ):
+                selection = RUN_TESTS.staged_test_selection((test,), repository)
+
+            self.assertEqual("full", selection.lane)
+            self.assertIn("index changed", selection.reason)
 
     def test_default_interface_is_the_full_suite(self):
         options = RUN_TESTS.parse_arguments(())

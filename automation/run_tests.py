@@ -11,6 +11,7 @@ full suite. The projection contains working-tree bytes, not an index snapshot. E
 only if every selected file passes.
 """
 import argparse
+import hashlib
 import os
 import shlex
 import shutil
@@ -49,14 +50,11 @@ REGULAR_INDEX_MODES = frozenset((b"100644", b"100755"))
 SERVICE_TEST_DEPENDENCIES = (
     (
         b"services/quote-api/",
-        (
-            Path("services/quote-api/tests/test_quote_api.py"),
-            Path("services/quote-cli/tests/test_quote_cli.py"),
-        ),
+        ("quote-api", "quote-cli"),
     ),
     (
         b"services/quote-cli/",
-        (Path("services/quote-cli/tests/test_quote_cli.py"),),
+        ("quote-cli",),
     ),
 )
 TestSelection = namedtuple("TestSelection", "lane reason test_files")
@@ -137,18 +135,70 @@ def full_selection(all_test_files, reason):
     return TestSelection("full", reason, tuple(all_test_files))
 
 
+def selected_git_index_path(repository, environment):
+    """Resolve the exact index file used by selector Git commands."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-path", "index"],
+        cwd=repository,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        raise RuntimeError("could not resolve the selected Git index")
+    raw_path = result.stdout.rstrip(b"\n")
+    if not raw_path or b"\0" in raw_path or b"\n" in raw_path:
+        raise RuntimeError("selected Git index path is malformed")
+    path = Path(os.fsdecode(raw_path))
+    return path if path.is_absolute() else repository / path
+
+
+def index_fingerprint(index_path):
+    """Hash the selected index so mixed Git reads cannot approve a narrow lane."""
+    try:
+        return hashlib.sha256(index_path.read_bytes()).digest()
+    except OSError as error:
+        raise RuntimeError("could not fingerprint the selected Git index") from error
+
+
+def discovered_service_tests(all_test_files, services, repository):
+    """Return every discovered test owned by the requested service closure."""
+    tests_by_service = {service: [] for service in services}
+    for test in all_test_files:
+        try:
+            relative = test.relative_to(repository)
+        except ValueError:
+            continue
+        if (
+            len(relative.parts) == 4
+            and relative.parts[0] == "services"
+            and relative.parts[1] in tests_by_service
+            and relative.parts[2] == "tests"
+            and relative.name.startswith("test_")
+            and relative.suffix == ".py"
+        ):
+            tests_by_service[relative.parts[1]].append(test)
+    if any(not tests for tests in tests_by_service.values()):
+        return ()
+    return tuple(sorted({test for tests in tests_by_service.values() for test in tests}))
+
+
 def staged_test_selection(all_test_files, repository=None):
     """Map a wholly known staged service diff to its conservative test closure."""
     repository = REPO if repository is None else Path(repository)
+    selector_environment = dict(os.environ)
     try:
+        index_path = selected_git_index_path(repository, selector_environment)
+        initial_index_fingerprint = index_fingerprint(index_path)
         diff = subprocess.run(
             ["git", "diff", "--cached", "--name-status", "-z", "-M"],
             cwd=repository,
+            env=selector_environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-    except OSError:
-        return full_selection(all_test_files, "staged diff unavailable")
+    except (OSError, RuntimeError):
+        return full_selection(all_test_files, "staged index or diff unavailable")
     if diff.returncode:
         return full_selection(all_test_files, "staged diff unavailable")
     try:
@@ -156,7 +206,7 @@ def staged_test_selection(all_test_files, repository=None):
     except (TypeError, ValueError):
         return full_selection(all_test_files, "staged diff empty or malformed")
 
-    selected_paths = set()
+    selected_services = set()
     changed_paths = []
     for status, paths in entries:
         if status not in ("A", "M"):
@@ -166,9 +216,9 @@ def staged_test_selection(all_test_files, repository=None):
             )
         path = paths[0]
         dependencies = None
-        for prefix, tests in SERVICE_TEST_DEPENDENCIES:
+        for prefix, services in SERVICE_TEST_DEPENDENCIES:
             if path.startswith(prefix) and len(path) > len(prefix):
-                dependencies = tests
+                dependencies = services
                 break
         if dependencies is None:
             return full_selection(
@@ -176,12 +226,13 @@ def staged_test_selection(all_test_files, repository=None):
                 "staged path is outside the known narrow service scopes",
             )
         changed_paths.append(path)
-        selected_paths.update(dependencies)
+        selected_services.update(dependencies)
 
     try:
         index_result = subprocess.run(
             ["git", "ls-files", "--stage", "-z"],
             cwd=repository,
+            env=selector_environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -219,16 +270,22 @@ def staged_test_selection(all_test_files, repository=None):
                 "working-tree bytes are unavailable or cross a symlink",
             )
 
-    discovered = {
-        test.relative_to(repository): test
-        for test in all_test_files
-        if repository == test or repository in test.parents
-    }
-    selected_tests = []
-    for relative_test in sorted(selected_paths):
-        test = discovered.get(relative_test)
+    selected_tests = discovered_service_tests(
+        all_test_files,
+        selected_services,
+        repository,
+    )
+    if not selected_tests:
+        return full_selection(
+            all_test_files,
+            "a mapped service has no complete discovered test scope",
+        )
+    for test in selected_tests:
         try:
-            unavailable_test = test is None or path_crosses_symlink(test, repository)
+            unavailable_test = (
+                path_crosses_symlink(test, repository)
+                or not test.is_file()
+            )
         except (OSError, ValueError):
             unavailable_test = True
         if unavailable_test:
@@ -236,11 +293,19 @@ def staged_test_selection(all_test_files, repository=None):
                 all_test_files,
                 "a mapped test is unavailable or crosses a symlink",
             )
-        selected_tests.append(test)
+    try:
+        stable_index = index_fingerprint(index_path) == initial_index_fingerprint
+    except RuntimeError:
+        stable_index = False
+    if not stable_index:
+        return full_selection(
+            all_test_files,
+            "Git index changed while selecting staged tests",
+        )
     return TestSelection(
         "staged",
         "all staged paths map to known service dependencies",
-        tuple(selected_tests),
+        selected_tests,
     )
 
 

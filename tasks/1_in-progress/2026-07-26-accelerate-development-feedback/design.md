@@ -33,12 +33,13 @@ evidence needed for the first safe improvement.
 
 ## Chosen
 
-Option B. `quote-cli` changes select its test; `quote-api` changes select both its own
-test and the dependent CLI test. The runner parses NUL-delimited staged Git output and
-checks that every selected path is one regular stage-zero index entry with usable,
-non-symlinked working-tree bytes. The full runner remains the no-argument interface for
-CI, release evidence, and all fail-closed cases. Suite parallelism and reconciler
-redesign remain outside this task.
+Option B. `quote-cli` changes select every discovered CLI test; `quote-api` changes
+select every discovered API and dependent CLI test. The runner parses NUL-delimited
+staged Git output, checks that every selected path is one regular stage-zero index entry
+with usable non-symlinked working-tree bytes, and fingerprints the selected Git index
+before and after its Git reads so a concurrent index change falls back to full. The
+full runner remains the no-argument interface for CI, release evidence, and all
+fail-closed cases. Suite parallelism and reconciler redesign remain outside this task.
 
 ## Core fit
 

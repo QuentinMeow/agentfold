@@ -112,6 +112,41 @@ pre-commit: OK
 $ git diff --check
 ```
 
+## Review-repair focused tests
+
+```
+$ python3 automation/tests/test_run_tests.py
+..................................
+----------------------------------------------------------------------
+Ran 34 tests in 1.609s
+
+OK
+```
+
+## Review-repair narrow staged-path probe
+
+```
+$ set -e
+$ AGENTFOLD_PROBE_DIR="$(mktemp -d /private/tmp/agentfold-fast-lane-repair.XXXXXX)"
+$ export GIT_INDEX_FILE="$AGENTFOLD_PROBE_DIR/index"
+$ git read-tree HEAD
+$ AGENTFOLD_PROBE_OBJECT="$(git rev-parse HEAD:services/quote-api/quote_api.py)"
+$ git update-index --info-only --cacheinfo "100644,$AGENTFOLD_PROBE_OBJECT,services/quote-cli/quote_cli.py"
+$ python3 automation/run_tests.py --staged
+test lane: staged
+test reason: all staged paths map to known service dependencies
+selected test files:
+  services/quote-cli/tests/test_quote_cli.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.317s
+
+OK
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 1/1 files passed
+test elapsed: 1.27s
+```
+
 ## Review verdicts (when a review was explicitly run)
 
 **Reviewed revision:** pending

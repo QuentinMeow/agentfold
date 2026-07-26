@@ -29,3 +29,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   staged paths and passed all 11 test files in 218.90 seconds. A timed post-change
   reconciler run took 5.43 seconds, so no broader reconciler redesign was justified in
   this bounded change.
+
+## 2026-07-26 — independent-review-repairs (codex)
+
+- Two defects were present in `a46c9e8`: a hard-coded test path could omit a newly added
+  service test, and separate Git reads could observe different index states while still
+  selecting a narrow lane.
+- Changed dependency registration to service scopes so every discovered test in each
+  affected or dependent service is selected. Added a regression containing an extra
+  failing test file and proved it appears in the selected set.
+- Fingerprinted the exact Git-selected index before and after selector reads. Any
+  unavailable or changed index now falls back to the full suite; a mutation regression
+  changes the fingerprint between reads and proves the fallback.
+- The repaired focused suite passed 34 tests, and the real alternate-index narrow probe
+  remained green at 1.27 seconds.
