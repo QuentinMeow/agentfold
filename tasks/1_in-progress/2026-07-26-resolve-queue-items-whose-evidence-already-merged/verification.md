@@ -348,3 +348,34 @@ Ran 5 tests in 0.109s — OK
 Ran 3 tests in 0.258s — OK
 tests: 11/11 files passed
 ```
+
+## Candidate-provenance code-commit hook
+
+**Verified revision:** 653b167f923e9b4ea22771652f723b99d6e3b8ad
+
+The code repair was committed with hooks enabled and the exact task trailer. This later
+verification record reports that completed hook; it does not claim the future hook result of
+the record commit that contains this paragraph.
+
+```
+$ git commit -m "fix: reject replaced range candidate ancestry" -m "Make candidate provenance and adjacent range reads ignore local replacement refs, with a forged-parent regression." -m "task: 2026-07-26-resolve-queue-items-whose-evidence-already-merged"
+pre-commit: core scope
+core-scope: pass (2 core path(s), task 2026-07-26-resolve-queue-items-whose-evidence-already-merged; independent review manual; not invoked)
+pre-commit: reconciler
+reconcile: 0 finding(s)
+pre-commit: repository tests
+Ran 118 tests in 31.508s — OK
+Ran 55 tests in 1.452s — OK (skipped=1)
+Ran 24 tests in 0.012s — OK
+Ran 9 tests in 0.011s — OK
+Ran 40 tests in 10.183s — OK (skipped=1)
+Ran 28 tests in 6.964s — OK
+Ran 322 tests in 136.094s — OK
+Ran 9 tests in 0.004s — OK
+Ran 19 tests in 1.400s — OK
+Ran 5 tests in 0.107s — OK
+Ran 3 tests in 0.248s — OK
+tests: 11/11 files passed
+pre-commit: OK
+[task/2026-07-26-resolve-queue-items-whose-evidence-already-merged 653b167] fix: reject replaced range candidate ancestry
+```
