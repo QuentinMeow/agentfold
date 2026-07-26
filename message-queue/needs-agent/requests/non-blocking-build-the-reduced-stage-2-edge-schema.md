@@ -1,6 +1,6 @@
 # Build Stage 2 of the edge graph in its reduced, measured form
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Action:** Build the typed edge schema in the reduced form the gating experiment supports: the relation vocabulary and its one-question test, one `Because:` line per edge, a clause anchor only where the target has two or more headings, `Update-when:` as prose the query prints, `handbook/` activated alone, and edges authored from the mined candidate list rather than from memory.
 **Full context:** `docs/designs/markdown-edge-graph.md`

@@ -1,6 +1,6 @@
 # Build the surviving half of Stage 4 — the three-way join and undeclared repair filing
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Action:** Build the confirmed/undeclared/suspect join as one report over declared edges and mined candidates, and file one repair item per `undeclared` result; leave clause-scoped review debt and its repair filing out.
 **Full context:** `docs/designs/markdown-edge-graph.md`
