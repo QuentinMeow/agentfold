@@ -21,4 +21,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   present: 1 finding without it, 0 with it.
 - Recorded every new test's pre-repair verdict by reverting only `reconcile.py`; three of
   the six discriminate and three are regression guards.
-- The pull request remains the last step.
+- Opened pull request 15 with a body validated by `automation/check_action_projection.py`
+  against the real base and merge-ref candidate, 0 findings. All four required checks
+  passed on the `opened` event, so the known admission-event race filed as task
+  2026-07-25-fix-pull-request-admission-event-race is timing-dependent rather than
+  certain; it hit pull requests 13 and 14 and did not hit this one.

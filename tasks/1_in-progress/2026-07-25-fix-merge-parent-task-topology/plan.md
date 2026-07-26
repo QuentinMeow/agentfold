@@ -18,4 +18,4 @@
       discriminate, and note every verdict in `verification.md`.
 - [x] 7. Record real output for the merge range, a full `--check`, and the whole test suite
       in `verification.md`.
-- [ ] 8. Open the pull request with a validated action-projection body.
+- [x] 8. Open the pull request with a validated action-projection body.
