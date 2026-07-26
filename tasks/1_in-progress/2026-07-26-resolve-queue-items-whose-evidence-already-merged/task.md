@@ -1,10 +1,10 @@
 # Let a queue item resolve when its resolution evidence landed in an earlier commit
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Filed:** 2026-07-26, by claude, from the coordination session that claimed and then could not resolve the handover code-span repair — `handbook/git-workflow.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-resolve-queue-items-whose-evidence-already-merged.md`
+**Queue actions:** none
 
 ## Goal
 
