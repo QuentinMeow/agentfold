@@ -5,6 +5,12 @@
 **Owner answers:** N1 to N8 answered 2026-07-25 — the per-folder freshness modes below and
 the justified per-file cap exception are the owner's N5 and N7, recorded in
 `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`.
+**Owner amendments:** after the Stage 0 measurement the owner amended two of those answers,
+choosing to drop the `each-run` freshness mode and not to commit the graph artifact — both
+recorded as not implemented rather than rejected, each with a revisit trigger, in
+`memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md` and
+`memory/decisions/2026-07-25-edge-graph-artifact-storage.md`. This document describes what
+those amendments leave to build.
 **Revision:** v3 — adds a mined co-change layer that ships before the schema, after
 measurement showed textual mention and real coupling are nearly disjoint here. v2 kept
 one-directional edges, the graph artifact as the product, and eventual consistency through
@@ -25,8 +31,8 @@ Four layers, each with one job:
 1. **Declared.** A markdown file declares its outgoing edges in an `## Edges` section.
    Forward direction only; no inverse relation is ever written in any file. Declaration is
    the *residue* — it records what mining cannot express, for the couplings mining surfaced.
-2. **Derived.** A stdlib CLI joins the two into a graph holding **both** directions, plus a
-   generated text projection that renders on GitHub and reads cheaply as tokens.
+2. **Derived.** A stdlib CLI joins the two into a graph holding **both** directions,
+   emitted on demand and never stored.
 3. **Consumers.** Queries answer "what must I review if I change this"; a blocking gate
    rejects what is objectively wrong; everything judgment-shaped becomes a repair item that
    a later session picks up.
@@ -109,8 +115,8 @@ are excluded from both, since their coupling is an artifact of when they were wr
 | Declared path type matches the target string's shape | **yes** |
 | `Update-when` present where required, absent where forbidden | **yes** |
 | `supersedes` / `restates` chains acyclic | **yes** |
-| The derived projection matches the declared edges | **yes**, byte-exact |
-| **The target's named clause changed and the dependent has not been touched since** | **yes** — from git alone; see "Review debt" |
+| The derived projection matches the declared edges | **moot** — nothing derived is stored; see "The graph artifact" |
+| **The target's named clause changed and the dependent has not been touched since** | **yes** — from git alone, but not built; see "Review debt" |
 | A pair co-changes in git history with no declared edge | **yes** — reported as *undeclared*, never as an error; this is the completeness signal |
 | An inline link to an in-scope node has no declared edge | yes, but **78-85% disjoint from real coupling** — not used as a signal |
 | A relationship that exists in reality but was never declared | **no** — undecidable |
@@ -259,11 +265,31 @@ Three consequences worth stating:
 
 ## The graph artifact
 
-**One committed, line-oriented text projection**, generated and byte-exact verified —
-the mechanism the repository's generated memory index already runs successfully. A
-structured form is emitted on demand, never stored.
+**Nothing generated is tracked.** The graph is emitted on demand, and the join and impact
+queries read the `## Edges` sections in the source files directly, so every fact keeps
+exactly one home. Committing a projection was the owner's N6 answer and is now recorded as
+not implemented rather than rejected, because the mined graph covers 17 of 172 in-scope
+markdown files (9.9%, about one tenth) and the stage that would protect it is six
+mechanisms.
 
-Format chosen on measurement, at 250 nodes and 400 edges:
+Struck with it, named so nobody rebuilds them out of habit: the committed projection, the
+byte-exact gate that made disagreement unmergeable, the determinism suite's
+foreign-environment run from a fresh clone with a different timezone, locale, and hash
+seed, the `.gitattributes` entry marking the file generated, the writer's
+index-versus-worktree refusal rule, and the regenerate-on-conflict merge procedure. The
+cost is stated rather than argued away: a bare clone answers in-edge questions only after a
+command runs, and a reviewer reading only the rendered diff sees the declaring side of an
+edge and never the receiving side.
+
+**Revisit threshold**, so the question returns on a number and not on recollection: when
+declared edges exceed 100 and span more than half the in-scope markdown files — 86 of the
+172 measured today — or when in-edges rendered without running a command become a real part
+of someone's review workflow.
+
+### Format, measured — deferred with the artifact, not deleted
+
+This table answers *which* format to commit, which is exactly the question the threshold
+reopens; it is simply not asked today. Measured at 250 nodes and 400 edges:
 
 | Candidate | Size | Tokens | Verdict |
 |---|---|---|---|
@@ -275,62 +301,34 @@ Format chosen on measurement, at 250 nodes and 400 edges:
 
 - **Prose stays out of the whole-graph projection.** It more than doubles the artifact, and
   an agent editing one file needs three edges' worth of prose, not four hundred.
-- **SQLite is disqualified as the stored artifact on two independent grounds.** Python
+- **SQLite is disqualified as a stored artifact on two independent grounds.** Python
   documents its `sqlite3` module as *optional* — "if it is missing from your copy of
   CPython, look for documentation from your distributor" — which fails a contract of
   running on a bare clone anywhere. And it is not byte-reproducible: rebuilding the same
   logical rows in a different insert order produced different bytes even after a full
   vacuum, so it cannot sit behind a byte-exact gate.
-- **Never intern node ids in the committed file.** Integer ids save 33-45% of tokens and
+- **Never intern node ids in a stored file.** Integer ids save 33-45% of tokens and
   renumber every later id when one node is inserted, converting a one-line change into a
   whole-file rewrite. Token efficiency belongs in ephemeral output; diff stability belongs
-  in the committed file.
+  in a committed file.
 - **Queries must parse line shapes, not grep substrings.** A bare substring search over
   the projection returned 9 hits where the correct answer was 5, because it matches both
-  directions and both clause variants.
-
-### Why committed, and the cost
-
-Committing gives three things one-sided authoring otherwise gives up: a bare clone answers
-"what depends on this" with no command run; GitHub renders it, which is the only way
-in-edges reach a human reviewer; and the diff shows the semantic consequence of an edge
-change during review. The precedent is uniform across ecosystems — dependency lockfiles,
-Rails' schema file, Terraform's lock file are all generated, committed, and **resolved on
-conflict by regeneration**, which for a fully derived file is always correct.
-
-Mark it generated in a tracked `.gitattributes` so GitHub collapses its diff by default.
-**Never define a merge driver**: driver definitions live in untracked local config, so a
-fresh clone, a CI runner, an agent worktree, and server-side merges all silently fall back
-to the default. **Never use union merge**: it resurrects deleted entries.
-
-The honest cost: a derived copy is a second place a fact lives, every edge change produces
-two diffs, and reviewers learn to skim the second. The byte-exact check makes disagreement
-*unmergeable* rather than merely unlikely, which is what makes the copy safe; if the
-artifact ever grows past a few hundred KB, revisit and move to build-not-commit.
-
-**One refusal rule, precisely scoped.** The writer refuses when a file it *reads* differs
-between index and worktree, because the checks read the index and the writer writes the
-worktree; combining them silently discards partially staged work. It does **not** refuse on
-the state of the file it writes — otherwise resolving a merge conflict in the artifact would
-be impossible. The merge procedure is: resolve source conflicts, stage them, regenerate,
-stage the artifact.
+  directions and both clause variants. This one binds today: on-demand output is parsed,
+  never grepped.
 
 ### Determinism rules
 
-Byte-identical regeneration is the property everything else rests on, and it is exactly
-what comparable tools got wrong.
+Reproducible output stays cheap, so it stays. What is deferred with the artifact is the
+suite that policed a second stored copy, not the rules that make a query answer the same
+way twice.
 
 Write with an explicit `"\n"` newline and no BOM; sort every collection explicitly on
 code-point order; **never iterate a set** (string hashes are randomised per interpreter
-run) and never fix that by pinning the hash seed — run the determinism test *with*
+run) and never fix that by pinning the hash seed — run any determinism test *with*
 randomisation on; never use locale collation; enumerate files from the git index, not the
 filesystem, whose order is arbitrary and whose filename normalisation differs by platform;
 no floats, no timestamps, no hostnames, no tool version strings in the body — a hand-bumped
 schema integer instead.
-
-**Mandatory test:** generate, generate again, compare bytes; then generate from a fresh
-clone in a different directory with a different timezone, locale, and hash seed, and
-compare again. The second half is what catches the locale and ordering rules.
 
 **No incremental generation.** Measured: a full pass over this repository's 244 tracked
 markdown files is 28 ms, and at 2,000 files the change-detection pass alone is ~60% of a
@@ -408,46 +406,52 @@ have it, using published operational thresholds from large-scale static-analysis
 The ledger's rejection rate *is* the effective-false-positive rate, which makes the
 governance rule self-measuring.
 
-## Review debt: three freshness modes, chosen per folder
+## Review debt: two freshness modes, chosen per folder
 
 Deriving freshness costs tokens, so the choice of how much to spend belongs to whoever owns
-the folder, not to this design. All three mechanisms exist, each folder configures its own
+the folder, not to this design. Two mechanisms exist, each folder configures its own
 independently, and the default is a **review window of 7 days**.
 
 | Mode | What it does | Recurring cost |
 |---|---|---|
-| `each-run` | clause-scoped debt derived from git, below | one history pass per run |
 | `review-window` (**default, 7 days**) | an absolute re-review date per edge, the mechanism this repository already runs on memory entries; cannot see a target change, and cannot thrash | none |
 | `advisory` | nothing mechanical — `Update-when` stays prose a reader acts on | none |
 
 No folder's mode constrains another's, so activating a directory is also the moment its
-freshness cost is chosen.
+freshness cost is chosen — now a two-way switch rather than a three-way one.
 
-### The `each-run` mode: clause-scoped debt derived from git
+### The `each-run` mode: measured, deferred, not implemented
 
-This replaces v1's content digests, which were rejected for churn. The mechanism is derived
-from git on every run, so there is no stored state to thrash.
+A third mode was answered in N5: clause-scoped debt derived from git on every run, mapping
+a target's headings to line ranges, intersecting them with the changed ranges from git
+history, and carrying **review debt** on any `depends-on` or `enforced-by` edge whose named
+clause moved while the declaring file stayed untouched. Stage 0's gating experiment
+measured what it would actually have filed over the whole recorded history of this design's
+single decisive example, and that measurement is why it is not built:
 
-For every `depends-on` and `enforced-by` edge that names a `#clause`:
+- Over the 14 in-scope revisions of `message-queue/AGENTS.md`, the prefix definitions
+  changed in exactly **2** — aca7014 and 3f4f1df. Both commits edited every restating
+  template in the same commit: aca7014 all five queue templates, 3f4f1df all five plus
+  `templates/handover.md`. Touched is what closes derived debt, so the mode would have
+  filed **0 items** across that entire history.
+- The one live drift it exists to catch happened *inside* aca7014, which propagated "UTC"
+  into `message-queue/AGENTS.md` line 17, into `automation/AGENTS.md`, and into all five
+  templates' `Blocks at` field lines while leaving line 4 of each reading "a named date".
+  The dependents were touched for a neighbouring reason in the very commit that caused the
+  drift, so the debt would have closed instead of firing. That drift is still live today.
+- The zero is not a volume artifact. It comes from the closing rule asking whether the
+  dependent was *touched* rather than whether it was *updated*, and that rule does not
+  improve with more history.
 
-1. Map the target's headings to line ranges.
-2. Take the changed line ranges from git history.
-3. Intersect. **If the named clause's lines changed**, and the declaring file has not been
-   modified in any commit at or after that one, the edge carries **review debt**.
+The mode returns as a new decision once two independent window misses are on record under
+`memory/known-issues/`, each naming the drifting commit, evidence that the commit did *not*
+touch the declaring dependent, the passed `review-window` date the drift outlived, and how
+it was actually found. Until then `Update-when` is prose the queries print.
 
-Why this survives the objection that killed digest pins: it is **clause-scoped**. The worst
-target under a file-level scheme is the roadmap's current-state file — 15 inbound
-references and required by contract to change every session — and under clause scoping it
-generates debt only for the dependents of the specific section that changed, which is
-almost never those 15. The same reasoning disposes of typo fixes and formatting passes.
-
-Debt **closes automatically** when the dependent is next modified, and explicitly when an
-agent records a disposition in the repair item. It is never a commit blocker: it is
-judgment, and blocking on judgment strands work whose fix belongs to another task.
-
-This is also what makes the mandatory clause anchor pay for itself, and it is why an anchor
-is required whenever a target has two or more headings — on a single-section file the
-requirement would have no legal answer.
+The clause anchor stays regardless, because it earned its place on the impact query
+independently: on `message-queue/AGENTS.md` an edge anchored at the routing clause fires on
+3 revisions rather than 14, about 4.7×. It is required whenever a target has two or more
+headings — on a single-section file the requirement would have no legal answer.
 
 ## Eventual consistency: the repair loop
 
@@ -463,9 +467,9 @@ garbage-collects items whose finding has cleared.
 
 | Condition | Tier | How it clears |
 |---|---|---|
-| Malformed record, unknown relation or path type, dead target, dead anchor, `Update-when` where forbidden, placeholder prose, cycle, stale artifact | **block** | the agent fixes it; every finding names a literal edit or a literal command |
+| Malformed record, unknown relation or path type, dead target, dead anchor, `Update-when` where forbidden, placeholder prose, cycle | **block** | the agent fixes it; every finding names a literal edit or a literal command |
 | A blocking finding whose fix belongs to another task or another folder | **discharged by filing** | clears once a queue item names that finding id and subject |
-| Review debt on a `depends-on` / `enforced-by` edge | **repair item** | the dependent is edited, or an agent records "checked, no change needed" |
+| A `review-window` date reached on a `depends-on` / `enforced-by` edge | **repair item** | the edge is re-reviewed and its date advanced, or an agent records "checked, no change needed" |
 | An inline link to an in-scope node with no declared edge | **repair item**, capped and diff-scoped | an edge is declared, or the item is rejected in file |
 | Edge whose rationale has never been human-reviewed | **repair item** | a review pass marks it |
 
@@ -503,8 +507,8 @@ prose. The guide therefore lives in a skill plus two lines in the root contract,
 
 What the guide says, in order: run the impact query before editing a file that has an
 `## Edges` section; apply the one-question test before adding an edge; name a clause, not
-just a file; write the sentence or delete the record; regenerate and verify the artifact
-twice. Directory activation is a rare, multi-step judgment pass and gets the skill; routine
+just a file; write the sentence or delete the record. Directory activation is a rare,
+multi-step judgment pass and gets the skill; routine
 editing gets the two lines and the hook output.
 
 **One mechanism does make declaration happen rather than be requested:** every template
@@ -524,7 +528,8 @@ narrowly enough that the next proposal cannot cite it for anything else.
 
 ## Query surface
 
-Verbs: `check`, `build`, `impact <path> [--clause]`, `advise --staged|--range`, `debt`,
+Verbs: `check`, `build` (to standard output, never to a tracked file), `impact <path>
+[--clause]`, `advise --staged|--range`, `debt` (edges whose review window is due),
 `review --range`, each with `--json`. Exit codes mean one thing each: 0 clean or answered,
 1 repository findings, 2 usage or environment refusal. A repair item is only ever filed for
 1.
@@ -730,12 +735,15 @@ durable, because otherwise every run re-proposes what was already declined.
 with a hard ceiling of 30 edges and a mandatory clause anchor. Edges are authored *from the
 mined candidate list*, not from memory.
 
-**Stage 3 — the artifact.** Generation, byte-exact check, determinism tests including the
-foreign-environment run.
+**Stage 3 — the artifact: struck.** Generation to a tracked file, the byte-exact check, and
+the determinism tests including the foreign-environment run are not built; nothing generated
+is tracked until the threshold under "The graph artifact" is crossed. The number is kept
+rather than reused, so every earlier reference to a stage still resolves.
 
-**Stage 4 — the join.** `impact` with the full output contract, the confirmed/undeclared/
-suspect report, clause-scoped review debt, and repair-item filing. This is where the design
-earns its keep or does not.
+**Stage 4 — the join, halved.** `impact` with the full output contract, the confirmed/
+undeclared/suspect report, and repair-item filing for the `undeclared` list. Clause-scoped
+review debt and its repair filing are out, because the mode that would derive them is not
+built. This is where the design earns its keep or does not.
 
 **Stage 5 — the advisory**, once finding severity tiers exist.
 
