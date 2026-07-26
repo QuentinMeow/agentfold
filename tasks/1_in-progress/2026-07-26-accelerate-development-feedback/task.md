@@ -1,10 +1,10 @@
 # Accelerate the local development feedback loop
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Filed:** 2026-07-26, by codex, from the owner's request in chat to improve the test harness and agent development speed in one pull request
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-accelerate-development-feedback.md`
+**Queue actions:** none
 
 ## Goal
 
