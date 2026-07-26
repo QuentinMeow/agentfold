@@ -1,6 +1,6 @@
 # Redesign every file that asks for human attention
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-26, by codex, from the owner's changes-requested review of task `2026-07-23-first-class-message-queue`
 **Action:** Research, design, implement, and verify an action-first format that makes every human-attention file self-contained, distinguishes current from proposed behavior, presents clear choices with rationale and consequences, and gives an evidence-backed agent recommendation.
 **Full context:** `handbook/human-action-guide.md`
