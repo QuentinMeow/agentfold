@@ -26,3 +26,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   passed on the `opened` event, so the known admission-event race filed as task
   2026-07-25-fix-pull-request-admission-event-race is timing-dependent rather than
   certain; it hit pull requests 13 and 14 and did not hit this one.
+
+## 2026-07-26 — reconcile-merged-task-status (claude)
+
+- Pull request 15 merged into `main` as merge commit 5d45dd4, so the task record was the
+  only thing still saying the work was in progress. Advanced it from `1_in-progress` to
+  `4_done`; the task id is unchanged.
+- Audited the acceptance criteria against `verification.md` rather than against the plan,
+  and checked eight of nine. `Queue actions` was already `none`, and `design.md` carries a
+  complete `## Core fit` receipt, so the last criterion was substantiated before it was
+  checked.
+- Left one criterion unchecked and recorded why in `task.md`: the criterion asserts the
+  legal `0_backlog`-to-`1_in-progress` merge advance behaves exactly as it did before the
+  repair, and the recorded pre-fix verdicts show it did not — that advance was also being
+  reported as a false creation, so the repair cleared a second false positive. The
+  criterion's intent survives, its literal wording does not, and the owner's wording was
+  left alone.
+- `plan.md` needed no change; all eight steps were already checked and each is
+  substantiated by the transcripts in `verification.md`.

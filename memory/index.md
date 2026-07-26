@@ -2,6 +2,7 @@
 # Memory index
 
 ## facts
+- [Work refused by Core admission is preserved as an `archive/*` annotated tag, not a branch](facts/archived-refs-outside-core.md) — Rejected-but-reusable work lives on annotated `archive/*` tags whose message carries the reasoning — check there before rebuilding something that looks unprecedented
 - [Example services are Python-stdlib-only, on purpose](facts/example-services-stay-stdlib-only.md) — services/ examples must never gain dependencies — they exist to demo the harness, not to be good software
 
 ## decisions
@@ -33,6 +34,7 @@
 - [The edge graph is generated on demand; nothing derived is tracked until a stated threshold](decisions/2026-07-25-edge-graph-artifact-storage.md) — Amends N6 of the edge-graph architecture decision: no generated graph projection is committed, gated, or ignored, so the six Stage 3 mechanisms are not built for a graph measured at 17 of 172 in-scope files (9.9%, about one tenth), and committing is recorded as not implemented rather than rejected, returning when declared edges exceed 100 and span more than half the in-scope files or when rendered in-edges become part of a real review workflow
 - [The edge graph ships two freshness modes; `each-run` is measured, deferred, and not implemented](decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md) — Amends one third of N5 in the edge-graph architecture decision: `review-window` (default, 7 days) and `advisory` ship, `each-run` is recorded as not implemented rather than rejected after measuring zero filed items across the whole history of the design's strongest case, and returns only when two recorded window misses meet a stated four-part test
 - [The markdown edge graph ships mined co-change first, with per-folder freshness and a capped edge budget](decisions/2026-07-25-markdown-edge-graph-architecture.md) — The edge-graph architecture is approved: mine git co-change before building the schema, join it three ways, keep a decision ledger, reinstate graph-only references, commit the generated artifact, offer three per-folder freshness modes defaulting to a 7-day window, cap edges per file with a justified exception, and add discharged-by-filing as a third gate state
+- [Agent-runtime-specific guidance stays outside this repository](decisions/2026-07-26-agent-specific-guidance-stays-out-of-core.md) — AgentFold stays free of agent choice, so runtime-specific instruction sets, hooks, and installers are never checked in — the portable mechanism may be, its runtime adapter may not
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
