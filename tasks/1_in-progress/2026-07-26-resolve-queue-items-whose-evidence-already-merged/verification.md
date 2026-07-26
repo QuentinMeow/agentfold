@@ -119,3 +119,135 @@ tests: 11/11 files passed
 
 The blocked revision was not published. Repair verification and a fresh revision-bound review
 follow before this task crosses into review.
+
+**Reviewed revision:** 6df60102b6fee66a2d5a0ef453d6f626bca617e2
+
+- correctness / independent adversarial panel: block — replacement refs could make the parent graph and raw object snapshots describe different histories, changing the admission verdict
+- contract / independent adversarial panel: block — replacement-ref nondeterminism violated fail-closed history semantics, and the required per-method pre-repair verdict matrix was missing
+- blast radius / independent adversarial panel: block — the shared persistent object reader honored replacement refs, so repository-local state could affect every cached historical read
+
+## Replacement-ref regression on the blocked revision
+
+The new test was copied into an isolated detached worktree at `6df6010`; the blocked checker
+changed a staged deletion from one unresolved finding to no findings when the replacement was
+installed.
+
+```
+$ python3 -m unittest -v automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_change_ordinary_request_resolution_verdict
+test_replace_ref_cannot_change_ordinary_request_resolution_verdict (...) ... FAIL
+
+AssertionError: Tuples differ: ('deleted unresolved queue item: resolution evidence was not created or changed; no surviving post-creation byte change: `docs/source.md`',) != ()
+Ran 1 test in 0.679s
+FAILED (failures=1)
+```
+
+## Replacement-ref repair and process budget
+
+The replacement test completes staged deletion, direct-range, and exact synthetic-merge
+subcases; each must retain the same rejection with and without the forged replacement.
+
+```
+$ python3 -m unittest -v automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_change_ordinary_request_resolution_verdict automation.tests.test_reconcile_queue.ReconcileQueueTests.test_creation_lookup_bounds_git_calls_across_300_unrelated_commits
+test_replace_ref_cannot_change_ordinary_request_resolution_verdict (...) ... ok
+test_creation_lookup_bounds_git_calls_across_300_unrelated_commits (...) ... ok
+
+Ran 2 tests in 11.813s
+OK
+```
+
+## Replacement repair staged gates
+
+```
+$ python3 automation/check_core_scope.py --staged
+core-scope: pass (2 core path(s), task 2026-07-26-resolve-queue-items-whose-evidence-already-merged; independent review manual; not invoked)
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --cached --check
+(no output; exit 0)
+
+$ git diff --cached --stat
+automation/reconcile/reconcile.py                  |   2 +-
+automation/tests/test_reconcile_queue.py           | 115 ++++++++++++++++++++-
+.../design.md                                      |   6 +-
+.../plan.md                                        |   3 +-
+.../verification.md                                | 107 +++++++++++++++++++
+.../worklog.md                                     |  19 ++++
+6 files changed, 247 insertions(+), 5 deletions(-)
+```
+
+## Every task-added test against the pre-repair checker
+
+The current test file, including all 24 methods added by this task, was placed in an isolated
+detached worktree at base checker `ab5a18e6c2c149be106f09968d309ae5f1fb0773`.
+The task branch was not modified. `FAIL` means the old checker contradicted an assertion;
+`ERROR` means the test exercised a helper that did not exist yet. Only those non-passing
+verdicts distinguish the old checker; the five passing regressions are explicitly not claimed
+as discriminating.
+
+```
+$ python3 -m unittest -v \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_accepts_surviving_change_before_claim_staged_and_range \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_accepts_surviving_change_after_claim \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_pre_creation_or_same_commit_evidence \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_change_reverted_to_creation_bytes \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_requires_every_evidence_path_to_change \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_accepts_evidence_absent_at_creation_then_created \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_follows_unambiguous_rename_to_creation \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_duplicate_creation_roots_across_merge \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_merge_rename_cannot_reset_creation_evidence_baseline \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_merge_collects_exact_and_renamed_parent_action_roots \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_range_rejects_evidence_reverted_after_deletion \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_range_rejects_evidence_changed_only_after_deletion \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_synthetic_merge_candidate_cannot_restore_creation_evidence \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_change_ordinary_request_resolution_verdict \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_creation_lineage_rejects_shallow_history_boundary \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_commit_parent_parser_ignores_body_bytes_and_parent_like_body \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_commit_parent_parser_fails_closed_on_malformed_headers \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_creation_lookup_bounds_git_calls_across_300_unrelated_commits \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_missing_or_nonregular_final_evidence \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_uses_staged_evidence_not_worktree_bytes \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_git_read_failure_fails_closed \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_still_rejects_non_status_only_claim \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_only_ordinary_requests_use_creation_baseline_evidence
+Ran 24 tests in 24.467s
+FAILED (failures=16, errors=10)
+```
+
+| Test method | Base verdict | Interpretation |
+|---|---:|---|
+| `test_ordinary_request_accepts_surviving_change_before_claim_staged_and_range` | FAIL | discriminating |
+| `test_ordinary_request_accepts_surviving_change_after_claim` | FAIL | discriminating |
+| `test_ordinary_request_rejects_pre_creation_or_same_commit_evidence` | FAIL | discriminating diagnostic contract |
+| `test_ordinary_request_rejects_change_reverted_to_creation_bytes` | FAIL | discriminating |
+| `test_ordinary_request_requires_every_evidence_path_to_change` | PASS | non-discriminating regression |
+| `test_ordinary_request_accepts_evidence_absent_at_creation_then_created` | PASS | non-discriminating regression |
+| `test_ordinary_request_follows_unambiguous_rename_to_creation` | PASS | non-discriminating regression |
+| `test_ordinary_request_rejects_duplicate_creation_roots_across_merge` | FAIL | discriminating |
+| `test_merge_rename_cannot_reset_creation_evidence_baseline` | FAIL | discriminating |
+| `test_merge_collects_exact_and_renamed_parent_action_roots` | FAIL | discriminating |
+| `test_range_rejects_evidence_reverted_after_deletion` | FAIL | discriminating diagnostic contract |
+| `test_range_rejects_evidence_changed_only_after_deletion` | FAIL | discriminating diagnostic contract |
+| `test_synthetic_merge_candidate_cannot_restore_creation_evidence` | FAIL | discriminating |
+| `test_replace_ref_cannot_change_ordinary_request_resolution_verdict` | PASS | non-discriminating against the base checker; discriminates blocked `6df6010` above |
+| `test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths` | FAIL | discriminating |
+| `test_creation_lineage_rejects_shallow_history_boundary` | ERROR | new helper absent; implementation-surface distinction |
+| `test_commit_parent_parser_ignores_body_bytes_and_parent_like_body` | ERROR | new helper absent; implementation-surface distinction |
+| `test_commit_parent_parser_fails_closed_on_malformed_headers` | ERROR | new helper absent; implementation-surface distinction |
+| `test_creation_lookup_bounds_git_calls_across_300_unrelated_commits` | ERROR | new helper absent; implementation-surface distinction |
+| `test_ordinary_request_rejects_missing_or_nonregular_final_evidence` | FAIL | discriminating diagnostic contract |
+| `test_ordinary_request_uses_staged_evidence_not_worktree_bytes` | FAIL | discriminating diagnostic contract |
+| `test_ordinary_request_git_read_failure_fails_closed` | ERROR | new helper absent; implementation-surface distinction |
+| `test_ordinary_request_still_rejects_non_status_only_claim` | PASS | non-discriminating regression |
+| `test_only_ordinary_requests_use_creation_baseline_evidence` | ERROR | new helper absent; implementation-surface distinction |
+
+## Replacement repair queue suite
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue
+Ran 321 tests in 123.654s
+
+OK
+```

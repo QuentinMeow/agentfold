@@ -60,8 +60,10 @@ action-specific completion receipt could distinguish those histories; this task 
 a new queue schema or receipt type.
 
 The history proof uses one invocation-local parent-graph query and one persistent Git object
-reader. Raw commit headers are parsed only through their blank-line terminator, raw and
-effective parents must match exactly, and commit/tree/blob/path snapshots are cached. Linear
+reader. Both disable Git replacement objects, so local `refs/replace/*` state cannot change
+the admitted history or evidence baseline. Raw commit headers are parsed only through their
+blank-line terminator, raw and effective parents must match exactly, and
+commit/tree/blob/path snapshots are cached. Linear
 history may jump only across commits whose complete `message-queue` subtree is unchanged;
 queue changes, merges, roots, malformed objects, and shallow boundaries stop or reject the
 jump. This keeps the creation proof complete without paying several Git process launches for

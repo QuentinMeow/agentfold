@@ -3290,6 +3290,117 @@ class ReconcileQueueTests(unittest.TestCase):
                 output.getvalue(),
             )
 
+    def test_replace_ref_cannot_change_ordinary_request_resolution_verdict(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source.md", "# Creation bytes\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+            trunk = self.git(root, "branch", "--show-current")
+            self.git(root, "checkout", "-b", "feature")
+
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            item = self.write(
+                root, path, self.ordinary_request_text(["docs/source.md"])
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            created_at = self.git(root, "rev-parse", "HEAD")
+            created_parent = self.git(root, "rev-parse", f"{created_at}^")
+
+            source.write_text("# Forged creation bytes\n", encoding="utf-8")
+            self.git(root, "add", "docs/source.md")
+            forged_tree = self.git(root, "write-tree")
+            self.git(
+                root, "restore", "--source", created_at,
+                "--staged", "--worktree", "docs/source.md",
+            )
+            replacement = subprocess.run(
+                [
+                    "git", "commit-tree", forged_tree,
+                    "-p", created_parent,
+                ],
+                cwd=root,
+                text=True,
+                input="forged creation tree\n",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            ).stdout.strip()
+
+            item.write_text(
+                self.ordinary_request_text(["docs/source.md"], "in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            def assert_replace_invariant(verdict):
+                without_replace = verdict()
+                self.git(root, "replace", created_at, replacement)
+                try:
+                    with_replace = verdict()
+                finally:
+                    self.git(root, "replace", "-d", created_at)
+                self.assertEqual(without_replace, with_replace)
+                return without_replace
+
+            staged = assert_replace_invariant(
+                lambda: tuple(self.messages(self.queue_resolution_findings()))
+            )
+            self.assertEqual(1, len(staged), staged)
+            self.assertIn(
+                "resolution evidence was not created or changed", staged[0]
+            )
+
+            self.git(root, "commit", "-m", "delete without evidence")
+            feature_head = self.git(root, "rev-parse", "HEAD")
+
+            def range_verdict(base, head):
+                output = io.StringIO()
+                with mock.patch.dict(
+                    RECONCILE.CHECKS,
+                    {"queue-resolution": RECONCILE.check_queue_resolution},
+                    clear=True,
+                ), contextlib.redirect_stdout(output):
+                    result = RECONCILE.main([
+                        "--check", "--range", f"{base}...{head}"
+                    ])
+                return result, output.getvalue()
+
+            direct = assert_replace_invariant(
+                lambda: range_verdict(common, feature_head)
+            )
+            self.assertEqual(1, direct[0], direct[1])
+            self.assertIn(
+                "resolution evidence was not created or changed", direct[1]
+            )
+
+            self.git(root, "checkout", trunk)
+            self.write(root, "base.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "advance base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.git(
+                root, "merge", "--no-ff", feature_head,
+                "-m", "synthetic merge",
+            )
+
+            synthetic = assert_replace_invariant(
+                lambda: range_verdict(base, feature_head)
+            )
+            self.assertEqual(1, synthetic[0], synthetic[1])
+            self.assertIn(
+                "resolution evidence was not created or changed", synthetic[1]
+            )
+
     def test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths(self):
         for invalid in ("../outside.md", "../outside file.md"):
             with self.subTest(invalid=invalid), self.repo() as root:
@@ -3443,7 +3554,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 ]
                 batch_readers = [
                     command for command in popen_commands
-                    if command == ["git", "cat-file", "--batch"]
+                    if command == [
+                        "git", "--no-replace-objects", "cat-file", "--batch"
+                    ]
                 ]
             finally:
                 RECONCILE.stop_git_snapshot_cache()

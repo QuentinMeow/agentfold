@@ -36,3 +36,22 @@
   tree object to historical artifact reads. Generalized the cached path reader to accept a
   validated commit or tree root; the affected 13-test subset and the final 320-test queue suite
   then passed.
+
+## 2026-07-26 — repair-replacement-ref-determinism (codex)
+
+- The second independent panel unanimously blocked revision `6df6010` because the bulk graph
+  walk disabled Git replacement refs while the persistent object reader honored them. A local
+  replacement could therefore forge the action-creation tree and change the baseline/verdict.
+  The contract reviewer also found that verification omitted the acceptance criterion's
+  per-method pre-repair test matrix.
+- Started the sole persistent object reader with `git --no-replace-objects cat-file --batch`,
+  matching every history query used by the creation proof. No other admission semantics
+  changed.
+- Added a real replacement-ref regression that forges the action-creation tree while retaining
+  the action and parent. It proves unchanged evidence rejects identically with and without the
+  ref for a staged deletion, a direct range, and an exact synthetic-merge candidate.
+- In isolated detached worktrees, the replacement test failed against blocked revision
+  `6df6010` and passed after the one-line repair. All 24 test methods introduced by this task
+  were also run against base checker `ab5a18e`; `verification.md` records every method verdict
+  and distinguishes assertion failures from missing-new-helper errors and non-discriminating
+  passes.

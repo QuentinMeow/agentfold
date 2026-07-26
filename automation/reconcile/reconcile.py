@@ -912,7 +912,7 @@ def git_object_snapshot(oid):
     if _GIT_CAT_FILE_PROCESS is None:
         try:
             _GIT_CAT_FILE_PROCESS = subprocess.Popen(
-                ["git", "cat-file", "--batch"],
+                ["git", "--no-replace-objects", "cat-file", "--batch"],
                 cwd=REPO,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
