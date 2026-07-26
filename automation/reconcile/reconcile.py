@@ -5280,6 +5280,16 @@ def task_record_paths_at(revision):
     return records
 
 
+def task_recorded_at_other_parent(task_id, parent, revision):
+    """Return whether another parent of one candidate already recorded a task."""
+    for other in candidate_parent_oids(revision):
+        if other == parent:
+            continue
+        if task_id in task_record_paths_at(other):
+            return True
+    return False
+
+
 def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
@@ -5346,7 +5356,11 @@ def task_topology_problems(parent, revision, adopting=False):
             if adopting or not current:
                 continue
             status, path = current[0]
-            if status != "0_backlog":
+            # A merge parent that predates a task is no lifecycle step for it;
+            # the parent holding the record supplies the validating edge.
+            if status != "0_backlog" and not task_recorded_at_other_parent(
+                task_id, parent, revision
+            ):
                 yield (
                     Path(path),
                     f"new task:{task_id} was created directly in {status}",

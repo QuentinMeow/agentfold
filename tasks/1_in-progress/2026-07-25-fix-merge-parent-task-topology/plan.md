@@ -1,21 +1,21 @@
 # Plan — stop reading a merge parent edge as a lifecycle step
 
-- [ ] 1. Claim the task, move it to `1_in-progress`, and resolve its pickup request in one
+- [x] 1. Claim the task, move it to `1_in-progress`, and resolve its pickup request in one
       coordination commit on `main`.
-- [ ] 2. Record the reproduction of the false finding on the merge range, before any code
+- [x] 2. Record the reproduction of the false finding on the merge range, before any code
       change, in `verification.md`.
-- [ ] 3. Add a sibling-parent lookup beside `task_record_paths_at` in
+- [x] 3. Add a sibling-parent lookup beside `task_record_paths_at` in
       `automation/reconcile/reconcile.py`, built on the existing `candidate_parent_oids`
       helper so the index candidate and a commit candidate resolve the same way.
-- [ ] 4. Condition only the `if not prior:` creation finding in `task_topology_problems` on
+- [x] 4. Condition only the `if not prior:` creation finding in `task_topology_problems` on
       that lookup, leaving `before`, `after`, the rename set, and every sibling rule
       untouched.
-- [ ] 5. Add tests in `automation/tests/test_reconcile_queue.py` over real merge commits:
+- [x] 5. Add tests in `automation/tests/test_reconcile_queue.py` over real merge commits:
       the cleared false positive, a linear direct-to-`1_in-progress` creation, a merge no
       parent of which carries the task, a `0_backlog` parent advanced to `1_in-progress` by
       the merge, and the `adopting` escape.
-- [ ] 6. Run each new test against the pre-repair function to record which ones
+- [x] 6. Run each new test against the pre-repair function to record which ones
       discriminate, and note every verdict in `verification.md`.
-- [ ] 7. Record real output for the merge range, a full `--check`, and the whole test suite
+- [x] 7. Record real output for the merge range, a full `--check`, and the whole test suite
       in `verification.md`.
-- [ ] 8. Open the pull request with a validated action-projection body.
+- [x] 8. Open the pull request with a validated action-projection body.
