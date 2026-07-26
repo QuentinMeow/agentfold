@@ -13,7 +13,7 @@ executes; Python stdlib only, so automation runs on a bare clone.
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
 | `mine_cochange.py` | advisory: ranks Markdown pairs that keep changing together, with their shared commit subjects as evidence; `accept`/`reject` append durable verdicts to `cochange-ledger.txt`, whose rejection rate is the effective-false-positive rate | on demand |
-| `run_tests.py` | runs test files under services, canonical skills, and automation | pre-commit, CI, on demand |
+| `run_tests.py` | runs tests in an isolated working-tree-byte view; the full suite is the default, while `--staged` selects only ordinary add/modify paths in the known quote-service dependency closure and otherwise falls back to full (it selects from the index, but is not staged-snapshot verification) | pre-commit (`--staged`), CI and on demand (full default) |
 
 Rules:
 

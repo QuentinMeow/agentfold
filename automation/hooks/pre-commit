@@ -12,7 +12,7 @@ python3 "$ROOT/automation/check_core_scope.py" --staged
 echo "pre-commit: reconciler"
 python3 "$ROOT/automation/reconcile/reconcile.py" --check
 
-echo "pre-commit: repository tests"
-python3 "$ROOT/automation/run_tests.py"
+echo "pre-commit: staged-path repository tests"
+python3 "$ROOT/automation/run_tests.py" --staged
 
 echo "pre-commit: OK"
