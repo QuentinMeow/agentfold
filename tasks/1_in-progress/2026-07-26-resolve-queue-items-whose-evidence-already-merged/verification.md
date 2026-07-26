@@ -77,7 +77,7 @@ OK
 
 ```
 $ python3 automation/reconcile/reconcile.py --check
-(no output; exit 0)
+reconcile: 0 finding(s)
 ```
 
 ## Full repository suite
@@ -378,4 +378,109 @@ Ran 3 tests in 0.248s — OK
 tests: 11/11 files passed
 pre-commit: OK
 [task/2026-07-26-resolve-queue-items-whose-evidence-already-merged 653b167] fix: reject replaced range candidate ancestry
+```
+
+## Candidate-provenance verification-record hook
+
+**Verified revision:** 2b6c269e08973647d2c19d09b3c74c618a8b9c34
+
+The record commit carrying the preceding code-hook evidence also passed the enabled hook. This
+later section records that completed result without claiming its own future commit hook.
+
+```
+$ git commit -m "docs: record candidate provenance verification" -m "Record the repaired implementation's complete manual and hook evidence without predicting this record commit's own hook." -m "task: 2026-07-26-resolve-queue-items-whose-evidence-already-merged"
+pre-commit: core scope
+core-scope: pass (4 core path(s), task 2026-07-26-resolve-queue-items-whose-evidence-already-merged; independent review manual; not invoked)
+pre-commit: reconciler
+reconcile: 0 finding(s)
+pre-commit: repository tests
+Ran 322 tests in 138.659s — OK
+tests: 11/11 files passed
+pre-commit: OK
+[task/2026-07-26-resolve-queue-items-whose-evidence-already-merged 2b6c269] docs: record candidate provenance verification
+```
+
+## Fourth review verdicts
+
+**Reviewed revision:** 2b6c269e08973647d2c19d09b3c74c618a8b9c34
+
+- correctness / independent adversarial panel: block — replacement-aware staged diffs could
+  hide queue deletion/mutation, handover mutation, and task admission changes
+- contract / independent adversarial panel: block — a valid angle-bracket Markdown evidence
+  destination containing spaces was rejected, and the staged verification record claimed no
+  output although success prints `reconcile: 0 finding(s)`
+- blast radius / independent adversarial panel: block — replacement-aware Git reads were shared
+  by review target validation, new-handover discovery, handover creation snapshots, and staged
+  task/queue/handover admission paths
+
+The reviewed revision was not published. A complete Git-command audit expanded the repair from
+the initial staged queue proof to every confirmed admission-verdict read.
+
+## Fourth-round pre-repair discriminators
+
+The six new fourth-round methods and the expanded mixed-invalid method were run in the isolated
+detached base-checker worktree at `ab5a18e6c2c149be106f09968d309ae5f1fb0773`.
+Replacement refs erased all five staged admission changes, made a blob appear to be a commit,
+hid the new handover in both root and non-root ranges, and substituted forged handover/queue
+creation state. The source guard found 24 unprefixed non-allowlisted Git command shapes. The
+angle-link compatibility method passed on the base checker and is explicitly non-discriminating.
+
+```
+$ python3 -m unittest -v \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_hide_staged_admission_changes \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_forge_git_review_object_or_ancestry \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_hide_new_handover_in_root_or_range \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_change_handover_or_staged_blob_baselines \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_git_object_reads_bypass_replacements_except_stable_allowlist \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_accepts_angle_link_evidence_path_with_spaces \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths
+Ran 7 tests in 3.445s
+FAILED (failures=15)
+```
+
+The complete task-added matrix now contains 31 methods: 6 PASS/non-discriminating, 19
+method-level FAIL/discriminating, and 6 helper-absent ERROR/implementation-surface distinctions
+against the base checker.
+
+## Fourth-round focused repair
+
+```
+$ python3 -m unittest -v \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_hide_staged_admission_changes \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_forge_git_review_object_or_ancestry \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_hide_new_handover_in_root_or_range \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_replace_ref_cannot_change_handover_or_staged_blob_baselines \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_git_object_reads_bypass_replacements_except_stable_allowlist \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_accepts_angle_link_evidence_path_with_spaces \
+  automation.tests.test_reconcile_queue.ReconcileQueueTests.test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths
+Ran 7 tests in 3.127s
+
+OK
+```
+
+## Fourth-round final queue reconciler suite
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue
+Ran 328 tests in 91.730s
+
+OK
+```
+
+## Fourth-round full repository suite
+
+```
+$ python3 automation/run_tests.py
+Ran 118 tests in 30.336s — OK
+Ran 55 tests in 1.403s — OK (skipped=1)
+Ran 24 tests in 0.012s — OK
+Ran 9 tests in 0.011s — OK
+Ran 40 tests in 10.028s — OK (skipped=1)
+Ran 28 tests in 7.083s — OK
+Ran 328 tests in 144.923s — OK
+Ran 9 tests in 0.004s — OK
+Ran 19 tests in 1.456s — OK
+Ran 5 tests in 0.120s — OK
+Ran 3 tests in 0.254s — OK
+tests: 11/11 files passed
 ```

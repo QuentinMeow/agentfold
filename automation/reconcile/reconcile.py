@@ -50,6 +50,7 @@ from markdown_semantics import (
 
 REPO = Path(__file__).resolve().parents[2]
 TODAY = datetime.datetime.now(datetime.timezone.utc).date()
+RAW_GIT = ("git", "--no-replace-objects")
 
 QUEUE = REPO / "message-queue"
 RETRIES = QUEUE / "needs-agent" / "retries"
@@ -871,7 +872,7 @@ def repo_artifact_bytes(path):
             value = git_blob_bytes(_GIT_INDEX_OID_CACHE.get(relative))
         else:
             artifact = subprocess.run(
-                ["git", "show", f":{relative}"],
+                [*RAW_GIT, "show", f":{relative}"],
                 cwd=REPO,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -1429,7 +1430,8 @@ def staged_deleted_queue_paths(parent):
         return []
     deleted = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff",
+            "--cached", "--name-status", "-z", "-M",
             "--diff-filter=DR", parent, "--", "message-queue",
         ],
         cwd=REPO,
@@ -1449,7 +1451,8 @@ def staged_mutated_queue_paths(parent):
         return []
     changed = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff",
+            "--cached", "--name-status", "-z", "-M",
             "--diff-filter=MRT", parent, "--", "message-queue",
         ],
         cwd=REPO,
@@ -1646,7 +1649,7 @@ def staged_mutated_handover_paths(parent):
         return []
     changed = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=MRT", parent, "--",
             "history/conversations",
         ],
@@ -3052,9 +3055,13 @@ def ordinary_request_resolution_evidence_problem(
         if matched is None:
             malformed = True
             break
-        declared.append(next(
-            group for group in matched.groups() if group is not None
-        ))
+        code_path, angle_path, plain_link_path = matched.groups()
+        if code_path is not None:
+            declared.append((code_path, False))
+        elif angle_path is not None:
+            declared.append((angle_path, True))
+        else:
+            declared.append((plain_link_path, False))
         offset = matched.end()
         whitespace = re.match(r"\s*", value[offset:])
         offset += len(whitespace.group(0))
@@ -3065,11 +3072,17 @@ def ordinary_request_resolution_evidence_problem(
             break
         offset += 1
     paths = []
-    for candidate in declared:
+    for candidate, permits_spaces in declared:
         candidate = candidate.split("#", 1)[0]
         candidate_path = Path(candidate)
         if not candidate or candidate_path.is_absolute() \
-                or any(character.isspace() for character in candidate) \
+                or candidate != candidate.strip() \
+                or "<" in candidate or ">" in candidate \
+                or any(
+                    character.isspace()
+                    and (character != " " or not permits_spaces)
+                    for character in candidate
+                ) \
                 or ".." in candidate_path.parts \
                 or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate) \
                 or candidate == "message-queue" \
@@ -4898,7 +4911,7 @@ def git_review_revision_problems(revision):
     problems = []
     for object_id in object_ids:
         result = subprocess.run(
-            ["git", "cat-file", "-t", object_id],
+            [*RAW_GIT, "cat-file", "-t", object_id],
             cwd=REPO,
             text=True,
             stdout=subprocess.PIPE,
@@ -4913,7 +4926,7 @@ def git_review_revision_problems(revision):
             )
     if len(object_ids) == 2 and not problems:
         merge_base = subprocess.run(
-            ["git", "merge-base", object_ids[0], object_ids[1]],
+            [*RAW_GIT, "merge-base", object_ids[0], object_ids[1]],
             cwd=REPO,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -5600,7 +5613,7 @@ def task_ids_changed_on_edge(parent, revision):
     """Return logical task ids touched on one exact Git/index edge."""
     command = (
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=ADMRT", parent, "--",
         ]
         if revision is None else
@@ -5823,7 +5836,7 @@ def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=R", parent, "--", "tasks",
         ]
         if revision is None else
@@ -6271,11 +6284,14 @@ def newly_added_handovers():
         )
     elif CHANGE_RANGE and CHANGE_RANGE.startswith("root:"):
         command = [
-            "git", "ls-tree", "-r", "--name-only",
+            *RAW_GIT, "ls-tree", "-r", "--name-only",
             CHANGE_RANGE[len("root:"):], "--", "history/conversations",
         ]
     else:
-        command = ["git", "diff", "--no-renames", "--name-only", "--diff-filter=A"]
+        command = [
+            *RAW_GIT, "diff", "--no-renames", "--name-only",
+            "--diff-filter=A",
+        ]
         command.append(CHANGE_RANGE if CHANGE_RANGE else "--cached")
         command.extend(["--", "history/conversations"])
     if CHANGE_RANGE is not None:
@@ -6302,7 +6318,7 @@ def newly_added_handovers():
     if CHANGE_RANGE and not CHANGE_RANGE.startswith("root:"):
         base, head = CHANGE_RANGE.split("...", 1)
         merge_base = subprocess.run(
-            ["git", "merge-base", base, head],
+            [*RAW_GIT, "merge-base", base, head],
             cwd=REPO,
             text=True,
             stdout=subprocess.PIPE,
@@ -6311,7 +6327,7 @@ def newly_added_handovers():
         )
         tree = subprocess.run(
             [
-                "git", "ls-tree", "-r", "--name-only", head, "--",
+                *RAW_GIT, "ls-tree", "-r", "--name-only", head, "--",
                 "history/conversations",
             ],
             cwd=REPO,
@@ -6349,7 +6365,7 @@ def newly_added_handovers():
                 return set(), latest.stderr.strip() \
                     or f"could not find current creation commit for {candidate}"
             before_boundary = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", creation, boundary],
+                [*RAW_GIT, "merge-base", "--is-ancestor", creation, boundary],
                 cwd=REPO,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -6526,7 +6542,7 @@ def handover_creation_state(handover, rel):
         return None, None, None, creation_error
 
     artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
+        [*RAW_GIT, "show", f"{created_at}:{rel.as_posix()}"],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -6535,7 +6551,7 @@ def handover_creation_state(handover, rel):
     )
     tree = subprocess.run(
         [
-            "git", "ls-tree", "-r", "-z", created_at, "--",
+            *RAW_GIT, "ls-tree", "-r", "-z", created_at, "--",
             "message-queue",
         ],
         cwd=REPO,
@@ -6624,7 +6640,7 @@ def handover_current_incarnation_text(rel):
     if not created_at:
         return None, history.stderr.strip() or "could not find creation commit"
     artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
+        [*RAW_GIT, "show", f"{created_at}:{rel.as_posix()}"],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,

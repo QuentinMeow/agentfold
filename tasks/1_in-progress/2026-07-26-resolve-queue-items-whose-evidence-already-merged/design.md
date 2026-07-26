@@ -74,6 +74,18 @@ candidate: candidate parent discovery, committed tree capture/comparison, and ra
 task scope all ignore replacement refs. A local replacement therefore cannot turn a raw
 one-parent or out-of-range commit into an apparent exact base-plus-head synthetic merge.
 
+The raw-object boundary applies to every Git object or ancestry read that contributes to an
+admission verdict, not only the ordinary-request lineage walker. Staged queue and handover
+events, staged task changes and renames, Git review target type/ancestry, new-handover
+discovery, handover creation snapshots, and uncached index-object reads all ignore
+repository-local replacement refs. Index/worktree-only reads and literal ref-name lookup are
+the closed replacement-insensitive exceptions, enforced by a source-level command guard.
+
+Angle-bracket Markdown destinations retain Markdown's support for ASCII spaces, so
+`[source](<docs/source file.md>)` is a valid local evidence declaration. Bare links and code
+spans remain whitespace-free. Every form still rejects leading/trailing whitespace, non-space
+whitespace, malformed brackets, URIs, absolute paths, traversal, and queue-local evidence.
+
 ## Core fit
 
 **Agent substitution:** pass — the rule consumes repository files and Git history, not an agent-runtime identity or private state

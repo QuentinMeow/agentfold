@@ -1,3 +1,4 @@
+import ast
 import contextlib
 import datetime
 import hashlib
@@ -2958,6 +2959,34 @@ class ReconcileQueueTests(unittest.TestCase):
 
             self.assertEqual([], self.queue_resolution_findings())
 
+    def test_ordinary_request_accepts_angle_link_evidence_path_with_spaces(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(root, "docs/source file.md", "# Broken\n")
+            path = "message-queue/needs-agent/requests/blocking-repair.md"
+            text = self.ordinary_request_text(["docs/placeholder.md"]).replace(
+                "`docs/placeholder.md`",
+                "[source](<docs/source file.md>)",
+            )
+            item = self.write(root, path, text)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file repair")
+            item.write_text(
+                text.replace("**Status:** open", "**Status:** in-repair"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim repair")
+            source.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            self.assertEqual([], self.queue_resolution_findings())
+
     def test_ordinary_request_follows_unambiguous_rename_to_creation(self):
         with self.repo() as root:
             self.init_git(root)
@@ -3402,8 +3431,16 @@ class ReconcileQueueTests(unittest.TestCase):
             )
 
     def test_ordinary_request_rejects_mixed_valid_and_invalid_evidence_paths(self):
-        for invalid in ("../outside.md", "../outside file.md"):
-            with self.subTest(invalid=invalid), self.repo() as root:
+        invalid_tokens = (
+            "`../outside.md`",
+            "`/absolute.md`",
+            "`https://example.invalid/evidence.md`",
+            "`message-queue/AGENTS.md`",
+            "`docs/other file.md`",
+            "[malformed](<docs/source.md)",
+        )
+        for invalid_token in invalid_tokens:
+            with self.subTest(invalid=invalid_token), self.repo() as root:
                 self.init_git(root)
                 self.write(
                     root, "message-queue/AGENTS.md",
@@ -3417,7 +3454,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     ["docs/source.md"]
                 ).replace(
                     "`docs/source.md`\n**Blocks now:",
-                    f"`docs/source.md`; `{invalid}`\n**Blocks now:",
+                    f"`docs/source.md`; {invalid_token}\n**Blocks now:",
                 )
                 item = self.write(root, path, text)
                 self.git(root, "add", ".")
@@ -11554,6 +11591,299 @@ class ReconcileQueueTests(unittest.TestCase):
                 "neither the --range head nor an exact base+head synthetic merge",
                 without_replace[1],
             )
+
+    def test_replace_ref_cannot_hide_staged_admission_changes(self):
+        cases = (
+            (
+                "queue deletion",
+                "message-queue/needs-agent/requests/blocking-repair.md",
+            ),
+            (
+                "queue mutation",
+                "message-queue/needs-agent/requests/blocking-repair.md",
+            ),
+            (
+                "handover mutation",
+                "history/conversations/2026-07-23-1200UTC-example/"
+                "handover.md",
+            ),
+            (
+                "task mutation",
+                "tasks/1_in-progress/2026-07-23-example/task.md",
+            ),
+            (
+                "task artifact rename",
+                "tasks/1_in-progress/2026-07-23-example/design.md",
+            ),
+        )
+        for case, path in cases:
+            with self.subTest(case=case), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                item = self.write(root, path, "# Repair\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file action")
+                head = self.git(root, "rev-parse", "HEAD")
+                parent = self.git(root, "rev-parse", "HEAD^")
+
+                if case == "queue deletion":
+                    item.unlink()
+                    expected = [path]
+                    verdict = lambda: RECONCILE.staged_deleted_queue_paths(
+                        head
+                    )
+                elif case == "queue mutation":
+                    item.write_text("# Rewritten repair\n", encoding="utf-8")
+                    expected = [(path, path)]
+                    verdict = lambda: RECONCILE.staged_mutated_queue_paths(
+                        head
+                    )
+                elif case == "handover mutation":
+                    item.write_text("# Rewritten handover\n", encoding="utf-8")
+                    expected = [path]
+                    verdict = lambda: RECONCILE.staged_mutated_handover_paths(
+                        head
+                    )
+                elif case == "task mutation":
+                    item.write_text("# Rewritten task\n", encoding="utf-8")
+                    expected = {"2026-07-23-example"}
+                    verdict = lambda: RECONCILE.task_ids_changed_on_edge(
+                        head, None
+                    )
+                else:
+                    destination = path.replace("design.md", "proposal.md")
+                    item.rename(root / destination)
+                    expected = [(path, destination)]
+                    verdict = lambda: RECONCILE.task_artifact_renames_on_edge(
+                        head, None
+                    )
+                self.git(root, "add", "-A")
+
+                index_tree = self.git(root, "write-tree")
+                replacement = self.git(
+                    root, "commit-tree", index_tree,
+                    "-p", parent,
+                    "-m", "forge index-matching HEAD",
+                )
+                without_replace = verdict()
+                self.git(root, "replace", head, replacement)
+                try:
+                    with_replace = verdict()
+                finally:
+                    self.git(root, "replace", "-d", head)
+
+                self.assertEqual(expected, without_replace)
+                self.assertEqual(without_replace, with_replace)
+
+    def test_replace_ref_cannot_forge_git_review_object_or_ancestry(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            blob = self.git(root, "rev-parse", "HEAD:docs/source.md")
+            tree = self.git(root, "write-tree")
+            unrelated = self.git(
+                root, "commit-tree", tree, "-m", "unrelated root"
+            )
+
+            blob_without = RECONCILE.git_review_revision_problems(
+                f"git:{blob}"
+            )
+            self.git(root, "replace", "-f", blob, base)
+            try:
+                blob_with = RECONCILE.git_review_revision_problems(
+                    f"git:{blob}"
+                )
+            finally:
+                self.git(root, "replace", "-d", blob)
+            self.assertEqual(blob_without, blob_with)
+            self.assertTrue(any("not a commit" in problem
+                                for problem in blob_without))
+
+            range_revision = f"git:{base}...{unrelated}"
+            ancestry_without = RECONCILE.git_review_revision_problems(
+                range_revision
+            )
+            replacement = self.git(
+                root, "commit-tree", tree, "-p", base,
+                "-m", "forged common ancestry",
+            )
+            self.git(root, "replace", unrelated, replacement)
+            try:
+                ancestry_with = RECONCILE.git_review_revision_problems(
+                    range_revision
+                )
+            finally:
+                self.git(root, "replace", "-d", unrelated)
+            self.assertEqual(ancestry_without, ancestry_with)
+            self.assertIn(
+                "base and head have no merge base", ancestry_without
+            )
+
+    def test_replace_ref_cannot_hide_new_handover_in_root_or_range(self):
+        rel = Path(
+            "history/conversations/2026-07-23-1200UTC-example/handover.md"
+        )
+        for view in ("root", "range"):
+            with self.subTest(view=view), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                base = self.git(root, "rev-parse", "HEAD")
+                self.write(root, rel.as_posix(), "# Handover\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "add handover")
+                head = self.git(root, "rev-parse", "HEAD")
+                base_tree = self.git(root, "rev-parse", f"{base}^{{tree}}")
+                replacement = self.git(
+                    root, "commit-tree", base_tree, "-p", base,
+                    "-m", "hide handover",
+                )
+                change_range = (
+                    f"root:{head}" if view == "root" else f"{base}...{head}"
+                )
+
+                def verdict():
+                    with mock.patch.multiple(
+                        RECONCILE,
+                        CHANGE_RANGE=change_range,
+                        projection_schema_activation_commits=(
+                            lambda _candidate: ([base], None)
+                        ),
+                        governed_by_activation_join=(
+                            lambda _revision, _activations: (True, None)
+                        ),
+                    ):
+                        return RECONCILE.newly_added_handovers()
+
+                without_replace = verdict()
+                self.git(root, "replace", head, replacement)
+                try:
+                    with_replace = verdict()
+                finally:
+                    self.git(root, "replace", "-d", head)
+                self.assertEqual(({rel}, None), without_replace)
+                self.assertEqual(without_replace, with_replace)
+
+    def test_replace_ref_cannot_change_handover_or_staged_blob_baselines(self):
+        rel = Path(
+            "history/conversations/2026-07-23-1200UTC-example/handover.md"
+        )
+        queue_path = (
+            "message-queue/needs-human/reviews/non-blocking-review.md"
+        )
+        with self.repo() as root:
+            self.init_git(root)
+            source = self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            handover = self.write(root, rel.as_posix(), "# Original handover\n")
+            self.write(root, queue_path, "# Review\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            handover.write_text("# Forged handover\n", encoding="utf-8")
+            (root / queue_path).unlink()
+            self.git(root, "add", "-A")
+            forged_tree = self.git(root, "write-tree")
+            replacement = self.git(
+                root, "commit-tree", forged_tree, "-p", base,
+                "-m", "forge creation snapshot",
+            )
+            self.git(root, "reset", "--hard", head)
+
+            def handover_verdict():
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    state = RECONCILE.handover_creation_state(
+                        handover, rel
+                    )
+                with mock.patch.object(RECONCILE, "CHANGE_RANGE", None):
+                    incarnation = RECONCILE.handover_current_incarnation_text(
+                        rel
+                    )
+                return state, incarnation
+
+            handover_without = handover_verdict()
+            self.git(root, "replace", head, replacement)
+            try:
+                handover_with = handover_verdict()
+            finally:
+                self.git(root, "replace", "-d", head)
+            self.assertEqual(handover_without, handover_with)
+            state, incarnation = handover_without
+            self.assertEqual("# Original handover\n", state[0])
+            self.assertEqual({queue_path}, state[1])
+            self.assertEqual(("# Original handover\n", None), incarnation)
+
+            original_blob = self.git(
+                root, "rev-parse", "HEAD:docs/source.md"
+            )
+            forged = self.write(root, "docs/forged.md", "# Forged\n")
+            forged_blob = self.git(root, "hash-object", "-w", str(forged))
+            staged_without = RECONCILE.repo_artifact_bytes(source)
+            self.git(root, "replace", original_blob, forged_blob)
+            try:
+                staged_with = RECONCILE.repo_artifact_bytes(source)
+            finally:
+                self.git(root, "replace", "-d", original_blob)
+            self.assertEqual(b"# Source\n", staged_without)
+            self.assertEqual(staged_without, staged_with)
+
+    def test_git_object_reads_bypass_replacements_except_stable_allowlist(self):
+        def string_literal(node):
+            if isinstance(node, ast.Str):
+                return node.s
+            if isinstance(node, ast.Constant) \
+                    and isinstance(node.value, str):
+                return node.value
+            return None
+
+        allowed = {
+            ("git", "ls-files", "--stage", "-z"),
+            ("git", "ls-files", "--stage", "-z", "--"),
+            ("git", "rev-parse", "--verify", "--quiet", "HEAD"),
+            (
+                "git", "diff-files", "--quiet",
+                "--ignore-submodules=all", "--",
+            ),
+            (
+                "git", "ls-files", "--others",
+                "--exclude-per-directory=.gitignore", "-z",
+            ),
+            ("git", "rev-parse", "--git-path", "MERGE_HEAD"),
+            ("git", "hash-object", "-t", "tree", "--stdin"),
+        }
+        tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
+        unsafe = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List) or not node.elts:
+                continue
+            first = node.elts[0]
+            if isinstance(first, ast.Starred):
+                continue
+            if string_literal(first) != "git":
+                continue
+            prefix = []
+            for element in node.elts:
+                value = string_literal(element)
+                if value is None:
+                    break
+                prefix.append(value)
+            prefix = tuple(prefix)
+            if len(prefix) >= 2 and prefix[1] == "--no-replace-objects":
+                continue
+            if prefix not in allowed:
+                unsafe.append((node.lineno, " ".join(prefix)))
+        self.assertEqual([], unsafe)
 
     def test_range_accepts_exact_synthetic_merge_candidate(self):
         with self.repo() as root:

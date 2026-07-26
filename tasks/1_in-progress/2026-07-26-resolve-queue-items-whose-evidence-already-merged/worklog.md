@@ -79,3 +79,28 @@
   the expected command now includes `--no-replace-objects`. The focused cache/exploit pair and
   the subsequent 11-file repository suite passed. The code-repair hook and its exact evidence
   are recorded only after that commit exists.
+
+## 2026-07-26 — close-raw-git-boundary-and-evidence-grammar (codex)
+
+- The fourth independent panel unanimously blocked `2b6c269`. Replacement-aware staged diffs
+  could hide queue, handover, and task changes; replacement-aware review validation could forge
+  target type or common ancestry; and handover discovery/baseline reads could observe forged
+  trees and bytes. The evidence parser also rejected schema-valid angle-bracket destinations
+  containing spaces, and an earlier verification entry mislabeled the reconciler's success
+  output as no output.
+- Audited every Git invocation in the reconciler and introduced one raw-object argv prefix for
+  all affected admission-verdict reads. Kept only index/worktree inventory, literal HEAD/ref
+  lookup, merge-state path lookup, and content hashing on a documented replacement-insensitive
+  allowlist. A source-level AST regression prevents new unprefixed Git reads from silently
+  expanding that allowlist.
+- Added real replacement forgeries covering staged queue deletion/mutation, staged handover
+  mutation, staged task change/rename, Git-review object type and ancestry, root/range handover
+  discovery, handover creation bytes and queue tree, current-incarnation baseline bytes, and an
+  uncached staged blob read.
+- Preserved the evidence grammar's closed-list behavior while accepting ASCII spaces only in
+  angle-bracket Markdown destinations. Expanded the mixed-invalid matrix across traversal,
+  absolute, URI, queue-local, whitespace code-span, and malformed-link entries.
+- All seven focused fourth-round tests passed. The same tests against base checker `ab5a18e`
+  produced five failing new methods, one passing compatibility case, and the already-existing
+  mixed-invalid method failure, confirming the behavior change without overstating the
+  non-discriminating angle-link acceptance case.
