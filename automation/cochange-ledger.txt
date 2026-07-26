@@ -1,0 +1,56 @@
+# AgentFold co-change verdict ledger -- append-only, one verdict per line.
+#
+# Written by automation/mine_cochange.py (verbs accept, reject); read by its report and
+# status verbs. A directed pair with a verdict never re-surfaces in the report: rejected
+# means dismissed, accepted means already declared, and neither is still a candidate.
+# That is what makes a decision durable once the agent that made it is gone. The share of
+# verdicts that are rejections is the effective-false-positive rate the governance
+# thresholds in docs/designs/markdown-edge-graph.md are measured against.
+#
+# Format: tab-separated fields, one line per verdict, never rewritten or reordered.
+#
+#   <date>  <verdict>  <a>  <b>  <reason>
+#
+#   date     ISO YYYY-MM-DD, the day the verdict was recorded
+#   verdict  accept (the coupling is real) or reject (the report was not acted on)
+#   a        the file that changed
+#   b        the file the candidate said to review; the direction a -> b is recorded
+#            explicitly, so a verdict on a -> b says nothing about b -> a
+#   reason   one line, required for a rejection and optional for an acceptance; tabs
+#            and newlines are collapsed to spaces before writing
+#
+# One regex parses every line:
+#   ^(\d{4}-\d{2}-\d{2})\t(accept|reject)\t([^\t]+)\t([^\t]+)\t([^\t]*)(?:\t(.*))?$
+# A sixth and later field may be appended by a future version; this parser keeps the
+# remainder as one opaque group, so lines written today keep parsing unchanged.
+#
+# Blank lines and lines beginning with # are comments.
+2026-07-25	reject	tasks/3_in-review/2026-07-23-first-class-message-queue/task.md	message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md	already declared bidirectionally in a stronger checked form -- the task Queue actions field names the item and the item Blocks at names task:<id>, and the reconciler enforces the pair; the design forbids restating an enforced typed field as a generic edge
+2026-07-25	accept	templates/queue/review.md	message-queue/AGENTS.md	restates the blocking-/future-blocking-/non-blocking- prefix rule this contract owns, with zero occurrences of that path anywhere in the template
+2026-07-25	accept	templates/queue/clarification.md	message-queue/AGENTS.md	carries the identical six-line prefix comment as review.md with no link to its owner
+2026-07-25	accept	templates/queue/decision.md	message-queue/AGENTS.md	carries the identical six-line prefix comment as review.md with no link to its owner
+2026-07-25	accept	templates/queue/request.md	message-queue/AGENTS.md	carries the identical six-line prefix comment plus the open/in-repair status vocabulary this contract owns
+2026-07-25	accept	templates/queue/retry.md	message-queue/AGENTS.md	carries the identical six-line prefix comment plus the open/in-repair status vocabulary this contract owns
+2026-07-25	accept	message-queue/AGENTS.md	templates/queue/review.md	the load-bearing direction: commit aca7014 changed explicit date to explicit UTC date here and the template prose comment still says a named date
+2026-07-25	accept	message-queue/AGENTS.md	templates/queue/clarification.md	owner-to-restatement direction; the same UTC drift is present in this template
+2026-07-25	accept	message-queue/AGENTS.md	templates/queue/decision.md	owner-to-restatement direction; the same UTC drift is present in this template
+2026-07-25	accept	message-queue/AGENTS.md	templates/queue/request.md	owner-to-restatement direction; lifecycle rules here govern the template's status and Request kind fields
+2026-07-25	accept	message-queue/AGENTS.md	templates/queue/retry.md	owner-to-restatement direction; lifecycle rules here govern the template's open-to-in-repair claim
+2026-07-25	accept	templates/queue/review.md	automation/AGENTS.md	the queue checks summarised there are what make this template's fields enforceable; aca7014 propagated the same UTC change to both
+2026-07-25	accept	templates/queue/clarification.md	automation/AGENTS.md	same enforcement summary; a template field change requires the queue check and its one-line description to move
+2026-07-25	accept	templates/queue/decision.md	automation/AGENTS.md	verified content coupling: aca7014 changed Blocks at to UTC here and the stale-queue description there in the same commit
+2026-07-25	accept	templates/queue/request.md	automation/AGENTS.md	the pickup and open/in-repair checks summarised there validate this template's fields
+2026-07-25	accept	templates/queue/retry.md	automation/AGENTS.md	retry filing and garbage collection are described there and produce files from this template
+2026-07-25	accept	handbook/git-workflow.md	automation/AGENTS.md	the PR and admission adapter bullets there restate this file's provider and merge rules almost verbatim
+2026-07-25	accept	automation/AGENTS.md	handbook/git-workflow.md	reverse direction of the same restatement; the enforcement summary and the prose rule must not diverge
+2026-07-25	accept	handbook/git-workflow.md	message-queue/AGENTS.md	the merging and review section restates the future-blocking timing and escalation semantics this contract owns
+2026-07-25	accept	message-queue/AGENTS.md	handbook/git-workflow.md	reverse direction; changing queue timing invalidates the merge-review paragraph there
+2026-07-25	accept	handbook/human-action-guide.md	message-queue/AGENTS.md	the guide already links this contract for the prefix choice; the only mutually mentioned pair in the whole candidate set
+2026-07-25	accept	message-queue/AGENTS.md	handbook/human-action-guide.md	this contract already links the guide for human fields, so the coupling is declared in prose already
+2026-07-25	accept	handbook/human-action-guide.md	automation/AGENTS.md	the projection and external-assignment rules the guide states are exactly what the action-projection adapter enforces
+2026-07-25	accept	message-queue/AGENTS.md	automation/AGENTS.md	the queue-checks bullet there is the enforcement summary of these lifecycle rules
+2026-07-25	accept	tasks/AGENTS.md	automation/AGENTS.md	both restate the core-scope receipt and the --require-review semantics in near-identical wording
+2026-07-25	accept	CONTRIBUTING.md	automation/AGENTS.md	restates the same core-scope receipt and --require-review rule for a human audience
+2026-07-25	accept	templates/task/verification.md	automation/AGENTS.md	the review-verdicts block restates when --require-review makes a core-fit verdict mandatory
+2026-07-25	accept	templates/handover.md	message-queue/AGENTS.md	the handover projection restates the prefix ordering and the never-originate-an-ask rule this contract owns
+2026-07-25	accept	docs/designs/risk-tiered-agent-guardrails.md	roadmap/desired-state.md	the roadmap carries a one-paragraph summary of this design and links it; all three shared commits moved both

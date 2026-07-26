@@ -12100,6 +12100,121 @@ class ReconcileQueueTests(unittest.TestCase):
                 subjects,
             )
 
+    def test_link_check_reports_dead_path_carried_behind_an_anchor(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/source.md",
+                "Anchored: `docs/does-not-exist.md#foo`\n",
+            )
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("`docs/does-not-exist.md` does not exist", messages[0])
+
+    def test_link_check_accepts_a_live_anchor_on_a_live_path(self):
+        with self.repo() as root:
+            self.write(root, "docs/target.md", "# Target\n\n## Live section\n")
+            self.write(root, "docs/source.md", "See `docs/target.md#live-section`.\n")
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_reports_a_dead_anchor_on_a_live_path(self):
+        with self.repo() as root:
+            self.write(root, "docs/target.md", "# Target\n\n## Live section\n")
+            self.write(
+                root,
+                "docs/source.md",
+                "See [gone](docs/target.md#missing-section).\n",
+            )
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("`docs/target.md` has no `missing-section` heading anchor",
+                          messages[0])
+
+    def test_link_check_rejects_an_anchor_defined_only_inside_a_fence(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/target.md",
+                "# Target\n\n```markdown\n## Fenced section\n```\n",
+            )
+            self.write(root, "docs/source.md", "See `docs/target.md#fenced-section`.\n")
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("no `fenced-section` heading anchor", messages[0])
+
+    def test_link_check_numbers_duplicate_heading_anchors(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/target.md",
+                "# Target\n\n## Repeat\n\ntext\n\n## Repeat\n\ntext\n",
+            )
+            self.write(
+                root,
+                "docs/source.md",
+                "First `docs/target.md#repeat`, second `docs/target.md#repeat-1`.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+            self.write(root, "docs/source.md", "Third `docs/target.md#repeat-2`.\n")
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("no `repeat-2` heading anchor", messages[0])
+
+    def test_link_check_slugs_punctuation_heavy_headings(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "handbook/git-workflow.md",
+                "# Git workflow\n\n"
+                "## Conflict avoidance (by construction, not by care)\n",
+            )
+            self.write(
+                root,
+                "docs/source.md",
+                "See `handbook/git-workflow.md"
+                "#conflict-avoidance-by-construction-not-by-care`.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+            self.write(
+                root,
+                "docs/source.md",
+                "See `handbook/git-workflow.md"
+                "#conflict-avoidance-by-construction-not-by-care-1`.\n",
+            )
+
+            self.assertEqual(1, len(list(RECONCILE.check_links())))
+
+    def test_link_check_keeps_anchor_exemptions_for_records_and_schemas(self):
+        with self.repo() as root:
+            self.write(root, "docs/target.md", "# Target\n")
+            for rel in (
+                "history/conversations/2026-07-23-1200Z-example/handover.md",
+                "templates/handover.md",
+                "memory/decisions/2026-07-23-example.md",
+            ):
+                self.write(root, rel, "Anchored: `docs/target.md#missing-section`\n")
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_ignores_a_bare_same_file_fragment(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/source.md",
+                "# Source\n\nSee [above](#source) and [nowhere](#absent).\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
 
 if __name__ == "__main__":
     unittest.main()
