@@ -1,10 +1,10 @@
 # Stop task-admission from reading a merge parent edge as a lifecycle step
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-25, by claude, from the CI failure on the push of the pull request 13 merge commit 74b9d0dfd98f13c17124a9b40d955ff9461e0572
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-fix-merge-parent-task-topology.md`
+**Queue actions:** none
 
 ## Goal
 
