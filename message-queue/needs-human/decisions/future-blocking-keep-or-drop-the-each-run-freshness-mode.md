@@ -1,6 +1,6 @@
 # Keep all three freshness modes as answered, or drop `each-run` and ship two?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Action:** keep all three freshness modes as answered in N5, or drop `each-run` and ship review-window plus advisory-only
 **Full context:** `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`

@@ -1,6 +1,6 @@
 # Commit the generated edge-graph artifact as answered, or generate it on demand?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Action:** keep the committed byte-exact artifact as answered in N6, or generate it on demand and name the size at which committing is revisited
 **Full context:** `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md`
