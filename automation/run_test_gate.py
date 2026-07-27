@@ -2,11 +2,13 @@
 """Run budgeted routine or complete final repository test gates."""
 
 import argparse
+import ctypes
 import errno
 import json
 import os
 import platform
 import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -50,6 +52,7 @@ OUTCOME_EXIT = {
     "invalid": 2,
     "error": 2,
 }
+_STRONG_PROCESS_CONTAINMENT = None
 
 
 class GateError(RuntimeError):
@@ -471,23 +474,36 @@ def _descendant_pids(root_pid, deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return ()
-    try:
-        result = subprocess.run(
-            ["ps", "-axo", "pid=,ppid="],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=min(0.1, remaining),
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ()
     children = {}
-    for line in result.stdout.splitlines():
+    proc = Path("/proc")
+    if sys.platform.startswith("linux") and proc.is_dir():
+        for entry in proc.iterdir():
+            if not entry.name.isdigit() or time.monotonic() >= deadline:
+                continue
+            try:
+                fields = (entry / "stat").read_text().rsplit(") ", 1)[1].split()
+                parent = int(fields[1])
+                pid = int(entry.name)
+            except (FileNotFoundError, IndexError, OSError, ValueError):
+                continue
+            children.setdefault(parent, []).append(pid)
+    else:
         try:
-            pid, parent = (int(value) for value in line.split())
-        except (TypeError, ValueError):
-            continue
-        children.setdefault(parent, []).append(pid)
+            result = subprocess.run(
+                ["ps", "-axo", "pid=,ppid="],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=min(0.1, remaining),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ()
+        for line in result.stdout.splitlines():
+            try:
+                pid, parent = (int(value) for value in line.split())
+            except (TypeError, ValueError):
+                continue
+            children.setdefault(parent, []).append(pid)
     descendants = set()
     pending = [root_pid]
     while pending:
@@ -526,13 +542,114 @@ INTERNAL_COMPONENT_ENVIRONMENT_NAMES = frozenset(
 )
 
 
+def _canonical_git_hook_path(source, path):
+    """Remove only Git's verified, hook-only exec-path prepend."""
+    git_exec_path = source.get("GIT_EXEC_PATH")
+    git_index_file = source.get("GIT_INDEX_FILE")
+    git_prefix = source.get("GIT_PREFIX")
+    if (
+        not path
+        or not git_exec_path
+        or not os.path.isabs(git_exec_path)
+        or not git_index_file
+        or git_prefix is None
+    ):
+        return path
+    parts = path.split(os.pathsep)
+    if not parts or os.path.normpath(parts[0]) != os.path.normpath(git_exec_path):
+        return path
+    remaining = os.pathsep.join(parts[1:])
+    git_binary = shutil.which("git", path=remaining)
+    if not git_binary:
+        return path
+    probe_environment = dict(source)
+    probe_environment.pop("GIT_EXEC_PATH", None)
+    probe_environment.pop("GIT_INDEX_FILE", None)
+    probe_environment["PATH"] = remaining
+    probe_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    probe_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    try:
+        configured = subprocess.run(
+            [git_binary, "--exec-path"],
+            env=probe_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.0,
+        )
+        canonical_index = subprocess.run(
+            [git_binary, "rev-parse", "--git-path", "index"],
+            cwd=REPO,
+            env=probe_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return path
+    if configured.returncode != 0 or os.path.normpath(
+        configured.stdout.strip()
+    ) != os.path.normpath(git_exec_path):
+        return path
+    if canonical_index.returncode != 0:
+        return path
+    supplied_index = Path(git_index_file)
+    expected_index = Path(canonical_index.stdout.strip())
+    if not supplied_index.is_absolute():
+        supplied_index = REPO / supplied_index
+    if not expected_index.is_absolute():
+        expected_index = REPO / expected_index
+    if supplied_index.resolve() != expected_index.resolve():
+        return path
+    return remaining
+
+
 def safe_process_environment(source=None):
     """Pass only non-secret execution context into candidate-controlled components."""
     source = os.environ if source is None else source
-    return {
+    environment = {
         name: value
         for name, value in source.items()
         if name in SAFE_ENVIRONMENT_NAMES or name.startswith("PYTHON")
+    }
+    if "PATH" in environment:
+        environment["PATH"] = _canonical_git_hook_path(source, environment["PATH"])
+    return environment
+
+
+def strong_process_containment_available():
+    """Enable Linux orphan adoption or report that strong containment is absent."""
+    global _STRONG_PROCESS_CONTAINMENT
+    if _STRONG_PROCESS_CONTAINMENT is not None:
+        return _STRONG_PROCESS_CONTAINMENT
+    if not sys.platform.startswith("linux") or not Path("/proc/self/task").is_dir():
+        _STRONG_PROCESS_CONTAINMENT = False
+        return False
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        configured = ctypes.c_int()
+        if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+            _STRONG_PROCESS_CONTAINMENT = False
+            return False
+        if libc.prctl(37, ctypes.byref(configured), 0, 0, 0) != 0:  # PR_GET_CHILD_SUBREAPER
+            _STRONG_PROCESS_CONTAINMENT = False
+            return False
+        _STRONG_PROCESS_CONTAINMENT = configured.value == 1
+    except (AttributeError, OSError):
+        _STRONG_PROCESS_CONTAINMENT = False
+    return _STRONG_PROCESS_CONTAINMENT
+
+
+def process_containment_identity():
+    if strong_process_containment_available():
+        return {
+            "mode": "linux-child-subreaper",
+            "detached_descendants": "contained",
+        }
+    return {
+        "mode": "portable-process-group",
+        "detached_descendants": "best-effort",
     }
 
 
@@ -614,9 +731,45 @@ def _signal_processes(process, owned, process_signal):
             pass
 
 
-def _kill_process_tree(process, cleanup_deadline, token):
-    owned = set(_descendant_pids(process.pid, cleanup_deadline))
-    owned.update(_owned_process_pids(token, cleanup_deadline))
+def _contained_process_pids(
+    process, token, deadline, containment_root=None, baseline_pids=()
+):
+    owned = set(_descendant_pids(process.pid, deadline))
+    owned.update(_owned_process_pids(token, deadline))
+    if containment_root is not None:
+        owned.update(
+            set(_descendant_pids(containment_root, deadline)).difference(
+                baseline_pids
+            )
+        )
+    owned.discard(os.getpid())
+    return owned
+
+
+def _reap_contained_processes(process, owned):
+    for pid in owned:
+        if pid == process.pid:
+            continue
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except (ChildProcessError, ProcessLookupError):
+            pass
+
+
+def _kill_process_tree(
+    process,
+    cleanup_deadline,
+    token,
+    containment_root=None,
+    baseline_pids=(),
+):
+    owned = _contained_process_pids(
+        process,
+        token,
+        cleanup_deadline,
+        containment_root,
+        baseline_pids,
+    )
     _signal_processes(process, owned, signal.SIGTERM)
     remaining = cleanup_deadline - time.monotonic()
     if remaining > 0:
@@ -625,9 +778,24 @@ def _kill_process_tree(process, cleanup_deadline, token):
         except subprocess.TimeoutExpired:
             pass
     while time.monotonic() < cleanup_deadline:
-        owned.update(_owned_process_pids(token, cleanup_deadline))
+        owned.update(
+            _contained_process_pids(
+                process,
+                token,
+                cleanup_deadline,
+                containment_root,
+                baseline_pids,
+            )
+        )
         _signal_processes(process, owned, signal.SIGKILL)
-        live_owned = set(_owned_process_pids(token, cleanup_deadline))
+        _reap_contained_processes(process, owned)
+        live_owned = _contained_process_pids(
+            process,
+            token,
+            cleanup_deadline,
+            containment_root,
+            baseline_pids,
+        )
         if process.poll() is not None and not live_owned:
             break
         remaining = cleanup_deadline - time.monotonic()
@@ -638,6 +806,7 @@ def _kill_process_tree(process, cleanup_deadline, token):
                 pass
     if process.poll() is None:
         _signal_processes(process, (), signal.SIGKILL)
+    _reap_contained_processes(process, owned)
     return tuple(sorted(owned, reverse=True))
 
 
@@ -655,6 +824,7 @@ def run_component(
     cleanup_deadline=None,
     environment=None,
     internal_environment=None,
+    require_strong_containment=False,
 ):
     if remaining_seconds <= 0:
         return ComponentResult(component_id, "incomplete", "none", 0.0, tuple(command))
@@ -664,6 +834,23 @@ def run_component(
         run_deadline + min(0.5, max(0.1, remaining_seconds * 0.2))
         if cleanup_deadline is None
         else cleanup_deadline
+    )
+    strong_containment = strong_process_containment_available()
+    if require_strong_containment and not strong_containment:
+        return ComponentResult(
+            component_id,
+            "incomplete",
+            "none",
+            time.monotonic() - started,
+            tuple(command),
+            "provider-hard component was not started because strong detached-process "
+            f"containment is unavailable on {sys.platform}",
+        )
+    containment_root = os.getpid() if strong_containment else None
+    baseline_pids = (
+        _descendant_pids(containment_root, cleanup_deadline)
+        if containment_root is not None
+        else ()
     )
     token = secrets.token_hex(32)
     component_environment = safe_process_environment(environment)
@@ -684,9 +871,19 @@ def run_component(
         try:
             process.wait(timeout=max(0.0, run_deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            descendants = _kill_process_tree(process, cleanup_deadline, token)
+            descendants = _kill_process_tree(
+                process,
+                cleanup_deadline,
+                token,
+                containment_root,
+                baseline_pids,
+            )
             captured = _read_component_output(output_stream)
             cleanup = "terminated component process group"
+            if strong_containment:
+                cleanup += " under Linux child-subreaper containment"
+            else:
+                cleanup += "; detached-process cleanup is best-effort on this platform"
             if descendants:
                 cleanup += f" and {len(descendants)} gate-owned descendant(s)"
             output = "component exceeded its reserved execution interval; " + cleanup
@@ -804,7 +1001,7 @@ def runner_revision(candidate_root=REPO):
     )
 
 
-def environment_identity():
+def environment_identity(source=None):
     git = subprocess.run(
         ["git", "--version"],
         stdout=subprocess.PIPE,
@@ -815,6 +1012,9 @@ def environment_identity():
         "python_implementation": platform.python_implementation(),
         "python_version": platform.python_version(),
         "git_version": git.stdout.strip() if git.returncode == 0 else "unavailable",
+        "component_environment_digest": test_manifest.canonical_digest(
+            safe_process_environment(source)
+        ),
     }
 
 
@@ -825,6 +1025,7 @@ def receipt_binding(
     policy_digest,
     component_id,
     candidate_root=REPO,
+    environment=None,
 ):
     value = {
         "candidate_digest": candidate.digest,
@@ -833,7 +1034,7 @@ def receipt_binding(
         "test_manifest_digest": test_manifest.canonical_digest(selected_tests),
         "policy_digest": policy_digest,
         "runner_revision": runner_revision(candidate_root),
-        "environment": environment_identity(),
+        "environment": environment_identity(environment),
         "component_id": component_id,
     }
     value["binding_digest"] = test_manifest.canonical_digest(value)
@@ -1240,6 +1441,7 @@ def _base_report(gate, started):
         "deferred": [],
         "incomplete": [],
         "components": [],
+        "process_containment": process_containment_identity(),
         "target_exceeded": False,
         "maximum_exceeded": False,
         "invocation": None,
@@ -1334,6 +1536,7 @@ def main(arguments=(), started=None):
                     cwd=candidate_root,
                     cleanup_deadline=hard_deadline,
                     internal_environment=component_environment,
+                    require_strong_containment=options.provider_hard,
                 )
                 components.append(result)
                 if result.outcome != "pass":
@@ -1377,6 +1580,8 @@ def main(arguments=(), started=None):
                             "--view-root",
                             str(candidate_root),
                         ]
+                        if options.provider_hard:
+                            command.append("--provider-hard")
                         for test in selected:
                             command.extend(("--test-file", test))
                         result = run_component(
@@ -1386,6 +1591,7 @@ def main(arguments=(), started=None):
                             cwd=candidate_root,
                             cleanup_deadline=hard_deadline,
                             internal_environment=component_environment,
+                            require_strong_containment=options.provider_hard,
                         )
                         components.append(result)
                         persist_full_receipt(binding, result, unchanged(), options)

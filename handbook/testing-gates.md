@@ -99,9 +99,12 @@ index fingerprint is retained only to detect drift during one invocation. The
 subsequent routine gate still runs admission and reconciliation inside its own
 60-second interval, and reuses the full-suite receipt only if the staged object
 ids, modes, paths, base, tested view, test manifest, policy, runner bytes, and
-environment identity are unchanged. Restaging changed content or topology
-invalidates that binding and requires another prewarm; there is no override for
-missing critical evidence.
+the digest of every caller variable admitted by the sanitized component
+environment boundary are unchanged.
+That digest includes every inherited `PYTHON*` setting, so interpreter behavior
+such as `PYTHONPATH` cannot reuse evidence from a different environment.
+Restaging changed content or topology invalidates that binding and requires
+another prewarm; there is no override for missing critical evidence.
 
 Run a complete final gate explicitly from a clean checkout (or provide a
 revision range):
@@ -130,46 +133,74 @@ The included GitHub adapter is split across three trust zones. A
 `pull_request_target` preparer checks out only the exact base revision, uses its
 read-only repository token to fetch and verify the event's base, head, ordered
 two-parent synthetic merge, and displaced tip, then uploads a one-run Git bundle
-and SHA-256. It never checks out or executes candidate code. A fresh runner has
-`permissions: {}`, verifies the artifact digest and every bundled ref, clears its
-environment with `env -i`, and invokes the base controller with
-`--provider-hard`; only candidate tests execute there. A final publisher has
-only `checks: write`, receives no bundle, checks out no code, and publishes the
-stable `AgentFold trusted hard final gate` check on the exact synthetic-merge
-SHA. Success requires both prior jobs and exact candidate identity.
+and SHA-256. It never checks out or executes candidate code. Every action in this
+transfer boundary is pinned to a full commit SHA.
 
-The split prevents a pull request from replacing its own controller or reading
-the preparer's repository token. It also prevents a skipped or failed preparer
-from becoming a successful required job: the runner and publisher use
-`always()`, default to failure, and fail after publishing a failing exact-SHA
-check. Artifact transfer is not authorization by itself; the trusted digest,
-refs, ordered parents, provider-hard receipt rules, and final provider check are
-all part of the binding.
+A fresh runner has `permissions: {}`, verifies the artifact digest and bundled
+refs on the trusted host, then executes the base controller inside one one-shot
+Docker container pinned by a full image digest. The container has no network,
+host PID namespace, Docker socket, workspace, or home mount. Its root filesystem
+and trusted inputs are read-only. Root-owned work and bounded scratch live on
+tmpfs, resource limits are explicit, and an outer timeout plus validated cidfile
+removes a surviving container.
 
-The tracked adapter becomes hard enforcement only after these repository-owned
-settings are applied:
+The root judge has only KILL, SETGID, and SETUID capabilities with
+no-new-privileges. It creates a fresh root-owned, non-writable view for each
+test. Only the test child drops groups/GID/UID to 65532. Before loading candidate
+code, a trusted probe requires UID/GID 65532, zero effective, permitted, and
+ambient capabilities, and `NoNewPrivs: 1`. Each child receives a new writable
+home and temporary directory. After every file the judge kills and reaps every
+process with UID 65532 before creating the next view.
 
-1. require the check named `AgentFold trusted hard final gate` for the protected
-   target branch, selecting GitHub Actions as its source when the ruleset allows;
-2. require branches to be current before merging so a changed base produces a
-   new synthetic candidate and check;
-3. prohibit direct pushes and bypasses that could land without the check; and
-4. disable merge queues. The workflow handles `merge_group` only to publish a
-   failing exact-SHA check because schema version 1 has no merge-group adapter.
+A final publisher also has `permissions: {}`, receives no bundle, checks out no
+code, and enters only the protected `agentfold-trusted-publisher` environment. A
+full-SHA-pinned token action mints a repository-scoped installation token for a
+dedicated GitHub App with only Commit statuses write permission. That App posts
+the stable `AgentFold trusted hard final gate` context on the exact synthetic
+merge SHA. The publisher never uses `GITHUB_TOKEN`, so an ordinary Actions job
+cannot satisfy protection configured for the dedicated App source.
 
-The workflow must first exist on the trusted base/default branch before it can
-protect later pull requests. Its introducing merge therefore needs explicit
-complete verification and review; after that merge, configure the required
-check before relying on `hard` mode. Installations that cannot apply these
-provider settings should set the final mode to `manual` or use another
-independently controlled provider adapter.
+The tracked adapter becomes hard enforcement only after this fail-closed setup:
+
+1. Create a private GitHub App, install it only on this repository, and grant it
+   Commit statuses read/write plus implicit Metadata read. Grant no Checks,
+   Contents, Pull requests, Actions, Workflows, Deployments, or Issues write.
+2. Create the repository environment `agentfold-trusted-publisher`. Set its
+   deployment branch policy to selected branches with exactly `main` and no tag
+   pattern. Store the client ID as the environment variable
+   `AGENTFOLD_PUBLISHER_CLIENT_ID` and its private key only as the environment
+   secret `AGENTFOLD_PUBLISHER_PRIVATE_KEY`.
+3. Merge the pinned workflow through an explicitly reviewed, manually verified
+   bootstrap change. Missing environment configuration, App installation,
+   variable, key, token permission, image, or Docker capability fails closed;
+   there is no Actions-token or direct-host candidate-execution fallback.
+4. Open a diagnostic pull request and confirm the dedicated App publishes
+   `AgentFold trusted hard final gate` on its current synthetic merge SHA.
+5. Protect `main`: require pull requests and current branches; require that exact
+   context with the dedicated App selected as source; prohibit direct pushes,
+   force pushes, deletion, and every bypass.
+6. Keep merge queues disabled. `merge_group` fails in the credential-free runner
+   and intentionally never enters the main-only publisher environment.
+7. Keep the default Actions token read-only, disable write tokens for fork pull
+   requests, and disable Actions creating or approving pull requests.
+8. Run canaries: a candidate workflow posting the same context through
+   `GITHUB_TOKEN` must not satisfy protection; failed/skipped tests and stale
+   merge SHAs must not satisfy it; candidate attempts to reach the network,
+   Docker socket, host workspace/home/PIDs, future test views, or the root judge
+   must fail.
+
+The workflow and App environment must already exist on the trusted base revision,
+so their introducing change cannot be protected by its future status. Until the
+diagnostic status and App-selected protection rule both work, treat final
+verification as manual regardless of configured target mode and do not describe
+the repository as hard-enforced.
 
 An adopter who needs another automatic boundary must first provide a controlled
 adapter and introduce that trigger through a future schema version; the version
 1 policy cannot select it. The runner's repository-local report keeps
 `enforcement: unobserved`: it cannot inspect rulesets or prove that bypasses are
 disabled. `explicit` and `transition` describe invocation, not enforcement. The
-provider-bound exact-SHA check plus the settings above establish the external
+provider-bound exact-SHA App status plus the settings above establish the external
 boundary; never reinterpret the JSON report alone as that proof.
 
 ## Results, receipts, and budget work
@@ -197,6 +228,20 @@ and tested-view fingerprints, full test manifest, policy digest, runner
 revision, and Python/Git environment identity all match. A selected routine
 test result is not a reusable full receipt; a different index, working tree, or
 commit is never covered by an earlier receipt.
+
+Each selected test file receives a newly materialized metadata-free projection.
+Writes made by one test process therefore cannot alter the source bytes supplied
+to a later test and turn its failure into a pass.
+
+Timeout cleanup always terminates the component process group and descendants
+that remain observable through the portable process-tree/ownership mechanisms.
+On Linux, the gate additionally becomes a child subreaper, so double-forked,
+new-session descendants remain contained after re-exec and environment scrubbing.
+`--provider-hard` refuses to start candidate-controlled components unless that
+strong Linux containment is available. Local gates remain usable elsewhere, but
+their report records `portable-process-group` with
+`detached_descendants: best-effort`; it is not evidence of hostile
+detached-process containment.
 
 These JSON receipts are a cooperative same-user optimization, not an
 authorization artifact. Another process with the same workspace account can

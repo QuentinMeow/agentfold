@@ -149,3 +149,128 @@ duration: 6.93s
 pre-commit: OK
 [task/2026-07-27-configure-test-gates-and-time-budgets f2d220b] harness: checkpoint configurable test gates
 ```
+
+## Blocking provider review and repairs
+
+The post-checkpoint review blocked on five concrete findings:
+
+1. Exact-pass receipts omitted the complete safe child execution environment, so a changed
+   value such as `PYTHONPATH` could reuse evidence from different execution inputs.
+2. Process-group and environment-marker cleanup could miss a double-forked, re-executed daemon
+   after it scrubbed the marker.
+3. Multiple test files ran from one writable materialized view, allowing an earlier test to
+   replace a later test before it executed.
+4. The credential-free GitHub job used `env -i`, which removed variables but did not isolate
+   candidate code from the host filesystem, process space, or network.
+5. The workflow-token check was attributable to GitHub Actions rather than a least-privilege
+   dedicated publisher App, so protected-branch admission could not bind the result to the
+   intended publisher identity.
+
+The local repairs bind the safe environment digest into receipt identity, use Linux
+child-subreaper containment for provider-hard execution, report portable cleanup as best-effort,
+and materialize a fresh view per test file. The provider repair runs the trusted-base controller
+inside a digest-pinned one-shot Docker container with no network or host mounts, a read-only root,
+bounded tmpfs and resources, exact root capabilities, and UID 65532 candidate children. It kills
+and reaps that UID after every file. The publisher has no candidate artifact or checkout and uses
+a protected environment to mint a repository-scoped, statuses-only GitHub App token.
+
+The final audit additionally removed an impossible CAP_CHOWN dependency from provider scratch,
+restored sealed views only after candidate cleanup, and changed the provider child environment
+from arbitrary `PYTHON*` passthrough to an exact allowlist.
+
+## Final focused provider-boundary verification
+
+```
+$ python3 automation/tests/test_run_tests.py
+Ran 46 tests in 1.577s — OK
+
+$ python3 automation/run_tests.py --test-file automation/tests/test_run_test_gate.py --test-file automation/tests/test_run_tests.py --test-file automation/tests/test_github_action_projection_workflow.py
+automation/tests/test_github_action_projection_workflow.py: 14 tests in 0.032s — OK
+automation/tests/test_run_test_gate.py: 44 tests in 7.047s — OK (skipped=3)
+automation/tests/test_run_tests.py: 46 tests in 1.781s — OK
+3/3 test files passed; elapsed 10.64s
+
+$ python3 automation/tests/test_reconcile_queue.py
+Ran 297 tests in 113.574s — OK
+
+$ python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_github_adapter_binds_event_merge_and_limits_push_to_reconciliation
+Ran 1 test in 0.001s — OK
+
+$ ruby -e "require 'yaml'; YAML.load_file('.github/workflows/harness.yml'); puts 'workflow YAML OK'"
+workflow YAML OK
+
+$ python3 -m py_compile automation/run_test_gate.py automation/run_tests.py automation/tests/test_run_test_gate.py automation/tests/test_run_tests.py automation/tests/test_github_action_projection_workflow.py automation/tests/test_reconcile_queue.py
+<no output; exit 0>
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+```
+
+The 297-test reconciler run preceded the final `run_tests.py`-only CAP_CHOWN, view-restoration,
+and environment-allowlist repair; its focused integration test and the structural reconciler
+check passed afterward. The final isolated three-file run includes that repair.
+
+The local macOS Docker daemon was unavailable, so no live Linux Docker execution or provider
+enforcement claim is made. The workflow includes a fail-closed Docker/platform preflight; a real
+provider run remains distinct from the structural and unit evidence above.
+
+## Pending external activation boundary
+
+`message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md` separately
+owns the future one-time GitHub App, protected-environment, diagnostic-pull-request, and branch-
+protection setup. Until that boundary is completed and verified, these results prove the local
+implementation and workflow contract only; they do not prove that GitHub currently enforces the
+status for merges.
+
+## Human-readable activation request and commit-hook cache repair
+
+The GitHub activation request was rewritten in ordinary language while retaining the current
+v1 queue schema. It now leads with the practical choice: automatically block merges unless the
+complete test passes, or keep that final test manual. The queue regression suite then passed all
+297 tests and the structural reconciler reported zero findings.
+
+An exact staged final run for candidate
+`ba88c925597a4934f42a8790cbf264b9c840845d55ec290db827f575a7028657` passed all 15 test
+files in 248.87 seconds. The subsequent real commit hook safely rejected the commit because it
+missed that exact receipt and began a duplicate full run, which reached the routine limit after
+59.90 seconds. A deliberately blocked diagnostic commit proved that Git prepended its verified
+`GIT_EXEC_PATH` to `PATH` inside the hook: every other binding field matched, but the component
+environment digest changed from `72222f1506e39cb98877602898ab3571ac02d470cbe15251e15214eba9eca285`
+to `dc69cf2dc337e25d352f0d9e8f5fdfd080652a917260ef896ac09d879f174df3`.
+
+The repair removes that one transient prefix from the environment actually passed to test
+components and therefore from its receipt identity only after all of these checks succeed: the
+prefix equals `GIT_EXEC_PATH`, the Git executable found on the remaining path reports that same
+exec path with configuration disabled, and Git's supplied index resolves to the repository's
+real index. A mismatched executable path, path prefix, or index stays unmodified and changes the
+environment identity. An actual-commit regression covers an ordinary repository, and a blocked
+diagnostic commit in this linked worktree computed the original `e518aced...` binding and found
+the existing receipt.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 46 tests in 12.692s
+OK (skipped=3)
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+```
+
+The first exact staged run after that repair used candidate
+`42a75b0a7f6bf162730234b618d8b96dd842710629c7c96e71266b7435bfa716` and failed honestly:
+14 of 15 test files passed, while the new path-normalization test incorrectly assumed its
+metadata-free per-test projection was a Git checkout. The full component took 295.56 seconds
+and the whole gate took 309.58 seconds, exceeding the 300-second target. The configured filer
+created and preserved:
+
+- `tasks/0_backlog/2026-07-27-investigate-final-test-budget-7631c3a1b1/task.md`
+- `tasks/0_backlog/2026-07-27-investigate-final-test-budget-7631c3a1b1/timing-evidence.jsonl`
+- `message-queue/needs-agent/requests/non-blocking-pick-up-investigate-final-test-budget-7631c3a1b1.md`
+
+The recorded occurrence reports 309.531811406 seconds actual, including 295.555618 seconds for
+the full test component. The unit fixture was then corrected to create and explicitly bind its
+own temporary Git repository; production normalization behavior was not weakened. Final exact
+verification after that fixture repair is recorded below when complete.

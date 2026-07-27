@@ -70,11 +70,17 @@ In schema version 1, `hard` requires the sole supported trigger, `pull-request`,
 on functional failure or incomplete required evidence only through a provider-controlled
 adapter. The included GitHub adapter has three trust zones: a base-code, read-only-token
 preparer verifies and bundles exact Git identities; a fresh `permissions: {}` runner verifies
-the artifact and executes the base controller plus candidate tests with a cleared environment;
-and a checks-only publisher creates `AgentFold trusted hard final gate` on the exact synthetic
-merge. The published check becomes enforcement only when protected-branch policy requires it,
-requires a current branch, and prohibits direct pushes and bypasses. The repository-local report
-remains `unobserved` because it cannot prove those provider settings.
+the artifact and executes the base controller in a digest-pinned, no-network, read-only Docker
+boundary; and a protected-environment publisher uses a statuses-only dedicated GitHub App token
+to create `AgentFold trusted hard final gate` on the exact synthetic merge. Inside the container,
+a root judge with only KILL, SETGID, and SETUID creates root-owned immutable per-test views. Only
+candidate test children run as UID 65532 with zero active capabilities and no-new-privileges;
+candidate-UID processes are killed and reaped after every file. The publisher has
+`permissions: {}`, receives no candidate artifact, and can mint the token only through the
+main-restricted `agentfold-trusted-publisher` environment. The status becomes enforcement only
+when protected-branch policy requires its exact context and dedicated App source, requires a
+current branch, and prohibits direct pushes and bypasses. The repository-local report remains
+`unobserved` because it cannot prove those provider settings.
 Other automatic boundaries require both a controlled adapter and a future schema version;
 version 1 rejects their trigger names rather than claiming enforcement it cannot provide.
 Neither mode turns complete verification back into an every-commit gate. The only initial
@@ -132,12 +138,20 @@ of producing reusable evidence.
 
 A successful local gate receipt may be reused only when the exact tested-view fingerprint, selected or
 full test manifest, canonical config digest, runner revision, and relevant interpreter/Git
-identity all match. Any mismatch reruns the affected gate. This prevents the common waste of
+identity plus the digest of every caller variable admitted by the sanitized component
+environment boundary all match. Any
+mismatch, including `PYTHONPATH`, reruns the affected gate. Each test file runs from a fresh
+materialization so an earlier test cannot rewrite a later test's inputs. This prevents the common waste of
 manually running the full suite and then immediately running the same suite again in a commit or
 final transition, without allowing a receipt for working-tree bytes to stand for different index
 or commit bytes. Ignored JSON receipts are cooperative same-user cache entries rather than
 authorization evidence. Provider-hard runs ignore them and rely on provider-bound results for
 the exact candidate, because a repository process could forge local ignored state.
+
+Linux provider-hard execution additionally requires child-subreaper process containment; the
+adapter refuses to execute candidate components when that strong boundary is unavailable. Local
+gates on other supported hosts retain portable process-group cleanup and report detached-child
+cleanup as best-effort rather than claiming containment they cannot provide.
 
 ### Automatically filing time regressions
 

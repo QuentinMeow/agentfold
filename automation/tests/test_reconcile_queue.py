@@ -129,6 +129,10 @@ class ReconcileQueueTests(unittest.TestCase):
         self.assertTrue(runner, "credential-free final-gate runner is missing")
         self.assertIn("permissions: {}", runner)
         self.assertIn("--provider-hard", runner)
+        self.assertIn("--pull=never", runner)
+        self.assertIn("--network none", runner)
+        self.assertIn("--cap-drop ALL", runner)
+        self.assertIn("--security-opt no-new-privileges", runner)
         self.assertIn("github.event_name == 'merge_group'", runner)
         self.assertIn("run: exit 1", runner)
 
@@ -136,22 +140,21 @@ class ReconcileQueueTests(unittest.TestCase):
             "  publish-trusted-final-test-check:\n"
         )[2].partition("  authoritative-external-action-projection:\n")[0]
         self.assertTrue(publisher, "exact-candidate check publisher is missing")
-        self.assertIn("checks: write", publisher)
-        self.assertIn(
-            "github.event.pull_request.merge_commit_sha || github.sha",
-            publisher,
-        )
+        self.assertIn("permissions: {}", publisher)
+        self.assertIn("environment: agentfold-trusted-publisher", publisher)
+        self.assertIn("permission-statuses: write", publisher)
+        self.assertIn("AGENTFOLD_PUBLISHER_PRIVATE_KEY", publisher)
+        self.assertIn("github.event.pull_request.merge_commit_sha", publisher)
         self.assertIn(
             'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
             publisher,
         )
         self.assertIn("AgentFold trusted hard final gate", publisher)
-        self.assertIn('head_sha "$TEST_GATE_CANDIDATE"', publisher)
-        self.assertIn(
-            "Schema version 1 does not support merge-group admission.",
-            publisher,
-        )
-        self.assertIn('test "$TEST_GATE_CONCLUSION" = success', publisher)
+        self.assertIn("statuses/$TEST_GATE_CANDIDATE", publisher)
+        self.assertIn('test "$TEST_GATE_STATE" = success', publisher)
+        self.assertNotIn("GITHUB_TOKEN", publisher)
+        self.assertNotIn("checks: write", publisher)
+        self.assertNotIn("github.event_name == 'merge_group'", publisher)
 
         push = workflow.partition(
             "  reconcile-and-test:\n"

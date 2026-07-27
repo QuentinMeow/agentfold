@@ -43,3 +43,49 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Folded the owner's Option A response into the trusted pull-request gate ADR. Work resumes with
   a base-controlled preparer and a separate credential-free candidate test job; the answered
   queue item is archived by Git history.
+
+## 2026-07-27 — trusted-provider-boundary-repair (codex and delegated agents)
+
+- A blocking review identified five independent gaps: cached evidence did not bind the complete
+  child execution environment; a double-forked process could scrub its ownership marker and
+  escape timeout cleanup; all test files shared one mutable projected view; `env -i` did not
+  make the credential-free runner a real candidate-code isolation boundary; and a check
+  published by the workflow token could not be required from a dedicated publisher identity.
+- Repaired the three local gaps by binding the safe child-environment digest (including
+  `PYTHONPATH`) into receipts, requiring Linux child-subreaper containment for provider-hard
+  components while retaining an honest best-effort label locally, and materializing a fresh
+  immutable-input view for every test file.
+- Repaired the provider gaps with a digest-pinned, no-network, read-only one-shot Docker
+  boundary; a root judge limited to KILL, SETGID, and SETUID; UID 65532 candidate children with
+  zero active capabilities and per-file process cleanup; and a separate protected-environment
+  publisher that posts the exact-candidate status through a statuses-only dedicated GitHub App.
+- The final diff audit found and repaired a real-container capability mismatch before handoff:
+  provider scratch no longer requires absent CAP_CHOWN, sealed views are restored only after
+  candidate processes are reaped, and arbitrary `PYTHON*` names no longer cross the exact child
+  environment allowlist.
+- Final focused verification passed 14 workflow tests, 44 gate tests (3 platform skips), and 46
+  runner tests in an isolated 3-file run lasting 10.64 seconds. The full reconciler regression
+  had already passed 297 tests in 113.574 seconds; the final structural check reported zero
+  findings. Docker was unavailable locally, so no live Linux-container execution is claimed.
+- External activation remains a separate future boundary owned by
+  `message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md`.
+  Until its GitHub App, protected environment, diagnostic pull request, and branch-protection
+  setup are completed and verified, the status is not described as enforced.
+
+## 2026-07-27 — human-readable decision and exact hook reuse repair (codex)
+
+- Rewrote the future GitHub activation request so the merge consequence and the manual
+  alternative are understandable without provider terminology, while preserving every v1
+  lifecycle field and the fail-safe manual default.
+- Reproduced a real commit-hook cache miss after an exact final prewarm. A blocked diagnostic
+  commit isolated the only difference: Git prepends its own internal executable directory to
+  `PATH` for hooks, changing the bound child environment and causing a duplicate full run.
+- Repaired both execution and identity through one shared canonical environment function. It
+  removes only a verified Git-owned hook prefix whose executable path and repository index both
+  match Git's configuration; attacker-supplied or mismatched prefixes and indexes stay bound.
+- Added an actual `git commit` regression for ordinary repositories and verified the same reuse
+  in this linked worktree. The focused gate suite passed 46 tests with three platform skips.
+- Preserved the automatic timing investigation generated when a later exact gate took 309.58
+  seconds and failed on a test-fixture assumption. The task, append-only timing evidence, and
+  pickup request remain staged for the next checkpoint. Corrected the fixture to create its own
+  temporary Git repository without changing production behavior.
