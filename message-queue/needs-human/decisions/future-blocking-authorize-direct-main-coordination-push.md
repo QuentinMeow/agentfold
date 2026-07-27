@@ -1,6 +1,6 @@
 # May the two validated coordination commits be pushed directly to main?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-27, by codex, from task `2026-07-27-configure-test-gates-and-time-budgets`
 **Action:** Authorize the two validated coordination commits to be pushed directly to `main`, or require pull requests for them.
 **Full context:** `handbook/git-workflow.md`
