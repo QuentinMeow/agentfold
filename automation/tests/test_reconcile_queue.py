@@ -123,6 +123,70 @@ class ReconcileQueueTests(unittest.TestCase):
         self.assertIn("if: ${{ always() }}", workflow)
         self.assertNotIn("--at-transition repository-admission", workflow)
 
+    def test_trusted_gate_migration_never_mixes_provider_regimes(self):
+        workflow = (
+            MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
+        ).read_text(encoding="utf-8")
+        job_names = (
+            "prepare-trusted-final-test-gate",
+            "trusted-final-test-runner",
+            "publish-trusted-final-test-check",
+        )
+
+        def job(name, next_name=None):
+            marker = f"  {name}:\n"
+            if marker not in workflow:
+                return ""
+            remainder = workflow.partition(marker)[2]
+            if next_name is None:
+                return remainder
+            return remainder.partition(f"  {next_name}:\n")[0]
+
+        blocks = (
+            job(job_names[0], job_names[1]),
+            job(job_names[1], job_names[2]),
+            job(job_names[2], "authoritative-external-action-projection"),
+        )
+        present = tuple(bool(block) for block in blocks)
+        if not any(present):
+            regime = "legacy"
+        elif not all(present):
+            regime = "invalid"
+        else:
+            prepare, runner, publisher = blocks
+            common = (
+                "permissions:\n      contents: read" in prepare
+                and "permissions: {}" in runner
+                and "--provider-hard" in runner
+                and "environment: agentfold-trusted-publisher" in publisher
+                and "statuses/$TEST_GATE_CANDIDATE" in publisher
+            )
+            legacy = (
+                "if: ${{ github.event_name == 'pull_request_target' }}" in prepare
+                and "github.event_name == 'merge_group'" in runner
+                and "Reject unsupported merge-queue admission" in runner
+            )
+            restricted_fragments = (
+                "github.event.action == 'opened' || github.event.action == 'synchronize'",
+                "github.event.pull_request.base.ref == github.event.repository.default_branch",
+                "github.event.pull_request.head.repo.id == github.event.repository.id",
+                "startsWith(github.event.pull_request.head.ref, 'task/')",
+            )
+            restricted = (
+                all(
+                    all(fragment in block for fragment in restricted_fragments)
+                    for block in blocks
+                )
+                and "github.event_name == 'merge_group'" not in runner
+                and "Reject unsupported merge-queue admission" not in runner
+            )
+            regime = (
+                "legacy" if common and legacy and not restricted
+                else "restricted" if common and restricted and not legacy
+                else "invalid"
+            )
+        self.assertIn(regime, ("legacy", "restricted"))
+
     def test_queue_checks_no_op_when_queue_is_absent(self):
         with self.repo() as root:
             self.assertEqual([], list(RECONCILE.check_queue_name()))

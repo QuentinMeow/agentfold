@@ -8,6 +8,70 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/harness.yml"
 JOB_HEADER_RE = re.compile(r"^  (?P<name>[a-z][a-z0-9-]*):\n", re.MULTILINE)
+TRUSTED_GATE_JOBS = (
+    "prepare-trusted-final-test-gate",
+    "trusted-final-test-runner",
+    "publish-trusted-final-test-check",
+)
+
+
+def workflow_job(workflow, name):
+    matches = list(JOB_HEADER_RE.finditer(workflow))
+    for index, match in enumerate(matches):
+        if match.group("name") != name:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) \
+            else len(workflow)
+        return workflow[match.start():end]
+    return ""
+
+
+def trusted_gate_regime(workflow):
+    """Recognize only a complete legacy or complete restricted gate shape."""
+    jobs = {name: workflow_job(workflow, name) for name in TRUSTED_GATE_JOBS}
+    present = tuple(bool(jobs[name]) for name in TRUSTED_GATE_JOBS)
+    if not any(present):
+        return "legacy"
+    if not all(present):
+        return "invalid"
+    prepare = jobs["prepare-trusted-final-test-gate"]
+    runner = jobs["trusted-final-test-runner"]
+    publisher = jobs["publish-trusted-final-test-check"]
+    common = (
+        "permissions:\n      contents: read" in prepare
+        and "permissions: {}" in runner
+        and "--provider-hard" in runner
+        and "permissions: {}" in publisher
+        and "environment: agentfold-trusted-publisher" in publisher
+        and "statuses/$TEST_GATE_CANDIDATE" in publisher
+    )
+    legacy = (
+        "if: ${{ github.event_name == 'pull_request_target' }}" in prepare
+        and "github.event_name == 'merge_group'" in runner
+        and "Reject unsupported merge-queue admission" in runner
+        and "github.event_name == 'merge_group'" not in publisher
+    )
+    restricted_fragments = (
+        "github.event.action == 'opened' || github.event.action == 'synchronize'",
+        "github.event.pull_request.base.ref == github.event.repository.default_branch",
+        "github.event.pull_request.head.repo.id == github.event.repository.id",
+        "startsWith(github.event.pull_request.head.ref, 'task/')",
+    )
+    restricted = (
+        all(
+            all(fragment in jobs[name] for fragment in restricted_fragments)
+            for name in TRUSTED_GATE_JOBS
+        )
+        and 'git merge-base --is-ancestor "$TEST_GATE_DISPLACED_TIP" "$TEST_GATE_HEAD"'
+        in prepare
+        and "github.event_name == 'merge_group'" not in runner
+        and "Reject unsupported merge-queue admission" not in runner
+    )
+    if common and legacy and not restricted:
+        return "legacy"
+    if common and restricted and not legacy:
+        return "restricted"
+    return "invalid"
 
 
 class GitHubActionProjectionWorkflowTests(unittest.TestCase):
@@ -16,14 +80,10 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
     def job(self, name):
-        matches = list(JOB_HEADER_RE.finditer(self.workflow))
-        for index, match in enumerate(matches):
-            if match.group("name") != name:
-                continue
-            end = matches[index + 1].start() if index + 1 < len(matches) \
-                else len(self.workflow)
-            return self.workflow[match.start():end]
-        self.fail(f"missing workflow job {name!r}")
+        job = workflow_job(self.workflow, name)
+        if not job:
+            self.fail(f"missing workflow job {name!r}")
+        return job
 
     def step(self, job_name, step_name):
         job = self.job(job_name)
@@ -36,6 +96,9 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         for expected in expected_values:
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
+
+    def test_trusted_gate_is_one_complete_migration_regime(self):
+        self.assertIn(trusted_gate_regime(self.workflow), ("legacy", "restricted"))
 
     def test_event_matrix_registers_authoritative_and_review_surfaces(self):
         on_block = self.workflow.partition("on:\n")[2].partition(
