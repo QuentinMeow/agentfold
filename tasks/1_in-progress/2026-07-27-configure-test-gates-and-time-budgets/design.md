@@ -159,4 +159,4 @@ use the smallest combination that meets the configured target with measured evid
 **Repository substitution:** pass — adopted repositories need fast feedback, configurable final assurance, and performance-regression work without inheriting AgentFold's exact test suite
 **User-global writes:** none
 **Why AgentFold core:** this defines the portable relationship between local feedback, final assurance, repository policy, and durable task filing rather than a personal optimization or example-service behavior
-**Thin adapter:** canonical=`automation/run_tests.py`; optional=yes; policy=none; writes=repo-only
+**Thin adapter:** canonical=automation/run_tests.py; optional=yes; policy=none; writes=repo-only
