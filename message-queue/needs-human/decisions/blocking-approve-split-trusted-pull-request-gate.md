@@ -1,6 +1,6 @@
 # Should AgentFold install the split trusted pull-request gate?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-27, by codex, from task `2026-07-27-configure-test-gates-and-time-budgets`
 **Action:** Choose whether to authorize the split trusted pull-request gate or keep final verification manual/external.
 **Full context:** `handbook/testing-gates.md`
