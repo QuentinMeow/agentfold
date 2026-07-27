@@ -89,3 +89,35 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   seconds and failed on a test-fixture assumption. The task, append-only timing evidence, and
   pickup request remain staged for the next checkpoint. Corrected the fixture to create its own
   temporary Git repository without changing production behavior.
+
+## 2026-07-27 — immutable-checkpoint-panel-repair (codex and delegated agents)
+
+- A fresh panel reviewed immutable checkpoint `78a5ba2` and returned two P1 blockers, so the
+  task remains in progress and the affected final-lane, provider-adapter, and verification plan
+  steps have been reopened.
+- The first blocker is an oracle-integrity flaw: candidate-controlled tests and helpers can be
+  deleted or weakened, so trusted-base tests/support must become a non-erasable floor executed
+  against exact candidate product bytes, with candidate test changes run only as supplemental
+  evidence.
+- The second blocker is a provider-event/history flaw: metadata-only pull-request events and
+  non-fast-forward rewrites must never prepare, execute, publish, or replace the stable hard-gate
+  success. One condition will restrict all three jobs to same-repository `task/**` pull requests
+  opened once or synchronized by a verified fast-forward.
+- Implemented an exact-base composite test plan. Base tests and directory-local support bytes
+  form a non-erasable floor over exact candidate product bytes; candidate-added or changed tests
+  run separately. The v2 receipt and report identity binds both lanes, the overlay, both views,
+  policy, runner, and environment.
+- Restricted prepare, credential-free execution, and App publication to one shared event/source
+  contract: default-base, same-repository `task/**` pull requests on open or a strict verified
+  fast-forward synchronize. All other pull-request events remain projection-only.
+- Added exploit and event/history matrix regressions. The combined isolated run passed 49 gate,
+  46 runner, and 16 workflow tests in 16.59 seconds; reconciliation, YAML parsing, compilation,
+  and whitespace validation also passed. Exact staged final verification follows in the next
+  evidence block.
+- The exact composite run then blocked after 398.22 seconds because four immutable base
+  assertions encode the provider behavior this security repair must replace. This proves the
+  repair cannot be honestly admitted as one pull request; it needs a transitional-test pull
+  request followed by the production/strict-test pull request targeted at that new base.
+- Kept the original waiting activation decision immutable. Filed a separate future-boundary
+  clarification requiring explicit acceptance of same-repository `task/**` protection and fork
+  exclusion before activation; its safe unattended outcome remains manual verification.

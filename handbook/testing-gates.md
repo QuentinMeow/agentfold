@@ -127,12 +127,30 @@ Tracked symlinks are rejected before materialization. Absolute, escaping,
 dangling, and looping links could otherwise introduce bytes outside the Git
 objects bound by the candidate and tested-view digests.
 
+Complete final or critical testing is a two-lane composite, not a test list supplied solely by
+the candidate. The trusted base revision contributes an immutable floor: every discovered base
+test plus every file in those tests' directories is copied from exact base Git objects over the
+exact candidate product view. Only those reserved test directories are overlaid; a product file
+deleted elsewhere by the candidate stays deleted. Deleting, renaming, emptying, or shadowing a
+base test or helper therefore cannot remove the floor. Candidate-added or byte-changed tests run
+afterward as supplemental evidence from a separate exact candidate view. Each lane still gives
+every test file its own fresh sealed view and cleanup cycle.
+
+This deliberately enforces backwards-compatible two-stage API changes. First merge the new
+product behavior while the old API still works, together with the new or updated tests. Once
+that revision becomes the trusted base, a later pull request may remove the deprecated API;
+its floor now contains the updated tests. A one-step incompatible product-and-test rewrite is
+rejected because the old trusted tests still exercise the candidate product.
+
 ### Provider enforcement boundary
 
 The included GitHub adapter is split across three trust zones. A
-`pull_request_target` preparer checks out only the exact base revision, uses its
+`pull_request_target` preparer runs only for `opened` and verified fast-forward
+`synchronize` events from a same-repository `task/**` branch. It checks out only the exact base revision, uses its
 read-only repository token to fetch and verify the event's base, head, ordered
-two-parent synthetic merge, and displaced tip, then uploads a one-run Git bundle
+two-parent synthetic merge, and displaced tip. A synchronize event must provide a nonzero prior
+tip different from the current head, and that tip must be an ancestor of the current head. The
+preparer then uploads a one-run Git bundle
 and SHA-256. It never checks out or executes candidate code. Every action in this
 transfer boundary is pinned to a full commit SHA.
 
@@ -178,7 +196,9 @@ The tracked adapter becomes hard enforcement only after this fail-closed setup:
    `AgentFold trusted hard final gate` on its current synthetic merge SHA.
 5. Protect `main`: require pull requests and current branches; require that exact
    context with the dedicated App selected as source; prohibit direct pushes,
-   force pushes, deletion, and every bypass.
+   force pushes, deletion, and every bypass. Apply matching source-branch rules to
+   same-repository `task/**` branches: prohibit force pushes, deletion, and every bypass there
+   too. Fork pull requests are unsupported and remain manual.
 6. Keep merge queues disabled. `merge_group` fails in the credential-free runner
    and intentionally never enters the main-only publisher environment.
 7. Keep the default Actions token read-only, disable write tokens for fork pull
@@ -188,6 +208,12 @@ The tracked adapter becomes hard enforcement only after this fail-closed setup:
    merge SHAs must not satisfy it; candidate attempts to reach the network,
    Docker socket, host workspace/home/PIDs, future test views, or the root judge
    must fail.
+
+Metadata-only events such as edit, reopen, ready-for-review, review, assignment, and review
+request changes still feed the action-projection jobs, but never prepare, run, or publish the
+hard status. A base-branch edit also receives no replacement success. The exact existing result
+must still match the current merge SHA, or the author must push a fast-forward update (an empty
+commit is sufficient) to the same `task/**` head so a new exact result is produced.
 
 The workflow and App environment must already exist on the trusted base revision,
 so their introducing change cannot be protected by its future status. Until the
@@ -224,8 +250,10 @@ and output are included by the following accounting pass.
 
 Full-suite pass receipts are stored only in ignored
 `tmp/test-gate-receipts/`. A receipt can be reused only when its exact candidate
-and tested-view fingerprints, full test manifest, policy digest, runner
-revision, and Python/Git environment identity all match. A selected routine
+and candidate-view fingerprints, trusted base revision, immutable floor/support records,
+supplemental records, overlay algorithm and floor-view digest, full manifests, policy digest,
+runner revision, and Python/Git environment identity all match. Version 2 receipts invalidate
+the earlier candidate-only evidence. A selected routine
 test result is not a reusable full receipt; a different index, working tree, or
 commit is never covered by an earlier receipt.
 
@@ -250,6 +278,13 @@ accidental path redirection, not same-user malice. A `--provider-hard` run
 therefore neither reads nor writes local receipts. Provider admission must use
 the provider-bound job/check result for the exact candidate, never a JSON file
 supplied by the repository or candidate.
+
+The residual provider threat boundary is explicit. The design trusts the protected base
+revision, GitHub's event identities and synthetic merge refs, the pinned Actions/image supply
+chain, the dedicated App/environment/rules, and the hosted runner plus Docker/kernel isolation.
+It does not claim safety if an administrator can bypass those rules, rewrite a protected source
+branch, change the App installation, compromise the provider/runner/kernel, or mutate the trusted
+base itself. Forks and merge queues are outside the supported hard boundary.
 
 When elapsed time is above the target, the runner tries to file or refresh one
 non-blocking investigation task and pickup request with timing components and
