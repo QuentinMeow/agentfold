@@ -40,3 +40,6 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Preserved the exact pre-approval implementation and blocking records in checkpoint
   `f2d220b1ae9ddc0f47d54252c4804c356ee780c1`. Its complete staged prewarm passed in 218.94
   seconds, and the real commit hook reused that receipt and passed in 6.93 seconds.
+- Folded the owner's Option A response into the trusted pull-request gate ADR. Work resumes with
+  a base-controlled preparer and a separate credential-free candidate test job; the answered
+  queue item is archived by Git history.
