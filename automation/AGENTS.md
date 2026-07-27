@@ -1,7 +1,7 @@
 # automation/ — things that run
 
-The mechanical half of `handbook/principles/systems-over-instructions.md`: everything
-executes; Python stdlib only, so automation runs on a bare clone.
+The mechanical half of `handbook/principles/systems-over-instructions.md`: everything executes.
+Automation is Python stdlib plus vendored, policy-free Tomli, and supports Python 3.7 bare clones.
 
 | Piece | What it does | Runs |
 |-------|--------------|------|
@@ -10,16 +10,16 @@ executes; Python stdlib only, so automation runs on a bare clone.
 | `core-scope-paths.txt` | registers thin agent/provider adapter files whose changes need the same core-scope check | read by the core-scope gate |
 | `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
 | `hooks/pre-commit` | blocks commits when core scope, repository invariants, or tests fail | every commit (installed) |
-| `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
+| `install.py` | idempotent setup: git hooks path and agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
 | `mine_cochange.py` | advisory: ranks Markdown pairs that keep changing together, with their shared commit subjects as evidence; `accept`/`reject` append durable verdicts to `cochange-ledger.txt`, whose rejection rate is the effective-false-positive rate | on demand |
+| `run_test_gate.py` | validates the repository test-gate policy, runs bounded staged routine or exact-candidate final verification (including explicit staged prewarming), reports deferred coverage, contains timed-out component processes, and best-effort files budget work | pre-commit, configured final adapter, on demand; policy and use: `handbook/testing-gates.md` |
 | `run_tests.py` | runs tests in an isolated working-tree-byte view; the full suite is the default, while `--staged` selects only ordinary add/modify paths in the known quote-service dependency closure and otherwise falls back to full (it selects from the index, but is not staged-snapshot verification) | pre-commit (`--staged`), CI and on demand (full default) |
-
 Rules:
 
-- A new repository-state invariant = a `CHECKS` entry in `reconcile.py` plus the rule
-  where agents read it. External artifact boundaries use a canonical standalone gate,
-  tests, and thin adapters. Check ids stay stable because retry filenames embed them
+- A new repository-state invariant = a `CHECKS` entry in `reconcile.py` plus its agent-facing rule.
+  External boundaries use a canonical gate, tests, and thin adapters. Check ids stay stable
+  because retry filenames embed them
   (`memory/lessons/automation/deterministic-finding-keys.md`).
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
@@ -29,8 +29,10 @@ Rules:
   merge reviews bind Git ranges. Cleanup proves a still-crossed receipt or withdrawn
   target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
   checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
-- Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range head remains the candidate;
-  a divergent old-tip snapshot must retain every live action, and an unavailable nonzero old tip fails closed.
+- Admission adapters pass `--displaced-tip <full oid>` for replaced refs; unavailable nonzero tips fail closed.
+- Provider-hard adapters use trusted controller code and exact candidate bytes; candidate tests get
+  no credentials or writes. They ignore same-user local receipts and reject tracked symlinks; details:
+  `handbook/testing-gates.md`.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned
@@ -50,11 +52,9 @@ Rules:
   adoption, including legacy records and intermediate/parallel history. Entry schema
   versions preserve creation-time grammar; a newly rejecting grammar needs a new
   version instead of retroactive validation.
-- Retry filing preserves claimed/rejected content on rerun; garbage collection removes
-  only exact generator identities whose named finding cleared. Active legacy output may
-  be migrated, but untrusted legacy lookalikes are never garbage-collected.
-- Adopters may delete an empty/resolved harness folder; the deletion edge may not erase
-  live actions, and removing only the queue v1 marker remains an anti-downgrade failure.
+- Retry filing preserves claimed/rejected content; GC removes only exact cleared generator identities.
+  Active legacy output may migrate, but untrusted legacy lookalikes are never garbage-collected.
+- Adopters may delete an empty/resolved harness folder, but not live actions or only its v1 marker.
   After clean removal, its registry check no-ops with the absent folder.
 - Tracked executables use repository-local state only. Agent/provider shims are thin, policy-free forwarders; personal installers stay outside AgentFold (`templates/task/design.md`).
 - Never weaken a check to pass; fix it or file the reason as a decision.

@@ -1,18 +1,12 @@
 #!/bin/sh
-# AgentFold pre-commit gate: core scope, invariants, and repository tests must pass.
+# AgentFold pre-commit gate: one budgeted routine orchestrator owns the interval.
 # Installed by automation/install.py (git config core.hooksPath automation/hooks).
 # A --no-verify bypass must be reported in the session handover with a reason.
 set -e
 
 ROOT="$(git rev-parse --show-toplevel)"
 
-echo "pre-commit: core scope"
-python3 "$ROOT/automation/check_core_scope.py" --staged
-
-echo "pre-commit: reconciler"
-python3 "$ROOT/automation/reconcile/reconcile.py" --check
-
-echo "pre-commit: staged-path repository tests"
-python3 "$ROOT/automation/run_tests.py" --staged
+echo "pre-commit: routine test gate"
+python3 "$ROOT/automation/run_test_gate.py" routine --staged
 
 echo "pre-commit: OK"

@@ -37,6 +37,8 @@ SAFE_GIT_BEHAVIOR_VARIABLES = frozenset(
         "GIT_COMMITTER_DATE",
         "GIT_COMMITTER_EMAIL",
         "GIT_COMMITTER_NAME",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
         "GIT_TERMINAL_PROMPT",
     )
 )
@@ -68,7 +70,21 @@ def parse_arguments(arguments):
         action="store_true",
         help="select a conservative staged-change lane, falling back to full",
     )
-    return parser.parse_args(arguments)
+    parser.add_argument(
+        "--view-root",
+        type=Path,
+        help="run from this already captured metadata-free tested view",
+    )
+    parser.add_argument(
+        "--test-file",
+        action="append",
+        default=[],
+        help="repository-relative test file to run (repeatable)",
+    )
+    options = parser.parse_args(arguments)
+    if options.staged and (options.view_root or options.test_file):
+        parser.error("--staged cannot be combined with --view-root or --test-file")
+    return options
 
 
 def parse_staged_name_status(output):
@@ -674,16 +690,76 @@ def materialize_repository_view(
     seen_repositories.remove(repository)
 
 
+def materialize_captured_view(source, destination, child_environment):
+    """Copy an exact gate view, dropping its fixed empty reconciler sentinel."""
+    source = Path(source).resolve()
+    for current_root, directory_names, file_names in os.walk(
+        str(source), followlinks=False
+    ):
+        current = Path(current_root)
+        git_directories = [
+            name for name in directory_names if name.casefold() == ".git"
+        ]
+        git_files = [name for name in file_names if name.casefold() == ".git"]
+        root_sentinel = current == source and git_directories == [".git"]
+        if git_files or git_directories and not root_sentinel:
+            raise RuntimeError("explicit tested view contained Git metadata")
+        if root_sentinel:
+            sentinel = current / ".git"
+            if sentinel.is_symlink() or not sentinel.is_dir() \
+                    or any(sentinel.iterdir()):
+                raise RuntimeError("explicit tested view contained Git metadata")
+            directory_names.remove(".git")
+
+    def ignore_reconciler_sentinel(path, names):
+        if Path(path).resolve() == source and ".git" in names:
+            return {".git"}
+        return set()
+
+    shutil.copytree(
+        str(source),
+        str(destination),
+        symlinks=True,
+        ignore=ignore_reconciler_sentinel,
+    )
+    seal_bare_repository_views(destination, child_environment)
+
+
 def main(arguments=()):
     started = time.monotonic()
     options = parse_arguments(arguments)
-    all_test_files = repository_test_files()
-    selection = (
-        staged_test_selection(all_test_files)
-        if options.staged
-        else full_selection(all_test_files, "full suite requested")
+    source_repository = (
+        options.view_root.resolve() if options.view_root else REPO
     )
-    report_selection(selection)
+    if options.view_root and not source_repository.is_dir():
+        raise RuntimeError("explicit tested view is unavailable")
+    all_test_files = repository_test_files(source_repository)
+    if options.test_file:
+        discovered = {
+            test.relative_to(source_repository).as_posix(): test
+            for test in all_test_files
+        }
+        requested = []
+        for raw_path in options.test_file:
+            path = Path(raw_path)
+            if path.is_absolute() or ".." in path.parts:
+                raise RuntimeError("explicit test path is unsafe")
+            test = discovered.get(path.as_posix())
+            if test is None:
+                raise RuntimeError(f"explicit test was not discovered: {raw_path}")
+            requested.append(test)
+        selection = TestSelection(
+            "explicit-view",
+            "gate supplied an exact tested view and manifest",
+            tuple(sorted(set(requested))),
+        )
+    else:
+        selection = (
+            staged_test_selection(all_test_files)
+            if options.staged
+            else full_selection(all_test_files, "full suite requested")
+        )
+    report_selection(selection, source_repository)
     test_files = selection.test_files
     if not test_files:
         print("no repository tests found")
@@ -700,12 +776,20 @@ def main(arguments=()):
         install_isolated_git_wrapper(scratch_root, child_environment)
         child_environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
         test_cwd = scratch_root / "view"
-        relative_tests = tuple(test.relative_to(REPO) for test in test_files)
-        materialize_repository_view(
-            test_cwd,
-            child_environment,
-            additional_paths=test_support_paths(test_files),
+        relative_tests = tuple(
+            test.relative_to(source_repository) for test in test_files
         )
+        if source_repository == REPO and not options.view_root:
+            materialize_repository_view(
+                test_cwd,
+                child_environment,
+                additional_paths=test_support_paths(test_files),
+            )
+        else:
+            child_environment[PROJECTED_REPOSITORY_ENVIRONMENT] = str(
+                source_repository
+            )
+            materialize_captured_view(source_repository, test_cwd, child_environment)
         child_environment[PROJECTED_REPOSITORY_ENVIRONMENT] = str(test_cwd)
         for test, rel in zip(test_files, relative_tests):
             result = subprocess.run(

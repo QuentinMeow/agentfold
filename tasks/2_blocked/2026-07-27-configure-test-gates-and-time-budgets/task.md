@@ -4,7 +4,7 @@
 **Filed:** 2026-07-27, by codex, from the owner's test-cycle request in chat
 **Parent:** 2026-07-26-continue-development-cycle-acceleration
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/decisions/blocking-approve-split-trusted-pull-request-gate.md`
 
 ## Goal
 
@@ -60,8 +60,9 @@ the configured critical checks produce complete final evidence.
       SYSTEM SHALL stop or avoid the remaining work, mark that coverage as deferred, and
       require it at the configured final boundary rather than claiming a full pass.
 - [ ] A repository can configure complete verification as `manual` or as an automatic `hard`
-      gate at one named final-stage trigger such as task review or merge. No supported setting
-      silently turns the complete suite back into an every-commit gate.
+      gate at the version 1 `pull-request` trigger backed by its controlled workflow adapter.
+      Other automatic boundaries require a future schema version and controlled adapter. No
+      supported setting silently turns the complete suite back into an every-commit gate.
 - [ ] Final evidence and cached evidence bind to the exact tested bytes, test manifest,
       policy configuration, runner version, and relevant toolchain identity. A changed input
       invalidates reuse.

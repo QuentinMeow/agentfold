@@ -97,30 +97,63 @@ class ReconcileQueueTests(unittest.TestCase):
         self.git(root, "config", "user.name", "Test")
         self.git(root, "config", "user.email", "test@example.invalid")
 
-    def test_github_adapter_handles_root_push_and_always_runs_tests(self):
+    def test_github_adapter_binds_event_merge_and_limits_push_to_reconciliation(self):
         workflow = (
             MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
         ).read_text(encoding="utf-8")
+        gate = workflow.partition(
+            "      - name: Final test gate — configured pull-request boundary\n"
+        )[2].partition("      - name: Reconciler — every harness invariant holds\n")[0]
+        self.assertTrue(gate, "configured pull-request gate is missing")
+        ordered_identity = (
+            "TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}",
+            "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
+            "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
+            "TEST_GATE_BRANCH: ${{ github.head_ref }}",
+            "TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}",
+            "TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}",
+            '"refs/pull/$TEST_GATE_PR_NUMBER/merge"',
+            'test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" =',
+            '"$TEST_GATE_CANDIDATE"',
+            'TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")',
+            "automation/run_test_gate.py final",
+            "--at-transition pull-request",
+            '--base-revision "$TEST_GATE_BASE"',
+            '--head-revision "$TEST_GATE_HEAD"',
+            '--candidate-revision "$TEST_GATE_CANDIDATE"',
+            '--branch "$TEST_GATE_BRANCH"',
+        )
+        previous = -1
+        for expected in ordered_identity:
+            position = gate.find(expected, previous + 1)
+            self.assertNotEqual(-1, position, expected)
+            previous = position
+        self.assertIn("if: github.event_name == 'pull_request'", gate)
+        self.assertNotIn("--provider-hard", gate)
+
+        push = workflow.partition(
+            "      - name: Reconciler — every harness invariant holds\n"
+        )[2].partition("  authoritative-external-action-projection:\n")[0]
+        self.assertTrue(push, "push reconciliation step is missing")
+        self.assertIn("if: github.event_name == 'push'", push)
         self.assertIn(
             '[ "$QUEUE_PUSH_BEFORE" = '
             '"0000000000000000000000000000000000000000" ]',
-            workflow,
+            push,
         )
-        self.assertIn('QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"', workflow)
+        self.assertIn('QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"', push)
         self.assertIn(
-            'git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"', workflow
-        )
-        self.assertIn(
-            'QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"',
-            workflow,
+            'git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"', push
         )
         self.assertIn(
-            "github.event.action == 'synchronize' && github.event.before",
-            workflow,
+            'QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"', push,
         )
-        self.assertIn('--displaced-tip "$QUEUE_DISPLACED_TIP"', workflow)
-        self.assertIn('--displaced-tip "$QUEUE_PUSH_BEFORE"', workflow)
-        self.assertIn("if: ${{ always() }}", workflow)
+        self.assertIn(
+            'QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_PUSH_BEFORE")', push,
+        )
+        self.assertIn("automation/reconcile/reconcile.py --check", push)
+        self.assertNotIn("automation/run_tests.py", push)
+        self.assertNotIn("automation/run_test_gate.py", push)
         self.assertNotIn("--at-transition repository-admission", workflow)
 
     def test_queue_checks_no_op_when_queue_is_absent(self):

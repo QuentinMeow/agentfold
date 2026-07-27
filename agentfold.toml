@@ -1,0 +1,96 @@
+# AgentFold repository test-gate policy, schema version 1.
+schema_version = 1
+
+[testing.routine]
+target_seconds = 60
+maximum_seconds = 60
+
+[testing.final]
+mode = "hard"
+trigger = "pull-request"
+target_seconds = 300
+maximum_seconds = 900
+
+[testing.performance]
+on_budget_exceeded = "file-task"
+
+[testing.risk]
+# A changed path must be explicitly known reversible; unknown paths fail closed.
+unmatched = "critical"
+
+[[testing.risk.critical]]
+category = "credentials-and-secrets"
+path_globs = [
+  "**/.env",
+  "**/.env.*",
+  "**/*credential*",
+  "**/*secret*",
+  "**/*token*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.critical]]
+category = "pii"
+path_globs = [
+  "**/*personal-data*",
+  "**/*pii*",
+  "**/*privacy*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.critical]]
+category = "authorization"
+path_globs = [
+  "**/*access-control*",
+  "**/*auth*",
+  "**/*permission*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.critical]]
+category = "destructive-operations"
+path_globs = [
+  "**/*cleanup*",
+  "**/*delete*",
+  "**/*migration*",
+  "**/*remove*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.critical]]
+category = "external-publication"
+path_globs = [
+  ".github/workflows/**",
+  "**/*publish*",
+  "**/*release*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.critical]]
+category = "production-deployment"
+path_globs = [
+  "**/*deploy*",
+  "**/*prod*",
+  "**/*production*",
+]
+required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
+
+[[testing.risk.reversible]]
+id = "ordinary-repository-work"
+path_globs = [
+  "AGENTS.md",
+  "README.md",
+  "CONTRIBUTING.md",
+  "agentfold.toml",
+  "automation/**",
+  "docs/**",
+  "handbook/**",
+  "history/**",
+  "memory/**",
+  "message-queue/**",
+  "roadmap/**",
+  "services/**",
+  "skills/**",
+  "tasks/**",
+  "templates/**",
+]

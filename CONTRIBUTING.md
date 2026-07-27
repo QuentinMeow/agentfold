@@ -34,6 +34,8 @@ python3 automation/run_tests.py                     # repository test files stay
 ```
 
 Both also run in CI and as the pre-commit hook (`automation/install.py` installs it).
+For the configured routine and final test lanes, including the required
+`agentfold.toml` policy, see [`handbook/testing-gates.md`](handbook/testing-gates.md).
 
 ## Proposing design changes
 

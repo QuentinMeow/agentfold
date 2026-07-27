@@ -321,7 +321,33 @@ class StagedTestSelectionTests(unittest.TestCase):
     def test_pre_commit_requests_the_staged_lane(self):
         hook = (RUN_TESTS.REPO / "automation/hooks/pre-commit").read_text()
 
-        self.assertIn('automation/run_tests.py" --staged', hook)
+        self.assertIn('automation/run_test_gate.py" routine --staged', hook)
+
+    def test_explicit_view_requires_safe_discovered_test_paths(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            view = Path(scratch)
+            (view / "automation/tests").mkdir(parents=True)
+            test = view / "automation/tests/test_probe.py"
+            test.write_text("pass\n")
+
+            options = RUN_TESTS.parse_arguments(
+                ("--view-root", str(view), "--test-file", "automation/tests/test_probe.py")
+            )
+
+            self.assertEqual(view, options.view_root)
+            self.assertEqual(["automation/tests/test_probe.py"], options.test_file)
+
+    def test_explicit_test_file_can_use_the_normal_isolated_runner_view(self):
+        options = RUN_TESTS.parse_arguments(
+            ("--test-file", "automation/tests/test_run_test_gate.py")
+        )
+
+        self.assertIsNone(options.view_root)
+        self.assertEqual(["automation/tests/test_run_test_gate.py"], options.test_file)
+
+    def test_staged_and_explicit_view_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            RUN_TESTS.parse_arguments(("--staged", "--view-root", "/tmp/view"))
 
     def test_name_status_parser_handles_nul_delimited_special_paths(self):
         entries = RUN_TESTS.parse_staged_name_status(
@@ -335,6 +361,36 @@ class StagedTestSelectionTests(unittest.TestCase):
 
 
 class RunTestsIsolationTests(unittest.TestCase):
+    def test_captured_view_drops_only_the_fixed_empty_root_git_sentinel(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "source"
+            destination = Path(scratch) / "destination"
+            source.mkdir()
+            (source / ".git").mkdir()
+            (source / "candidate.txt").write_text("candidate\n")
+
+            RUN_TESTS.materialize_captured_view(source, destination, {})
+
+            self.assertEqual("candidate\n", (destination / "candidate.txt").read_text())
+            self.assertFalse((destination / ".git").exists())
+
+    def test_captured_view_rejects_nonempty_or_nested_git_metadata(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for name in ("nonempty", "nested"):
+                with self.subTest(name=name):
+                    source = root / name
+                    source.mkdir()
+                    sentinel = (
+                        source / ".git" if name == "nonempty" else source / "nested/.git"
+                    )
+                    sentinel.mkdir(parents=True)
+                    (sentinel / "config").write_text("[core]\n")
+                    with self.assertRaisesRegex(RuntimeError, "Git metadata"):
+                        RUN_TESTS.materialize_captured_view(
+                            source, root / f"{name}-destination", {}
+                        )
+
     def test_child_environment_removes_every_git_local_variable(self):
         factory = getattr(RUN_TESTS, "isolated_test_environment", None)
         self.assertIsNotNone(
