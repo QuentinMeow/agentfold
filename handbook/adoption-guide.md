@@ -31,6 +31,9 @@ Add in this order — each step pays for itself before the next:
    haven't adopted; the check registry in `reconcile.py` is a plain dict.
 6. **`memory/` + `roadmap/`** once cross-session amnesia actually hurts.
 
+When you adopt the automated checks, configure their routine/final lanes in
+[`testing-gates.md`](testing-gates.md) before installing the hook.
+
 ## Making your code folders agent-native
 
 For each real service/module folder, its `AGENTS.md` answers exactly four things: what

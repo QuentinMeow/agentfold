@@ -189,6 +189,34 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "check_action_projection.py", self.job("reconcile-and-test")
         )
 
+    def test_configured_hard_final_gate_owns_pull_request_verification(self):
+        gate = self.step(
+            "reconcile-and-test",
+            "Final test gate — configured pull-request boundary",
+        )
+        self.assert_contains_all(gate, (
+            "if: github.event_name == 'pull_request'",
+            "TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}",
+            "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
+            "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
+            "TEST_GATE_BRANCH: ${{ github.head_ref }}",
+            "github.event.before",
+            '"refs/pull/$TEST_GATE_PR_NUMBER/merge"',
+            'rev-parse --verify HEAD^{commit}',
+            "automation/run_test_gate.py final",
+            "--at-transition pull-request",
+            '--base-revision "$TEST_GATE_BASE"',
+            '--head-revision "$TEST_GATE_HEAD"',
+            '--candidate-revision "$TEST_GATE_CANDIDATE"',
+            '--branch "$TEST_GATE_BRANCH"',
+            'TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")',
+        ))
+        job = self.job("reconcile-and-test")
+        self.assertNotIn("automation/run_tests.py", job)
+        self.assertNotIn("name: Repository tests", job)
+        self.assertNotIn("check_core_scope.py --range", job)
+        self.assertNotIn("Reconciler — pull-request merge boundary", job)
+
     def test_issue_assignment_state_replays_on_issue_and_comment_events(self):
         projection = self.step(
             "authoritative-external-action-projection",

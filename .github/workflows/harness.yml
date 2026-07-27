@@ -27,34 +27,38 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Core scope — deterministic boundary (agent review is manual)
+      - name: Final test gate — configured pull-request boundary
         if: github.event_name == 'pull_request'
         env:
-          CORE_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
-          CORE_SCOPE_HEAD: ${{ github.event.pull_request.head.sha }}
-          CORE_SCOPE_BRANCH: ${{ github.head_ref }}
-        run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH"
-      - name: Reconciler — pull-request merge boundary
-        if: github.event_name == 'pull_request'
-        env:
-          QUEUE_TASK_BRANCH: ${{ github.head_ref }}
-          QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
-          QUEUE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+          TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}
+          TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}
+          TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}
+          TEST_GATE_BRANCH: ${{ github.head_ref }}
+          TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
         run: |
-          QUEUE_DISPLACED_ARGS=()
-          if [ -n "$QUEUE_DISPLACED_TIP" ] && \
-              [ "$QUEUE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
-            if ! git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$QUEUE_DISPLACED_TIP"
-            fi
-            git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}"
-            QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_DISPLACED_TIP")
+          test -n "$TEST_GATE_CANDIDATE"
+          if ! git cat-file -e "$TEST_GATE_CANDIDATE^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "refs/pull/$TEST_GATE_PR_NUMBER/merge"
           fi
-          python3 automation/reconcile/reconcile.py --check \
-            --at-transition merge \
-            --branch "$QUEUE_TASK_BRANCH" \
-            --range "$QUEUE_CHANGE_RANGE" \
-            "${QUEUE_DISPLACED_ARGS[@]}"
+          test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" = \
+            "$TEST_GATE_CANDIDATE"
+          TEST_GATE_DISPLACED_ARGS=()
+          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
+              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
+            if ! git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$TEST_GATE_DISPLACED_TIP"
+            fi
+            git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}"
+            TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")
+          fi
+          python3 automation/run_test_gate.py final \
+            --at-transition pull-request \
+            --base-revision "$TEST_GATE_BASE" \
+            --head-revision "$TEST_GATE_HEAD" \
+            --candidate-revision "$TEST_GATE_CANDIDATE" \
+            --branch "$TEST_GATE_BRANCH" \
+            "${TEST_GATE_DISPLACED_ARGS[@]}"
       - name: Reconciler — every harness invariant holds
         if: github.event_name == 'push'
         env:
@@ -84,10 +88,6 @@ jobs:
             --branch "$QUEUE_PUSH_BRANCH" \
             --range "$QUEUE_CHANGE_RANGE" \
             "${QUEUE_DISPLACED_ARGS[@]}"
-      - name: Repository tests
-        if: ${{ always() }}
-        run: python3 automation/run_tests.py
-
   authoritative-external-action-projection:
     name: Authoritative action projection from trusted workflow code
     if: >-
