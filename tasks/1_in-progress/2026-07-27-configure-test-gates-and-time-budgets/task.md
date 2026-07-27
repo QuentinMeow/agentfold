@@ -4,7 +4,7 @@
 **Filed:** 2026-07-27, by codex, from the owner's test-cycle request in chat
 **Parent:** 2026-07-26-continue-development-cycle-acceleration
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/decisions/blocking-approve-split-trusted-pull-request-gate.md`
+**Queue actions:** none
 
 ## Goal
 

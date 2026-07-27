@@ -1,6 +1,7 @@
 # Design notes — configurable test gates and time budgets
 
 **Status:** decided
+**Authorization:** `memory/decisions/2026-07-27-trusted-pull-request-gate-boundary.md`
 
 ## Problem
 
