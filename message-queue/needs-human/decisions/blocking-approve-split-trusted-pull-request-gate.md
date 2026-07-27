@@ -43,4 +43,4 @@ adapter must enforce it and AgentFold reports the included workflow as untrusted
 Option A, because the starter policy already selects hard pull-request mode and the split design
 keeps candidate execution out of the token-bearing trusted preparer.
 
-**Your answer:** ______
+**Your answer:** option A.
