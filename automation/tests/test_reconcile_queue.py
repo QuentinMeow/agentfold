@@ -133,7 +133,6 @@ class ReconcileQueueTests(unittest.TestCase):
         self.assertIn("--network none", runner)
         self.assertIn("--cap-drop ALL", runner)
         self.assertIn("--security-opt no-new-privileges", runner)
-        self.assertIn("github.event_name == 'merge_group'", runner)
         self.assertIn("run: exit 1", runner)
 
         publisher = workflow.partition(
@@ -246,6 +245,10 @@ class ReconcileQueueTests(unittest.TestCase):
                 else "invalid"
             )
         self.assertIn(regime, ("legacy", "restricted"))
+        if regime == "legacy":
+            self.assertIn("github.event_name == 'merge_group'", runner)
+        else:
+            self.assertNotIn("github.event_name == 'merge_group'", runner)
 
     def test_queue_checks_no_op_when_queue_is_absent(self):
         with self.repo() as root:

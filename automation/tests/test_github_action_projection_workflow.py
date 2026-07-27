@@ -194,10 +194,19 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         job = self.job("prepare-trusted-final-test-gate")
         self.assert_contains_all(job, (
             "name: Prepare trusted hard final gate candidate",
-            "if: ${{ github.event_name == 'pull_request_target' }}",
             "permissions:\n      contents: read",
             "bundle_sha256: ${{ steps.bundle.outputs.sha256 }}",
         ))
+        if trusted_gate_regime(self.workflow) == "legacy":
+            self.assertIn(
+                "if: ${{ github.event_name == 'pull_request_target' }}", job
+            )
+        else:
+            self.assertIn(
+                "github.event.action == 'opened' || "
+                "github.event.action == 'synchronize'",
+                job,
+            )
         checkout = self.step(
             "prepare-trusted-final-test-gate",
             "Checkout trusted pull-request base controller",
@@ -275,10 +284,13 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "trusted-final-test-runner", "Reject missing trusted preparation"
         )
         self.assert_contains_all(rejection, (
-            "github.event_name == 'pull_request_target'",
             "needs.prepare-trusted-final-test-gate.result != 'success'",
             "run: exit 1",
         ))
+        if trusted_gate_regime(self.workflow) == "legacy":
+            self.assertIn("github.event_name == 'pull_request_target'", rejection)
+        else:
+            self.assertNotIn("github.event_name == 'pull_request_target'", rejection)
         download = self.step(
             "trusted-final-test-runner", "Download trusted candidate bundle"
         )
@@ -390,13 +402,18 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
 
     def test_merge_queue_and_missing_preparation_fail_closed(self):
         runner = self.job("trusted-final-test-runner")
-        rejection = self.step(
-            "trusted-final-test-runner", "Reject unsupported merge-queue admission"
-        )
-        self.assert_contains_all(rejection, (
-            "github.event_name == 'merge_group'",
-            "run: exit 1",
-        ))
+        if trusted_gate_regime(self.workflow) == "legacy":
+            rejection = self.step(
+                "trusted-final-test-runner",
+                "Reject unsupported merge-queue admission",
+            )
+            self.assert_contains_all(rejection, (
+                "github.event_name == 'merge_group'",
+                "run: exit 1",
+            ))
+        else:
+            self.assertNotIn("github.event_name == 'merge_group'", runner)
+            self.assertNotIn("Reject unsupported merge-queue admission", runner)
         publisher = self.job("publish-trusted-final-test-check")
         self.assertIn("github.event_name == 'pull_request_target'", publisher)
         self.assertNotIn("github.event_name == 'merge_group'", publisher)
