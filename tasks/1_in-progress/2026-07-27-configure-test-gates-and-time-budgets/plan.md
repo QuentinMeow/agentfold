@@ -8,12 +8,12 @@
       enough pure checks and integration smoke coverage to select a safe routine manifest.
 - [x] 4. Implement the routine gate's end-to-end budget, clean timeout handling, reversible
       deferral, and honest selected/deferred coverage report.
-- [x] 5. Implement the complete final lane with manual and final-stage execution, exact receipt
+- [ ] 5. Implement the complete final lane with manual and final-stage execution, exact receipt
       validation, and non-deferrable critical-scope behavior.
 - [x] 6. Implement deterministic budget-regression task and pickup generation, open-task
       deduplication, recurrence links, actor-note preservation, and read-only finding output.
-- [x] 7. Wire pre-commit and CI/provider adapters to the configured lanes without running the
+- [ ] 7. Wire pre-commit and CI/provider adapters to the configured lanes without running the
       complete suite twice for the same candidate; document the adopter-facing configuration.
-- [x] 8. Add focused regression tests, benchmark representative service, automation, and
+- [ ] 8. Add focused regression tests, benchmark representative service, automation, and
       cross-cutting changes, and record real before/after evidence against both configured
       targets before review.
