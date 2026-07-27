@@ -345,6 +345,21 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertIsNone(options.view_root)
         self.assertEqual(["automation/tests/test_run_test_gate.py"], options.test_file)
 
+    def test_provider_hard_requires_an_explicit_view_and_manifest(self):
+        with self.assertRaises(SystemExit):
+            RUN_TESTS.parse_arguments(("--provider-hard",))
+
+        options = RUN_TESTS.parse_arguments(
+            (
+                "--provider-hard",
+                "--view-root",
+                "/tmp/candidate",
+                "--test-file",
+                "automation/tests/test_probe.py",
+            )
+        )
+        self.assertTrue(options.provider_hard)
+
     def test_staged_and_explicit_view_are_mutually_exclusive(self):
         with self.assertRaises(SystemExit):
             RUN_TESTS.parse_arguments(("--staged", "--view-root", "/tmp/view"))
@@ -361,6 +376,98 @@ class StagedTestSelectionTests(unittest.TestCase):
 
 
 class RunTestsIsolationTests(unittest.TestCase):
+    def test_provider_view_is_made_nonwritable_without_changing_executability(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "view"
+            root.mkdir()
+            ordinary = root / "ordinary.py"
+            executable = root / "executable.py"
+            ordinary.write_text("pass\n")
+            executable.write_text("pass\n")
+            executable.chmod(0o755)
+
+            RUN_TESTS.seal_provider_test_view(root)
+
+            self.assertEqual(0o444, ordinary.stat().st_mode & 0o777)
+            self.assertEqual(0o555, executable.stat().st_mode & 0o777)
+            self.assertEqual(0o555, root.stat().st_mode & 0o777)
+
+            RUN_TESTS.restore_provider_test_view(root)
+
+            self.assertEqual(0o644, ordinary.stat().st_mode & 0o777)
+            self.assertEqual(0o755, executable.stat().st_mode & 0o777)
+            self.assertEqual(0o755, root.stat().st_mode & 0o777)
+
+    def test_provider_scratch_does_not_require_the_absent_chown_capability(self):
+        with tempfile.TemporaryDirectory() as scratch, mock.patch.object(
+            RUN_TESTS.os,
+            "chown",
+            side_effect=AssertionError("provider root must not require CAP_CHOWN"),
+        ):
+            home, temporary = RUN_TESTS.prepare_provider_candidate_scratch(
+                Path(scratch) / "state"
+            )
+            self.assertEqual(0o777, home.stat().st_mode & 0o777)
+            self.assertEqual(0o777, temporary.stat().st_mode & 0o777)
+
+    def test_provider_candidate_environment_is_explicitly_allowlisted(self):
+        environment = RUN_TESTS.provider_candidate_environment(
+            {
+                "PATH": "/untrusted/path",
+                "LANG": "C.UTF-8",
+                "GITHUB_TOKEN": "secret",
+                "PYTHONWARNINGS": "error",
+                "PYTHON_CREDENTIAL": "also-secret",
+                "UNRELATED": "secret",
+            },
+            Path("/work/view"),
+            Path("/work/state/home"),
+            Path("/work/state/tmp"),
+        )
+
+        self.assertEqual("/usr/local/bin:/usr/bin:/bin", environment["PATH"])
+        self.assertEqual("/work/state/home", environment["HOME"])
+        self.assertEqual("/work/state/tmp", environment["TMPDIR"])
+        self.assertEqual("error", environment["PYTHONWARNINGS"])
+        self.assertNotIn("GITHUB_TOKEN", environment)
+        self.assertNotIn("PYTHON_CREDENTIAL", environment)
+        self.assertNotIn("UNRELATED", environment)
+
+    def test_provider_launcher_probes_identity_capabilities_and_no_new_privs(self):
+        launcher = RUN_TESTS.PROVIDER_TEST_LAUNCHER
+        self.assertIn("os.getuid() != 65532", launcher)
+        self.assertIn('(\"CapEff\", \"CapPrm\", \"CapAmb\")', launcher)
+        self.assertIn('status.get("NoNewPrivs") != "1"', launcher)
+        self.assertIn('os.access(str(view), os.W_OK)', launcher)
+        self.assertIn("pathlib.Path(sys.argv[2]).resolve()", launcher)
+        self.assertIn("pathlib.Path(sys.argv[3]).resolve()", launcher)
+        self.assertNotIn('os.environ["HOME"]', launcher)
+
+    def test_provider_runner_uses_trusted_drop_and_fails_on_leaked_uid(self):
+        process = mock.Mock(pid=123, args=["python"])
+        process.wait.return_value = 0
+        with mock.patch.object(
+            RUN_TESTS.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            RUN_TESTS, "cleanup_provider_candidate_processes", return_value={456}
+        ), mock.patch.object(RUN_TESTS.os, "killpg"):
+            result = RUN_TESTS.run_provider_test(
+                Path("/view/test_probe.py"),
+                Path("/view"),
+                {"PATH": "/bin"},
+                Path("/state/home"),
+                Path("/state/tmp"),
+            )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIs(
+            RUN_TESTS._drop_to_provider_candidate,
+            popen.call_args[1]["preexec_fn"],
+        )
+        self.assertTrue(popen.call_args[1]["start_new_session"])
+        self.assertEqual("/state/home", popen.call_args[0][0][-2])
+        self.assertEqual("/state/tmp", popen.call_args[0][0][-1])
+
     def test_captured_view_drops_only_the_fixed_empty_root_git_sentinel(self):
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch) / "source"
@@ -955,7 +1062,7 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("/caller/home", child_environment["HOME"])
         self.assertEqual("/caller/xdg", child_environment["XDG_CONFIG_HOME"])
 
-    def test_main_materializes_one_view_for_every_discovered_test(self):
+    def test_main_materializes_a_fresh_view_for_each_discovered_test(self):
         child_environment = {"PATH": os.environ.get("PATH", "")}
         tests = [
             RUN_TESTS.REPO / "automation/tests/test_first.py",
@@ -993,19 +1100,46 @@ class RunTestsIsolationTests(unittest.TestCase):
                                 ) as run:
                                     self.assertEqual(0, RUN_TESTS.main())
 
-        materialize.assert_called_once()
-        self.assertEqual(
-            (
-                Path("automation/tests/test_first.py"),
-                Path("automation/tests/test_second.py"),
-            ),
-            materialize.call_args[1]["additional_paths"],
-        )
+        self.assertEqual(2, materialize.call_count)
+        for call in materialize.call_args_list:
+            self.assertEqual(
+                (
+                    Path("automation/tests/test_first.py"),
+                    Path("automation/tests/test_second.py"),
+                ),
+                call[1]["additional_paths"],
+            )
         self.assertEqual(2, run.call_count)
-        self.assertEqual(
+        self.assertNotEqual(
             run.call_args_list[0][1]["cwd"],
             run.call_args_list[1][1]["cwd"],
         )
+
+    def test_earlier_test_cannot_rewrite_later_test_input(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "captured"
+            tests = source / "automation/tests"
+            tests.mkdir(parents=True)
+            first = tests / "test_first.py"
+            second = tests / "test_second.py"
+            first.write_text(
+                "from pathlib import Path\n"
+                "Path('automation/tests/test_second.py').write_text('pass\\n')\n"
+            )
+            second.write_text("raise AssertionError('original failure must run')\n")
+
+            result = RUN_TESTS.main(
+                (
+                    "--view-root",
+                    str(source),
+                    "--test-file",
+                    "automation/tests/test_first.py",
+                    "--test-file",
+                    "automation/tests/test_second.py",
+                )
+            )
+
+        self.assertEqual(1, result)
 
     def test_main_does_not_run_hooks_from_the_callers_global_git_config(self):
         with tempfile.TemporaryDirectory() as scratch:

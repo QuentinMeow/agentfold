@@ -387,6 +387,70 @@ class TestGateTests(unittest.TestCase):
         self.assertNotIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", observed)
         self.assertNotIn("UNRELATED_SECRET", observed)
 
+    def test_only_verified_git_hook_exec_path_prefix_is_canonicalized(self):
+        base_path = os.environ.get("PATH", "")
+        git_exec_path = subprocess.check_output(
+            ["git", "--exec-path"], text=True
+        ).strip()
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            git_index_file = subprocess.check_output(
+                ["git", "rev-parse", "--git-path", "index"],
+                cwd=repo,
+                text=True,
+            ).strip()
+            hook_environment = {
+                "PATH": git_exec_path + os.pathsep + base_path,
+                "GIT_EXEC_PATH": git_exec_path,
+                "GIT_INDEX_FILE": git_index_file,
+                "GIT_PREFIX": "",
+            }
+
+            with mock.patch.object(GATE, "REPO", repo):
+                normalized = GATE.safe_process_environment(hook_environment)
+
+                self.assertEqual(base_path, normalized["PATH"])
+                self.assertEqual(
+                    GATE.environment_identity({"PATH": base_path})[
+                        "component_environment_digest"
+                    ],
+                    GATE.environment_identity(hook_environment)[
+                        "component_environment_digest"
+                    ],
+                )
+
+                attacker_prefix = "/tmp/not-the-configured-git-exec-path"
+                attacker_environment = dict(hook_environment)
+                attacker_environment["PATH"] = attacker_prefix + os.pathsep + base_path
+                attacker_environment["GIT_EXEC_PATH"] = attacker_prefix
+                observed = GATE.safe_process_environment(attacker_environment)
+
+                self.assertEqual(attacker_environment["PATH"], observed["PATH"])
+                self.assertNotEqual(
+                    GATE.environment_identity({"PATH": base_path})[
+                        "component_environment_digest"
+                    ],
+                    GATE.environment_identity(attacker_environment)[
+                        "component_environment_digest"
+                    ],
+                )
+
+                mismatched_prefix = dict(hook_environment)
+                mismatched_prefix["PATH"] = "/tmp/not-git" + os.pathsep + base_path
+                self.assertEqual(
+                    mismatched_prefix["PATH"],
+                    GATE.safe_process_environment(mismatched_prefix)["PATH"],
+                )
+
+                mismatched_index = dict(hook_environment)
+                mismatched_index["GIT_INDEX_FILE"] = "/tmp/not-this-repository.index"
+                self.assertEqual(
+                    mismatched_index["PATH"],
+                    GATE.safe_process_environment(mismatched_index)["PATH"],
+                )
+
     def test_setsid_escaped_child_holding_output_cannot_block_cleanup(self):
         if not GATE.process_identity_discovery_available():
             self.skipTest("process environment inspection is sandbox-restricted")
@@ -460,6 +524,83 @@ class TestGateTests(unittest.TestCase):
                 time.sleep(0.02)
             else:
                 self.fail("reparented daemon survived gate-owned cleanup")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "Linux child-subreaper containment is platform-specific",
+    )
+    def test_linux_subreaper_kills_reexeced_daemon_after_environment_scrub(self):
+        if not GATE.strong_process_containment_available():
+            self.skipTest("Linux child-subreaper containment is unavailable")
+        with tempfile.TemporaryDirectory() as scratch:
+            pid_file = Path(scratch) / "scrubbed-daemon.pid"
+            survivor = (
+                "import os,pathlib,signal,time; "
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); "
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(30)"
+            )
+            daemon = (
+                "import os,sys; pid=os.fork(); "
+                "os._exit(0) if pid else None; os.setsid(); pid=os.fork(); "
+                "os._exit(0) if pid else None; "
+                f"os.execve(sys.executable,[sys.executable,'-c',{survivor!r}],"
+                "{'PATH':os.environ.get('PATH','')})"
+            )
+            parent = (
+                "import subprocess,sys,time; "
+                f"subprocess.Popen([sys.executable,'-c',{daemon!r}]); time.sleep(30)"
+            )
+            started = time.monotonic()
+            result = GATE.run_component(
+                "probe",
+                [sys.executable, "-c", parent],
+                0.2,
+                cleanup_deadline=started + 1.0,
+                require_strong_containment=True,
+            )
+            self.assertEqual("incomplete", result.outcome)
+            self.assertIn("Linux child-subreaper containment", result.detail)
+            self.assertTrue(pid_file.is_file())
+            pid = int(pid_file.read_text())
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("scrubbed double-fork descendant survived containment")
+
+    def test_provider_hard_refuses_unsupported_process_containment(self):
+        with mock.patch.object(
+            GATE, "strong_process_containment_available", return_value=False
+        ), mock.patch.object(GATE.subprocess, "Popen") as popen:
+            result = GATE.run_component(
+                "probe",
+                [sys.executable, "-c", "raise AssertionError('must not run')"],
+                1.0,
+                require_strong_containment=True,
+            )
+
+        self.assertEqual("incomplete", result.outcome)
+        self.assertEqual("none", result.evidence)
+        self.assertIn("was not started", result.detail)
+        popen.assert_not_called()
+
+    def test_report_states_best_effort_detached_cleanup_when_strong_is_absent(self):
+        with mock.patch.object(
+            GATE, "strong_process_containment_available", return_value=False
+        ):
+            report = GATE._base_report("routine", time.monotonic())
+
+        self.assertEqual(
+            {
+                "mode": "portable-process-group",
+                "detached_descendants": "best-effort",
+            },
+            report["process_containment"],
+        )
 
     def test_timeout_plus_candidate_drift_can_never_defer_with_exit_zero(self):
         report = GATE._base_report("routine", time.monotonic())
@@ -841,6 +982,130 @@ class TestGateTests(unittest.TestCase):
             changed["policy_digest"] = "other"
             changed["binding_digest"] = MANIFEST.canonical_digest(changed)
             self.assertIsNone(GATE.reusable_receipt(changed))
+
+    def test_pythonpath_change_cannot_reuse_a_full_pass_receipt(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        with mock.patch.object(GATE, "REPO", Path(tempfile.mkdtemp())):
+            (GATE.REPO / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=GATE.REPO, check=True)
+            first = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+                environment={"PATH": "/bin", "PYTHONPATH": "/first"},
+            )
+            GATE.write_receipt(first)
+            changed = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+                environment={"PATH": "/bin", "PYTHONPATH": "/second"},
+            )
+
+            self.assertNotEqual(first["binding_digest"], changed["binding_digest"])
+            self.assertIsNone(GATE.reusable_receipt(changed))
+
+    def test_final_prewarm_is_reused_by_actual_git_commit_hook(self):
+        source_repo = GATE.REPO
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            for relative in (
+                "automation/run_test_gate.py",
+                "automation/run_tests.py",
+                "automation/test_manifest.py",
+            ):
+                destination = repo / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_repo / relative, destination)
+            shutil.copy2(source_repo / "agentfold.toml", repo / "agentfold.toml")
+            (repo / ".gitignore").write_text("tmp/\n")
+            smoke = repo / "automation/tests/test_smoke.py"
+            smoke.parent.mkdir(parents=True)
+            smoke.write_text("import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n")
+            workflow = repo / ".github/workflows/harness.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: base\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            workflow.write_text("name: critical-candidate\n")
+            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
+
+            noop = [sys.executable, "-c", "raise SystemExit(0)"]
+            admissions = (("core-scope", noop), ("reconcile", noop))
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE, "admission_commands", return_value=admissions
+            ), mock.patch.object(GATE, "_write_summary"):
+                self.assertEqual(
+                    0,
+                    GATE.main(
+                        ("final", "--explicit", "--staged"),
+                        started=time.monotonic(),
+                    ),
+                )
+
+            hook = repo / ".git/hooks/pre-commit"
+            hook.write_text(
+                "#!/usr/bin/env python3\n"
+                "import importlib.util,json,os,sys\n"
+                "from pathlib import Path\n"
+                f"path=Path({str(MODULE_PATH)!r})\n"
+                "spec=importlib.util.spec_from_file_location('hook_gate',str(path))\n"
+                "gate=importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(gate)\n"
+                "gate.REPO=Path.cwd().resolve()\n"
+                "noop=[sys.executable,'-c','raise SystemExit(0)']\n"
+                "gate.admission_commands=lambda *args: (('core-scope',noop),('reconcile',noop))\n"
+                "original=gate.reusable_receipt\n"
+                "def probe(binding):\n"
+                " payload={'binding':binding,'git_environment':{name:os.environ.get(name) for name in ('GIT_EXEC_PATH','GIT_INDEX_FILE','GIT_PREFIX')},'safe_environment':gate.safe_process_environment()}\n"
+                " Path('hook-binding.json').write_text(json.dumps(payload,sort_keys=True))\n"
+                " return original(binding)\n"
+                "gate.reusable_receipt=probe\n"
+                "raise SystemExit(gate.main(('routine','--staged')))\n"
+            )
+            hook.chmod(0o755)
+
+            committed = subprocess.run(
+                ["git", "commit", "-m", "exercise real routine hook"],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            self.assertEqual(0, committed.returncode, committed.stdout)
+            report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-routine.json").read_text()
+            )
+            full = next(
+                component
+                for component in report["components"]
+                if component["component_id"] == "repository-tests/full"
+            )
+            diagnostic = {
+                "report": report,
+                "hook_probe": json.loads((repo / "hook-binding.json").read_text()),
+                "receipts": [
+                    json.loads(path.read_text())
+                    for path in (repo / "tmp/test-gate-receipts").glob("*.json")
+                ],
+            }
+            self.assertEqual("reused", full["evidence"], diagnostic)
 
     def test_provider_hard_boundary_disallows_local_receipts(self):
         provider = mock.Mock(provider_hard=True)

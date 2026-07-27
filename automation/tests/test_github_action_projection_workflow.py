@@ -203,7 +203,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "Checkout trusted pull-request base controller",
         )
         self.assert_contains_all(checkout, (
-            "uses: actions/checkout@v4",
+            "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
             "fetch-depth: 0",
             "persist-credentials: false",
             "ref: ${{ github.event.pull_request.base.sha }}",
@@ -248,12 +248,12 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "prepare-trusted-final-test-gate", "Upload trusted candidate bundle"
         )
         self.assert_contains_all(upload, (
-            "uses: actions/upload-artifact@v4",
+            "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
             "agentfold-test-gate-${{ github.run_id }}-${{ github.run_attempt }}",
             "if-no-files-found: error",
             "retention-days: 1",
         ))
-        self.assertEqual(1, job.count("uses: actions/checkout@v4"))
+        self.assertEqual(1, job.count("uses: actions/checkout@"))
         self.assertNotIn("git checkout", job)
         self.assertNotIn("python3 ", job)
         self.assertNotIn("automation/run_test_gate.py", job)
@@ -284,12 +284,12 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         self.assert_contains_all(download, (
             "needs.prepare-trusted-final-test-gate.result == 'success'",
-            "uses: actions/download-artifact@v4",
+            "uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
             "agentfold-test-gate-${{ github.run_id }}-${{ github.run_attempt }}",
         ))
         run = self.step(
             "trusted-final-test-runner",
-            "Run trusted controller without repository credentials",
+            "Run trusted controller in one-shot candidate container",
         )
         self.assert_contains_all(run, (
             "needs.prepare-trusted-final-test-gate.outputs.bundle_sha256",
@@ -299,52 +299,94 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "refs/agentfold/test-gate/head^{commit}",
             "refs/agentfold/test-gate/merge^{commit}",
             "refs/agentfold/test-gate/displaced^{commit}",
-            "env -i",
-            "automation/run_test_gate.py final",
+            "docker.io/library/python:3.11-bookworm@sha256:",
+            "timeout --signal=TERM --kill-after=15s 960s docker run",
+            "--pull=never",
+            "--network none",
+            "--ipc private",
+            "--read-only",
+            "--cap-drop ALL",
+            "--cap-add KILL",
+            "--cap-add SETUID",
+            "--cap-add SETGID",
+            "--security-opt no-new-privileges",
+            "--pids-limit 256",
+            "--memory 2g",
+            "--memory-swap 2g",
+            "--cpus 2",
+            "--cidfile",
+            "grep -Eq '^[0-9a-f]{12,64}$'",
+            "uid=0,gid=0",
+            "python3 /trusted/launcher.py",
+            'str(pathlib.Path(CONTROLLER) / "automation/run_test_gate.py")',
             "--provider-hard",
-            "--at-transition pull-request",
-            '--base-revision "$TEST_GATE_BASE"',
-            '--head-revision "$TEST_GATE_HEAD"',
-            '--candidate-revision "$TEST_GATE_CANDIDATE"',
-            '--branch "$TEST_GATE_BRANCH"',
+            '"--at-transition", "pull-request"',
+            '"--base-revision", base',
+            '"--head-revision", head',
+            '"--candidate-revision", candidate',
+            '"--branch", branch',
         ))
+        self.assertEqual(3, run.count("--cap-add "))
+        self.assertEqual(2, run.count("--pull=never"))
+        self.assertRegex(run, r"python:3\.11-bookworm@sha256:[0-9a-f]{64}")
         self.assertNotIn("GITHUB_TOKEN", run)
         self.assertNotIn("github.token", run)
         self.assertNotIn("secrets.", run)
+        self.assertNotIn("/var/run/docker.sock", run)
+        self.assertNotIn("$GITHUB_WORKSPACE", run)
+        self.assertNotIn("--pid=host", run)
+        self.assertNotIn("--privileged", run)
+        self.assertNotIn("uid=65532", run)
+        self.assertIn("invalid Docker cidfile", run)
 
-    def test_stable_required_check_is_published_without_candidate_execution(self):
+    def test_stable_required_status_is_published_by_dedicated_app(self):
         job = self.job("publish-trusted-final-test-check")
         self.assert_contains_all(job, (
-            "name: Publish AgentFold hard final gate result",
+            "name: Publish AgentFold App-authored hard final gate status",
             "needs: [prepare-trusted-final-test-gate, trusted-final-test-runner]",
             "always()",
-            "permissions:\n      checks: write",
+            "permissions: {}",
+            "environment: agentfold-trusted-publisher",
+            "github.event_name == 'pull_request_target'",
+        ))
+        token = self.step(
+            "publish-trusted-final-test-check",
+            "Mint repository-scoped publisher App token",
+        )
+        self.assert_contains_all(token, (
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "client-id: ${{ vars.AGENTFOLD_PUBLISHER_CLIENT_ID }}",
+            "private-key: ${{ secrets.AGENTFOLD_PUBLISHER_PRIVATE_KEY }}",
+            "permission-statuses: write",
         ))
         publish = self.step(
             "publish-trusted-final-test-check",
-            "Publish exact-candidate required check",
+            "Publish exact-candidate required commit status",
         )
         self.assert_contains_all(publish, (
-            "GITHUB_TOKEN: ${{ github.token }}",
+            "TEST_GATE_APP_TOKEN: ${{ steps.publisher-token.outputs.token }}",
             "github.event.pull_request.merge_commit_sha",
             "needs.prepare-trusted-final-test-gate.outputs.candidate",
             "needs.prepare-trusted-final-test-gate.result",
             "needs.trusted-final-test-runner.result",
-            "TEST_GATE_CONCLUSION=failure",
+            "TEST_GATE_STATE=failure",
             '[ "$TEST_GATE_PREPARE_RESULT" = success ]',
             '[ "$TEST_GATE_RUNNER_RESULT" = success ]',
             'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
-            "TEST_GATE_CONCLUSION=success",
+            "TEST_GATE_STATE=success",
             "AgentFold trusted hard final gate",
-            'head_sha "$TEST_GATE_CANDIDATE"',
-            'status:"completed"',
-            "/check-runs",
-            'test "$TEST_GATE_CONCLUSION" = success',
+            "statuses/$TEST_GATE_CANDIDATE",
+            "'{state:$state,context:$context,description:$description,target_url:$target_url}'",
+            'test "$TEST_GATE_STATE" = success',
         ))
         self.assertNotIn("actions/checkout", job)
         self.assertNotIn("actions/download-artifact", job)
         self.assertNotIn("run_test_gate.py", job)
         self.assertNotIn("git checkout", job)
+        self.assertNotIn("GITHUB_TOKEN", job)
+        self.assertNotIn("github.token", job)
+        self.assertNotIn("checks: write", job)
+        self.assertNotIn("/check-runs", job)
 
     def test_merge_queue_and_missing_preparation_fail_closed(self):
         runner = self.job("trusted-final-test-runner")
@@ -355,16 +397,9 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "github.event_name == 'merge_group'",
             "run: exit 1",
         ))
-        publisher = self.step(
-            "publish-trusted-final-test-check",
-            "Publish exact-candidate required check",
-        )
-        self.assert_contains_all(publisher, (
-            "github.sha",
-            'elif [ "$TEST_GATE_EVENT" = merge_group ]',
-            "Schema version 1 does not support merge-group admission.",
-            'test "$TEST_GATE_CONCLUSION" = success',
-        ))
+        publisher = self.job("publish-trusted-final-test-check")
+        self.assertIn("github.event_name == 'pull_request_target'", publisher)
+        self.assertNotIn("github.event_name == 'merge_group'", publisher)
         self.assertIn("always()", runner)
 
     def test_candidate_controlled_pull_request_job_cannot_replace_hard_gate(self):
