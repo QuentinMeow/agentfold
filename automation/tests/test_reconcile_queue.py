@@ -4,7 +4,9 @@ import hashlib
 import importlib.util
 import io
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,6 +16,7 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "reconcile" / "reconcile.py"
 SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
+MARKDOWN_SEMANTICS = sys.modules["markdown_semantics"]
 
 
 VALID_DECISION = """# Choose the admission boundary
@@ -44,6 +47,98 @@ Run before commit.
 
 Run at repository admission.
 *Example consequence:* every accepted push passes the guard.
+
+**Your answer:** ______
+"""
+
+VALID_DECISION_V2 = """# Choose the admission boundary
+
+<!-- human-action-presentation: v2 -->
+
+> **Waiting for your response.**
+
+## What I need from you
+
+**Action:** choose one admission boundary
+
+Choose which admission boundary should enforce the guard.
+
+## Why this matters
+
+The selected boundary determines whether every accepted change receives the guard.
+
+## If you do not respond
+
+If you do not respond, the task remains blocked before merge.
+
+## Situation
+
+**Today:** No admission boundary is approved or implemented.
+**Future behavior being decided:** Choose where the guard will reject unsafe content.
+
+## Options
+
+### Option A — Local
+
+**What it means:** Run the guard before each local commit.
+**Benefits:** Feedback arrives before publication.
+**Costs and risks:** A skipped hook can bypass the guard.
+**Example consequence:** A contributor can publish an unchecked commit.
+
+### Option B — Server
+
+**What it means:** Run the guard at repository admission.
+**Benefits:** Every accepted update receives the guard.
+**Costs and risks:** Server outages can pause admission.
+**Example consequence:** An unchecked commit is rejected before acceptance.
+
+## Agent recommendation
+
+**Evidence checked:** The server-admission design and bypass requirement.
+**Assumptions:** Repository admission can run the guard reliably.
+**Confidence:** High, based on the stated bypass requirement.
+**Rationale:** The server sees every accepted update.
+**What could change this recommendation:** A trusted local-only repository boundary.
+**Recommendation:** Choose Option B.
+
+## Your response
+
+**Your answer:** ______
+
+## References
+
+**Full context:** [design](../../../docs/design.md#boundary)
+
+<details>
+<summary>Tracking details</summary>
+
+**Status:** waiting
+**Filed:** 2026-07-23, by test
+**Resolution evidence:** `docs/design.md`
+**Blocks now:** task:2026-07-23-example
+</details>
+"""
+
+VALID_CUSTOM_HUMAN = """# Approve the deployment
+
+**Status:** waiting
+**Filed:** 2026-07-23, by test
+**Action:** approve the deployment
+**Full context:** `docs/design.md`
+**Resolution evidence:** `docs/disposition.md`
+**Blocks now:** operation:deploy
+
+## What you need to know
+
+The deployment needs explicit authorization.
+
+## Differences
+
+Approval permits deployment; rejection leaves it stopped.
+
+## Example
+
+Approval permits the release job to proceed.
 
 **Your answer:** ______
 """
@@ -97,6 +192,134 @@ class ReconcileQueueTests(unittest.TestCase):
         self.git(root, "config", "user.name", "Test")
         self.git(root, "config", "user.email", "test@example.invalid")
 
+    @staticmethod
+    def approved_waiting_review(digest):
+        return (
+            "# Review source\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23, by test\n"
+            "**Action:** review the exact source bytes\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** `docs/source.md`\n"
+            f"**Review revision:** {digest}\n"
+            f"**Reviewed revision:** {digest}\n"
+            "**Review outcome:** approved\n"
+            "**If unanswered:** leave the reviewed bytes unchanged\n"
+            "**Why-you-might-care:** The review controls source acceptance.\n"
+            "**If-you-do-nothing:** The source remains unaccepted.\n"
+            "\n## What you need to know\n\n"
+            "The review determines whether the exact source is accepted.\n"
+            "\n## Differences\n\n"
+            "Approval accepts these bytes; rejection leaves them unaccepted.\n"
+            "\n## Example\n\n"
+            "Approval permits the source to cross its review boundary.\n\n"
+            "**Your review:** approve\n"
+        )
+
+    def activate_then_remove_human_queue(self, root, contract):
+        contract.write_text(
+            "**Queue resolution schema:** v1\n"
+            "**Human action presentation schema:** v2\n",
+            encoding="utf-8",
+        )
+        self.git(root, "add", "message-queue/AGENTS.md")
+        self.git(root, "commit", "-m", "activate presentation v2")
+        contract.unlink()
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-m", "remove empty queue service")
+        return self.git(root, "rev-parse", "HEAD")
+
+    def queue_findings_in_range(self, change_range, displaced_tip=None):
+        with mock.patch.multiple(
+            RECONCILE,
+            CHANGE_RANGE=change_range,
+            DISPLACED_TIP=displaced_tip,
+        ):
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                RECONCILE.validate_range_candidate(change_range)
+                RECONCILE.validate_displaced_tip(
+                    displaced_tip, change_range
+                )
+                return (
+                    list(RECONCILE.check_queue_resolution()),
+                    list(RECONCILE.check_queue_schema()),
+                )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+    def handover_findings_in_range(self, change_range, displaced_tip=None):
+        with mock.patch.multiple(
+            RECONCILE,
+            CHANGE_RANGE=change_range,
+            DISPLACED_TIP=displaced_tip,
+        ):
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                RECONCILE.validate_range_candidate(change_range)
+                RECONCILE.validate_displaced_tip(
+                    displaced_tip, change_range
+                )
+                return list(RECONCILE.check_handover_queue_projection())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+    def commit_resolved_human_action(
+        self, root, path, initial_text, answered_text, evidence
+    ):
+        item = self.write(root, path, initial_text)
+        self.git(root, "add", path)
+        self.git(root, "commit", "-m", "create waiting human action")
+        if answered_text != initial_text:
+            item.write_text(answered_text, encoding="utf-8")
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "record human response")
+        item.write_text(
+            answered_text.replace(
+                "**Status:** waiting", "**Status:** folding"
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", path)
+        self.git(root, "commit", "-m", "claim folding")
+        evidence.write_text(
+            "# Disposition\n\nResponse accepted.\n", encoding="utf-8"
+        )
+        item.unlink()
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-m", "resolve human action")
+
+    @staticmethod
+    def folding_v2_action(text=VALID_DECISION_V2):
+        return text.replace(
+            "**Your answer:** ______", "**Your answer:** Option B"
+        ).replace(
+            "> **Waiting for your response.**",
+            "> **Response received. No further response is needed.**",
+        ).replace("**Status:** waiting", "**Status:** folding")
+
+    def checkout_rollback_candidate(
+        self, root, range_head, range_base, candidate_kind
+    ):
+        if candidate_kind == "direct":
+            candidate = range_head
+        else:
+            tree = self.git(root, "rev-parse", f"{range_head}^{{tree}}")
+            candidate = self.git(
+                root,
+                "commit-tree",
+                tree,
+                "-p",
+                range_base,
+                "-p",
+                range_head,
+                "-m",
+                "synthetic rollback candidate",
+            )
+        self.git(root, "checkout", candidate)
+        return candidate
+
     def test_github_adapter_handles_root_push_and_always_runs_tests(self):
         workflow = (
             MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
@@ -149,6 +372,5382 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual([], list(RECONCILE.check_queue_name()))
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_valid_human_presentation_v2_is_self_contained_and_parseable(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2,
+            )
+
+            self.assertEqual("waiting", RECONCILE.fields(item)["Status"])
+            self.assertEqual(
+                "task:2026-07-23-example",
+                RECONCILE.fields(item)["Blocks now"],
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            with_template_comment = (
+                "<!-- Filename: blocking-example.md -->\n\n"
+                + VALID_DECISION_V2
+            )
+            self.assertTrue(RECONCILE.human_action_v2_marker_is_immediate(
+                with_template_comment
+            ))
+
+    def test_human_action_templates_keep_the_notice_adjacent_to_the_action(self):
+        repo = MODULE_PATH.parents[2]
+        for name in ("decision.md", "clarification.md", "review.md"):
+            with self.subTest(name=name):
+                text = (repo / "templates/queue" / name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn(
+                    "<!-- human-action-presentation: v2 -->\n\n"
+                    "> **Waiting for your response.**\n\n"
+                    "## What I need from you",
+                    text,
+                )
+                self.assertIn(
+                    "**Full context:** [<one complete source for deeper detail>]"
+                    "(../../../<repo-relative path>)",
+                    text,
+                )
+                request = RECONCILE.raw_level_two_section_body(
+                    text, "## What I need from you"
+                )
+                action, explanation, problem = (
+                    RECONCILE.raw_human_action_request_parts(request)
+                )
+                self.assertIsNone(problem)
+                self.assertTrue(action)
+                self.assertTrue(explanation)
+                if name == "review.md":
+                    self.assertIn("**Exact review artifact:**", text)
+                    self.assertIn("bound revision", text)
+                    self.assertIn(
+                        "machine-managed target below is not a substitute", text
+                    )
+
+    def test_human_presentation_v2_requires_one_final_tracking_disclosure(self):
+        canonical = "<details>\n<summary>Tracking details</summary>"
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            VALID_DECISION_V2, "decisions", "blocking"
+        ))
+
+        rogue_disclosure = (
+            "<details>\n<summary>Choose Option C instead.</summary>\n\n"
+            "Contradict the bounded recommendation.\n\n</details>\n\n"
+        )
+        invalid = {
+            "before content": VALID_DECISION_V2.replace(
+                "## What I need from you",
+                rogue_disclosure + "## What I need from you",
+                1,
+            ),
+            "within content": VALID_DECISION_V2.replace(
+                "## Agent recommendation",
+                rogue_disclosure + "## Agent recommendation",
+                1,
+            ),
+            "after content": VALID_DECISION_V2.replace(
+                canonical, rogue_disclosure + canonical, 1
+            ),
+            "nested tracking disclosure": VALID_DECISION_V2.replace(
+                "**Status:** waiting",
+                "<details>\n<summary>Nested tracking</summary>\n</details>\n"
+                "**Status:** waiting",
+                1,
+            ),
+            "mixed-case disclosure": VALID_DECISION_V2.replace(
+                canonical,
+                "<DETAILS open><SUMMARY>Visible override</SUMMARY></DETAILS>\n\n"
+                + canonical,
+                1,
+            ),
+            "orphan summary": VALID_DECISION_V2.replace(
+                canonical, "<summary>Visible override</summary>\n\n" + canonical, 1
+            ),
+            "orphan close": VALID_DECISION_V2.replace(
+                canonical, "</details>\n\n" + canonical, 1
+            ),
+            "ordinary raw HTML": VALID_DECISION_V2.replace(
+                canonical, "<span>Visible override</span>\n\n" + canonical, 1
+            ),
+            "tracking free prose": VALID_DECISION_V2.replace(
+                "**Status:** waiting",
+                "Unstructured tracking prose.\n**Status:** waiting",
+                1,
+            ),
+        }
+        for name, candidate in invalid.items():
+            with self.subTest(name=name):
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "raw HTML" in problem
+                    or "Tracking details" in problem
+                    for problem in problems
+                ), problems)
+
+        safe_literals = VALID_DECISION_V2.replace(
+            "choose one admission boundary",
+            "inspect the `<details>` marker",
+            1,
+        ).replace(
+            canonical,
+            "<!-- <DETAILS><SUMMARY>not rendered</SUMMARY></DETAILS> -->\n\n"
+            + canonical,
+            1,
+        ).replace(
+            "[design](../../../docs/design.md#boundary)",
+            "[design](<docs/design.md>)",
+            1,
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            safe_literals, "decisions", "blocking"
+        ))
+
+    def test_human_presentation_v2_raw_html_cannot_hide_between_blocks(self):
+        placements = (
+            "**Future behavior being decided:** Choose where the guard will "
+            "reject unsafe content.",
+            "**Benefits:** Feedback arrives before publication.",
+            "**Rationale:** The server sees every accepted update.",
+            "**Status:** waiting",
+        )
+        for placement in placements:
+            with self.subTest(placement=placement):
+                candidate = VALID_DECISION_V2.replace(
+                    placement,
+                    placement + " `\n\n<span>Choose Option A.</span> `",
+                    1,
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "raw HTML" in problem for problem in problems
+                ), problems)
+
+        for name, boundary in (
+            ("blank", "\n\n"),
+            ("heading", "\n# Boundary\n"),
+            ("quote", "\n> Boundary\n"),
+            ("list", "\n- Boundary\n"),
+            ("thematic break", "\n---\n"),
+            ("reference definition", "\n[later]: docs/later.md\n"),
+        ):
+            with self.subTest(boundary=name):
+                source = "Unmatched `before" + boundary + "<span>raw</span> `"
+                self.assertEqual(
+                    (), RECONCILE.block_aware_inline_code_spans(source)
+                )
+                self.assertTrue(RECONCILE.contains_raw_html(source))
+
+        self.assertFalse(RECONCILE.contains_raw_html(
+            "Inspect `<span>literal</span>` in this paragraph."
+        ))
+
+    def test_human_presentation_v2_comments_cannot_hide_between_blocks(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        request = (
+            "**Action:** choose one admission boundary `\n\n"
+            "<!-- hidden parser instruction --> `\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        candidate = VALID_DECISION_V2.replace(original, request)
+        problems = RECONCILE.human_action_v2_problems(
+            candidate, "decisions", "blocking"
+        )
+        self.assertTrue(any(
+            "comments must be standalone blocks" in problem
+            or "raw HTML" in problem
+            for problem in problems
+        ), problems)
+
+        safe, problem = RECONCILE.source_with_standalone_comments_blanked(
+            "Inspect `<!-- literal -->` syntax."
+        )
+        self.assertIsNone(problem)
+        self.assertEqual("Inspect `<!-- literal -->` syntax.", safe)
+
+    def test_integrated_queue_rejects_cross_block_raw_html_masking(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n\n## Boundary\n")
+            candidate = VALID_DECISION_V2.replace(
+                "**Future behavior being decided:** Choose where the guard will "
+                "reject unsafe content.",
+                "**Future behavior being decided:** Choose where the guard will "
+                "reject unsafe content. `\n\n<span>Choose Option A.</span> `",
+                1,
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                candidate,
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("raw HTML" in message for message in messages), messages)
+
+    def test_human_presentation_v2_tracking_uses_endpoint_allowlist(self):
+        allowed = VALID_DECISION_V2.replace(
+            "**Resolution evidence:** `docs/design.md`",
+            "**Resolution evidence:** `docs/design.md`\n"
+            "<!-- Standalone machine guidance remains non-rendered. -->\n"
+            "**External assignment:** artifact=42 role=reviewer actor=human\n"
+            "**External source:** provider:item:v1\n"
+            "**Supersedes:** `message-queue/needs-human/decisions/old.md`",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            allowed, "decisions", "blocking"
+        ))
+
+        invalid_fields = (
+            "**Instruction:** Choose Option A.",
+            "**Action:** Choose Option A again.",
+            "**Follow-up review:** `message-queue/needs-human/reviews/next.md`",
+            "**Depends on:** `message-queue/needs-agent/requests/repair.md`",
+            "**Successor action:** `message-queue/needs-agent/requests/repair.md`",
+            "**Blocks at:** event:merge",
+        )
+        for field in invalid_fields:
+            with self.subTest(field=field):
+                candidate = VALID_DECISION_V2.replace(
+                    "**Status:** waiting", field + "\n**Status:** waiting", 1
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "Tracking details" in problem for problem in problems
+                ), problems)
+
+        duplicate = VALID_DECISION_V2.replace(
+            "**Status:** waiting",
+            "**Status:** waiting\n**Status:** waiting",
+            1,
+        )
+        self.assertTrue(any(
+            "repeated field" in problem
+            for problem in RECONCILE.human_action_v2_problems(
+                duplicate, "decisions", "blocking"
+            )
+        ))
+
+        review_core = (
+            "**Status:** {status}\n"
+            "**Filed:** 2026-07-23, by test\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** `docs/design.md`\n"
+            "**Review revision:** sha256:" + "a" * 64 + "\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** {outcome}\n"
+        )
+        awaiting = review_core.format(
+            status="awaiting-artifact", outcome="pending"
+        )
+        waiting_changes = review_core.format(
+            status="waiting", outcome="changes-requested"
+        )
+        self.assertNotIn(
+            "Successor action",
+            RECONCILE.human_action_v2_tracking_optional_fields(
+                "reviews", "awaiting-artifact", awaiting
+            ),
+        )
+        self.assertIn(
+            "Successor action",
+            RECONCILE.human_action_v2_tracking_optional_fields(
+                "reviews", "waiting", waiting_changes
+            ),
+        )
+
+    def test_human_presentation_v2_rejects_field_looking_visual_lines(self):
+        state = "**Today:** No admission boundary is approved or implemented."
+        prefixes_and_fields = {
+            "two-space unknown": "  **Instruction:** Choose Option A.",
+            "nbsp Action": "\u00a0**Action:** Choose Option A instead.",
+            "em-space wrong response": "\u2003**Your review:** approve",
+            "unicode-plus-tab": "\u00a0\t**Instruction:** Choose Option A.",
+            "default-ignorable prefix": "\u200b**Action:** Choose Option A.",
+            "default-ignorable label": "  **Instr\u2060uction:** Choose Option A.",
+            "named nbsp prefix": "&nbsp;**Action:** Choose Option A instead.",
+            "numeric tab prefix": "&#9;**Action:** Choose Option A instead.",
+            "numeric zwsp prefix": "&#x200B;**Action:** Choose Option A instead.",
+            "named newline prefix": "&NewLine;**Action:** Choose Option A instead.",
+            "numeric newline prefix": "&#10;**Action:** Choose Option A instead.",
+            "encoded Action label": (
+                "**Act&#105;on&#58;** Choose Option A instead."
+            ),
+            "encoded wrong response label": (
+                "**Your&#x20;review:** approve"
+            ),
+        }
+        for name, field_line in prefixes_and_fields.items():
+            with self.subTest(name=name):
+                candidate = VALID_DECISION_V2.replace(
+                    state, state + "\n" + field_line, 1
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "bold-key" in problem
+                    or "exactly one **Action:**" in problem
+                    or "must not contain **Your review:**" in problem
+                    for problem in problems
+                ), problems)
+
+        placements = (
+            (
+                "Choose which admission boundary should enforce the guard.",
+                "Choose which admission boundary should enforce the guard.\n"
+                "  **Action:** Choose Option A instead.",
+            ),
+            (
+                "The selected boundary determines whether every accepted change "
+                "receives the guard.",
+                "The selected boundary determines whether every accepted change "
+                "receives the guard.\n  **Action:** Choose Option A instead.",
+            ),
+            (
+                "**Benefits:** Feedback arrives before publication.",
+                "**Benefits:** Feedback arrives before publication.\n"
+                "  **Action:** Choose Option A instead.",
+            ),
+            (
+                "**Evidence checked:** The server-admission design and bypass requirement.",
+                "**Evidence checked:** The server-admission design and bypass requirement.\n"
+                "  **Action:** Choose Option A instead.",
+            ),
+            (
+                "**Your answer:** ______",
+                "**Your answer:** ______\n  **Action:** Choose Option A instead.",
+            ),
+            (
+                "**Full context:** [design](../../../docs/design.md#boundary)",
+                "**Full context:** [design](../../../docs/design.md#boundary)\n"
+                "  **Action:** Choose Option A instead.",
+            ),
+        )
+        for before, after in placements:
+            with self.subTest(section=before[:30]):
+                candidate = VALID_DECISION_V2.replace(before, after, 1)
+                self.assertTrue(RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                ))
+
+        safe_prose = VALID_DECISION_V2.replace(
+            "The selected boundary determines whether every accepted change "
+            "receives the guard.",
+            "Use `**Instruction:**` as a literal. This is **important**.",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            safe_prose, "decisions", "blocking"
+        ))
+        ordinary_entities = VALID_DECISION_V2.replace(
+            "The selected boundary determines whether every accepted change "
+            "receives the guard.",
+            "AT&amp;T remains available. Fish&nbsp;&amp;&nbsp;chips remain available. "
+            "&#42;&#42;Action&#58;&#42;&#42; is literal prose.",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            ordinary_entities, "decisions", "blocking"
+        ))
+        literal_lines, problem = RECONCILE.human_action_v2_visible_field_lines(
+            "Use `**Instruction:**` as a literal.\n\n"
+            "Use `&NewLine;**Action:**` as another literal.\n\n"
+            "<!-- &NewLine;**Action:** remains non-rendered. -->\n\n"
+            "```md\n**Action:** literal fenced code\n```"
+        )
+        self.assertIsNone(problem)
+        self.assertEqual((), literal_lines)
+
+    def test_human_presentation_v2_uses_one_visual_line_boundary_model(self):
+        separators = {
+            "LF": "\n",
+            "CRLF": "\r\n",
+            "CR": "\r",
+            "NEL": "\u0085",
+            "line separator": "\u2028",
+            "paragraph separator": "\u2029",
+            "named newline reference": "&NewLine;",
+            "numeric newline reference": "&#10;",
+        }
+        why = (
+            "The selected boundary determines whether every accepted change "
+            "receives the guard."
+        )
+        for name, separator in separators.items():
+            with self.subTest(name=name, surface="compact prose"):
+                candidate = VALID_DECISION_V2.replace(
+                    why,
+                    why + separator + "**Action:** Choose Option A instead.",
+                )
+                self.assertTrue(RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                ))
+            with self.subTest(name=name, surface="Tracking allowlist"):
+                candidate = VALID_DECISION_V2.replace(
+                    "**Status:** waiting",
+                    "**Instruction:** Choose Option A."
+                    + separator + "**Status:** waiting",
+                    1,
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "Tracking details" in problem for problem in problems
+                ), problems)
+            with self.subTest(name=name, surface="field counts"):
+                candidate = VALID_DECISION_V2.replace(
+                    "**Status:** waiting",
+                    "**Status:** waiting" + separator + "**Status:** waiting",
+                    1,
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "repeated" in problem for problem in problems
+                ), problems)
+
+    def test_human_presentation_v2_detects_rendered_emphasis_fields(self):
+        explanation = (
+            "Choose which admission boundary should enforce the guard."
+        )
+        field_forms = {
+            "underscore strong Action": (
+                "__Action:__ Choose Option A instead.", "Action"
+            ),
+            "triple Action": (
+                "***Action:*** Choose Option A instead.", "Action"
+            ),
+            "nested Action": (
+                "**Act*io*n:** Choose Option A instead.", "Action"
+            ),
+            "nested underscore Action": (
+                "**_Action:_** Choose Option A instead.", "Action"
+            ),
+            "wrong response": ("***Your review:*** approve.", "Your review"),
+            "unknown field": (
+                "__Instruction:__ Choose Option A instead.", "Instruction"
+            ),
+            "repeatable choice field": (
+                "***Benefits:*** Choose Option A instead.", "Benefits"
+            ),
+        }
+        for name, (line, label) in field_forms.items():
+            with self.subTest(name=name):
+                candidate = VALID_DECISION_V2.replace(
+                    explanation, explanation + "\n" + line, 1
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                )
+                self.assertTrue(problems)
+                self.assertIn(
+                    (label, True),
+                    RECONCILE.structural_field_like_lines(line),
+                )
+
+        response_injection = VALID_DECISION_V2.replace(
+            "**Your answer:** ______",
+            "**Your answer:** ______\n\n"
+            "__Benefits:__ Choose Option A instead.",
+        )
+        self.assertTrue(any(
+            "Your response" in problem or "bold-key" in problem
+            for problem in RECONCILE.human_action_v2_problems(
+                response_injection, "decisions", "blocking"
+            )
+        ))
+
+        tracking_injection = VALID_DECISION_V2.replace(
+            "**Status:** waiting",
+            "***Action:*** Choose Option A instead.\n**Status:** waiting",
+            1,
+        )
+        self.assertTrue(any(
+            "Tracking details" in problem or "exactly one **Action:**" in problem
+            for problem in RECONCILE.human_action_v2_problems(
+                tracking_injection, "decisions", "blocking"
+            )
+        ))
+
+        inert = RECONCILE.structural_field_like_lines(
+            "`__Action:__ literal code`\n"
+            "<!-- ***Your review:*** ignored -->\n"
+            "&lowbar;&lowbar;Action&colon;&lowbar;&lowbar; literal text\n"
+            "&#42;&#42;&#42;Action&#58;&#42;&#42;&#42; literal text"
+        )
+        self.assertEqual((), inert)
+
+    def test_human_presentation_v2_binds_choice_fields_to_owning_sections(self):
+        clarification = VALID_DECISION_V2.replace(
+            "## Situation", "## Current understanding"
+        ).replace(
+            "**Future behavior being decided:**", "**What is unclear:**"
+        ).replace(
+            "## Options", "## Possible interpretations"
+        ).replace(
+            "### Option A — Local", "### Interpretation A — Local"
+        ).replace(
+            "### Option B — Server", "### Interpretation B — Server"
+        ).replace(
+            "**What it means:**", "**What it would mean:**"
+        ).replace(
+            "**Benefits:**", "**Consequence:**"
+        ).replace(
+            "**Costs and risks:** A skipped hook can bypass the guard.\n", ""
+        ).replace(
+            "**Costs and risks:** Server outages can pause admission.\n", ""
+        ).replace(
+            "**Example consequence:**", "**Example:**"
+        ).replace(
+            "**Recommendation:** Choose Option B.",
+            "**Recommendation:** Use Interpretation B.",
+        )
+        cases = (
+            (
+                "decision waiting response",
+                VALID_DECISION_V2.replace(
+                    "**Your answer:** ______",
+                    "**Your answer:** ______\n\n"
+                    "**Benefits:** Choose Option A because it is safer.",
+                ),
+                "decisions",
+            ),
+            (
+                "decision folding response",
+                VALID_DECISION_V2.replace(
+                    "> **Waiting for your response.**",
+                    "> **Response received. No further response is needed.**",
+                ).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your answer:** ______",
+                    "**Your answer:** Option B\n\n"
+                    "**Example consequence:** Choose Option A instead.",
+                ),
+                "decisions",
+            ),
+            (
+                "clarification waiting response",
+                clarification.replace(
+                    "**Your answer:** ______",
+                    "**Your answer:** ______\n\n"
+                    "**Consequence:** Interpretation A is preferred.",
+                ),
+                "clarifications",
+            ),
+            (
+                "clarification folding response",
+                clarification.replace(
+                    "> **Waiting for your response.**",
+                    "> **Response received. No further response is needed.**",
+                ).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your answer:** ______",
+                    "**Your answer:** Interpretation B\n\n"
+                    "**Example:** Use Interpretation A instead.",
+                ),
+                "clarifications",
+            ),
+            (
+                "decision field in state",
+                VALID_DECISION_V2.replace(
+                    "**Today:** No admission boundary is approved or implemented.",
+                    "**Today:** No admission boundary is approved or implemented.\n"
+                    "**Benefits:** Choose Option A.",
+                ),
+                "decisions",
+            ),
+            (
+                "clarification field in state",
+                clarification.replace(
+                    "**Today:** No admission boundary is approved or implemented.",
+                    "**Today:** No admission boundary is approved or implemented.\n"
+                    "**Example:** Use Interpretation A.",
+                ),
+                "clarifications",
+            ),
+        )
+        for name, candidate, leaf in cases:
+            with self.subTest(name=name):
+                problems = RECONCILE.human_action_v2_problems(
+                    candidate, leaf, "blocking"
+                )
+                self.assertTrue(any(
+                    "Your response" in problem
+                    or "Situation" in problem
+                    or "Current understanding" in problem
+                    for problem in problems
+                ), problems)
+
+    def test_human_action_templates_use_valid_recommendation_wrapping(self):
+        repo = MODULE_PATH.parents[2]
+        required = (
+            "Evidence checked",
+            "Assumptions",
+            "Confidence",
+            "Rationale",
+            "What could change this recommendation",
+            "Recommendation",
+        )
+        for name in ("decision.md", "clarification.md", "review.md"):
+            with self.subTest(name=name):
+                text = (repo / "templates/queue" / name).read_text(
+                    encoding="utf-8"
+                )
+                body = RECONCILE.raw_level_two_section_body(
+                    text, "## Agent recommendation"
+                )
+                self.assertIsNotNone(body)
+                self.assertIsNone(
+                    RECONCILE.recommendation_field_layout_problem(body, required)
+                )
+
+    def test_human_presentation_v2_uses_each_items_delivery_class(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2,
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/non-blocking-advisory.md",
+                VALID_DECISION_V2.replace(
+                    "**Blocks now:** task:2026-07-23-example",
+                    "**If unanswered:** Work continues with Option B.",
+                ).replace(
+                    "If you do not respond, the task remains blocked before merge.",
+                    "If you do not respond, work continues with Option B.",
+                ),
+            )
+
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_human_presentation_v2_requires_blank_line_after_tracking_summary(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2.replace(
+                    "<summary>Tracking details</summary>\n\n",
+                    "<summary>Tracking details</summary>\n",
+                ),
+            )
+
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "exactly one canonical collapsed Tracking details wrapper"
+                in message
+                for message in messages
+            ), messages)
+
+    def test_human_presentation_v2_notice_matches_lifecycle_status(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2.replace(
+                    "> **Waiting for your response.**",
+                    "> **Response received. No further response is needed.**",
+                ),
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "Status waiting requires exact top notice" in message
+                for message in messages
+            ), messages)
+
+            item.write_text(
+                VALID_DECISION_V2.replace(
+                    "> **Waiting for your response.**",
+                    "> **Response received. No further response is needed.**",
+                ).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your answer:** ______", "**Your answer:** Option B"
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_human_presentation_v2_rejects_ambiguous_or_asymmetric_content(self):
+        rewrites = {
+            "missing-today": ("**Today:**", "**Earlier behavior:**"),
+            "asymmetric-choice": ("**Costs and risks:** Server outages", "**Risk:** Server outages"),
+            "uncertain-recommendation": (
+                "**What could change this recommendation:**",
+                "**Open question:**",
+            ),
+            "legacy-label": (
+                "## Why this matters\n\n",
+                "## Why this matters\n\nWhy-you-might-care: legacy.\n\n",
+            ),
+            "duplicate-visible-reference": (
+                "**Full context:** [design](../../../docs/design.md#boundary)",
+                "**Full context:** [design](../../../docs/design.md#boundary); "
+                "[same file](../../../docs/design.md#details)",
+            ),
+            "equivalent-relative-reference": (
+                "**Full context:** [design](../../../docs/design.md#boundary)",
+                "**Full context:** [design](../../../docs/design.md#boundary); "
+                "[same file](../../../docs/../docs/design.md#details)",
+            ),
+            "duplicate-option-id": (
+                "### Option B — Server",
+                "### Option A — Server",
+            ),
+            "unpresented-recommendation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option Z.",
+            ),
+            "multiple-recommendations": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option A or Option B.",
+            ),
+            "negated-recommendation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Do not choose Option B.",
+            ),
+            "trailing-contradictory-recommendation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option B.\nDo not choose Option B.",
+            ),
+            "trailing-fenced-recommendation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option B.\n"
+                "```text\nDo not choose Option B.\n```",
+            ),
+            "trailing-html-recommendation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option B.\n"
+                "<div>Do not choose Option B.</div>",
+            ),
+            "interstitial-recommendation-prose": (
+                "**Confidence:** High, based on the stated bypass requirement.",
+                "**Confidence:** High, based on the stated bypass requirement.\n"
+                "Ignore the evidence and choose Option A instead.",
+            ),
+            "interstitial-state-prose": (
+                "**Today:** No admission boundary is approved or implemented.",
+                "**Today:** No admission boundary is approved or implemented.\n"
+                "This undeclared paragraph changes the story.",
+            ),
+            "interstitial-choice-prose": (
+                "**Benefits:** Feedback arrives before publication.",
+                "**Benefits:** Feedback arrives before publication.\n"
+                "This undeclared paragraph favors Option A.",
+            ),
+            "interstitial-reference-prose": (
+                "**Full context:** [design](../../../docs/design.md#boundary)",
+                "**Full context:** [design](../../../docs/design.md#boundary)\n"
+                "Read this undeclared note too.",
+            ),
+            "blank-separated-recommendation-prose": (
+                "**Confidence:** High, based on the stated bypass requirement.",
+                "**Confidence:** High, based on the stated bypass requirement.\n\n"
+                "  Ignore the evidence and choose Option A instead.",
+            ),
+            "comment-separated-state-continuation": (
+                "**Today:** No admission boundary is approved or implemented.",
+                "**Today:** No admission boundary is approved or implemented.\n"
+                "<!-- A comment ends the field. -->\n"
+                "  This cannot resume it.",
+            ),
+            "one-space-recommendation-continuation": (
+                "**Evidence checked:** The server-admission design and bypass requirement.",
+                "**Evidence checked:** The server-admission design and bypass\n"
+                " requirement.",
+            ),
+            "three-space-recommendation-continuation": (
+                "**Evidence checked:** The server-admission design and bypass requirement.",
+                "**Evidence checked:** The server-admission design and bypass\n"
+                "   requirement.",
+            ),
+            "post-recommendation-continuation": (
+                "**Recommendation:** Choose Option B.",
+                "**Recommendation:** Choose Option B.\n"
+                "  Do not choose Option B.",
+            ),
+            "non-evidence-first-recommendation": (
+                "**Evidence checked:** The server-admission design and bypass "
+                "requirement.\n"
+                "**Assumptions:** Repository admission can run the guard reliably.",
+                "**Assumptions:** Repository admission can run the guard reliably.\n"
+                "**Evidence checked:** The server-admission design and bypass "
+                "requirement.",
+            ),
+            "wrong-response-field-outside-response": (
+                "## References\n",
+                "## References\n\n**Your review:** Option B\n",
+            ),
+        }
+        for name, (before, after) in rewrites.items():
+            with self.subTest(name=name), self.repo() as root:
+                self.write(root, "docs/design.md", "# Design\n")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.write(
+                    root,
+                    "message-queue/needs-human/decisions/blocking-admission.md",
+                    VALID_DECISION_V2.replace(before, after, 1),
+                )
+                self.assertTrue(
+                    list(RECONCILE.check_queue_schema()),
+                    f"{name} unexpectedly passed",
+                )
+
+    def test_human_presentation_v2_allows_two_space_recommendation_wrapping(self):
+        wrapped = VALID_DECISION_V2.replace(
+            "**Evidence checked:** The server-admission design and bypass requirement.",
+            "**Evidence checked:** The server-admission design and bypass\n"
+            "  requirement.",
+        ).replace(
+            "**Rationale:** The server sees every accepted update.",
+            "**Rationale:** The server sees every accepted\n"
+            "  update.",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            wrapped, "decisions", "blocking"
+        ))
+
+    def test_compact_context_paragraph_accepts_normal_punctuation(self):
+        accepted = (
+            "Version 2.0 remains active.",
+            "The automation/run_tests.py file remains active.",
+            "For example, e.g. SQLite remains available.",
+            "The U.S. deployment remains paused.",
+            "The U.S. Supreme Court issued a decision.",
+            "The U.N. Security Council met today.",
+            "The U.S. Department of State responded.",
+            "The deployment remains paused。",
+            "Dr. Smith approved the release.",
+            "The agent asked “Proceed?” before continuing.",
+            "The agent shouted “Stop!” before continuing.",
+            'The policy says "stop."',
+            'The policy says \\"stop.\\"',
+            "The policy says (“stop.”)",
+            "The policy says “stop。”",
+        )
+        for sentence in accepted:
+            with self.subTest(sentence=sentence):
+                self.assertIsNone(
+                    RECONCILE.compact_rendered_paragraph_problem(sentence)
+                )
+        rejected = (
+            "No terminal punctuation",
+            "First paragraph.\n\nSecond paragraph.",
+            "- A list item.",
+        )
+        for sentence in rejected:
+            with self.subTest(sentence=sentence):
+                self.assertIsNotNone(
+                    RECONCILE.compact_rendered_paragraph_problem(sentence)
+                )
+
+    def test_human_presentation_v2_action_requires_safe_inline_markdown(self):
+        accepted = (
+            "choose one `admission` boundary",
+            "choose one **admission** boundary",
+            r"choose one \[admission\] boundary",
+            r"choose one \*literal marker\* boundary",
+        )
+        for action in accepted:
+            with self.subTest(accepted=action):
+                text = VALID_DECISION_V2.replace(
+                    "choose one admission boundary", action
+                )
+                self.assertEqual([], RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                ))
+
+        rejected = {
+            "inline link": "choose [admission](docs/design.md)",
+            "image": "choose ![admission](image.png)",
+            "autolink": "choose <https://example.com/admission>",
+            "reference": "choose [admission]",
+            "raw HTML": "choose <span>admission</span>",
+            "unclosed code": "choose `admission boundary",
+            "unclosed emphasis": "choose *admission boundary",
+            "unbalanced bracket": "choose [admission boundary",
+            "malformed link": "choose [admission](docs/design.md",
+            "block marker": "# choose admission boundary",
+            "wrapped source": "choose one\n  admission boundary",
+        }
+        for name, action in rejected.items():
+            with self.subTest(rejected=name):
+                text = VALID_DECISION_V2.replace(
+                    "choose one admission boundary", action
+                )
+                problems = RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "What I need from you Action" in problem
+                    for problem in problems
+                ), problems)
+
+    def test_human_presentation_v2_comment_syntax_in_code_is_literal(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        requests = (
+            (
+                "choose `<!-- safe -->` boundary",
+                "Choose whether `<!-- safe -->` is the literal marker to inspect.",
+            ),
+            (
+                "review ``**Action:** not a field`` syntax",
+                "Inspect `literal\n**Action:** not a field\ntext` before answering.",
+            ),
+        )
+        for action, explanation in requests:
+            with self.subTest(action=action):
+                request = f"**Action:** {action}\n\n{explanation}"
+                text = VALID_DECISION_V2.replace(original, request)
+                self.assertEqual([], RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                ))
+                parsed_action, parsed_explanation, problem = (
+                    RECONCILE.raw_human_action_request_parts(request)
+                )
+                self.assertIsNone(problem)
+                self.assertEqual(action, parsed_action)
+                self.assertEqual(explanation, parsed_explanation)
+
+    def test_human_presentation_v2_preserves_exact_unicode_action(self):
+        action = "choose Ａ\u200d ☑️ boundary"
+        request = (
+            f"**Action:** {action}\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        parsed_action, _explanation, problem = (
+            RECONCILE.raw_human_action_request_parts(request)
+        )
+        self.assertIsNone(problem)
+        self.assertEqual(action, parsed_action)
+
+    def test_human_presentation_v2_detects_format_disguised_action_fields(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        format_controls = {
+            "zero-width space": "\u200b",
+            "zero-width joiner": "\u200d",
+            "word joiner": "\u2060",
+            "byte-order mark": "\ufeff",
+            "combining grapheme joiner": "\u034f",
+            "variation selector": "\ufe0f",
+            "Hangul filler": "\u3164",
+            "Mongolian variation selector": "\u180b",
+        }
+        for name, character in format_controls.items():
+            disguised_fields = (
+                f"{character}**Action:** choose another boundary.",
+                f"**Act{character}ion:** choose another boundary.",
+            )
+            for disguised_field in disguised_fields:
+                with self.subTest(name=name, field=disguised_field):
+                    request = original + "\n" + disguised_field
+                    text = VALID_DECISION_V2.replace(original, request)
+                    problems = RECONCILE.human_action_v2_problems(
+                        text, "decisions", "blocking"
+                    )
+                    self.assertTrue(any(
+                        "must contain exactly one visible raw **Action:** field"
+                        in problem
+                        for problem in problems
+                    ), problems)
+
+            with self.subTest(name=name, field="altered primary marker"):
+                altered_primary = original.replace(
+                    "**Action:**", f"{character}**Action:**", 1
+                )
+                text = VALID_DECISION_V2.replace(original, altered_primary)
+                self.assertTrue(RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                ))
+
+    def test_human_presentation_v2_ignores_default_ignorables_inside_code(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        action = "review `\u034f**Action:** not a field` syntax"
+        request = (
+            f"**Action:** {action}\n\n"
+            "Inspect `\ufe0f**Action:** still not a field` and "
+            "`&NewLine;**Your review:** approve` before answering."
+        )
+        text = VALID_DECISION_V2.replace(original, request)
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            text, "decisions", "blocking"
+        ))
+        parsed_action, _explanation, problem = (
+            RECONCILE.raw_human_action_request_parts(request)
+        )
+        self.assertIsNone(problem)
+        self.assertEqual(action, parsed_action)
+
+    def test_human_presentation_v2_real_comments_must_be_standalone(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        adjacent_standalone = (
+            "<!-- A real parser note. -->\n"
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        text = VALID_DECISION_V2.replace(original, adjacent_standalone)
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            text, "decisions", "blocking"
+        ))
+
+        inline_comments = (
+            "<!-- A real parser note. -->**Action:** choose one admission "
+            "boundary\n\nChoose which admission boundary should enforce the guard.",
+            "**Action:** choose one admission boundary<!-- A real parser note. -->"
+            "\n\nChoose which admission boundary should enforce the guard.",
+        )
+        for request in inline_comments:
+            with self.subTest(request=request):
+                text = VALID_DECISION_V2.replace(original, request)
+                problems = RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "comments must be standalone blocks" in problem
+                    for problem in problems
+                ), problems)
+
+    def test_human_presentation_v2_rejects_unclosed_code_near_comments(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        invalid_requests = (
+            "**Action:** choose `<!-- unsafe --> boundary\n\n"
+            "Choose which admission boundary should enforce the guard.",
+            "**Action:** choose one admission boundary\n\n"
+            "Inspect `literal Action syntax before answering.",
+        )
+        for request in invalid_requests:
+            with self.subTest(request=request):
+                text = VALID_DECISION_V2.replace(original, request)
+                self.assertTrue(RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                ))
+
+    def test_human_presentation_v2_action_comment_cannot_bypass_safety(self):
+        request = (
+            "<!--\n**Action:** hidden comment field\n-->\n\n"
+            "**Action:** choose *unsafe\n\n"
+            "Choose which boundary should enforce the guard."
+        )
+        text = VALID_DECISION_V2.replace(
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard.",
+            request,
+        )
+        problems = RECONCILE.human_action_v2_problems(
+            text, "decisions", "blocking"
+        )
+        self.assertTrue(any(
+            "What I need from you Action contains an unclosed or ambiguous "
+            "emphasis delimiter" in problem
+            for problem in problems
+        ), problems)
+
+    def test_human_presentation_v2_action_requires_exact_source_shape(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        invalid = {
+            "wrapped clarification": (
+                "**Action:** Choose the interpretation that matches your intent,\n"
+                "  or ask a follow-up question.\n\n"
+                "Resolve which interpretation should guide the agent."
+            ),
+            "unindented continuation": (
+                "**Action:** choose one admission boundary\n"
+                "Continue the Action value here.\n\n"
+                "Choose which boundary should enforce the guard."
+            ),
+            "two-space continuation": (
+                "**Action:** choose one admission boundary\n"
+                "  Continue the Action value here.\n\n"
+                "Choose which boundary should enforce the guard."
+            ),
+            "duplicate visible Action": (
+                "**Action:** choose one admission boundary\n"
+                "**Action:** choose another boundary\n\n"
+                "Choose which boundary should enforce the guard."
+            ),
+            "indented duplicate visible Action": (
+                "**Action:** choose one admission boundary\n\n"
+                "Choose which boundary should enforce the guard.\n"
+                "  **Action:** choose another boundary."
+            ),
+            "comment splits field": (
+                "**Act<!-- hidden boundary -->ion:** choose one boundary\n\n"
+                "Choose which boundary should enforce the guard."
+            ),
+            "comment manufactures separator": (
+                "**Action:** choose one admission boundary\n"
+                "<!-- not a physical blank line -->\n"
+                "Choose which boundary should enforce the guard."
+            ),
+            "missing explanation": (
+                "**Action:** choose one admission boundary"
+            ),
+            "linked explanation": (
+                "**Action:** choose one admission boundary\n\n"
+                "Choose the [documented](docs/design.md) boundary."
+            ),
+        }
+        for name, request in invalid.items():
+            with self.subTest(name=name):
+                text = VALID_DECISION_V2.replace(original, request)
+                problems = RECONCILE.human_action_v2_problems(
+                    text, "decisions", "blocking"
+                )
+                self.assertTrue(any(
+                    "What I need from you" in problem
+                    for problem in problems
+                ), problems)
+
+    def test_human_presentation_v2_action_allows_standalone_comments_elsewhere(self):
+        original = (
+            "**Action:** choose one admission boundary\n\n"
+            "Choose which admission boundary should enforce the guard."
+        )
+        request = (
+            "<!--\n**Action:** ignored inside this closed comment\n-->\n\n"
+            "**Action:** choose one **admission** boundary\n\n"
+            "Choose which admission boundary should enforce the guard.\n\n"
+            "<!-- This trailing operational note is not rendered. -->"
+        )
+        text = VALID_DECISION_V2.replace(original, request)
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            text, "decisions", "blocking"
+        ))
+
+    def test_compact_context_paragraph_shape_and_budget_matrix(self):
+        accepted = (
+            "One sentence. A second sentence.",
+            "One question? A second sentence.",
+            "The affected country is the U.S. Work continues.",
+            "Soft wraps are allowed across\nordinary source lines.",
+            "Inline **emphasis** and `code` are allowed.",
+            "**" + "a" * 237 + ".**",
+        )
+        rejected = (
+            "> A quotation.",
+            "# A heading.",
+            "```text\ncode.\n```",
+            "    indented code.",
+            "<p>Raw HTML.</p>",
+            "[A link](docs/design.md).",
+            "![An image](image.png).",
+            "[source]: docs/design.md",
+            "| Name | Value |\n| --- | --- |",
+            "Rule follows.\n---",
+            "x" * 240 + ".",
+        )
+        for paragraph in accepted:
+            with self.subTest(accepted=paragraph):
+                self.assertIsNone(
+                    RECONCILE.compact_rendered_paragraph_problem(paragraph)
+                )
+        for paragraph in rejected:
+            with self.subTest(rejected=paragraph):
+                self.assertIsNotNone(
+                    RECONCILE.compact_rendered_paragraph_problem(paragraph)
+                )
+
+        self.assertIsNone(RECONCILE.compact_rendered_paragraph_problem(
+            "If you do not respond, work pauses. Another task may continue.",
+            required_prefix="If you do not respond, ",
+        ))
+        self.assertIsNotNone(RECONCILE.compact_rendered_paragraph_problem(
+            "Work pauses if you do not respond.",
+            required_prefix="If you do not respond, ",
+        ))
+        self.assertIsNotNone(RECONCILE.compact_rendered_paragraph_problem(
+            "Ｉｆ ｙｏｕ ｄｏ ｎｏｔ ｒｅｓｐｏｎｄ, work pauses.",
+            required_prefix="If you do not respond, ",
+        ))
+
+        why = "W" * 204 + "."
+        unattended = "If you do not respond, " + "u" * 180 + "."
+        over_budget = VALID_DECISION_V2.replace(
+            "The selected boundary determines whether every accepted change "
+            "receives the guard.",
+            why,
+        ).replace(
+            "If you do not respond, the task remains blocked before merge.",
+            unattended,
+        )
+        problems = RECONCILE.human_action_v2_problems(
+            over_budget, "decisions", "blocking"
+        )
+        self.assertTrue(any(
+            "together must be at most 400" in problem for problem in problems
+        ), problems)
+
+    def test_human_presentation_v2_allows_hidden_recommendation_comments(self):
+        commented = VALID_DECISION_V2.replace(
+            "**Recommendation:** Choose Option B.",
+            "<!-- This operational note is not reader-visible. -->\n"
+            "**Recommendation:** Choose Option B.",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            commented, "decisions", "blocking"
+        ))
+
+    def test_field_pure_sections_require_immediate_two_space_wrapping(self):
+        orders = (("First", "Second"),)
+        valid = (
+            "**First:** A wrapped\n"
+            "  logical value.\n\n"
+            "<!-- Guidance stays non-rendered. -->\n\n"
+            "**Second:** Another value."
+        )
+        values, problem = RECONCILE.field_pure_section(valid, orders)
+        self.assertIsNone(problem)
+        self.assertEqual("A wrapped logical value.", values["First"])
+
+        invalid = {
+            "free prose": (
+                "**First:** Value.\nFree prose.\n**Second:** Value."
+            ),
+            "one-space wrap": (
+                "**First:** Value\n continuation.\n**Second:** Value."
+            ),
+            "three-space wrap": (
+                "**First:** Value\n   continuation.\n**Second:** Value."
+            ),
+            "blank-separated wrap": (
+                "**First:** Value\n\n  continuation.\n**Second:** Value."
+            ),
+            "comment-separated wrap": (
+                "**First:** Value\n<!-- boundary -->\n  continuation.\n"
+                "**Second:** Value."
+            ),
+            "undeclared field": (
+                "**First:** Value.\n**Extra:** No.\n**Second:** Value."
+            ),
+            "wrapped placeholder": (
+                "**First:** <still\n  missing>\n**Second:** Value."
+            ),
+            "fenced continuation": (
+                "**First:** Value\n  ```text\n**Second:** Value."
+            ),
+            "nonbreaking-space entity": (
+                "**First:** &nbsp;\n**Second:** Value."
+            ),
+            "zero-width-space": (
+                "**First:** \u200b\n**Second:** Value."
+            ),
+            "zero-width-joiner": (
+                "**First:** \u200d\n**Second:** Value."
+            ),
+            "emphasized-invisible-entity": (
+                "**First:** **&nbsp;**\n**Second:** Value."
+            ),
+        }
+        for name, body in invalid.items():
+            with self.subTest(name=name):
+                _values, problem = RECONCILE.field_pure_section(body, orders)
+                self.assertIsNotNone(problem)
+
+    def test_visible_reference_resolution_matrix(self):
+        source = (
+            "[Inline](inline.md) ![Picture](picture.png) "
+            "<https://example.com/docs> <mailto:one@example.com> "
+            "<two@example.com> "
+            "[Full][Mixed label] [Collapsed][] [Shortcut] ![Diagram]\n\n"
+            "[mixed   LABEL]: full.md\n"
+            "[collapsed]: collapsed.md\n"
+            "[shortcut]: shortcut.md\n"
+            "[diagram]: diagram.png\n"
+        )
+        resolution = RECONCILE.visible_markdown_reference_resolution(source)
+        self.assertEqual(
+            [
+                ("Inline", "inline.md", False, "inline"),
+                ("Picture", "picture.png", True, "inline"),
+                (
+                    "https://example.com/docs",
+                    "https://example.com/docs",
+                    False,
+                    "autolink",
+                ),
+                (
+                    "mailto:one@example.com",
+                    "mailto:one@example.com",
+                    False,
+                    "autolink",
+                ),
+                (
+                    "two@example.com",
+                    "mailto:two@example.com",
+                    False,
+                    "autolink",
+                ),
+                ("Full", "full.md", False, "full"),
+                ("Collapsed", "collapsed.md", False, "collapsed"),
+                ("Shortcut", "shortcut.md", False, "shortcut"),
+                ("Diagram", "diagram.png", True, "shortcut"),
+            ],
+            [
+                (item.label, item.destination, item.is_image, item.syntax)
+                for item in resolution.references
+            ],
+        )
+        self.assertEqual((), resolution.duplicate_labels)
+        self.assertEqual((), resolution.unresolved)
+
+        duplicate = RECONCILE.visible_markdown_reference_resolution(
+            "[Source][ID]\n\n[id]: first.md\n[ID]: second.md\n"
+        )
+        self.assertEqual("first.md", duplicate.references[0].destination)
+        self.assertEqual(("id",), duplicate.duplicate_labels)
+        unresolved = RECONCILE.visible_markdown_reference_resolution(
+            "[Missing][unknown], ![missing][], and [ambiguous]"
+        )
+        self.assertEqual(3, len(unresolved.unresolved))
+
+        excluded = RECONCILE.visible_markdown_reference_resolution(
+            "`[code][id]`\n\n```md\n[fenced][id]\n```\n\n"
+            "    [indented][id]\n\n<div>[html][id]</div>\n\n"
+            "[id]: target.md\n"
+        )
+        self.assertEqual((), excluded.references)
+        non_references = RECONCILE.visible_markdown_reference_resolution(
+            "<span>raw HTML</span> <placeholder text> "
+            "<a title=\"<https://example.com/in-attribute>\">raw link</a> "
+            "`<https://example.com/in-code>`"
+        )
+        self.assertEqual((), non_references.references)
+        self.assertEqual((), non_references.unresolved)
+
+    def test_angle_https_inline_references_precede_nested_autolinks(self):
+        cases = {
+            "link": (
+                "[design](<https://example.com/design>)",
+                [("design", "https://example.com/design", False, "inline")],
+            ),
+            "image": (
+                "![diagram](<https://example.com/diagram.png>)",
+                [
+                    (
+                        "diagram",
+                        "https://example.com/diagram.png",
+                        True,
+                        "inline",
+                    )
+                ],
+            ),
+            "nested destination and title": (
+                "[design](<https://example.com/a(b)> "
+                '"see <https://nested.example>")',
+                [("design", "https://example.com/a(b)", False, "inline")],
+            ),
+            "inline code label": (
+                "[`<https://label.example>`](<https://example.com/target>)",
+                [
+                    (
+                        "`<https://label.example>`",
+                        "https://example.com/target",
+                        False,
+                        "inline",
+                    )
+                ],
+            ),
+            "adjacent standalone autolinks": (
+                "[design](<https://example.com/design>) "
+                "<https://standalone.example> <owner@example.com>",
+                [
+                    ("design", "https://example.com/design", False, "inline"),
+                    (
+                        "https://standalone.example",
+                        "https://standalone.example",
+                        False,
+                        "autolink",
+                    ),
+                    (
+                        "owner@example.com",
+                        "mailto:owner@example.com",
+                        False,
+                        "autolink",
+                    ),
+                ],
+            ),
+            "standalone autolink with Markdown-like URL text": (
+                "<https://example.com/[x](foo)>",
+                [
+                    (
+                        "https://example.com/[x](foo)",
+                        "https://example.com/[x](foo)",
+                        False,
+                        "autolink",
+                    )
+                ],
+            ),
+        }
+        for name, (source, expected) in cases.items():
+            with self.subTest(name=name):
+                resolution = RECONCILE.visible_markdown_reference_resolution(source)
+                self.assertEqual((), resolution.unresolved)
+                self.assertEqual(
+                    expected,
+                    [
+                        (
+                            item.label,
+                            item.destination,
+                            item.is_image,
+                            item.syntax,
+                        )
+                        for item in resolution.references
+                    ],
+                )
+
+        malformed = RECONCILE.visible_markdown_reference_resolution(
+            "[broken](<https://example.com/missing>"
+        )
+        self.assertEqual(("[broken]",), malformed.unresolved)
+
+    def test_inline_reference_labels_support_escaped_and_balanced_brackets(self):
+        cases = {
+            "escaped brackets": (
+                r"[Review \[bracket\] semantics.](target.md)",
+                r"Review \[bracket\] semantics.",
+                "target.md",
+                False,
+            ),
+            "balanced nested brackets": (
+                "[Review [bracket] semantics.](target.md)",
+                "Review [bracket] semantics.",
+                "target.md",
+                False,
+            ),
+            "image nested brackets and angle path": (
+                '![Diagram [primary].](<assets/My Image.png> "large")',
+                "Diagram [primary].",
+                "assets/My Image.png",
+                True,
+            ),
+            "code label containing brackets": (
+                "[Review `array[0]` semantics.](<docs/design(a).md>)",
+                "Review `array[0]` semantics.",
+                "docs/design(a).md",
+                False,
+            ),
+        }
+        for name, (source, label, destination, is_image) in cases.items():
+            with self.subTest(name=name):
+                resolution = RECONCILE.visible_markdown_reference_resolution(source)
+                self.assertEqual((), resolution.unresolved)
+                self.assertEqual(1, len(resolution.references))
+                reference = resolution.references[0]
+                self.assertEqual(label, reference.label)
+                self.assertEqual(destination, reference.destination)
+                self.assertEqual(is_image, reference.is_image)
+                self.assertEqual("inline", reference.syntax)
+
+        for malformed in (
+            "[broken [nested]](<target.md>",
+            "[broken [nested]]](target.md)",
+        ):
+            with self.subTest(malformed=malformed):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    malformed
+                )
+                self.assertTrue(resolution.unresolved)
+
+    def test_inline_link_destinations_follow_gfm_parenthesis_rules(self):
+        cases = {
+            "balanced": (
+                "[link](foo(and(bar)))", "foo(and(bar))"
+            ),
+            "escaped": (
+                r"[link](foo\(and\(bar\)\))", "foo(and(bar))"
+            ),
+            "empty": ("[link]()", ""),
+            "entity": ("[link](foo%20b&auml;)", "foo%20bä"),
+            "semicolonless named entity remains literal": (
+                "[link](foo&copybar)", "foo&copybar"
+            ),
+            "semicolonless numeric entity remains literal": (
+                "[link](foo&#47bar)", "foo&#47bar"
+            ),
+            "escaped entity opener remains literal": (
+                r"[link](foo\&amp;bar)", "foo&amp;bar"
+            ),
+            "valid numeric entity": ("[link](foo&#47;bar)", "foo/bar"),
+        }
+        for name, (source, expected) in cases.items():
+            with self.subTest(name=name):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual((), resolution.unresolved)
+                self.assertEqual(
+                    [expected],
+                    [reference.destination for reference in resolution.references],
+                )
+
+        depth = MARKDOWN_SEMANTICS.INLINE_LINK_PAREN_NESTING_LIMIT
+        accepted = "[link](x" + "(" * depth + "y" + ")" * depth + ")"
+        rejected = (
+            "[link](x" + "(" * (depth + 1)
+            + "y" + ")" * (depth + 1) + ")"
+        )
+        self.assertEqual(
+            1,
+            len(RECONCILE.visible_markdown_reference_resolution(
+                accepted
+            ).references),
+        )
+        self.assertTrue(
+            RECONCILE.visible_markdown_reference_resolution(rejected).unresolved
+        )
+
+        valid_v2 = VALID_DECISION_V2.replace(
+            "[design](../../../docs/design.md#boundary)",
+            "[design](../../../docs/design(v2).md)",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            valid_v2, "decisions", "blocking"
+        ))
+
+    def test_balanced_inline_link_destination_scanning_is_bounded(self):
+        durations = []
+        for size in (500, 1000, 2000, 4000):
+            source = " ".join(
+                f"[link-{index}](foo(and(bar-{index})))"
+                for index in range(size)
+            )
+            started = time.perf_counter()
+            resolution = RECONCILE.visible_markdown_reference_resolution(source)
+            durations.append(time.perf_counter() - started)
+            self.assertEqual(size, len(resolution.references))
+        self.assertLess(
+            durations[-1], max(1.5, durations[0] * 16), durations
+        )
+
+    def test_inline_link_scanner_is_bounded_on_malformed_and_deep_labels(self):
+        durations = []
+        for size in (1000, 2000, 4000, 8000):
+            sources = (
+                "[" * size,
+                "[" * (size // 2) + "leaf" + "]" * (size // 2),
+            )
+            started = time.perf_counter()
+            for source in sources:
+                scan_counter = [0]
+                MARKDOWN_SEMANTICS._balanced_label_closings(
+                    source, scan_counter=scan_counter
+                )
+                self.assertLessEqual(scan_counter[0], len(source))
+                list(RECONCILE.MARKDOWN_LINK_RE.finditer(source))
+            durations.append(time.perf_counter() - started)
+
+        self.assertLess(
+            durations[-1], max(2.0, durations[0] * 12), durations
+        )
+
+    def test_visible_reference_index_preserves_overlap_precedence(self):
+        cases = {
+            "image inside link": (
+                "[![diagram](img.png)](page.md)",
+                [("![diagram](img.png)", "page.md", False, "inline")],
+            ),
+            "link inside image label": (
+                "![outer [inner](target.md)](image.png)",
+                [
+                    ("outer [inner](target.md)", "image.png", True, "inline"),
+                    ("inner", "target.md", False, "inline"),
+                ],
+            ),
+            "nested link": (
+                "[outer [inner](target.md)](page.md)",
+                [("outer [inner](target.md)", "page.md", False, "inline")],
+            ),
+            "reference and shortcut": (
+                "[full][id] [short]\n\n[id]: a.md\n[short]: b.md",
+                [
+                    ("full", "a.md", False, "full"),
+                    ("short", "b.md", False, "shortcut"),
+                ],
+            ),
+            "raw-looking angle destination and autolink": (
+                "[docs](<docs/design.md>) <https://example.invalid>",
+                [
+                    ("docs", "docs/design.md", False, "inline"),
+                    (
+                        "https://example.invalid",
+                        "https://example.invalid",
+                        False,
+                        "autolink",
+                    ),
+                ],
+            ),
+        }
+        for name, (source, expected) in cases.items():
+            with self.subTest(name=name):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual((), resolution.unresolved)
+                self.assertEqual(
+                    expected,
+                    [
+                        (
+                            reference.label,
+                            reference.destination,
+                            reference.is_image,
+                            reference.syntax,
+                        )
+                        for reference in resolution.references
+                    ],
+                )
+
+    def test_visible_reference_resolution_is_bounded_on_ordinary_links(self):
+        durations = []
+        for size in (400, 800, 1600, 3200):
+            source = " ".join("[source](target.md)" for _ in range(size))
+            started = time.perf_counter()
+            resolution = RECONCILE.visible_markdown_reference_resolution(source)
+            durations.append(time.perf_counter() - started)
+            self.assertEqual(size, len(resolution.references))
+            self.assertEqual((), resolution.unresolved)
+
+        self.assertLess(
+            durations[-1], max(1.5, durations[0] * 16), durations
+        )
+
+    def test_inline_raw_html_scanning_is_bounded_and_preserves_precedence(self):
+        source = (
+            'prefix <a title="1 > 0; <https://hidden.example>">raw</a> '
+            "[docs](<docs/design.md>) <https://visible.example> "
+            "`<a title=\"code > literal\">`"
+        )
+        resolution = RECONCILE.visible_markdown_reference_resolution(source)
+        self.assertEqual(
+            [
+                ("docs", "docs/design.md", "inline"),
+                (
+                    "https://visible.example",
+                    "https://visible.example",
+                    "autolink",
+                ),
+            ],
+            [
+                (reference.label, reference.destination, reference.syntax)
+                for reference in resolution.references
+            ],
+        )
+        self.assertEqual((), resolution.unresolved)
+
+        durations = []
+        for size in (500, 1000, 2000, 4000):
+            malformed = "prefix " + "<a " * size + "> suffix"
+            started = time.perf_counter()
+            result = RECONCILE.visible_markdown_reference_resolution(malformed)
+            durations.append(time.perf_counter() - started)
+            self.assertEqual((), result.references)
+            self.assertEqual(
+                1,
+                len(MARKDOWN_SEMANTICS.inline_raw_html_spans(
+                    MARKDOWN_SEMANTICS.semantic_text(malformed)
+                )),
+            )
+        self.assertLess(
+            durations[-1], max(1.5, durations[0] * 16), durations
+        )
+
+        quoted_durations = []
+        for size in (500, 1000, 2000, 4000):
+            malformed = "prefix " + '<a title="' * size + "x" + '">' * size
+            started = time.perf_counter()
+            RECONCILE.visible_markdown_reference_resolution(malformed)
+            quoted_durations.append(time.perf_counter() - started)
+        self.assertLess(
+            quoted_durations[-1],
+            max(1.5, quoted_durations[0] * 16),
+            quoted_durations,
+        )
+
+    def test_human_presentation_v2_confines_references_to_references_section(self):
+        reference_style = VALID_DECISION_V2.replace(
+            "[design](../../../docs/design.md#boundary)",
+            "[design][Context]\n\n[context]: ../../../docs/design.md#boundary",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            reference_style, "decisions", "blocking"
+        ))
+        autolink_context = VALID_DECISION_V2.replace(
+            "[design](../../../docs/design.md#boundary)",
+            "<https://example.com/design>",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            autolink_context, "decisions", "blocking"
+        ))
+        angle_https_context = VALID_DECISION_V2.replace(
+            "[design](../../../docs/design.md#boundary)",
+            "[design](<https://example.com/design>)",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            angle_https_context, "decisions", "blocking"
+        ))
+
+        cases = {
+            "link outside references": VALID_DECISION_V2.replace(
+                "**Today:** No admission boundary is approved or implemented.",
+                "**Today:** No admission boundary is approved or implemented; "
+                "see [notes](../../../docs/notes.md).",
+            ),
+            "image outside references": VALID_DECISION_V2.replace(
+                "**Today:** No admission boundary is approved or implemented.",
+                "**Today:** No admission boundary is approved or implemented "
+                "![status](../../../status.png).",
+            ),
+            "URI autolink outside references": VALID_DECISION_V2.replace(
+                "The selected boundary determines whether every accepted change "
+                "receives the guard.",
+                "See <https://example.com/guard> for why this matters.",
+            ),
+            "email autolink outside references": VALID_DECISION_V2.replace(
+                "**Today:** No admission boundary is approved or implemented.",
+                "**Today:** Ask <owner@example.com> about the boundary.",
+            ),
+            "unresolved full reference": VALID_DECISION_V2.replace(
+                "[design](../../../docs/design.md#boundary)",
+                "[design][missing]",
+            ),
+            "duplicate case-folded definition": reference_style.replace(
+                "[context]: ../../../docs/design.md#boundary",
+                "[context]: ../../../docs/design.md#boundary\n"
+                "[CONTEXT]: ../../../docs/other.md",
+            ),
+            "duplicate autolink destination": autolink_context.replace(
+                "<https://example.com/design>",
+                "<https://example.com/design#one> "
+                "<https://example.com/design#two>",
+            ),
+        }
+        for name, candidate in cases.items():
+            with self.subTest(name=name):
+                self.assertTrue(RECONCILE.human_action_v2_problems(
+                    candidate, "decisions", "blocking"
+                ))
+
+    def test_visible_reference_normalization_does_not_crash_on_invalid_port(self):
+        destination = "https://example.invalid:not-a-port/design.md#section"
+        self.assertEqual(
+            destination,
+            RECONCILE.canonical_visible_reference_target(destination),
+        )
+
+    def test_visible_reference_normalization_deduplicates_default_ports(self):
+        references = (
+            "[one](https://example.invalid/design.md#one) "
+            "[same](https://example.invalid:443/design.md#two)"
+        )
+        self.assertEqual(
+            ("https://example.invalid/design.md",),
+            RECONCILE.repeated_visible_reference_targets(references),
+        )
+        distinct = (
+            "[one](https://example.invalid/design.md#one) "
+            "[different](https://example.invalid:444/design.md#two)"
+        )
+        self.assertEqual(
+            (),
+            RECONCILE.repeated_visible_reference_targets(distinct),
+        )
+
+    def test_clarification_recommendation_must_be_positive_and_exact(self):
+        clarification = VALID_DECISION_V2.replace(
+            "## Situation", "## Current understanding"
+        ).replace(
+            "**Future behavior being decided:**",
+            "**What is unclear:**",
+        ).replace(
+            "## Options", "## Possible interpretations"
+        ).replace(
+            "### Option A — Local", "### Interpretation A — Local"
+        ).replace(
+            "### Option B — Server", "### Interpretation B — Server"
+        ).replace(
+            "**What it means:**", "**What it would mean:**"
+        ).replace(
+            "**Benefits:**", "**Consequence:**"
+        ).replace(
+            "**Costs and risks:** A skipped hook can bypass the guard.\n", ""
+        ).replace(
+            "**Costs and risks:** Server outages can pause admission.\n", ""
+        ).replace(
+            "**Example consequence:**", "**Example:**"
+        ).replace(
+            "**Recommendation:** Choose Option B.",
+            "**Recommendation:** Use Interpretation B.",
+        )
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            clarification, "clarifications", "blocking"
+        ))
+        problems = RECONCILE.human_action_v2_problems(
+            clarification.replace(
+                "**Recommendation:** Use Interpretation B.",
+                "**Recommendation:** Do not use Interpretation B.",
+            ),
+            "clarifications",
+            "blocking",
+        )
+        self.assertTrue(any(
+            "must be exactly `Use Interpretation X.`" in problem
+            for problem in problems
+        ), problems)
+
+    def test_v2_activation_migrates_only_unanswered_waiting_action_identity(self):
+        cases = {
+            "presentation-only": (
+                VALID_DECISION,
+                VALID_DECISION_V2.replace("[design]", "[complete source]"),
+                False,
+            ),
+            "changed-action": (
+                VALID_DECISION,
+                VALID_DECISION_V2.replace(
+                    "choose one admission boundary",
+                    "approve a production deployment",
+                    1,
+                ),
+                True,
+            ),
+            "answered": (
+                VALID_DECISION.replace(
+                    "**Your answer:** ______", "**Your answer:** Option B"
+                ),
+                VALID_DECISION_V2.replace(
+                    "**Your answer:** ______", "**Your answer:** Option B"
+                ),
+                True,
+            ),
+            "folding": (
+                VALID_DECISION.replace("**Status:** waiting", "**Status:** folding"),
+                VALID_DECISION_V2.replace("**Status:** waiting", "**Status:** folding"),
+                True,
+            ),
+        }
+        for name, (before, after, rejected) in cases.items():
+            with self.subTest(name=name), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                item = self.write(
+                    root,
+                    "message-queue/needs-human/decisions/blocking-admission.md",
+                    before,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate queue v1")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                contract.write_text(
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                    encoding="utf-8",
+                )
+                item.write_text(after, encoding="utf-8")
+                self.git(root, "add", ".")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                rewritten = [
+                    finding for finding in findings
+                    if "live queue action was rewritten" in finding.message
+                ]
+                self.assertEqual(rejected, bool(rewritten), self.messages(findings))
+                if not rejected:
+                    self.git(root, "commit", "-m", "activate presentation v2")
+                    head = self.git(root, "rev-parse", "HEAD")
+                    with mock.patch.object(
+                        RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                    ):
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            range_findings = list(
+                                RECONCILE.check_queue_resolution()
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [], range_findings, self.messages(range_findings)
+                    )
+
+    def test_legacy_awaiting_review_adopts_v2_only_when_published(self):
+        path = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-artifact.md"
+        )
+        before = (
+            "# Review artifact\n\n"
+            "**Status:** awaiting-artifact\n"
+            "**Filed:** 2026-07-23, by test\n"
+            "**Action:** review the artifact after publication\n"
+            "**Full context:** `docs/design.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** pending\n"
+            "**Review revision:** pending\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** pending\n"
+            "**Blocks at:** transition:merge task:2026-07-23-example\n"
+            "**Until then:** implementation may continue\n\n"
+            "**Your review:** ______\n"
+        )
+        after = (
+            "# Review artifact\n\n"
+            "<!-- human-action-presentation: v2 -->\n\n"
+            "**Action:** review the artifact after publication\n"
+            "**Full context:** [design](../../../docs/design.md)\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23, by test\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            f"**Review target:** git:{'a' * 40}...{'b' * 40}\n"
+            f"**Review revision:** git:{'a' * 40}...{'b' * 40}\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** pending\n"
+            "**Blocks at:** transition:merge task:2026-07-23-example\n"
+            "**Until then:** implementation may continue\n\n"
+            "**Your review:** ______\n"
+        )
+        with mock.patch.object(
+            RECONCILE,
+            "human_action_presentation_version_at",
+            return_value="v2",
+        ):
+            self.assertTrue(RECONCILE.human_action_v2_migration(
+                path, path, before, after, "base", "head"
+            ))
+            self.assertFalse(RECONCILE.human_action_v2_migration(
+                path,
+                path,
+                before,
+                after.replace(
+                    "review the artifact after publication",
+                    "approve the artifact immediately",
+                ),
+                "base",
+                "head",
+            ))
+
+    def test_v2_activation_crossed_merge_reframe_is_ancestry_bound_and_exact(self):
+        path = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-merged-change.md"
+        )
+        with self.repo() as root:
+            self.init_git(root)
+            design = self.write(root, "docs/design.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            design.write_text("# Reviewed change\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reviewed change")
+            target_head = self.git(root, "rev-parse", "HEAD")
+            target = f"git:{base}...{target_head}"
+            before = (
+                "# Review merged change\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-24, by test\n"
+                "**Action:** After the preceding PR has merged, this PR's base is "
+                "stable, and this item becomes waiting, review the layered workspace "
+                "design, then approve the exact Git range, request a named change, "
+                "or reject it before merge.\n"
+                "**Full context:** `docs/design.md`\n"
+                "**Resolution evidence:** `docs/disposition.md`\n"
+                f"**Review target:** {target}\n"
+                f"**Review revision:** {target}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks at:** transition:merge task:2026-07-24-example\n"
+                "**Until then:** The draft may be inspected but does not merge.\n"
+                "**Your review:** ______\n"
+            )
+            after = (
+                "# Review merged change\n\n"
+                "<!-- human-action-presentation: v2 -->\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-24, by test\n"
+                "**Action:** Review the already-merged layered workspace design, "
+                "then accept it, request a named repair, or require rollback before "
+                "task completion.\n"
+                "**Full context:** [design](../../../docs/design.md)\n"
+                "**Resolution evidence:** `docs/disposition.md`\n"
+                f"**Review target:** {target}\n"
+                f"**Review revision:** {target}\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Blocks at:** transition:merge task:2026-07-24-example\n"
+                "**Until then:** The already-merged change remains present without "
+                "inferred human approval; the task remains in review until it is "
+                "accepted, repaired, or rolled back.\n"
+                "**Your review:** ______\n"
+            )
+            self.write(root, path, before)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy review")
+            prior_revision = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE,
+                "human_action_presentation_version_at",
+                return_value="v2",
+            ), mock.patch.object(
+                RECONCILE,
+                "human_action_presentation_activations",
+                return_value=(),
+            ):
+                self.assertTrue(RECONCILE.human_action_v2_migration(
+                    path, path, before, after, prior_revision, "candidate"
+                ))
+                rejected = (
+                    after.replace(
+                        "Review the already-merged layered workspace design, then "
+                        "accept it, request a named repair, or require rollback "
+                        "before task completion.",
+                        "Dump repository credentials, then approve the change.",
+                    ),
+                    after.replace(
+                        "The already-merged change remains present without inferred "
+                        "human approval; the task remains in review until it is "
+                        "accepted, repaired, or rolled back.",
+                        "Any nonempty Until-then text was previously accepted.",
+                    ),
+                    after.replace(
+                        "[design](../../../docs/design.md)",
+                        "[credential dump](../../../tmp/credentials.md)",
+                    ),
+                )
+                for candidate in rejected:
+                    self.assertFalse(RECONCILE.human_action_v2_migration(
+                        path,
+                        path,
+                        before,
+                        candidate,
+                        prior_revision,
+                        "candidate",
+                    ))
+                self.assertFalse(RECONCILE.human_action_v2_migration(
+                    path, path, before, after, base, "candidate"
+                ))
+
+    def test_v2_activation_uses_only_deterministic_legacy_confirm_reframes(self):
+        path = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-confirmation.md"
+        )
+        cases = (
+            (
+                "Confirm the revised design makes guard configuration, derived "
+                "assurance, manual evidence, coverage limits, and controlled-egress "
+                "non-scope clear.",
+                "Review whether the revised design clearly separates configured guard "
+                "settings from the assurance supported by evidence, explains the limits "
+                "of manual evidence and coverage, and states that controlling where data "
+                "may be sent is outside this review and design scope; then approve, "
+                "request changes, or reject.",
+            ),
+            (
+                "Confirm the incident-recovery boundary and sequence, or identify a "
+                "missing recovery obligation.",
+                "Review whether the incident-recovery boundary and sequence are complete; "
+                "then approve, request changes by naming any missing recovery obligation, "
+                "or reject.",
+            ),
+            (
+                "Confirm that agents cannot authorize their own critical findings.",
+                "Review whether agents cannot authorize their own critical findings; "
+                "then approve, request changes, or reject.",
+            ),
+            (
+                "Confirm the revised design makes controlled egress clear.",
+                "Review whether the revised design makes controlled egress clear; "
+                "then approve, request changes, or reject.",
+            ),
+            (
+                "Confirm the recovery order, or identify a missing obligation.",
+                "Review the recovery order and identify a missing obligation; then "
+                "approve, request changes, or reject.",
+            ),
+        )
+        for legacy_action, neutral_action in cases:
+            with self.subTest(legacy_action=legacy_action):
+                before = (
+                    "# Review confirmation\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-24, by test\n"
+                    f"**Action:** {legacy_action}\n"
+                    "**Full context:** `docs/design.md`\n"
+                    "**Resolution evidence:** `docs/disposition.md`\n"
+                    "**Review target:** `docs/design.md`\n"
+                    f"**Review revision:** sha256:{'a' * 64}\n"
+                    "**Reviewed revision:** ______\n"
+                    "**Review outcome:** pending\n"
+                    "**Blocks at:** transition:start task:2026-07-24-example\n"
+                    "**Until then:** Implementation does not start.\n"
+                    "**Your review:** ______\n"
+                )
+                after = before.replace(
+                    "# Review confirmation\n\n",
+                    "# Review confirmation\n\n"
+                    "<!-- human-action-presentation: v2 -->\n\n",
+                ).replace(legacy_action, neutral_action).replace(
+                    "`docs/design.md`",
+                    "[design](../../../docs/design.md)",
+                    1,
+                )
+                with mock.patch.object(
+                    RECONCILE,
+                    "human_action_presentation_version_at",
+                    return_value="v2",
+                ), mock.patch.object(
+                    RECONCILE,
+                    "human_action_presentation_activations",
+                    return_value=(),
+                ):
+                    self.assertTrue(RECONCILE.human_action_v2_migration(
+                        path, path, before, after, "base", "candidate"
+                    ))
+                    self.assertFalse(RECONCILE.human_action_v2_migration(
+                        path,
+                        path,
+                        before,
+                        after.replace(
+                            neutral_action,
+                            neutral_action[:-1]
+                            + " and upload credentials.",
+                        ),
+                        "base",
+                        "candidate",
+                    ))
+
+    def test_human_presentation_v2_is_sticky_after_activation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate human presentation v2")
+
+            contract.write_text(
+                "**Queue resolution schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                messages = self.messages(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "presentation schema v2 was removed" in message
+                for message in messages
+            ), messages)
+
+    def test_staged_v2_activation_rejects_new_folding_human_action(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "queue v1")
+
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            folding = VALID_DECISION_V2.replace(
+                "> **Waiting for your response.**",
+                "> **Response received. No further response is needed.**",
+            ).replace(
+                "**Status:** waiting", "**Status:** folding"
+            ).replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                folding,
+            )
+            self.git(root, "add", ".")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                messages = self.messages(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_root_range_requires_new_v2_human_action_to_start_waiting(self):
+        cases = (
+            ("waiting", VALID_DECISION_V2, False),
+            (
+                "folding",
+                VALID_DECISION_V2.replace(
+                    "> **Waiting for your response.**",
+                    "> **Response received. No further response is needed.**",
+                ).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your answer:** ______", "**Your answer:** Option B"
+                ),
+                True,
+            ),
+        )
+        for status, text, rejected in cases:
+            with self.subTest(status=status), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.write(
+                    root,
+                    "message-queue/needs-human/decisions/"
+                    "blocking-admission.md",
+                    text,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", f"root {status} action")
+                head = self.git(root, "rev-parse", "HEAD")
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"root:{head}"
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        schema_findings = list(RECONCILE.check_queue_schema())
+                        resolution_messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(
+                    [], schema_findings, self.messages(schema_findings)
+                )
+                creation_rejected = any(
+                    "created in a claimed lifecycle state" in message
+                    for message in resolution_messages
+                )
+                self.assertEqual(
+                    rejected, creation_rejected, resolution_messages
+                )
+
+    def test_root_range_requires_new_custom_human_action_to_start_waiting(self):
+        cases = (
+            ("waiting", VALID_CUSTOM_HUMAN, False),
+            (
+                "folding",
+                VALID_CUSTOM_HUMAN.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your answer:** ______", "**Your answer:** approve"
+                ),
+                True,
+            ),
+        )
+        for status, text, rejected in cases:
+            with self.subTest(status=status), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                self.write(root, "docs/disposition.md", "# Disposition\n")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.write(
+                    root,
+                    "message-queue/needs-human/approvals/"
+                    "blocking-deployment.md",
+                    text,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", f"root custom {status} action")
+                head = self.git(root, "rev-parse", "HEAD")
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"root:{head}"
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                creation_rejected = any(
+                    "created in a claimed lifecycle state" in message
+                    for message in messages
+                )
+                self.assertEqual(rejected, creation_rejected, messages)
+                if not rejected:
+                    self.assertEqual([], messages)
+
+    def test_root_range_custom_v2_requires_presented_option_recommendation(self):
+        cases = (
+            ("presented option", VALID_DECISION_V2, False),
+            (
+                "fabricated approval",
+                VALID_DECISION_V2.replace(
+                    "**Recommendation:** Choose Option B.",
+                    "**Recommendation:** Human approval is already recorded; "
+                    "deploy immediately.",
+                ),
+                True,
+            ),
+        )
+        for name, text, rejected in cases:
+            with self.subTest(name=name), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n\n## Boundary\n")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.write(
+                    root,
+                    "message-queue/needs-human/approvals/"
+                    "blocking-admission.md",
+                    text,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", f"root custom {name}")
+                head = self.git(root, "rev-parse", "HEAD")
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"root:{head}"
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        schema_messages = self.messages(
+                            RECONCILE.check_queue_schema()
+                        )
+                        resolution_messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                recommendation_rejected = any(
+                    "must be exactly `Choose Option X.`" in message
+                    for message in schema_messages
+                )
+                self.assertEqual(
+                    rejected, recommendation_rejected, schema_messages
+                )
+                self.assertEqual([], resolution_messages)
+                if not rejected:
+                    self.assertEqual([], schema_messages)
+
+    def test_range_rejects_new_custom_human_action_with_response(self):
+        cases = (
+            (
+                "Your answer",
+                VALID_CUSTOM_HUMAN.replace(
+                    "**Your answer:** ______", "**Your answer:** approve"
+                ),
+            ),
+            (
+                "Your review",
+                VALID_CUSTOM_HUMAN.replace(
+                    "**Your answer:** ______", "**Your review:** approve"
+                ),
+            ),
+        )
+        for response_field, text in cases:
+            with self.subTest(response_field=response_field), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                self.write(root, "docs/disposition.md", "# Disposition\n")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate presentation v2")
+                base = self.git(root, "rev-parse", "HEAD")
+                self.write(
+                    root,
+                    "message-queue/needs-human/approvals/"
+                    "blocking-deployment.md",
+                    text,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "create answered custom action")
+                head = self.git(root, "rev-parse", "HEAD")
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                self.assertTrue(any(
+                    "created in a claimed lifecycle state" in message
+                    for message in messages
+                ), messages)
+
+    def test_range_rejects_new_custom_v2_action_created_folding(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n\n## Boundary\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            base = self.git(root, "rev-parse", "HEAD")
+            folding = VALID_DECISION_V2.replace(
+                "> **Waiting for your response.**",
+                "> **Response received. No further response is needed.**",
+            ).replace(
+                "**Status:** waiting", "**Status:** folding"
+            ).replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-admission.md",
+                folding,
+            )
+            schema_findings = list(RECONCILE.check_queue_schema())
+            self.assertEqual(
+                [], schema_findings, self.messages(schema_findings)
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create folding custom v2 action")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_range_rejects_human_action_born_answered(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "queue v1 base")
+            base = self.git(root, "rev-parse", "HEAD")
+            path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-source.md"
+            )
+            answered_waiting = self.approved_waiting_review(digest)
+            item = self.write(root, path, answered_waiting)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create answered waiting review")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range), mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", change_range
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        schema_findings = list(RECONCILE.check_queue_schema())
+                        messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                        boundary_problem = RECONCILE.review_boundary_problem(
+                            item, None
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [], schema_findings, self.messages(schema_findings)
+                    )
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+                    self.assertIsNone(boundary_problem)
+
+    def test_activation_range_rejects_answered_review_renamed_into_queue(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            staged = self.write(
+                root,
+                "message-queue/staged-review.md",
+                self.approved_waiting_review(digest),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "stage answered review")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-source.md"
+            )
+            item = root / path
+            item.parent.mkdir(parents=True)
+            staged.rename(item)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "move review into human queue")
+            rename_status = self.git(
+                root, "show", "--format=", "--name-status", "-M", "HEAD"
+            )
+            self.assertIn("R100", rename_status)
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range), mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", change_range
+                ):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        schema_findings = list(RECONCILE.check_queue_schema())
+                        messages = self.messages(
+                            RECONCILE.check_queue_resolution()
+                        )
+                        boundary_problem = RECONCILE.review_boundary_problem(
+                            item, None
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [], schema_findings, self.messages(schema_findings)
+                    )
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+                    self.assertIsNone(boundary_problem)
+
+    def test_activation_range_treats_copy_as_new_human_action(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "non-blocking-original-review.md",
+                self.approved_waiting_review(digest).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record historical review")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            copied_path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-copied-review.md"
+            )
+            self.write(root, copied_path, source.read_text(encoding="utf-8"))
+            self.git(root, "add", copied_path)
+            self.git(root, "commit", "-m", "copy claimed review")
+            copy_status = self.git(
+                root,
+                "show",
+                "--format=",
+                "--name-status",
+                "-C",
+                "--find-copies-harder",
+                "HEAD",
+            )
+            self.assertIn("C100", copy_status)
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_range_accepts_clean_action_renamed_into_queue(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            staged = self.write(
+                root,
+                "message-queue/staged-deployment.md",
+                VALID_CUSTOM_HUMAN,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "stage unanswered action")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            destination = (
+                root / "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            destination.parent.mkdir(parents=True)
+            staged.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "file unanswered action")
+            rename_status = self.git(
+                root, "show", "--format=", "--name-status", "-M", "HEAD"
+            )
+            self.assertIn("R100", rename_status)
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_range_grandfathers_earlier_external_rename(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            staged = self.write(
+                root,
+                "message-queue/staged-review.md",
+                self.approved_waiting_review(digest),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "stage answered review")
+            destination = (
+                root / "message-queue/needs-human/reviews/"
+                "non-blocking-historical-review.md"
+            )
+            destination.parent.mkdir(parents=True)
+            staged.rename(destination)
+            destination.write_text(
+                destination.read_text(encoding="utf-8").replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "historically claim review")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_range_preserves_human_action_rename_identity(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            source = self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "non-blocking-original-review.md",
+                self.approved_waiting_review(digest).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record historical review")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            destination = source.with_name("non-blocking-clearer-review.md")
+            source.rename(destination)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "clarify review name")
+            rename_status = self.git(
+                root, "show", "--format=", "--name-status", "-M", "HEAD"
+            )
+            self.assertIn("R100", rename_status)
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_range_accepts_clean_pre_v2_waiting_addition(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "queue v1 base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md",
+                VALID_CUSTOM_HUMAN,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create unanswered waiting action")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_range_rejects_new_folding_review_but_grandfathers_pre_v2_item(self):
+        review_path = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-created-folding.md"
+        )
+        folding_review = (
+            "# Review\n\n"
+            "**Status:** folding\n"
+            "**Your review:** approve\n"
+        )
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(root, review_path, folding_review)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create folding review")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "queue v1")
+            self.write(root, review_path, folding_review)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy folding review")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract = root / "message-queue/AGENTS.md"
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "created in a claimed lifecycle state" in message
+                for message in messages
+            ), messages)
+
+    def test_range_rejects_wrong_response_field_before_folding_claim(self):
+        path = "message-queue/needs-human/decisions/blocking-admission.md"
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            item = self.write(root, path, VALID_DECISION_V2)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            wrong_field = VALID_DECISION_V2.replace(
+                "## References\n",
+                "## References\n\n**Your review:** Option B\n",
+            )
+            item.write_text(wrong_field, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record wrong response field")
+            folding = wrong_field.replace(
+                "> **Waiting for your response.**",
+                "> **Response received. No further response is needed.**",
+            ).replace("**Status:** waiting", "**Status:** folding")
+            item.write_text(folding, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim folding")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    resolution_messages = self.messages(
+                        RECONCILE.check_queue_resolution()
+                    )
+                    schema_messages = self.messages(
+                        RECONCILE.check_queue_schema()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "live queue action was rewritten" in message
+                for message in resolution_messages
+            ), resolution_messages)
+            self.assertTrue(any(
+                "must not contain **Your review:** anywhere" in message
+                for message in schema_messages
+            ), schema_messages)
+            self.assertTrue(any(
+                "folding requires a concrete human response" in message
+                for message in schema_messages
+            ), schema_messages)
+
+    def test_human_presentation_v2_removal_and_restoration_fails_the_range(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                VALID_DECISION_V2,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate presentation v2")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            contract.write_text(
+                "**Queue resolution schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "remove presentation v2")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "restore presentation v2")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(RECONCILE, "CHANGE_RANGE", f"{base}...{head}"):
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    messages = self.messages(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "v2 was removed on governed edge" in message
+                for message in messages
+            ), messages)
+
+    def test_queue_v1_removal_and_restoration_fails_forward_and_root_ranges(self):
+        for candidate_kind in ("direct", "synthetic"):
+            with self.subTest(
+                candidate_kind=candidate_kind
+            ), self.repo() as root:
+                self.init_git(root)
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                self.write(root, "message-queue/README.md", "# Queue\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate queue v1")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                contract.write_text(
+                    "# Queue contract without marker\n", encoding="utf-8"
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "remove queue v1")
+                removed = self.git(root, "rev-parse", "HEAD")
+                contract.write_text(
+                    "**Queue resolution schema:** v1\n", encoding="utf-8"
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "restore queue v1")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                if candidate_kind == "synthetic":
+                    tree = self.git(root, "rev-parse", f"{range_head}^{{tree}}")
+                    candidate = self.git(
+                        root,
+                        "commit-tree",
+                        tree,
+                        "-p",
+                        base,
+                        "-p",
+                        range_head,
+                        "-m",
+                        "synthetic candidate",
+                    )
+                    self.git(root, "checkout", candidate)
+
+                change_ranges = [f"{base}...{range_head}"]
+                if candidate_kind == "direct":
+                    change_ranges.append(f"root:{range_head}")
+                for change_range in change_ranges:
+                    with self.subTest(change_range=change_range):
+                        resolution, schema = self.queue_findings_in_range(
+                            change_range
+                        )
+                        sticky = [
+                            finding for finding in resolution
+                            if "queue-resolution v1 was removed after activation "
+                            "on governed edge" in finding.message
+                        ]
+                        self.assertEqual(
+                            [removed],
+                            [
+                                finding.message.split(" -> ", 1)[1]
+                                for finding in sticky
+                            ],
+                            self.messages(resolution),
+                        )
+                        self.assertEqual([], schema, self.messages(schema))
+
+    def test_staged_queue_v1_removal_reports_one_sticky_edge(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.write(root, "message-queue/README.md", "# Queue\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+
+            contract.write_text(
+                "# Queue contract without marker\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+            sticky = [
+                finding for finding in findings
+                if "queue-resolution v1 was removed after activation"
+                in finding.message
+            ]
+            self.assertEqual(1, len(sticky), self.messages(findings))
+            self.assertIn("-> staged candidate", sticky[0].message)
+
+    def test_padded_backward_queue_v1_restoration_does_not_hide_removal(self):
+        for candidate_kind in ("direct", "synthetic"):
+            with self.subTest(
+                candidate_kind=candidate_kind
+            ), self.repo() as root:
+                self.init_git(root)
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                self.write(root, "message-queue/README.md", "# Queue\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate queue v1")
+                contract.write_text(
+                    "# Queue contract without marker\n", encoding="utf-8"
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "remove queue v1")
+                removed = self.git(root, "rev-parse", "HEAD")
+                contract.write_text(
+                    "**Queue resolution schema:** v1\n", encoding="utf-8"
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "restore queue v1")
+                self.write(root, "candidate-padding.md", "# Padding\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "pad rollback head")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                self.write(root, "displaced-padding.md", "# Displaced\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "advance displaced tip")
+                range_base = self.git(root, "rev-parse", "HEAD")
+                self.checkout_rollback_candidate(
+                    root, range_head, range_base, candidate_kind
+                )
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=range_base,
+                )
+                sticky = [
+                    finding for finding in resolution
+                    if "queue-resolution v1 was removed after activation "
+                    "on governed edge" in finding.message
+                ]
+                self.assertEqual(1, len(sticky), self.messages(resolution))
+                self.assertIn(f"-> {removed}", sticky[0].message)
+                self.assertEqual([], schema, self.messages(schema))
+
+    def test_queue_v1_whole_service_removal_and_restoration_stays_modular(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove empty queue service")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "restore queue service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    self.assertEqual(
+                        [], resolution, self.messages(resolution)
+                    )
+                    self.assertEqual([], schema, self.messages(schema))
+
+    def test_queue_v1_stickiness_composes_with_presentation_dependency(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue and presentation")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text(
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "remove queue v1")
+            removed = self.git(root, "rev-parse", "HEAD")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "restore queue v1")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, _schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    sticky = [
+                        finding for finding in resolution
+                        if "queue-resolution v1 was removed after activation "
+                        "on governed edge" in finding.message
+                    ]
+                    dependencies = [
+                        finding for finding in resolution
+                        if "v2 is active without queue-resolution schema v1"
+                        in finding.message
+                    ]
+                    self.assertEqual(1, len(sticky), self.messages(resolution))
+                    self.assertIn(f"-> {removed}", sticky[0].message)
+                    self.assertEqual(
+                        1, len(dependencies), self.messages(resolution)
+                    )
+
+    def test_queue_v1_stickiness_grandfathers_preactivation_history(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v0\n",
+            )
+            self.write(root, "message-queue/README.md", "# Queue\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy queue")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text(
+                "# Legacy contract without marker\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "legacy marker removal")
+            contract.write_text(
+                "**Queue resolution schema:** v0\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "restore legacy marker")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate queue v1")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    self.assertEqual(
+                        [], resolution, self.messages(resolution)
+                    )
+                    self.assertEqual([], schema, self.messages(schema))
+
+    def test_v2_only_candidate_rejects_combined_response_and_folding_claim(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Human action presentation schema:** v2\n",
+            )
+            path = (
+                "message-queue/needs-human/decisions/"
+                "blocking-admission.md"
+            )
+            item = self.write(root, path, VALID_DECISION_V2)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate v2 with clean origin")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            folding = VALID_DECISION_V2.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            ).replace(
+                "> **Waiting for your response.**",
+                "> **Response received. No further response is needed.**",
+            ).replace("**Status:** waiting", "**Status:** folding")
+            item.write_text(folding, encoding="utf-8")
+            self.git(root, "add", path)
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                staged = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            staged_messages = self.messages(staged)
+            self.assertTrue(any(
+                "v2 is active without queue-resolution schema v1" in message
+                for message in staged_messages
+            ), staged_messages)
+            self.assertTrue(any(
+                "waiting -> folding claim changed more than status" in message
+                for message in staged_messages
+            ), staged_messages)
+
+            self.git(root, "commit", "-m", "combine response and folding claim")
+            head = self.git(root, "rev-parse", "HEAD")
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "v2 is active without queue-resolution schema v1"
+                        in message
+                        for message in messages
+                    ), messages)
+                    self.assertTrue(any(
+                        "waiting -> folding claim changed more than status"
+                        in message
+                        for message in messages
+                    ), messages)
+
+    def test_rollback_range_checks_exact_head_presentation_dependency(self):
+        for candidate_kind in ("direct", "synthetic"):
+            with self.subTest(
+                candidate_kind=candidate_kind
+            ), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Common\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "common history")
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "orphan rollback v2")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                contract.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove queue service")
+                range_base = self.git(root, "rev-parse", "HEAD")
+                self.checkout_rollback_candidate(
+                    root, range_head, range_base, candidate_kind
+                )
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=range_base,
+                )
+                messages = self.messages(resolution)
+                self.assertEqual([], schema, self.messages(schema))
+                self.assertTrue(any(
+                    "v2 is active without queue-resolution schema v1"
+                    in message
+                    and f"selected commit {range_head}" in message
+                    for message in messages
+                ), messages)
+
+    def test_rollback_range_rejects_combined_response_and_folding_claim(self):
+        for action_kind in ("standard", "custom"):
+            for candidate_kind in ("direct", "synthetic"):
+                with self.subTest(
+                    action_kind=action_kind,
+                    candidate_kind=candidate_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(root, "docs/design.md", "# Design\n")
+                    contract = self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                    )
+                    path = (
+                        "message-queue/needs-human/decisions/"
+                        "blocking-admission.md"
+                        if action_kind == "standard"
+                        else "message-queue/needs-human/approvals/"
+                        "blocking-admission.md"
+                    )
+                    item = self.write(root, path, VALID_DECISION_V2)
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "clean waiting origin")
+                    clean_origin = self.git(root, "rev-parse", "HEAD")
+
+                    item.write_text(
+                        self.folding_v2_action(), encoding="utf-8"
+                    )
+                    self.git(root, "add", path)
+                    self.git(
+                        root,
+                        "commit",
+                        "-m",
+                        "combine response and folding claim",
+                    )
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    item.unlink()
+                    contract.unlink()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "remove queue service")
+                    range_base = self.git(root, "rev-parse", "HEAD")
+                    self.checkout_rollback_candidate(
+                        root, range_head, range_base, candidate_kind
+                    )
+
+                    change_range = f"{range_base}...{range_head}"
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range, displaced_tip=range_base
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "waiting -> folding claim changed more than status"
+                        in message
+                        for message in messages
+                    ), messages)
+
+                    with mock.patch.multiple(
+                        RECONCILE,
+                        CHANGE_RANGE=change_range,
+                        DISPLACED_TIP=range_base,
+                    ):
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            edges = list(RECONCILE.queue_revision_edges(
+                                (), include_selected_range=True
+                            ))
+                            mutations = list(RECONCILE.queue_mutation_events(
+                                (), include_selected_range=True
+                            ))
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [(clean_origin, range_head)],
+                        [edge for edge in edges if edge[1] == range_head],
+                    )
+                    self.assertEqual(
+                        1,
+                        sum(
+                            prior_revision == clean_origin
+                            and revision == range_head
+                            and destination == path
+                            for (
+                                _source,
+                                destination,
+                                _before,
+                                _after,
+                                prior_revision,
+                                revision,
+                            ) in mutations
+                        ),
+                    )
+
+    def test_padded_rollback_rejects_combined_response_and_folding_claim(self):
+        for action_kind in ("standard", "custom"):
+            for candidate_kind in ("direct", "synthetic"):
+                with self.subTest(
+                    action_kind=action_kind,
+                    candidate_kind=candidate_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(root, "docs/design.md", "# Design\n")
+                    contract = self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                    )
+                    path = (
+                        "message-queue/needs-human/decisions/"
+                        "blocking-admission.md"
+                        if action_kind == "standard"
+                        else "message-queue/needs-human/approvals/"
+                        "blocking-admission.md"
+                    )
+                    item = self.write(root, path, VALID_DECISION_V2)
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "clean waiting origin")
+                    clean_origin = self.git(root, "rev-parse", "HEAD")
+
+                    item.write_text(
+                        self.folding_v2_action(), encoding="utf-8"
+                    )
+                    self.git(root, "add", path)
+                    self.git(
+                        root,
+                        "commit",
+                        "-m",
+                        "combine response and folding claim",
+                    )
+                    invalid_claim = self.git(root, "rev-parse", "HEAD")
+                    self.write(root, "padding.md", "# Padding\n")
+                    self.git(root, "add", "padding.md")
+                    self.git(root, "commit", "-m", "pad rollback head")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    item.unlink()
+                    contract.unlink()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "remove queue service")
+                    range_base = self.git(root, "rev-parse", "HEAD")
+                    self.checkout_rollback_candidate(
+                        root, range_head, range_base, candidate_kind
+                    )
+
+                    resolution, schema = self.queue_findings_in_range(
+                        f"{range_base}...{range_head}",
+                        displaced_tip=range_base,
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "waiting -> folding claim changed more than status"
+                        in message
+                        for message in messages
+                    ), messages)
+
+                    change_range = f"{range_base}...{range_head}"
+                    with mock.patch.object(
+                        RECONCILE, "CHANGE_RANGE", change_range
+                    ):
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            edges = list(RECONCILE.queue_revision_edges(
+                                (), include_selected_range=True
+                            ))
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [(clean_origin, invalid_claim)],
+                        [edge for edge in edges if edge[1] == invalid_claim],
+                    )
+
+    def test_padded_rollback_rejects_intermediate_orphan_presentation_v2(self):
+        for candidate_kind in ("direct", "synthetic"):
+            with self.subTest(
+                candidate_kind=candidate_kind
+            ), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Common\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "common history")
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate orphan v2")
+                invalid_state = self.git(root, "rev-parse", "HEAD")
+
+                contract.write_text(
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "repair queue dependency")
+                range_head = self.git(root, "rev-parse", "HEAD")
+                contract.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove queue service")
+                range_base = self.git(root, "rev-parse", "HEAD")
+                self.checkout_rollback_candidate(
+                    root, range_head, range_base, candidate_kind
+                )
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=range_base,
+                )
+                messages = self.messages(resolution)
+                self.assertEqual([], schema, self.messages(schema))
+                self.assertTrue(any(
+                    "v2 is active without queue-resolution schema v1"
+                    in message
+                    and f"selected commit {invalid_state}" in message
+                    for message in messages
+                ), messages)
+
+    def test_padded_rollback_accepts_clean_waiting_action_history(self):
+        for action_kind in ("standard", "custom"):
+            with self.subTest(action_kind=action_kind), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate supported v2")
+                path = (
+                    "message-queue/needs-human/decisions/"
+                    "blocking-admission.md"
+                    if action_kind == "standard"
+                    else "message-queue/needs-human/approvals/"
+                    "blocking-admission.md"
+                )
+                item = self.write(root, path, VALID_DECISION_V2)
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "create clean waiting action")
+                self.write(root, "padding.md", "# Padding\n")
+                self.git(root, "add", "padding.md")
+                self.git(root, "commit", "-m", "pad clean rollback head")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                item.unlink()
+                contract.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove queue service")
+                range_base = self.git(root, "rev-parse", "HEAD")
+                self.git(root, "checkout", range_head)
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=range_base,
+                )
+                self.assertEqual([], resolution, self.messages(resolution))
+                self.assertEqual([], schema, self.messages(schema))
+
+    def test_padded_rollback_grandfathers_pre_v2_claimed_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            path = (
+                "message-queue/needs-human/decisions/"
+                "blocking-admission.md"
+            )
+            item = self.write(root, path, self.folding_v2_action())
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy claimed action")
+
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "activate queue schemas")
+            self.write(root, "padding.md", "# Padding\n")
+            self.git(root, "add", "padding.md")
+            self.git(root, "commit", "-m", "pad rollback head")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            item.unlink()
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove queue service")
+            range_base = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", range_head)
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{range_base}...{range_head}",
+                displaced_tip=range_base,
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_padded_rollback_accepts_clean_queue_service_restoration(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue service")
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove empty queue service")
+
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            path = (
+                "message-queue/needs-human/decisions/"
+                "blocking-admission.md"
+            )
+            item = self.write(root, path, VALID_DECISION_V2)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "restore clean queue service")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            item.unlink()
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove restored queue service")
+            range_base = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", range_head)
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{range_base}...{range_head}",
+                displaced_tip=range_base,
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_rollback_range_checks_exact_head_action_origins(self):
+        for action_kind in ("standard", "custom"):
+            for origin_kind in ("add", "rename", "copy"):
+                with self.subTest(
+                    action_kind=action_kind,
+                    origin_kind=origin_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(root, "docs/design.md", "# Design\n")
+                    contract = self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                    )
+                    source = None
+                    if origin_kind != "add":
+                        source = self.write(
+                            root,
+                            "staging/human-action.md",
+                            self.folding_v2_action(),
+                        )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "prepare action origin")
+                    origin_parent = self.git(root, "rev-parse", "HEAD")
+
+                    path = (
+                        "message-queue/needs-human/decisions/"
+                        "blocking-admission.md"
+                        if action_kind == "standard"
+                        else "message-queue/needs-human/approvals/"
+                        "blocking-admission.md"
+                    )
+                    destination = root / path
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if origin_kind == "rename":
+                        source.rename(destination)
+                    elif origin_kind == "copy":
+                        destination.write_text(
+                            source.read_text(encoding="utf-8"),
+                            encoding="utf-8",
+                        )
+                    else:
+                        destination.write_text(
+                            self.folding_v2_action(), encoding="utf-8"
+                        )
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", f"{origin_kind} action")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    destination.unlink()
+                    contract.unlink()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "remove queue service")
+                    range_base = self.git(root, "rev-parse", "HEAD")
+                    self.git(root, "checkout", range_head)
+
+                    change_range = f"{range_base}...{range_head}"
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range, displaced_tip=range_base
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+
+                    with mock.patch.multiple(
+                        RECONCILE,
+                        CHANGE_RANGE=change_range,
+                        DISPLACED_TIP=range_base,
+                    ):
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            origins = list(
+                                RECONCILE.human_action_origin_events(
+                                    (), include_selected_range=True
+                                )
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [(path, origin_parent, range_head)],
+                        [
+                            (origin_path, prior_revision, revision)
+                            for (
+                                origin_path,
+                                _text,
+                                prior_revision,
+                                revision,
+                            ) in origins
+                            if origin_path == path
+                        ],
+                    )
+
+    def test_rollback_range_accepts_clean_exact_head_action_origin(self):
+        for action_kind in ("standard", "custom"):
+            with self.subTest(action_kind=action_kind), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate supported v2")
+                path = (
+                    "message-queue/needs-human/decisions/"
+                    "blocking-admission.md"
+                    if action_kind == "standard"
+                    else "message-queue/needs-human/approvals/"
+                    "blocking-admission.md"
+                )
+                item = self.write(root, path, VALID_DECISION_V2)
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "create clean waiting action")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                item.unlink()
+                contract.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove queue service")
+                range_base = self.git(root, "rev-parse", "HEAD")
+                self.git(root, "checkout", range_head)
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=range_base,
+                )
+                self.assertEqual([], resolution, self.messages(resolution))
+                self.assertEqual([], schema, self.messages(schema))
+
+    def test_selected_ranges_inspect_linear_head_once(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Root\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "root")
+            parent = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "candidate.md", "# Candidate\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "candidate")
+            range_head = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "later.md", "# Later\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "later")
+            descendant = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (
+                f"{parent}...{range_head}",
+                f"root:{range_head}",
+                f"{descendant}...{range_head}",
+            ):
+                with self.subTest(change_range=change_range):
+                    with mock.patch.object(
+                        RECONCILE, "CHANGE_RANGE", change_range
+                    ):
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            edges = list(RECONCILE.queue_revision_edges(
+                                (), include_selected_range=True
+                            ))
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    self.assertEqual(
+                        [(parent, range_head)],
+                        [edge for edge in edges if edge[1] == range_head],
+                    )
+
+    def test_presentation_dependency_checks_base_synthetic_and_displaced(self):
+        for candidate_kind in ("direct", "synthetic-merge", "displaced"):
+            with self.subTest(candidate_kind=candidate_kind), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Common\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "common history")
+                common = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "governed")
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Human action presentation schema:** v2\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate orphan v2")
+                governed = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "candidate", common)
+                self.write(root, "candidate.md", "# Candidate\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "candidate history")
+                range_head = self.git(root, "rev-parse", "HEAD")
+                displaced_tip = None
+                range_base = governed
+                if candidate_kind == "synthetic-merge":
+                    self.git(
+                        root,
+                        "merge",
+                        "-s",
+                        "ours",
+                        "--no-edit",
+                        "governed",
+                    )
+                elif candidate_kind == "displaced":
+                    range_base = common
+                    displaced_tip = governed
+
+                resolution, _schema = self.queue_findings_in_range(
+                    f"{range_base}...{range_head}",
+                    displaced_tip=displaced_tip,
+                )
+                messages = self.messages(resolution)
+                expected_state = (
+                    "displaced tip"
+                    if candidate_kind == "displaced"
+                    else "trusted range base"
+                )
+                self.assertTrue(any(
+                    "v2 is active without queue-resolution schema v1"
+                    in message
+                    and expected_state in message
+                    for message in messages
+                ), messages)
+
+    def test_presentation_v2_accepts_supported_queue_activation_orders(self):
+        for activation_order in ("same-commit", "v1-before-v2"):
+            with self.subTest(activation_order=activation_order), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "docs/design.md", "# Design\n")
+                if activation_order == "v1-before-v2":
+                    contract = self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "activate queue v1")
+                    base = self.git(root, "rev-parse", "HEAD")
+                    contract.write_text(
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                    )
+                    self.write(root, "README.md", "# Base\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "pre-activation base")
+                    base = self.git(root, "rev-parse", "HEAD")
+                self.write(
+                    root,
+                    "message-queue/needs-human/decisions/"
+                    "blocking-admission.md",
+                    VALID_DECISION_V2,
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate supported v2")
+                head = self.git(root, "rev-parse", "HEAD")
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{base}...{head}"
+                )
+                messages = self.messages(resolution)
+                self.assertFalse(any(
+                    "v2 is active without queue-resolution schema v1"
+                    in message
+                    for message in messages
+                ), messages)
+                self.assertEqual([], schema, self.messages(schema))
+
+    def test_removing_queue_v1_while_presentation_v2_remains_fails(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue and presentation")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text(
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "remove queue lifecycle v1")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            resolution, _schema = self.queue_findings_in_range(
+                f"{base}...{head}"
+            )
+            messages = self.messages(resolution)
+            self.assertTrue(any(
+                "v2 is active without queue-resolution schema v1" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(any(
+                "queue-resolution v1 was removed" in message
+                for message in messages
+            ), messages)
+
+    def test_activation_then_service_removal_rejects_review_response_at_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            target = self.write(root, "docs/source.md", "# Reviewed\n")
+            digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            path = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-source.md"
+            )
+            answered_waiting = self.approved_waiting_review(digest)
+            item = self.write(root, path, answered_waiting)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create approved waiting review")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            evidence.write_text(
+                "# Disposition\n\nApproved.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve review")
+            head = self.activate_then_remove_human_queue(root, contract)
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+
+    def test_activation_then_service_removal_rejects_custom_response_at_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            path = (
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            item = self.write(root, path, answered_waiting)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create answered waiting action")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            evidence.write_text(
+                "# Disposition\n\nOption B accepted.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve action")
+            head = self.activate_then_remove_human_queue(root, contract)
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+
+    def test_activation_then_service_removal_accepts_clean_action_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            path = (
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            item = self.write(root, path, VALID_CUSTOM_HUMAN)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create unanswered waiting action")
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            item.write_text(answered_waiting, encoding="utf-8")
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "record human answer")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            evidence.write_text(
+                "# Disposition\n\nOption B accepted.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve action")
+            head = self.activate_then_remove_human_queue(root, contract)
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    self.assertEqual(
+                        [], resolution, self.messages(resolution)
+                    )
+                    self.assertEqual([], schema, self.messages(schema))
+
+    def test_service_removal_without_presentation_activation_stays_modular(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove empty queue service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    resolution, schema = self.queue_findings_in_range(
+                        change_range
+                    )
+                    self.assertEqual(
+                        [], resolution, self.messages(resolution)
+                    )
+                    self.assertEqual([], schema, self.messages(schema))
+
+    def test_service_removal_grandfathers_pre_range_human_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            path = (
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            item = self.write(root, path, answered_waiting)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create legacy answered action")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim legacy folding")
+            evidence.write_text(
+                "# Disposition\n\nOption B accepted.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve legacy action")
+            base = self.git(root, "rev-parse", "HEAD")
+            head = self.activate_then_remove_human_queue(root, contract)
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{base}...{head}"
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+            root_resolution, root_schema = self.queue_findings_in_range(
+                f"root:{head}"
+            )
+            root_messages = self.messages(root_resolution)
+            self.assertEqual([], root_schema, self.messages(root_schema))
+            self.assertTrue(any(
+                "created in a claimed lifecycle state" in message
+                for message in root_messages
+            ), root_messages)
+
+    def test_divergent_candidates_honor_presentation_v2_at_trusted_base(self):
+        for action_kind in ("review", "custom"):
+            for candidate_kind in ("direct", "synthetic-merge"):
+                with self.subTest(
+                    action_kind=action_kind,
+                    candidate_kind=candidate_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    target = self.write(
+                        root, "docs/source.md", "# Reviewed\n"
+                    )
+                    digest = (
+                        "sha256:"
+                        + hashlib.sha256(target.read_bytes()).hexdigest()
+                    )
+                    self.write(root, "docs/design.md", "# Design\n")
+                    evidence = self.write(
+                        root, "docs/disposition.md", "# Disposition\n"
+                    )
+                    contract = self.write(
+                        root,
+                        "message-queue/AGENTS.md",
+                        "**Queue resolution schema:** v1\n",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "common queue v1")
+                    common = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "trusted")
+                    contract.write_text(
+                        "**Queue resolution schema:** v1\n"
+                        "**Human action presentation schema:** v2\n",
+                        encoding="utf-8",
+                    )
+                    self.git(root, "add", "message-queue/AGENTS.md")
+                    self.git(root, "commit", "-m", "trusted base activates v2")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "feature", common)
+                    if action_kind == "review":
+                        path = (
+                            "message-queue/needs-human/reviews/"
+                            "non-blocking-review-source.md"
+                        )
+                        answered_waiting = self.approved_waiting_review(digest)
+                    else:
+                        path = (
+                            "message-queue/needs-human/approvals/"
+                            "blocking-deployment.md"
+                        )
+                        answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                            "**Your answer:** ______",
+                            "**Your answer:** Option B",
+                        )
+                    item = self.write(root, path, answered_waiting)
+                    self.git(root, "add", path)
+                    self.git(
+                        root, "commit", "-m", "create answered waiting action"
+                    )
+                    item.write_text(
+                        answered_waiting.replace(
+                            "**Status:** waiting", "**Status:** folding"
+                        ),
+                        encoding="utf-8",
+                    )
+                    self.git(root, "add", path)
+                    self.git(root, "commit", "-m", "claim folding")
+                    evidence.write_text(
+                        "# Disposition\n\nResponse accepted.\n",
+                        encoding="utf-8",
+                    )
+                    item.unlink()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "resolve action")
+                    contract.unlink()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "remove queue service")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    if candidate_kind == "synthetic-merge":
+                        self.git(
+                            root,
+                            "merge",
+                            "-s",
+                            "ours",
+                            "--no-edit",
+                            "trusted",
+                        )
+                    resolution, schema = self.queue_findings_in_range(
+                        f"{base}...{range_head}"
+                    )
+                    messages = self.messages(resolution)
+                    self.assertEqual([], schema, self.messages(schema))
+                    self.assertTrue(any(
+                        "created in a claimed lifecycle state" in message
+                        for message in messages
+                    ), messages)
+
+    def test_clean_divergent_head_is_accepted_against_v2_base(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common queue v1")
+            common = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "trusted")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "trusted base activates v2")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "feature", common)
+            path = (
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            item = self.write(root, path, VALID_CUSTOM_HUMAN)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create unanswered action")
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            item.write_text(answered_waiting, encoding="utf-8")
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "record human answer")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim folding")
+            evidence.write_text(
+                "# Disposition\n\nOption B accepted.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve action")
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove queue service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{base}...{head}"
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_divergent_head_is_grandfathered_when_base_has_no_v2(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common queue v1")
+            common = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "trusted")
+            self.write(root, "docs/trusted.md", "# Trusted base\n")
+            self.git(root, "add", "docs/trusted.md")
+            self.git(root, "commit", "-m", "advance trusted base without v2")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "feature", common)
+            path = (
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md"
+            )
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            item = self.write(root, path, answered_waiting)
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "create legacy answered action")
+            item.write_text(
+                answered_waiting.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim legacy folding")
+            evidence.write_text(
+                "# Disposition\n\nOption B accepted.\n", encoding="utf-8"
+            )
+            item.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "resolve legacy action")
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove queue service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{base}...{head}"
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_displaced_v2_tip_governs_rewritten_human_origins(self):
+        for action_kind in ("review", "custom"):
+            with self.subTest(action_kind=action_kind), self.repo() as root:
+                self.init_git(root)
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                digest = (
+                    "sha256:"
+                    + hashlib.sha256(target.read_bytes()).hexdigest()
+                )
+                self.write(root, "docs/design.md", "# Design\n")
+                evidence = self.write(
+                    root, "docs/disposition.md", "# Disposition\n"
+                )
+                contract = self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "common queue v1")
+                common = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "old-tip")
+                contract.write_text(
+                    "**Queue resolution schema:** v1\n"
+                    "**Human action presentation schema:** v2\n",
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "message-queue/AGENTS.md")
+                self.git(root, "commit", "-m", "old tip activates v2")
+                old_tip = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "rewritten", common)
+                if action_kind == "review":
+                    path = (
+                        "message-queue/needs-human/reviews/"
+                        "non-blocking-review-source.md"
+                    )
+                    answered_waiting = self.approved_waiting_review(digest)
+                else:
+                    path = (
+                        "message-queue/needs-human/approvals/"
+                        "blocking-deployment.md"
+                    )
+                    answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                        "**Your answer:** ______",
+                        "**Your answer:** Option B",
+                    )
+                self.commit_resolved_human_action(
+                    root,
+                    path,
+                    answered_waiting,
+                    answered_waiting,
+                    evidence,
+                )
+                contract.unlink()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "remove queue service")
+                new_tip = self.git(root, "rev-parse", "HEAD")
+
+                resolution, schema = self.queue_findings_in_range(
+                    f"{common}...{new_tip}", displaced_tip=old_tip
+                )
+                messages = self.messages(resolution)
+                self.assertEqual([], schema, self.messages(schema))
+                self.assertTrue(any(
+                    "created in a claimed lifecycle state" in message
+                    for message in messages
+                ), messages)
+
+    def test_displaced_v2_tip_accepts_clean_rewritten_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common queue v1")
+            common = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "old-tip")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "old tip activates v2")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", common)
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            self.commit_resolved_human_action(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md",
+                VALID_CUSTOM_HUMAN,
+                answered_waiting,
+                evidence,
+            )
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove queue service")
+            new_tip = self.git(root, "rev-parse", "HEAD")
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{common}...{new_tip}", displaced_tip=old_tip
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_displaced_tip_without_v2_preserves_legacy_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common queue v1")
+            common = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "old-tip")
+            self.write(root, "docs/old-tip.md", "# Old tip\n")
+            self.git(root, "add", "docs/old-tip.md")
+            self.git(root, "commit", "-m", "advance old tip without v2")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", common)
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            self.commit_resolved_human_action(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md",
+                answered_waiting,
+                answered_waiting,
+                evidence,
+            )
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove queue service")
+            new_tip = self.git(root, "rev-parse", "HEAD")
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{common}...{new_tip}", displaced_tip=old_tip
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_removed_displaced_v2_service_preserves_legacy_origin(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/design.md", "# Design\n")
+            evidence = self.write(
+                root, "docs/disposition.md", "# Disposition\n"
+            )
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common queue v1")
+            common = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-b", "old-tip")
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "message-queue/AGENTS.md")
+            self.git(root, "commit", "-m", "old tip activates v2")
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "old tip removes queue service")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", common)
+            answered_waiting = VALID_CUSTOM_HUMAN.replace(
+                "**Your answer:** ______", "**Your answer:** Option B"
+            )
+            self.commit_resolved_human_action(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-deployment.md",
+                answered_waiting,
+                answered_waiting,
+                evidence,
+            )
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove rewritten queue service")
+            new_tip = self.git(root, "rev-parse", "HEAD")
+
+            resolution, schema = self.queue_findings_in_range(
+                f"{common}...{new_tip}", displaced_tip=old_tip
+            )
+            self.assertEqual([], resolution, self.messages(resolution))
+            self.assertEqual([], schema, self.messages(schema))
+
+    def test_awaiting_review_v2_exposes_no_premature_response_prompt(self):
+        review = """# Review the published artifact
+
+<!-- human-action-presentation: v2 -->
+
+> **Not ready yet. No action is requested.**
+
+## What I need from you
+
+**Action:** Review the artifact after it is published.
+
+No action is needed yet. The review target has not been published.
+Judge the artifact after publication and choose a review outcome.
+
+## Why this matters
+
+The review will decide whether the proposed artifact can be accepted.
+
+## If you do not respond
+
+If you do not respond, implementation may continue but merge remains blocked.
+
+## What changed
+
+**Before this change:** Human review files were metadata-first.
+**Current state:** The exact review target is not published.
+**Change under review:** Publish a self-contained human action format.
+**Not included:** Implementation remains future work.
+**Additional context:** The review is needed after publication so the exact bytes,
+  rather than a promise about future work, receive the judgment.
+
+## Review outcomes
+
+### Approve
+
+**What it means:** Accept the published artifact.
+**Consequence:** The review boundary may close.
+**Example:** The task may merge after other checks pass.
+
+### Request changes
+
+**What it means:** Ask for a specific revision.
+**Consequence:** An agent repairs and republishes the artifact.
+**Example:** A confusing choice table is rewritten.
+
+### Reject
+
+**What it means:** End pursuit of this artifact.
+**Consequence:** The proposed format is not adopted.
+**Example:** The task remains open for a different design.
+
+## Agent recommendation
+
+**Evidence checked:** The review target and revision are both pending.
+**Assumptions:** The repair will publish a stable local target.
+**Confidence:** High, because the target is currently pending.
+**Rationale:** Reviewing absent bytes cannot authorize a merge.
+**What could change this recommendation:** Publication of the exact target.
+**Recommendation:** Wait for the exact target before deciding.
+
+## Your response
+
+No response is needed until the review target is published.
+
+## References
+
+**Full context:** [design](../../../docs/design.md)
+
+<details>
+<summary>Tracking details</summary>
+
+**Status:** awaiting-artifact
+**Filed:** 2026-07-23, by test
+**Resolution evidence:** `docs/review-disposition.md`
+**Review target:** pending
+**Review revision:** pending
+**Reviewed revision:** ______
+**Review outcome:** pending
+**Your review:** ______
+**Blocks at:** event:acceptance
+**Until then:** implementation may continue
+</details>
+"""
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-artifact.md",
+                review,
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+            missing_context = review.replace(
+                "**Additional context:** The review is needed after publication "
+                "so the exact bytes,\n"
+                "  rather than a promise about future work, receive the judgment.\n",
+                "",
+            )
+            problems = RECONCILE.human_action_v2_problems(
+                missing_context, "reviews", "future-blocking"
+            )
+            self.assertTrue(any(
+                "Additional context" in problem for problem in problems
+            ), problems)
+
+            digest = "sha256:" + hashlib.sha256(
+                (root / "docs/design.md").read_bytes()
+            ).hexdigest()
+            published = review.replace(
+                "> **Not ready yet. No action is requested.**",
+                "> **Waiting for your response.**",
+            ).replace(
+                "No action is needed yet. The review target has not been published.\n",
+                "",
+            ).replace(
+                "**Current state:** The exact review target is not published.",
+                "**Current state:** The exact review artifact is published.",
+            ).replace(
+                "**Recommendation:** Wait for the exact target before deciding.",
+                "**Recommendation:** Approve.",
+            ).replace(
+                "**Rationale:** Reviewing absent bytes cannot authorize a merge.",
+                "**Rationale:** The published artifact matches the stated proposal.",
+            ).replace(
+                "**Evidence checked:** The review target and revision are both pending.",
+                "**Evidence checked:** The published design file and its exact digest.",
+            ).replace(
+                "**Assumptions:** The repair will publish a stable local target.",
+                "**Assumptions:** The stated scope is complete.",
+            ).replace(
+                "**Confidence:** High, because the target is currently pending.",
+                "**Confidence:** High, because the target is bound to exact bytes.",
+            ).replace(
+                "**What could change this recommendation:** Publication of the exact target.",
+                "**What could change this recommendation:** A mismatch in the published bytes.",
+            ).replace(
+                "No response is needed until the review target is published.",
+                "Write `approve`, `request changes`, `reject`, or "
+                "`I need clarification` followed by your question. A plain-language "
+                "answer is enough; the agent manages revision tracking.\n\n"
+                "**Your review:** ______",
+            ).replace(
+                "**Status:** awaiting-artifact", "**Status:** waiting"
+            ).replace(
+                "**Review target:** pending", "**Review target:** `docs/design.md`"
+            ).replace(
+                "**Review revision:** pending", f"**Review revision:** {digest}"
+            ).replace(
+                "**Your review:** ______\n**Blocks at:**",
+                "**Blocks at:**",
+                1,
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-artifact.md",
+                published,
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+            open_ended = published.replace(
+                "`reject`, or `I need clarification`",
+                "`reject`, another disposition, or `I need clarification`",
+            )
+            messages = RECONCILE.human_action_v2_problems(
+                open_ended, "reviews", "future-blocking", source=item
+            )
+            self.assertTrue(any(
+                "response guidance must offer only" in message
+                for message in messages
+            ), messages)
+            hidden_comment = published.replace(
+                "**Your review:** ______",
+                "<!-- This comment is not reader-visible. -->\n\n"
+                "**Your review:** ______",
+            )
+            self.assertEqual([], RECONCILE.human_action_v2_problems(
+                hidden_comment,
+                "reviews",
+                "future-blocking",
+                source=item,
+            ))
+            response_ownership_cases = (
+                (
+                    "awaiting response",
+                    review.replace(
+                        "No response is needed until the review target is published.",
+                        "No response is needed until the review target is published.\n\n"
+                        "**Example:** Approve before publication.",
+                    ),
+                ),
+                (
+                    "waiting response",
+                    published.replace(
+                        "**Your review:** ______",
+                        "**Your review:** ______\n\n"
+                        "**Consequence:** Approve the artifact.",
+                    ),
+                ),
+                (
+                    "folding response",
+                    published.replace(
+                        "> **Waiting for your response.**",
+                        "> **Response received. No further response is needed.**",
+                    ).replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ).replace(
+                        "**Your review:** ______",
+                        "**Your review:** approve\n\n"
+                        "**Example:** Reject instead.",
+                    ),
+                ),
+                (
+                    "review field in state",
+                    published.replace(
+                        "**Before this change:** Human review files were metadata-first.",
+                        "**Before this change:** Human review files were metadata-first.\n"
+                        "**Example:** Approve immediately.",
+                    ),
+                ),
+            )
+            for name, injected in response_ownership_cases:
+                with self.subTest(response_ownership=name):
+                    self.assertTrue(RECONCILE.human_action_v2_problems(
+                        injected,
+                        "reviews",
+                        "future-blocking",
+                        source=item,
+                    ))
+            for name, addition in (
+                ("raw-html", "<div>You may also defer.</div>"),
+                ("fenced-code", "```text\nYou may also defer.\n```"),
+            ):
+                with self.subTest(name=name):
+                    injected = published.replace(
+                        "**Your review:** ______",
+                        addition + "\n\n**Your review:** ______",
+                    )
+                    messages = RECONCILE.human_action_v2_problems(
+                        injected,
+                        "reviews",
+                        "future-blocking",
+                        source=item,
+                    )
+                    self.assertTrue(any(
+                        "response guidance must offer only" in message
+                        for message in messages
+                    ), messages)
+            self.assertIsNone(RECONCILE.queue_mutation_problem(
+                item.relative_to(root).as_posix(),
+                item.relative_to(root).as_posix(),
+                review,
+                published,
+            ))
+            self.assertIsNone(RECONCILE.queue_mutation_problem(
+                item.relative_to(root).as_posix(),
+                item.relative_to(root).as_posix(),
+                published,
+                review,
+            ))
+            transition_injections = (
+                (
+                    review,
+                    published.replace(
+                        "# Review the published artifact",
+                        "# Review a different artifact",
+                    ),
+                ),
+                (
+                    published,
+                    review.replace(
+                        "**Change under review:** Publish a self-contained human "
+                        "action format.",
+                        "**Change under review:** Publish a self-contained human "
+                        "action format.\nResidual publication scope was injected.",
+                    ),
+                ),
+            )
+            for transition_before, transition_after in transition_injections:
+                direction = (
+                    RECONCILE.text_fields(transition_before).get("Status"),
+                    RECONCILE.text_fields(transition_after).get("Status"),
+                )
+                with self.subTest(direction=direction):
+                    self.assertIsNotNone(RECONCILE.queue_mutation_problem(
+                        item.relative_to(root).as_posix(),
+                        item.relative_to(root).as_posix(),
+                        transition_before,
+                        transition_after,
+                    ), direction)
+
+            base_revision = "a" * 40
+            head_revision = "b" * 40
+            git_target = f"git:{base_revision}...{head_revision}"
+            git_published = published.replace(
+                "**Review target:** `docs/design.md`",
+                f"**Review target:** {git_target}",
+            ).replace(
+                f"**Review revision:** {digest}",
+                f"**Review revision:** {git_target}",
+            ).replace(
+                "**Full context:** [design](../../../docs/design.md)",
+                "**Full context:** [design](../../../docs/design.md)\n\n"
+                "**Exact review artifact:** [Open the immutable Git range]"
+                f"(https://github.com/example/repo/compare/"
+                f"{base_revision}...{head_revision})",
+            )
+            with mock.patch.object(
+                RECONCILE,
+                "repository_remote_identity",
+                return_value=("github.com", "example/repo"),
+            ):
+                self.assertEqual([], RECONCILE.human_action_v2_problems(
+                    git_published, "reviews", "future-blocking"
+                ))
+                bogus_provider_url = git_published.replace(
+                    f"https://github.com/example/repo/compare/"
+                    f"{base_revision}...{head_revision}",
+                    f"https://github.com/example/repo/not-a-diff/"
+                    f"{base_revision}/{head_revision}",
+                )
+                messages = RECONCILE.human_action_v2_problems(
+                    bogus_provider_url, "reviews", "future-blocking"
+                )
+                self.assertTrue(any(
+                    "supported same-repository provider" in message
+                    for message in messages
+                ), messages)
+            with mock.patch.object(
+                RECONCILE,
+                "repository_remote_identity",
+                return_value=("github.com", "another/repository"),
+            ):
+                messages = RECONCILE.human_action_v2_problems(
+                    git_published, "reviews", "future-blocking"
+                )
+                self.assertTrue(any(
+                    "supported same-repository provider" in message
+                    for message in messages
+                ), messages)
+            valid_git_url = (
+                f"https://github.com/example/repo/compare/"
+                f"{base_revision}...{head_revision}"
+            )
+            malformed_destinations = (
+                "https://[bad",
+                "http://[bad",
+                "../../../artifacts/%00.md",
+            )
+            for malformed_destination in malformed_destinations:
+                with self.subTest(malformed_destination=malformed_destination):
+                    malformed_artifact = git_published.replace(
+                        valid_git_url, malformed_destination
+                    )
+                    messages = RECONCILE.human_action_v2_problems(
+                        malformed_artifact,
+                        "reviews",
+                        "future-blocking",
+                        source=item,
+                    )
+                    self.assertTrue(any(
+                        "supported same-repository provider" in message
+                        for message in messages
+                    ), messages)
+            single_target = f"git:{head_revision}"
+            git_single = git_published.replace(
+                git_target, single_target
+            ).replace(
+                f"compare/{base_revision}...{head_revision}",
+                f"commit/{head_revision}",
+            )
+            with mock.patch.object(
+                RECONCILE,
+                "repository_remote_identity",
+                return_value=("github.com", "example/repo"),
+            ):
+                self.assertEqual([], RECONCILE.human_action_v2_problems(
+                    git_single, "reviews", "future-blocking"
+                ))
+
+            artifact_rel = (
+                f"artifacts/review-{base_revision}...{head_revision}.md"
+            )
+            local_artifact = self.write(
+                root,
+                artifact_rel,
+                "# Immutable review artifact\n\n"
+                f"**Git review target:** {git_target}\n",
+            )
+            repo_linked = git_published.replace(
+                "[Open the immutable Git range]"
+                f"(https://github.com/example/repo/compare/"
+                f"{base_revision}...{head_revision})",
+                "[Open the immutable Git range]"
+                f"(../../../{artifact_rel})",
+            )
+            self.assertEqual([], RECONCILE.human_action_v2_problems(
+                repo_linked,
+                "reviews",
+                "future-blocking",
+                source=item,
+            ))
+            local_artifact.write_text(
+                "# Filename alone is not a binding\n", encoding="utf-8"
+            )
+            messages = RECONCILE.human_action_v2_problems(
+                repo_linked,
+                "reviews",
+                "future-blocking",
+                source=item,
+            )
+            self.assertTrue(any(
+                "exact **Git review target:** binding" in message
+                for message in messages
+            ), messages)
+            local_artifact.write_text(
+                "# Immutable review artifact\n\n"
+                f"**Git review target:** {git_target}\n",
+                encoding="utf-8",
+            )
+            missing_exact = git_published.replace(
+                "\n\n**Exact review artifact:** "
+                "[Open the immutable Git range]"
+                f"(https://github.com/example/repo/compare/"
+                f"{base_revision}...{head_revision})",
+                "",
+            )
+            messages = RECONCILE.human_action_v2_problems(
+                missing_exact, "reviews", "future-blocking"
+            )
+            self.assertTrue(any(
+                "Git review References must contain one "
+                "**Exact review artifact:**" in message
+                for message in messages
+            ), messages)
+            missing_repo_artifact = repo_linked.replace(
+                artifact_rel,
+                f"artifacts/missing-{base_revision}...{head_revision}.md",
+            )
+            messages = RECONCILE.human_action_v2_problems(
+                missing_repo_artifact,
+                "reviews",
+                "future-blocking",
+                source=item,
+            )
+            self.assertTrue(any(
+                "Git review References must contain one "
+                "**Exact review artifact:**" in message
+                for message in messages
+            ), messages)
+
+    def test_folding_v2_action_requires_a_concrete_response(self):
+        text = VALID_DECISION_V2.replace(
+            "> **Waiting for your response.**",
+            "> **Response received. No further response is needed.**",
+        ).replace("**Status:** waiting", "**Status:** folding")
+        messages = RECONCILE.human_action_v2_problems(
+            text, "decisions", "blocking"
+        )
+        self.assertTrue(any(
+            "folding requires a concrete human response" in message
+            for message in messages
+        ), messages)
+
+    def test_legacy_folding_action_cannot_hide_a_blank_response_under_v2(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            legacy = VALID_DECISION.replace(
+                "**Status:** waiting", "**Status:** folding"
+            ).replace(
+                "**Full context:** [design](docs/design.md#boundary)\n",
+                "**Full context:** [design](docs/design.md#boundary)\n"
+                "**Why-you-might-care:** This choice controls admission.\n"
+                "**If-you-do-nothing:** The task remains blocked.\n",
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/blocking-admission.md",
+                legacy,
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "folding requires a concrete human response" in message
+                for message in messages
+            ), messages)
+
+    def test_v2_waiting_to_folding_claim_changes_only_status_presentation(self):
+        waiting = VALID_DECISION_V2.replace(
+            "**Your answer:** ______", "**Your answer:** Option B"
+        )
+        folding = waiting.replace(
+            "> **Waiting for your response.**",
+            "> **Response received. No further response is needed.**",
+        ).replace("**Status:** waiting", "**Status:** folding")
+        path = "message-queue/needs-human/decisions/blocking-admission.md"
+        self.assertIsNone(RECONCILE.queue_mutation_problem(
+            path, path, waiting, folding
+        ))
+        self.assertEqual([], RECONCILE.human_action_v2_problems(
+            folding, "decisions", "blocking"
+        ))
 
     def test_queue_v1_requires_concrete_human_projection_context(self):
         with self.repo() as root:
@@ -264,12 +5863,343 @@ class ReconcileQueueTests(unittest.TestCase):
         with self.repo() as root:
             self.write(root, "docs/design.md", "# Design\n")
             text = "```bad`info\n" + VALID_DECISION
-            self.write(
+            item = self.write(
                 root,
                 "message-queue/needs-human/decisions/blocking-admission.md",
                 text,
             )
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                text.replace(
+                    "**Action:** choose one admission boundary",
+                    "**Action:** choose one admission boundary\n"
+                    "**Action:** choose a conflicting boundary",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "field **Action:** appears more than once" in message
+                for message in messages
+            ), messages)
+
+    def test_visual_line_syntax_inside_inline_code_is_not_a_field(self):
+        for name, literal in (
+            ("named newline", "&NewLine;**Action:** literal"),
+            ("numeric newline", "&#10;**Your review:** literal"),
+            ("NEL", "\u0085**Action:** literal"),
+            ("line separator", "\u2028**Your review:** literal"),
+            ("paragraph separator", "\u2029**Action:** literal"),
+        ):
+            with self.subTest(name=name):
+                source = (
+                    "**Action:** inspect `" + literal + "` syntax\n"
+                    "**Resolution evidence:** `docs/design.md`"
+                )
+                self.assertEqual(
+                    {"Action": 1, "Resolution evidence": 1},
+                    RECONCILE.field_counts(source),
+                )
+                self.assertEqual(
+                    "`docs/design.md`",
+                    RECONCILE.text_fields(source)["Resolution evidence"],
+                )
+
+    def test_inline_code_field_shielding_respects_block_boundaries(self):
+        block_boundaries = (
+            ("blank line", ""),
+            ("ATX heading", "# A heading"),
+            ("list", "- A list item"),
+            ("quote", "> A quote"),
+            ("thematic break", "---"),
+            ("invalid fence info", "```bad`info"),
+            ("reference definition", "[source]: docs/design.md"),
+            ("setext heading", "==="),
+            ("indented code", "    indented code"),
+            ("GFM table", "| --- |"),
+        )
+        for name, boundary in block_boundaries:
+            with self.subTest(boundary=name):
+                source = (
+                    "Unmatched `code\n" + boundary + "\n"
+                    "**Action:** visible field\n"
+                    "**Resolution evidence:** `docs/design.md`"
+                )
+                self.assertEqual(1, RECONCILE.field_counts(source)["Action"])
+                self.assertEqual(
+                    "`docs/design.md`",
+                    RECONCILE.text_fields(source)["Resolution evidence"],
+                )
+
+        same_paragraph = (
+            "Paragraph `literal code\n"
+            "**Action:** inside code` continues.\n"
+            "**Action:** outside code"
+        )
+        self.assertEqual(
+            {"Action": 1}, RECONCILE.field_counts(same_paragraph)
+        )
+
+        encoded = (
+            "Paragraph `&NewLine;**Action:** inside code` continues.\n"
+            "Outside&NewLine;**Action:** outside code"
+        )
+        self.assertEqual({"Action": 1}, RECONCILE.field_counts(encoded))
+
+        fenced = (
+            "```markdown\n**Action:** inside fenced code\n```\n"
+            "**Action:** outside code"
+        )
+        self.assertEqual({"Action": 1}, RECONCILE.field_counts(fenced))
+
+        multiple_runs = (
+            "```bad`one``two```info\n# A heading\n"
+            "**Action:** visible field\n"
+            "**Resolution evidence:** `docs/design.md`"
+        )
+        self.assertEqual(
+            {"Action": 1, "Resolution evidence": 1},
+            RECONCILE.field_counts(multiple_runs),
+        )
+
+    def test_generic_agent_fields_survive_cross_block_unmatched_ticks(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            text = (
+                "# Inspect the design\n\n"
+                "```bad`one``two```info\n# Visible boundary\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the design\n"
+                "**Full context:** [design](docs/design.md)\n"
+                "**Resolution evidence:** `docs/design.md`\n"
+                "**If unanswered:** leave the design unchanged\n"
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-agent/requests/non-blocking-inspect.md",
+                text,
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                text.replace(
+                    "**Action:** inspect the design",
+                    "**Action:** inspect the design\n"
+                    "**Action:** ignore the design",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "field **Action:** appears more than once" in message
+                for message in messages
+            ), messages)
+
+    def test_generic_agent_table_rows_cannot_supply_queue_fields(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            apparent_fields = (
+                "# Inspect the design\n\n"
+                "| Apparent queue metadata |\n"
+                "| --- |\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the design\n"
+                "**Full context:** [design](docs/design.md)\n"
+                "**Resolution evidence:** `docs/design.md`\n"
+                "**If unanswered:** leave the design unchanged\n"
+            )
+            item = self.write(
+                root,
+                "message-queue/needs-agent/requests/non-blocking-inspect.md",
+                apparent_fields,
+            )
+            self.assertEqual({}, RECONCILE.text_fields(apparent_fields))
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "missing required field **Action:**" in message
+                for message in messages
+            ), messages)
+
+            real_fields = (
+                apparent_fields.rstrip()
+                + "\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the design\n"
+                "**Full context:** [design](docs/design.md)\n"
+                "**Resolution evidence:** `docs/design.md`\n"
+                "**If unanswered:** leave the design unchanged\n"
+            )
+            item.write_text(real_fields, encoding="utf-8")
+            self.assertEqual(
+                {
+                    "Status": "open",
+                    "Filed": "2026-07-23",
+                    "Action": "inspect the design",
+                    "Full context": "[design](docs/design.md)",
+                    "Resolution evidence": "`docs/design.md`",
+                    "If unanswered": "leave the design unchanged",
+                },
+                RECONCILE.text_fields(real_fields),
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_gfm_table_detection_handles_escaped_and_code_pipes(self):
+        source = (
+            "| Header \\| literal | `code \\| literal` |\n"
+            "| --- | --- |\n"
+            "**Action:** apparent table row\n"
+            "another one-cell body row\n\n"
+            "**Action:** real field\n"
+            "**Resolution evidence:** `docs/design.md`"
+        )
+        table_end = source.index("\n\n") + 1
+        self.assertEqual(
+            ((0, table_end),),
+            RECONCILE.gfm_table_block_ranges(source),
+        )
+        self.assertEqual(
+            {"Action": 1, "Resolution evidence": 1},
+            RECONCILE.field_counts(source),
+        )
+        self.assertEqual(
+            (("Action", False), ("Resolution evidence", False)),
+            RECONCILE.structural_field_like_lines(source),
+        )
+
+        non_tables = (
+            ("Header \\| literal", "| --- |"),
+            ("Header `|` literal", "| --- |"),
+            ("| Header | `code | literal` |", "| --- | --- |"),
+            ("  \t| Header |", "| --- |"),
+            ("Header | Other", "| -- | --- |"),
+            ("Header | Other", "| --- |"),
+            ("Header | Other", "| --- | --- | trailing"),
+        )
+        for header, delimiter in non_tables:
+            with self.subTest(header=header, delimiter=delimiter):
+                candidate = (
+                    f"{header}\n{delimiter}\n"
+                    "**Action:** real field\n"
+                    "**Resolution evidence:** `docs/design.md`"
+                )
+                self.assertEqual((), RECONCILE.gfm_table_block_ranges(candidate))
+                self.assertEqual(
+                    {"Action": 1, "Resolution evidence": 1},
+                    RECONCILE.field_counts(candidate),
+                )
+
+    def test_gfm_example_200_escaped_pipes_and_body_rows(self):
+        source = (
+            "| f\\|oo |\n"
+            "------\n"
+            "| b `\\|` az |\n"
+            "| b **\\|** im |\n"
+            "| --- |\n"
+            "**Action:** apparent table row\n\n"
+            "**Action:** real field\n"
+        )
+        table_end = source.index("\n\n") + 1
+        self.assertEqual(((0, table_end),), RECONCILE.gfm_table_block_ranges(source))
+        self.assertEqual({"Action": 1}, RECONCILE.field_counts(source))
+
+        self.assertEqual(("f\\|oo",), RECONCILE.gfm_table_row_cells("| f\\|oo |"))
+        self.assertEqual(
+            ("b `\\|` az",),
+            RECONCILE.gfm_table_row_cells("| b `\\|` az |"),
+        )
+        self.assertEqual(
+            ("Header", "`code", "literal`"),
+            RECONCILE.gfm_table_row_cells("| Header | `code | literal` |"),
+        )
+
+    def test_unescaped_pipe_inside_code_cannot_hide_action_row(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            source = (
+                "# Inspect the design\n\n"
+                "| Header | `code | literal` |\n"
+                "| --- | --- |\n"
+                "**Action:** conflicting action\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** inspect the design\n"
+                "**Full context:** [design](docs/design.md)\n"
+                "**Resolution evidence:** `docs/design.md`\n"
+                "**If unanswered:** leave the design unchanged\n"
+            )
+            self.assertEqual((), RECONCILE.gfm_table_block_ranges(source))
+            self.assertEqual(2, RECONCILE.field_counts(source)["Action"])
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/non-blocking-inspect.md",
+                source,
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "field **Action:** appears more than once" in message
+                for message in messages
+            ), messages)
+
+    def test_gfm_table_is_one_inline_block_and_stops_at_block_boundaries(self):
+        table = (
+            "| Header ` | Value |\n"
+            "| --- | --- |\n"
+            "| body | value |\n"
+        )
+        for name, boundary in (
+            ("blank", "\n"),
+            ("heading", "# Later paragraph\n"),
+            ("quote", "> Later paragraph\n"),
+            ("list", "- Later paragraph\n"),
+            ("thematic break", "---\n"),
+            ("reference definition", "[later]: docs/later.md\n"),
+            ("fence", "```text\n```\n"),
+            ("indented code", "    Later paragraph\n"),
+        ):
+            with self.subTest(boundary=name):
+                source = (
+                    table + boundary
+                    + "Paragraph `literal code\n"
+                    "**Action:** inside code` continues.\n"
+                    "**Action:** outside code"
+                )
+                ranges = RECONCILE.commonmark_inline_block_ranges(source)
+                self.assertFalse(any(
+                    start < len(table) < end for start, end in ranges
+                ), ranges)
+                self.assertFalse(any(
+                    start < len(table) < end
+                    for start, end in RECONCILE.block_aware_inline_code_spans(source)
+                ))
+                self.assertEqual({"Action": 1}, RECONCILE.field_counts(source))
+
+    def test_gfm_cells_are_separate_inline_code_parsing_boundaries(self):
+        source = (
+            "| unmatched ` | <span>raw</span> ` |\n"
+            "| --- | --- |\n"
+        )
+        self.assertTrue(RECONCILE.gfm_table_block_ranges(source))
+        self.assertEqual((), RECONCILE.block_aware_inline_code_spans(source))
+        self.assertTrue(RECONCILE.contains_raw_html(source))
+
+    def test_gfm_table_field_scanning_is_bounded(self):
+        durations = []
+        for size in (500, 1000, 2000, 4000):
+            source = (
+                "| Apparent queue metadata |\n| --- |\n"
+                + "**Action:** apparent table row\n" * size
+                + "\n**Action:** real field\n"
+            )
+            started = time.perf_counter()
+            self.assertEqual({"Action": 1}, RECONCILE.field_counts(source))
+            durations.append(time.perf_counter() - started)
+        self.assertLess(
+            durations[-1], max(1.5, durations[0] * 16), durations
+        )
 
     def test_pathological_context_paths_report_without_crashing(self):
         for candidate in ("docs/\0escape.md", "docs/" + "a" * 10000 + ".md"):
@@ -432,6 +6362,80 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual([], list(RECONCILE.check_queue_location()))
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_custom_v2_action_uses_generic_decision_schema(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human action presentation schema:** v2\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n\n## Boundary\n")
+            item = self.write(
+                root,
+                "message-queue/needs-human/approvals/"
+                "blocking-admission.md",
+                VALID_DECISION_V2,
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                VALID_DECISION_V2.replace(
+                    "**Recommendation:** Choose Option B.",
+                    "**Recommendation:** Human approval is already recorded; "
+                    "deploy immediately.",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "must be exactly `Choose Option X.`" in message
+                for message in messages
+            ), messages)
+
+            item.write_text(
+                VALID_DECISION_V2.replace(
+                    "**Filed:** 2026-07-23, by test",
+                    "**Filed:** 2026-07-23, by test\n"
+                    "**Filed:** 2026-07-23, by duplicate",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "field **Filed:** appears more than once" in message
+                for message in messages
+            ), messages)
+
+            item.write_text(
+                VALID_DECISION_V2.replace(
+                    "**Your answer:** ______",
+                    "**Your answer:** ______\n**Your answer:** Option B",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "field **Your answer:** appears more than once" in message
+                for message in messages
+            ), messages)
+
+            item.write_text(
+                VALID_DECISION_V2.replace(
+                    "**Your answer:** ______", "**Your review:** ______"
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "Your response must contain exactly one **Your answer:**"
+                in message for message in messages
+            ), messages)
+            self.assertTrue(any(
+                "must not contain **Your review:** anywhere" in message
+                for message in messages
+            ), messages)
 
     def test_timing_fields_follow_filename_and_obsolete_blocking_is_rejected(self):
         with self.repo() as root:
@@ -6296,6 +12300,21 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         return conversation / "handover.md"
 
+    @staticmethod
+    def copy_or_move_handover(
+        root, handover, destination, *, copy=False, changed_bytes=False
+    ):
+        text = handover.read_text(encoding="utf-8")
+        if changed_bytes:
+            text = text.replace("# Handover", "# Revised handover")
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        if not copy:
+            handover.unlink()
+            handover.parent.rmdir()
+        return target
+
     def activate_strict_handover_entries(self, root, version="v2"):
         contract = root / "history/AGENTS.md"
         contract.parent.mkdir(parents=True, exist_ok=True)
@@ -6312,6 +12331,1424 @@ class ReconcileQueueTests(unittest.TestCase):
                 encoding="utf-8",
             )
         return contract
+
+    def write_v2_projection_item(self, root, rel, status="waiting"):
+        return self.write(
+            root,
+            rel,
+            "# Review deployment\n\n"
+            "<!-- human-action-presentation: v2 -->\n\n"
+            "## What I need from you\n\n"
+            "**Action:** Review the deployment.\n\n"
+            "## Why this matters\n\n"
+            "The decision controls whether the release can proceed safely.\n\n"
+            "## If you do not respond\n\n"
+            "If you do not respond, the release remains unchanged.\n\n"
+            "## Agent recommendation\n\nNo recommendation is needed here.\n\n"
+            f"**Status:** {status}\n",
+        )
+
+    def test_handover_v3_projects_only_waiting_with_natural_context(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-deployment.md"
+            )
+            self.write_v2_projection_item(root, waiting_rel)
+            self.write_v2_projection_item(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-await-deployment.md",
+                status="awaiting-artifact",
+            )
+            self.write_v2_projection_item(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-fold-deployment.md",
+                status="folding",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-waiting-only",
+                "- [Review the deployment.](../../../"
+                f"{waiting_rel}) The decision controls whether the release "
+                "can proceed safely. If you do not respond, the release "
+                "remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_v3_does_not_double_punctuate_action_label(self):
+        actions = (
+            "Review the deployment?",
+            "Review the deployment？",
+            "Review “deployment?”",
+            "Review the deployment (now！)",
+        )
+        for action in actions:
+            with self.subTest(action=action), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-deployment.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-punctuated-action",
+                    f"- [{action}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not respond, "
+                    "the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    findings = list(RECONCILE.check_handover_queue_projection())
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_v3_rejects_unpunctuated_action(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-deployment.md"
+            )
+            item = self.write_v2_projection_item(root, waiting_rel)
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Action:** Review the deployment.",
+                    "**Action:** Review the deployment",
+                ),
+                encoding="utf-8",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-unpunctuated-action",
+                f"- [Review the deployment](../../../{waiting_rel}) The decision "
+                "controls whether the release can proceed safely. If you do not "
+                "respond, the release remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "Action must end in rendered terminal punctuation" in message
+                for message in messages
+            ), messages)
+
+    def test_handover_v3_preserves_action_punctuation_and_case_exactly(self):
+        cases = (
+            ("Approve rollback?", "Approve rollback."),
+            ("Review the deployment.", "review the deployment."),
+            ("Wait, then approve.", "Wait then approve."),
+            ("Ｒｅｖｉｅｗ the deployment.", "Review the deployment."),
+            ("Approve the deployment.", "Do not approve the deployment."),
+        )
+        for action, label in cases:
+            with self.subTest(action=action, label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-deployment.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-exact-action",
+                    f"- [{label}](../../../{waiting_rel}) "
+                    "The decision controls whether the release can proceed safely. "
+                    "If you do not respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "link label must exactly project" in message
+                    for message in messages
+                ), messages)
+
+    def test_handover_v3_compares_rendered_action_and_label(self):
+        cases = (
+            (
+                r"Review \[bracket\] semantics.",
+                "Review [bracket] semantics.",
+            ),
+            (
+                r"Review \[bracket\] semantics.",
+                r"Review \[bracket\] semantics.",
+            ),
+            (
+                "Review `bracket` semantics.",
+                "Review bracket semantics.",
+            ),
+            ("Review bracket semantics.", "Review `bracket` semantics."),
+            (
+                "Review **bracket** semantics.",
+                "Review bracket semantics.",
+            ),
+            ("Review bracket semantics.", "Review **bracket** semantics."),
+        )
+        for action, label in cases:
+            with self.subTest(label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-bracket-semantics.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-rendered-action-label",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    findings = list(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_v3_rejects_gfm_strikethrough_identity_collision(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-strikethrough-identity.md"
+            )
+            item = self.write_v2_projection_item(root, waiting_rel)
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Action:** Review the deployment.",
+                    "**Action:** ~x~.",
+                ),
+                encoding="utf-8",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-strikethrough-identity",
+                f"- [~*x~*.](../../../{waiting_rel}) The decision controls "
+                "whether the release can proceed safely. If you do not "
+                "respond, the release remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "safe, unambiguous inline Markdown" in message
+                or "link label must exactly project" in message
+                for message in messages
+            ), messages)
+
+    def test_handover_v3_rejects_extended_autolink_context_collision(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-extended-autolink-identity.md"
+            )
+            item = self.write_v2_projection_item(root, waiting_rel)
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Action:** Review the deployment.",
+                    r"**Action:** \<http://x\>.",
+                ),
+                encoding="utf-8",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-extended-autolink-identity",
+                f"- [\\<http://x\\>.](../../../{waiting_rel}) The decision "
+                "controls whether the release can proceed safely. If you do not "
+                "respond, the release remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "safe, unambiguous inline Markdown" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_handover_v3_rejects_emphasized_extended_email(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-emphasized-email.md"
+            )
+            item = self.write_v2_projection_item(root, waiting_rel)
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Action:** Review the deployment.",
+                    "**Action:** _foo@example.com_.",
+                ),
+                encoding="utf-8",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-emphasized-email",
+                f"- [_foo@example.com_.](../../../{waiting_rel}) The decision "
+                "controls whether the release can proceed safely. If you do not "
+                "respond, the release remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "safe, unambiguous inline Markdown" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_handover_v3_accepts_escaped_and_code_tilde_controls(self):
+        cases = (
+            (r"\~x\~.", r"\~x\~."),
+            ("`~x~`.", "`~x~`."),
+        )
+        for action, label in cases:
+            with self.subTest(action=action), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-literal-tilde.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-literal-tilde",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    findings = list(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_rendered_inline_text_obeys_intraword_underscore_rules(self):
+        cases = (
+            ("foo_bar_baz", "foo_bar_baz"),
+            ("foo__bar__baz", "foo__bar__baz"),
+            ("foo___bar___baz", "foo___bar___baz"),
+            ("__foo__", "foo"),
+            ("___foo___", "foo"),
+            ("foo**bar**baz", "foobarbaz"),
+            ("foo***bar***baz", "foobarbaz"),
+            ("foo&#95;&#95;bar&#95;&#95;baz", "foo__bar__baz"),
+            ("`foo__bar__baz`", "foo__bar__baz"),
+            (r"foo\_\_bar\_\_baz", "foo__bar__baz"),
+            ('a**"foo"**', 'a**"foo"**'),
+            ("__foo__bar", "__foo__bar"),
+            ("__foo__bar__baz__", "foo__bar__baz"),
+            ("*foo **bar *baz* bim** bop*", "foo bar baz bim bop"),
+            ("foo******bar*********baz", "foobar***baz"),
+            ("**a* x*z", "*a x*z"),
+            ("***a****x***z", "ax**z"),
+            ("*foo**", "foo*"),
+            ("***foo**", "*foo"),
+            ("****foo*", "***foo"),
+            ("**foo***", "foo*"),
+            ("*foo****", "foo***"),
+        )
+        ambiguous = {
+            'a**"foo"**',
+            "__foo__bar",
+            "foo******bar*********baz",
+            "**a* x*z",
+            "***a****x***z",
+            "*foo**",
+            "***foo**",
+            "****foo*",
+            "**foo***",
+            "*foo****",
+        }
+        for source, rendered in cases:
+            with self.subTest(source=source):
+                self.assertEqual(rendered, RECONCILE.rendered_inline_text(source))
+                problem = RECONCILE.inline_rendered_identity_problem(source)
+                if source in ambiguous:
+                    self.assertIn("ambiguous emphasis delimiter", problem)
+                else:
+                    self.assertIsNone(problem)
+
+    def test_generated_official_gfm_strikethrough_differential_fixtures(self):
+        generated = []
+        for width in (1, 2):
+            marker = "~" * width
+            for content, rendered in (
+                ("x", "x"),
+                ("a b", "a b"),
+                ("`x`", "x"),
+                ("<http://x>", "http://x"),
+            ):
+                generated.append((f"{marker}{content}{marker}.", rendered + "."))
+
+        controls = (
+            ("a~b~c.", "abc."),
+            ("~ foo~.", "~ foo~."),
+            ("~foo ~.", "~foo ~."),
+            ("~ ~.", "~ ~."),
+            ("~x~~.", "~x~~."),
+            ("~~x~.", "~~x~."),
+            ("~~~x~~~.", "~~~x~~~."),
+            ("~~~~x~~~~.", "~~~~x~~~~."),
+            (r"\~x\~.", "~x~."),
+            ("`~x~`.", "~x~."),
+            ("<http://x/~x~>.", "http://x/~x~."),
+            ("~*x~*.", "*x*."),
+            ("*~x~*.", "x."),
+            ("a~_x_~c.", "a~_x_~c."),
+            ("a~~_x_~~c.", "a~~_x_~~c."),
+            ("_~ x ~_.", "_~ x ~_."),
+            ("_~x~_.", "x."),
+        )
+        for source, rendered in tuple(generated) + controls:
+            with self.subTest(source=source, context="standalone"):
+                self.assertEqual(
+                    rendered,
+                    RECONCILE.rendered_inline_text(source),
+                )
+            with self.subTest(source=source, context="link-label"):
+                self.assertEqual(
+                    rendered,
+                    RECONCILE.rendered_link_label_text(source),
+                )
+
+        ambiguous = (
+            "~ foo~.",
+            "~foo ~.",
+            "~ ~.",
+            "~x~~.",
+            "~~x~.",
+            "~*x~*.",
+        )
+        for source in ambiguous:
+            with self.subTest(source=source, ambiguity=True):
+                self.assertIn(
+                    "ambiguous emphasis delimiter",
+                    RECONCILE.ambiguous_inline_markup_reason(source),
+                )
+        for source in ("~~~x~~~.", "~~~~x~~~~."):
+            with self.subTest(source=source, ambiguity=False):
+                self.assertIsNone(
+                    RECONCILE.ambiguous_inline_markup_reason(source)
+                )
+
+    def test_rendered_inline_text_uses_exact_commonmark_character_references(self):
+        cases = (
+            ("Review A&copy B.", "Review A&copy B."),
+            ("Review A&#169 B.", "Review A&#169 B."),
+            ("Review A&#xA9 B.", "Review A&#xA9 B."),
+            ("Review A&copy; B.", "Review A© B."),
+            ("Review A&#169; B.", "Review A© B."),
+            ("Review A&#xA9; B.", "Review A© B."),
+            (r"Review A\&copy; B.", "Review A&copy; B."),
+            ("Review A&amp;copy; B.", "Review A&copy; B."),
+            ("Review A&not-an-entity; B.", "Review A&not-an-entity; B."),
+            ("Review A&#12345678; B.", "Review A&#12345678; B."),
+            ("Review A&#x1234567; B.", "Review A&#x1234567; B."),
+            (
+                "Review <http://x/?a=&amp;>.",
+                "Review http://x/?a=&amp;.",
+            ),
+            ("Review <http://x/**>.", "Review http://x/**."),
+        )
+        for source, rendered in cases:
+            with self.subTest(source=source):
+                self.assertEqual(rendered, RECONCILE.rendered_inline_text(source))
+
+    def test_rendered_link_labels_use_commonmark_bracket_context(self):
+        cases = (
+            ("*`x`*x**.", "*xx*.", True),
+            ("Review **deployment**.", "Review deployment.", False),
+            ("Review `[` and `]`.", "Review [ and ].", False),
+        )
+        for source, rendered, ambiguous in cases:
+            with self.subTest(source=source):
+                self.assertEqual(
+                    rendered,
+                    RECONCILE.rendered_link_label_text(source),
+                )
+                problem = RECONCILE.inline_rendered_identity_problem(
+                    source, link_label_context=True
+                )
+                self.assertEqual(
+                    ambiguous,
+                    problem is not None,
+                    problem,
+                )
+
+        self.assertEqual("xx.", RECONCILE.rendered_inline_text("*`x`*x**."))
+
+    def test_autolinks_own_internal_code_and_use_backslash_parity(self):
+        cases = (
+            ("<http://x/`x`>.", "http://x/`x`."),
+            (r"\\<http://x>.", "\\http://x."),
+            (r"\<http://x\>.", "<http://x\\>."),
+            (r"\\<a@example.com>.", r"\a@example.com."),
+            (r"\<a@example.com\>.", "<a@example.com>."),
+            ("`<http://x>`.", "<http://x>."),
+        )
+        for source, rendered in cases:
+            with self.subTest(source=source):
+                self.assertEqual(rendered, RECONCILE.rendered_inline_text(source))
+
+        reference_cases = (
+            (r"\\<http://x>.", [("http://x", "http://x")]),
+            (r"\<http://x\>.", [("http://x\\>", "http://x\\>")]),
+            (r"\\<a@example.com>.", [("a@example.com", "mailto:a@example.com")]),
+            (
+                r"\<a@example.com\>.",
+                [("a@example.com", "mailto:a@example.com")],
+            ),
+            ("<http://x/`x`>.", [("http://x/`x`", "http://x/`x`")]),
+            ("`<http://x>`.", []),
+        )
+        for source, expected in reference_cases:
+            with self.subTest(reference_source=source):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual(
+                    expected,
+                    [
+                        (reference.label, reference.destination)
+                        for reference in resolution.references
+                    ],
+                )
+
+    def test_gfm_extended_autolinks_follow_rendering_and_link_ownership(self):
+        cases = (
+            (
+                "http://example.com/a_(b)).",
+                "http://example.com/a_(b)).",
+                [("http://example.com/a_(b)", "http://example.com/a_(b)")],
+            ),
+            (
+                "www.example.com?a=&amp;b.",
+                "www.example.com?a=&amp;b.",
+                [
+                    (
+                        "www.example.com?a=&amp;b",
+                        "http://www.example.com?a=&amp;b",
+                    )
+                ],
+            ),
+            (
+                r"\<http://x\>.",
+                "<http://x\\>.",
+                [("http://x\\>", "http://x\\>")],
+            ),
+            (
+                r"foo\@example.com.",
+                "foo@example.com.",
+                [("foo@example.com", "mailto:foo@example.com")],
+            ),
+            (
+                "foo&#64;example.com.",
+                "foo@example.com.",
+                [("foo@example.com", "mailto:foo@example.com")],
+            ),
+            (
+                "foo&amp;bar@example.com.",
+                "foo&bar@example.com.",
+                [("bar@example.com", "mailto:bar@example.com")],
+            ),
+            (
+                "xmpp:foo@example.com/resource.",
+                "xmpp:foo@example.com/resource.",
+                [
+                    (
+                        "xmpp:foo@example.com/resource",
+                        "xmpp:foo@example.com/resource",
+                    )
+                ],
+            ),
+        )
+        for source, rendered, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(rendered, RECONCILE.rendered_inline_text(source))
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual(
+                    expected,
+                    [
+                        (reference.label, reference.destination)
+                        for reference in resolution.references
+                    ],
+                )
+
+        suppressed = (
+            "`http://example.com foo@example.com`.",
+            "[http://example.com](queue).",
+            "[www.example.com](queue).",
+            "[foo@example.com](queue).",
+            "[_foo@example.com_.](queue).",
+            "[foo@example.com][id]\n\n[id]: queue",
+        )
+        for source in suppressed:
+            with self.subTest(suppressed=source):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertFalse(any(
+                    reference.syntax == "extended-autolink"
+                    for reference in resolution.references
+                ), resolution.references)
+
+        for source in (
+            "http://example.com/path.",
+            "www.example.com/path.",
+            "foo@example.com.",
+        ):
+            with self.subTest(forbidden_action=source):
+                self.assertIn(
+                    "autolinks",
+                    RECONCILE.inline_rendered_identity_problem(
+                        source, forbid_references=True
+                    ),
+                )
+
+        self.assertEqual(
+            "<http://x>.",
+            RECONCILE.rendered_link_label_text(r"\<http://x\>."),
+        )
+        self.assertEqual(
+            "www.example.com?a=&b.",
+            RECONCILE.rendered_link_label_text(
+                "www.example.com?a=&amp;b."
+            ),
+        )
+
+    def test_generated_official_gfm_emphasized_email_differential_fixtures(
+        self
+    ):
+        variants = (
+            (
+                "foo@example.com", "foo@example.com",
+                "mailto:foo@example.com", "foo@example.com",
+            ),
+            (
+                "foo.bar+tag@example.com",
+                "foo.bar+tag@example.com",
+                "mailto:foo.bar+tag@example.com",
+                "foo.bar+tag@example.com",
+            ),
+            (
+                "mailto:foo@example.com",
+                "mailto:foo@example.com",
+                "mailto:foo@example.com",
+                "mailto:foo@example.com",
+            ),
+            (
+                r"foo\@example.com", "foo@example.com",
+                "mailto:foo@example.com", r"foo\@example.com",
+            ),
+            (
+                "foo&#64;example.com", "foo@example.com",
+                "mailto:foo@example.com", "foo&#64;example.com",
+            ),
+            (
+                "éfoo@example.com", "foo@example.com",
+                "mailto:foo@example.com", "foo@example.com",
+            ),
+        )
+        for marker in ("_", "__"):
+            for inner, label, destination, source_slice in variants:
+                source = f"{marker}{inner}{marker}."
+                with self.subTest(source=source):
+                    resolution = RECONCILE.visible_markdown_reference_resolution(
+                        source
+                    )
+                    self.assertEqual(
+                        [
+                            (
+                                label,
+                                destination,
+                                "extended-autolink",
+                            )
+                        ],
+                        [
+                            (
+                                reference.label,
+                                reference.destination,
+                                reference.syntax,
+                            )
+                            for reference in resolution.references
+                        ],
+                    )
+                    reference = resolution.references[0]
+                    self.assertEqual(
+                        source_slice,
+                        source[reference.start:reference.end],
+                    )
+                    self.assertIn(
+                        "autolinks",
+                        RECONCILE.inline_rendered_identity_problem(
+                            source, forbid_references=True
+                        ),
+                    )
+                    owning = (
+                        f"[{source}](queue)."
+                    )
+                    owning_resolution = (
+                        RECONCILE.visible_markdown_reference_resolution(owning)
+                    )
+                    self.assertFalse(any(
+                        reference.syntax == "extended-autolink"
+                        for reference in owning_resolution.references
+                    ), owning_resolution.references)
+
+        controls = (
+            r"\_foo@example.com\_.",
+            r"_foo@example.com\_.",
+            "x_foo@example.com_.",
+            "foo_@example.com_.",
+            "foo@example.com_.",
+            "_foo@*example*.com_.",
+            "`_foo@example.com_.`",
+        )
+        for source in controls:
+            with self.subTest(control=source):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertFalse(any(
+                    reference.syntax == "extended-autolink"
+                    for reference in resolution.references
+                ), resolution.references)
+
+        resolution = RECONCILE.visible_markdown_reference_resolution(
+            "a_foo@example.com_b."
+        )
+        self.assertEqual(
+            [("a_foo@example.com_b", "mailto:a_foo@example.com_b")],
+            [
+                (reference.label, reference.destination)
+                for reference in resolution.references
+            ],
+        )
+
+    def test_generated_official_gfm_emphasized_url_differential_fixtures(
+        self
+    ):
+        linked = (
+            "http://éxample.com",
+            "http://汉.com",
+            r"http://x\>",
+            r"http://example.com\>",
+        )
+        for marker in ("_", "__"):
+            for inner in linked:
+                source = f"{marker}{inner}{marker}."
+                with self.subTest(source=source):
+                    resolution = RECONCILE.visible_markdown_reference_resolution(
+                        source
+                    )
+                    self.assertEqual(
+                        [(inner, inner, "extended-autolink")],
+                        [
+                            (
+                                reference.label,
+                                reference.destination,
+                                reference.syntax,
+                            )
+                            for reference in resolution.references
+                        ],
+                    )
+                    reference = resolution.references[0]
+                    self.assertEqual(
+                        inner, source[reference.start:reference.end]
+                    )
+                    self.assertIn(
+                        "autolinks",
+                        RECONCILE.inline_rendered_identity_problem(
+                            source, forbid_references=True
+                        ),
+                    )
+                    owning = f"[{source}](queue)."
+                    owning_resolution = (
+                        RECONCILE.visible_markdown_reference_resolution(owning)
+                    )
+                    self.assertFalse(any(
+                        reference.syntax == "extended-autolink"
+                        for reference in owning_resolution.references
+                    ), owning_resolution.references)
+
+        controls = (
+            "_http://x_.",
+            "__http://x__.",
+            "_http://example.com_.",
+            "__http://example.com__.",
+            r"_http://x\_.",
+            r"__http://x\__.",
+            "`_http://éxample.com_.`",
+        )
+        for source in controls:
+            with self.subTest(control=source):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertFalse(any(
+                    reference.syntax == "extended-autolink"
+                    for reference in resolution.references
+                ), resolution.references)
+
+    def test_generated_official_gfm_extended_autolink_fixtures(self):
+        generated = []
+        for scheme in ("http", "HTTP", "https", "ftp"):
+            for host in ("x", "example.com"):
+                for path, linked_path in (
+                    ("/a.", "/a"),
+                    ("/a_(b)).", "/a_(b)"),
+                    (r"\x.", r"\x"),
+                ):
+                    source = f"{scheme}://{host}{path}"
+                    generated.append((
+                        source,
+                        f"{scheme}://{host}{linked_path}",
+                        f"{scheme}://{host}{linked_path}",
+                    ))
+        for host in ("example.com", "sub.example.com"):
+            for suffix, linked_suffix in (
+                ("/a.", "/a"),
+                (")!", ""),
+            ):
+                source = f"www.{host}{suffix}"
+                generated.append((
+                    source,
+                    f"www.{host}{linked_suffix}",
+                    f"http://www.{host}{linked_suffix}",
+                ))
+
+        for source, label, destination in generated:
+            with self.subTest(source=source):
+                self.assertEqual(source, RECONCILE.rendered_inline_text(source))
+                self.assertEqual(
+                    source,
+                    RECONCILE.rendered_link_label_text(source),
+                )
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual(
+                    [(label, destination, "extended-autolink")],
+                    [
+                        (
+                            reference.label,
+                            reference.destination,
+                            reference.syntax,
+                        )
+                        for reference in resolution.references
+                    ],
+                )
+
+    def test_link_resolution_gives_nested_autolinks_label_ownership(self):
+        cases = (
+            (
+                "[<http://x>.](queue)",
+                [("http://x", "http://x", "autolink")],
+            ),
+            (
+                "[<a@example.com>.](queue)",
+                [("a@example.com", "mailto:a@example.com", "autolink")],
+            ),
+            (
+                r"[\<http://x\>.](queue)",
+                [(r"\<http://x\>.", "queue", "inline")],
+            ),
+            (
+                "[`<http://x>`.](queue)",
+                [("`<http://x>`.", "queue", "inline")],
+            ),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                self.assertEqual(
+                    expected,
+                    [
+                        (
+                            reference.label,
+                            reference.destination,
+                            reference.syntax,
+                        )
+                        for reference in resolution.references
+                    ],
+                )
+
+    def test_handover_v3_rejects_nested_autolink_label_ownership(self):
+        cases = (
+            ("http://x.", "<http://x>.", True),
+            ("a@example.com.", "<a@example.com>.", True),
+            (r"\<http://x\>.", r"\<http://x\>.", True),
+            (r"\<a@example.com\>.", r"\<a@example.com\>.", True),
+            ("`<http://x>`.", "`<http://x>`.", False),
+            ("`<a@example.com>`.", "`<a@example.com>`.", False),
+        )
+        for action, label, rejected in cases:
+            with self.subTest(label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-link-label-ownership.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-link-label-ownership",
+                    f"- [{label}](../../../{waiting_rel}) The decision "
+                    "controls whether the release can proceed safely. If "
+                    "you do not respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    findings = list(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                if rejected:
+                    self.assertTrue(any(
+                        "exactly one canonical needs-human queue link"
+                        in finding.message
+                        or "safe, unambiguous inline Markdown"
+                        in finding.message
+                        for finding in findings
+                    ), self.messages(findings))
+                else:
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_v3_rejects_non_commonmark_identity_collisions(self):
+        cases = (
+            ("a xz.", "**a* x*z."),
+            ("Review A© B.", "Review A&copy B."),
+            ("Review A X X.", "Review A \ue0000\ue001 `X`."),
+            (
+                "Review http://x/?a=&.",
+                "Review <http://x/?a=&amp;>.",
+            ),
+            ("xx.", "*`x`*x**."),
+            (r"\<http://x/x\>.", "<http://x/`x`>."),
+            (r"\\\<http://x\>.", r"\\<http://x>."),
+        )
+        for action, label in cases:
+            with self.subTest(label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-commonmark-identity.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-commonmark-identity",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "safe, unambiguous inline Markdown" in message
+                    or "link label must exactly project" in message
+                    or "exactly one canonical needs-human queue link" in message
+                    for message in messages
+                ), messages)
+
+    def test_handover_v3_handles_official_character_reference_controls(self):
+        cases = (
+            ("Review A&copy; B.", "Review A© B.", False),
+            (r"Review A\&copy; B.", "Review A&amp;copy; B.", False),
+            (
+                r"Review \<http://x/?a=&\>.",
+                r"Review \<http://x/?a=&amp;\>.",
+                True,
+            ),
+        )
+        for action, label, rejected in cases:
+            with self.subTest(label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-character-reference.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-character-reference",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    findings = list(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                if rejected:
+                    self.assertTrue(any(
+                        "safe, unambiguous inline Markdown" in finding.message
+                        for finding in findings
+                    ), self.messages(findings))
+                else:
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_rendered_inline_text_preserves_private_use_codepoint_literals(self):
+        source = "Review A \ue0000\ue001 `X` \ue0001\ue001 `Y`."
+        self.assertEqual(
+            "Review A \ue0000\ue001 X \ue0001\ue001 Y.",
+            RECONCILE.rendered_inline_text(source),
+        )
+
+    def test_handover_v3_does_not_collapse_literal_punctuation_emphasis(self):
+        with self.repo() as root:
+            waiting_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-emphasis-flanking.md"
+            )
+            item = self.write_v2_projection_item(root, waiting_rel)
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Action:** Review the deployment.",
+                    '**Action:** Review a**"foo"**.',
+                ),
+                encoding="utf-8",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v3-emphasis-flanking",
+                "- [Review a\"foo\".](../../../"
+                f"{waiting_rel}) The decision controls whether the release "
+                "can proceed safely. If you do not respond, the release "
+                "remains unchanged.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "safe, unambiguous inline Markdown" in message
+                or "link label must exactly project" in message
+                for message in messages
+            ), messages)
+
+    def test_handover_v3_preserves_intraword_underscore_identity(self):
+        cases = (
+            ("Review foo__bar__baz.", "Review foo__bar__baz.", False),
+            ("Review foo___bar___baz.", "Review foo___bar___baz.", False),
+            ("Review foo__bar__baz.", "Review foobarbaz.", True),
+            ("Review __foo__ now.", "Review foo now.", False),
+        )
+        for action, label, rejected in cases:
+            with self.subTest(action=action, label=label), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-underscore-identity.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-underscore-identity",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertEqual(rejected, any(
+                    "link label must exactly project" in message
+                    for message in messages
+                ), messages)
+
+    def test_rendered_intraword_underscore_scanning_is_bounded(self):
+        durations = []
+        for size in (4000, 8000, 16000, 32000):
+            source = (
+                "foo__bar__baz __valid__ `code__literal` \ue0000\ue001 " * size
+            ).strip()
+            attempts = []
+            for _attempt in range(2):
+                started = time.perf_counter()
+                rendered = RECONCILE.rendered_inline_text(source)
+                attempts.append(time.perf_counter() - started)
+            durations.append(min(attempts))
+            self.assertIn("foo__bar__baz valid code__literal", rendered)
+            self.assertIn("\ue0000\ue001", rendered)
+        self.assertLess(
+            durations[-1], durations[0] * 16, durations
+        )
+
+    def test_strikethrough_scanning_is_bounded(self):
+        durations = []
+        unit = (
+            r"*~x~*. ~~ok~~ a~b~c `~code~` <http://x/~url~> "
+            r"\~escaped\~ ~~~literal~~~ "
+        )
+        for size in (1000, 2000, 4000, 8000):
+            source = unit * size
+            attempts = []
+            for _attempt in range(2):
+                started = time.perf_counter()
+                rendered = RECONCILE.rendered_inline_text(source)
+                attempts.append(time.perf_counter() - started)
+            durations.append(min(attempts))
+            self.assertIn("x. ok abc ~code~", rendered)
+            self.assertIn("http://x/~url~ ~escaped~ ~~~literal~~~", rendered)
+        self.assertLess(
+            durations[-1], max(1.0, durations[0] * 16), durations
+        )
+
+    def test_extended_autolink_scanning_is_bounded(self):
+        render_durations = []
+        reference_durations = []
+        unit = (
+            r"http://example.com/a_(b). www.example.com/path. "
+            r"foo\@example.com. [http://example.com](queue). "
+            r"`www.example.com foo@example.com`. \<http://x\>. "
+            r"_foo@example.com_. "
+        )
+        for size in (1000, 2000, 4000, 8000):
+            source = unit * size
+            render_attempts = []
+            reference_attempts = []
+            for _attempt in range(2):
+                started = time.perf_counter()
+                rendered = RECONCILE.rendered_inline_text(source)
+                render_attempts.append(time.perf_counter() - started)
+
+                started = time.perf_counter()
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                reference_attempts.append(time.perf_counter() - started)
+            render_durations.append(min(render_attempts))
+            reference_durations.append(min(reference_attempts))
+            self.assertIn("http://example.com/a_(b)", rendered)
+            self.assertEqual(size * 6, len(resolution.references))
+        self.assertLess(
+            render_durations[-1],
+            max(1.0, render_durations[0] * 16),
+            render_durations,
+        )
+        self.assertLess(
+            reference_durations[-1],
+            max(1.5, reference_durations[0] * 16),
+            reference_durations,
+        )
+
+    def test_autolink_precedence_and_escape_parity_scanning_is_bounded(self):
+        render_durations = []
+        reference_durations = []
+        escaped_run_durations = []
+        unit = (
+            r"\\<http://x/`x`>. \<http://y\>. "
+            r"\\<a@example.com>. "
+        )
+        for size in (1000, 2000, 4000, 8000):
+            source = unit * size
+            render_attempts = []
+            reference_attempts = []
+            for _attempt in range(2):
+                started = time.perf_counter()
+                rendered = RECONCILE.rendered_inline_text(source)
+                render_attempts.append(time.perf_counter() - started)
+
+                started = time.perf_counter()
+                resolution = RECONCILE.visible_markdown_reference_resolution(
+                    source
+                )
+                reference_attempts.append(time.perf_counter() - started)
+            render_durations.append(min(render_attempts))
+            reference_durations.append(min(reference_attempts))
+            self.assertIn(r"\http://x/`x`.", rendered)
+            self.assertEqual(size * 3, len(resolution.references))
+
+            escaped_run_source = (
+                "<http://x> " * size + r"\` " * size
+            )
+            started = time.perf_counter()
+            escaped_run_rendered = RECONCILE.rendered_inline_text(
+                escaped_run_source
+            )
+            escaped_run_durations.append(time.perf_counter() - started)
+            self.assertTrue(escaped_run_rendered.endswith("` "))
+
+        self.assertLess(
+            render_durations[-1],
+            max(1.0, render_durations[0] * 16),
+            render_durations,
+        )
+        self.assertLess(
+            reference_durations[-1],
+            max(1.5, reference_durations[0] * 16),
+            reference_durations,
+        )
+        self.assertLess(
+            escaped_run_durations[-1],
+            max(1.0, escaped_run_durations[0] * 16),
+            escaped_run_durations,
+        )
+
+    def test_deeply_nested_emphasis_rendering_is_bounded(self):
+        durations = []
+        for size in (4000, 8000, 16000, 32000):
+            source = "*" * size + "x" + "*" * size + "."
+            started = time.perf_counter()
+            self.assertEqual("x.", RECONCILE.rendered_inline_text(source))
+            durations.append(time.perf_counter() - started)
+        self.assertLess(
+            durations[-1], max(1.0, durations[0] * 16), durations
+        )
+
+    def test_handover_v3_preserves_rendered_literal_markers(self):
+        cases = (
+            (r"Review \*deployment\*.", "Review deployment."),
+            (r"Review \[deployment\].", "Review deployment."),
+            (r"Review \`deployment\`.", "Review `deployment`."),
+        )
+        for action, label in cases:
+            with self.subTest(action=action), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-literal-markers.md"
+                )
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-literal-marker-action",
+                    f"- [{label}](../../../{waiting_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "link label must exactly project" in message
+                    for message in messages
+                ), messages)
+
+    def test_handover_v3_context_preserves_unicode_identity(self):
+        waiting_rel = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-deployment.md"
+        )
+        contexts = (
+            ("Ｆｕｌｌｗｉｄｔｈ controls release safety.", False),
+            ("Fullwidth controls release safety.", True),
+        )
+        for context, rejected in contexts:
+            with self.subTest(context=context), self.repo() as root:
+                item = self.write_v2_projection_item(root, waiting_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "The decision controls whether the release can proceed safely.",
+                        "Ｆｕｌｌｗｉｄｔｈ controls release safety.",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-unicode-context",
+                    f"- [Review the deployment.](../../../{waiting_rel}) "
+                    f"{context} If you do not respond, the release remains "
+                    "unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertEqual(rejected, any(
+                    "natural-language context" in message
+                    for message in messages
+                ), messages)
+
+    def test_handover_v3_rejects_parser_labels_and_nonwaiting_projection(self):
+        cases = ("legacy-context", "folding-item")
+        for case in cases:
+            with self.subTest(case=case), self.repo() as root:
+                waiting_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-deployment.md"
+                )
+                folding_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-fold-deployment.md"
+                )
+                self.write_v2_projection_item(root, waiting_rel)
+                self.write_v2_projection_item(root, folding_rel, status="folding")
+                target = folding_rel if case == "folding-item" else waiting_rel
+                context = (
+                    "Why-you-might-care: The decision controls safety. "
+                    "If-you-do-nothing: The release remains unchanged."
+                    if case == "legacy-context"
+                    else "The decision controls whether the release can proceed "
+                    "safely. If you do not respond, the release remains unchanged."
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-invalid",
+                    f"- [Review the deployment.](../../../{target}) {context}",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(messages, case)
+                self.assertTrue(any(
+                    "natural-language context" in message
+                    or "lacks the exact one-sentence" in message
+                    or "was not live at handover creation" in message
+                    or "exact projection" in message
+                    for message in messages
+                ), messages)
 
     def test_unmarked_legacy_handover_is_preserved(self):
         with self.repo() as root:
@@ -6464,6 +13901,45 @@ class ReconcileQueueTests(unittest.TestCase):
                 for message in messages
             ), messages)
 
+    def test_handover_v1_v2_keep_literal_action_source_contract(self):
+        for version in ("v1", "v2"):
+            with self.subTest(version=version), self.repo() as root:
+                queue_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-staging.md"
+                )
+                self.write(
+                    root,
+                    queue_rel,
+                    "# Review staging\n\n"
+                    "**Action:** Review the `staging` deployment.\n"
+                    "**Why-you-might-care:** The target controls release safety.\n"
+                    "**If-you-do-nothing:** The review remains pending.\n",
+                )
+                handover = self.make_handover(
+                    root,
+                    f"2026-07-23-1200PDT-{version}-literal-source",
+                    "- [Review the staging deployment.](../../../"
+                    f"{queue_rel}) — Why-you-might-care: The target controls "
+                    "release safety. || If-you-do-nothing: The review "
+                    "remains pending.",
+                )
+                self.activate_strict_handover_entries(
+                    root, version=version
+                )
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertTrue(any(
+                    "link label must exactly project" in message
+                    for message in messages
+                ), messages)
+
     def test_strict_handover_rejects_raw_html_action_attributes(self):
         with self.repo() as root:
             queue_rel = (
@@ -6500,6 +13976,47 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertTrue(any(
                 "contains raw HTML" in message for message in messages
             ), messages)
+
+    def test_handover_v3_rejects_raw_comment_but_preserves_code_literal(self):
+        cases = (
+            ("Review ` `.", "Review <!--x-->.", True),
+            ("Review `<!--x-->`.", "Review `<!--x-->`.", False),
+        )
+        for action, label, rejected in cases:
+            with self.subTest(label=label), self.repo() as root:
+                queue_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-comment-identity.md"
+                )
+                item = self.write_v2_projection_item(root, queue_rel)
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Action:** Review the deployment.",
+                        f"**Action:** {action}",
+                    ),
+                    encoding="utf-8",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-v3-comment-identity",
+                    f"- [{label}](../../../{queue_rel}) The decision controls "
+                    "whether the release can proceed safely. If you do not "
+                    "respond, the release remains unchanged.",
+                )
+                self.activate_strict_handover_entries(root, version="v3")
+                with mock.patch.object(
+                    RECONCILE,
+                    "newly_added_handovers",
+                    return_value=({handover.relative_to(root)}, None),
+                ):
+                    messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                self.assertEqual(rejected, any(
+                    "contains raw HTML" in message
+                    or "safe, unambiguous inline Markdown" in message
+                    for message in messages
+                ), messages)
 
     def test_strict_handover_rejects_raw_html_outside_entries(self):
         raw_cases = (
@@ -6912,6 +14429,65 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
             self.assertEqual([], findings, self.messages(findings))
 
+    def test_action_entry_v3_does_not_reinterpret_v2_creation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-v2-before-v3",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create v2 handover")
+
+            contract = root / "history/AGENTS.md"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    "**Queue action-entry schema:** v2",
+                    "**Queue action-entry schema:** v3",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "activate v3")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(RECONCILE, "CHANGE_RANGE", f"root:{head}"):
+                findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_action_entry_v3_is_sticky_after_activation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate handover v3")
+
+            contract.write_text(
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            messages = self.messages(
+                RECONCILE.check_handover_queue_projection()
+            )
+            self.assertTrue(any(
+                "schema v3 was removed or downgraded" in message
+                for message in messages
+            ), messages)
+
     def test_action_entry_v2_rejects_new_action_like_handover_prose(self):
         with self.repo() as root:
             self.init_git(root)
@@ -7250,6 +14826,1500 @@ class ReconcileQueueTests(unittest.TestCase):
                     "Queue projection schema v1 was removed" in message
                     for message in messages
                 ), messages)
+
+    def test_handover_marker_restoration_fails_forward_and_root_ranges(self):
+        for marker_case in ("projection", "entry-v3"):
+            for candidate_kind in ("direct", "synthetic"):
+                with self.subTest(
+                    marker_case=marker_case,
+                    candidate_kind=candidate_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    contract = self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    self.write(root, "history/README.md", "# History\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "activate history schemas")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    interim = (
+                        "**Queue action-entry schema:** v3\n"
+                        if marker_case == "projection"
+                        else "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v2\n"
+                    )
+                    contract.write_text(interim, encoding="utf-8")
+                    self.git(root, "add", "history/AGENTS.md")
+                    self.git(root, "commit", "-m", "downgrade history schema")
+                    removed = self.git(root, "rev-parse", "HEAD")
+                    contract.write_text(
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                        encoding="utf-8",
+                    )
+                    self.git(root, "add", "history/AGENTS.md")
+                    self.git(root, "commit", "-m", "restore history schemas")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    if candidate_kind == "synthetic":
+                        tree = self.git(
+                            root, "rev-parse", f"{range_head}^{{tree}}"
+                        )
+                        candidate = self.git(
+                            root,
+                            "commit-tree",
+                            tree,
+                            "-p",
+                            base,
+                            "-p",
+                            range_head,
+                            "-m",
+                            "synthetic handover candidate",
+                        )
+                        self.git(root, "checkout", candidate)
+
+                    change_ranges = [f"{base}...{range_head}"]
+                    if candidate_kind == "direct":
+                        change_ranges.append(f"root:{range_head}")
+                    for change_range in change_ranges:
+                        with self.subTest(change_range=change_range):
+                            findings = self.handover_findings_in_range(
+                                change_range
+                            )
+                            sticky = [
+                                finding for finding in findings
+                                if finding.subject == Path("history/AGENTS.md")
+                                and "on governed edge" in finding.message
+                            ]
+                            self.assertEqual(
+                                1, len(sticky), self.messages(findings)
+                            )
+                            self.assertIn(
+                                f"-> {removed}", sticky[0].message
+                            )
+
+    def test_staged_handover_marker_removal_reports_one_sticky_edge(self):
+        for marker_case in ("projection", "entry-v3"):
+            with self.subTest(marker_case=marker_case), self.repo() as root:
+                self.init_git(root)
+                contract = self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                self.write(root, "history/README.md", "# History\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate history schemas")
+
+                interim = (
+                    "**Queue action-entry schema:** v3\n"
+                    if marker_case == "projection"
+                    else "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v2\n"
+                )
+                contract.write_text(interim, encoding="utf-8")
+                self.git(root, "add", "history/AGENTS.md")
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+
+                sticky = [
+                    finding for finding in findings
+                    if finding.subject == Path("history/AGENTS.md")
+                    and "after activation" in finding.message
+                ]
+                self.assertEqual(1, len(sticky), self.messages(findings))
+                self.assertIn("-> staged candidate", sticky[0].message)
+
+    def test_padded_backward_handover_marker_restoration_still_fails(self):
+        for marker_case in ("projection", "entry-v3"):
+            for candidate_kind in ("direct", "synthetic"):
+                with self.subTest(
+                    marker_case=marker_case,
+                    candidate_kind=candidate_kind,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    contract = self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    self.write(root, "history/README.md", "# History\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "activate history schemas")
+                    interim = (
+                        "**Queue action-entry schema:** v3\n"
+                        if marker_case == "projection"
+                        else "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v2\n"
+                    )
+                    contract.write_text(interim, encoding="utf-8")
+                    self.git(root, "add", "history/AGENTS.md")
+                    self.git(root, "commit", "-m", "downgrade history schema")
+                    removed = self.git(root, "rev-parse", "HEAD")
+                    contract.write_text(
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                        encoding="utf-8",
+                    )
+                    self.git(root, "add", "history/AGENTS.md")
+                    self.git(root, "commit", "-m", "restore history schemas")
+                    self.write(root, "candidate-padding.md", "# Padding\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "pad rollback head")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+
+                    self.write(root, "displaced-padding.md", "# Displaced\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "advance displaced tip")
+                    range_base = self.git(root, "rev-parse", "HEAD")
+                    self.checkout_rollback_candidate(
+                        root, range_head, range_base, candidate_kind
+                    )
+
+                    findings = self.handover_findings_in_range(
+                        f"{range_base}...{range_head}",
+                        displaced_tip=range_base,
+                    )
+                    sticky = [
+                        finding for finding in findings
+                        if finding.subject == Path("history/AGENTS.md")
+                        and "on governed edge" in finding.message
+                    ]
+                    self.assertEqual(
+                        1, len(sticky), self.messages(findings)
+                    )
+                    self.assertIn(f"-> {removed}", sticky[0].message)
+
+    def test_handover_schema_whole_service_removal_and_restoration_is_clean(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate history schemas")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            contract.unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "remove history service")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "restore history service")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    findings = self.handover_findings_in_range(change_range)
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_schema_stickiness_grandfathers_preactivation_history(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v0\n"
+                "**Queue action-entry schema:** v0\n",
+            )
+            self.write(root, "history/README.md", "# History\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy history schemas")
+            base = self.git(root, "rev-parse", "HEAD")
+            contract.write_text(
+                "# Legacy history contract\n", encoding="utf-8"
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "remove legacy markers")
+            contract.write_text(
+                "**Queue projection schema:** v0\n"
+                "**Queue action-entry schema:** v0\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "restore legacy markers")
+            contract.write_text(
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "activate history schemas")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            for change_range in (f"{base}...{head}", f"root:{head}"):
+                with self.subTest(change_range=change_range):
+                    findings = self.handover_findings_in_range(change_range)
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_displaced_history_schema_activation_governs_replacement_tip(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common history")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate displaced schemas")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(root, "history/README.md", "# Replacement history\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "replace history without schemas")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            messages = self.messages(findings)
+            self.assertTrue(any(
+                "Queue projection schema v1 was removed" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(any(
+                "Queue action-entry schema v3 was removed or downgraded"
+                in message
+                for message in messages
+            ), messages)
+
+    def test_action_entry_schema_requires_projection_in_admitted_states(self):
+        for version in ("v1", "v2", "v3"):
+            with self.subTest(version=version), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "history/README.md", "# History\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "legacy history")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                contract = self.write(
+                    root,
+                    "history/AGENTS.md",
+                    f"**Queue action-entry schema:** {version}\n",
+                )
+                self.git(root, "add", "history/AGENTS.md")
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    staged_messages = self.messages(
+                        RECONCILE.check_handover_queue_projection()
+                    )
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertTrue(any(
+                    f"schema {version} is active without Queue projection "
+                    "schema v1 at staged candidate" in message
+                    for message in staged_messages
+                ), staged_messages)
+
+                self.git(root, "commit", "-m", "activate orphan entry schema")
+                orphan = self.git(root, "rev-parse", "HEAD")
+                contract.write_text(
+                    "**Queue projection schema:** v1\n"
+                    f"**Queue action-entry schema:** {version}\n",
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "history/AGENTS.md")
+                self.git(root, "commit", "-m", "repair projection dependency")
+                head = self.git(root, "rev-parse", "HEAD")
+
+                for change_range in (f"{base}...{head}", f"root:{head}"):
+                    with self.subTest(change_range=change_range):
+                        findings = self.handover_findings_in_range(
+                            change_range
+                        )
+                        messages = self.messages(findings)
+                        self.assertTrue(any(
+                            f"schema {version} is active without Queue "
+                            "projection schema v1" in message
+                            and f"selected commit {orphan}" in message
+                            for message in messages
+                        ), messages)
+
+    def test_displaced_action_entry_dependency_checks_old_tip(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common history")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "orphan displaced entry schema")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "valid replacement schemas")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            messages = self.messages(findings)
+            self.assertTrue(any(
+                "schema v3 is active without Queue projection schema v1 at "
+                "displaced tip" in message
+                for message in messages
+            ), messages)
+
+    def test_handover_move_outside_conversations_is_immutable_across_candidates(
+        self,
+    ):
+        for candidate_kind in ("staged", "direct", "synthetic"):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    candidate_kind=candidate_kind,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    handover = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-move-outside",
+                        "None.",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "governed handover")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    self.copy_or_move_handover(
+                        root,
+                        handover,
+                        "archive/moved-handover.md",
+                        changed_bytes=changed_bytes,
+                    )
+                    self.git(root, "add", "-A")
+
+                    if candidate_kind == "staged":
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            findings = list(
+                                RECONCILE.check_handover_queue_projection()
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    else:
+                        self.git(
+                            root,
+                            "commit",
+                            "-m",
+                            "move handover outside governed subtree",
+                        )
+                        head = self.git(root, "rev-parse", "HEAD")
+                        if candidate_kind == "synthetic":
+                            tree = self.git(
+                                root, "rev-parse", f"{head}^{{tree}}"
+                            )
+                            candidate = self.git(
+                                root,
+                                "commit-tree",
+                                tree,
+                                "-p",
+                                base,
+                                "-p",
+                                head,
+                                "-m",
+                                "synthetic admission candidate",
+                            )
+                            self.git(root, "checkout", candidate)
+                        findings = self.handover_findings_in_range(
+                            f"{base}...{head}"
+                        )
+
+                    mutations = [
+                        finding for finding in findings
+                        if "modified after queue-projection adoption"
+                        in finding.message
+                    ]
+                    self.assertEqual(
+                        1, len(mutations), self.messages(findings)
+                    )
+
+    def test_handover_copy_to_new_conversation_is_allowed_across_candidates(
+        self,
+    ):
+        for candidate_kind in ("staged", "direct", "synthetic"):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    candidate_kind=candidate_kind,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    handover = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-copy-source",
+                        "None.",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "source handover")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    self.copy_or_move_handover(
+                        root,
+                        handover,
+                        "history/conversations/"
+                        "2026-07-23-1201PDT-copy-destination/handover.md",
+                        copy=True,
+                        changed_bytes=changed_bytes,
+                    )
+                    self.git(root, "add", "-A")
+                    if candidate_kind == "staged":
+                        copy_status = self.git(
+                            root,
+                            "diff",
+                            "--cached",
+                            "--name-status",
+                            "-C",
+                            "--find-copies-harder",
+                        )
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            findings = list(
+                                RECONCILE.check_handover_queue_projection()
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+                    else:
+                        self.git(
+                            root,
+                            "commit",
+                            "-m",
+                            "add copied conversation handover",
+                        )
+                        head = self.git(root, "rev-parse", "HEAD")
+                        copy_status = self.git(
+                            root,
+                            "diff",
+                            "--name-status",
+                            "-C",
+                            "--find-copies-harder",
+                            base,
+                            head,
+                        )
+                        if candidate_kind == "synthetic":
+                            tree = self.git(
+                                root, "rev-parse", f"{head}^{{tree}}"
+                            )
+                            candidate = self.git(
+                                root,
+                                "commit-tree",
+                                tree,
+                                "-p",
+                                base,
+                                "-p",
+                                head,
+                                "-m",
+                                "synthetic admission candidate",
+                            )
+                            self.git(root, "checkout", candidate)
+                        findings = self.handover_findings_in_range(
+                            f"{base}...{head}"
+                        )
+                    self.assertTrue(
+                        copy_status.startswith("C"), copy_status
+                    )
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_handover_rename_to_new_conversation_remains_immutable(self):
+        for committed in (False, True):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    committed=committed,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    handover = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-rename-source",
+                        "None.",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "governed handover")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    self.copy_or_move_handover(
+                        root,
+                        handover,
+                        "history/conversations/"
+                        "2026-07-23-1201PDT-rename-destination/handover.md",
+                        changed_bytes=changed_bytes,
+                    )
+                    self.git(root, "add", "-A")
+                    if committed:
+                        self.git(
+                            root,
+                            "commit",
+                            "-m",
+                            "rename immutable handover",
+                        )
+                        head = self.git(root, "rev-parse", "HEAD")
+                        findings = self.handover_findings_in_range(
+                            f"{base}...{head}"
+                        )
+                    else:
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            findings = list(
+                                RECONCILE.check_handover_queue_projection()
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+
+                    mutations = [
+                        finding for finding in findings
+                        if "modified after queue-projection adoption"
+                        in finding.message
+                    ]
+                    self.assertEqual(
+                        1, len(mutations), self.messages(findings)
+                    )
+
+    def test_handover_copy_to_prior_governed_path_is_rejected(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                source = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-copy-collision-source",
+                    "None.",
+                )
+                retired = self.make_handover(
+                    root,
+                    "2026-07-23-1201PDT-copy-collision-retired",
+                    "None.",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "two governed handovers")
+                retired.unlink()
+                retired.parent.rmdir()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "retire one handover")
+                base = self.git(root, "rev-parse", "HEAD")
+
+                self.copy_or_move_handover(
+                    root,
+                    source,
+                    "history/conversations/"
+                    "2026-07-23-1201PDT-copy-collision-retired/handover.md",
+                    copy=True,
+                )
+                self.git(root, "add", "-A")
+                if committed:
+                    self.git(
+                        root,
+                        "commit",
+                        "-m",
+                        "reuse retired handover path",
+                    )
+                    head = self.git(root, "rev-parse", "HEAD")
+                    findings = self.handover_findings_in_range(
+                        f"{base}...{head}"
+                    )
+                else:
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        findings = list(
+                            RECONCILE.check_handover_queue_projection()
+                        )
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+
+                reuse = [
+                    finding for finding in findings
+                    if "reuses a path that already has a committed governed"
+                    in finding.message
+                ]
+                self.assertEqual(1, len(reuse), self.messages(findings))
+
+    def test_handover_copy_outside_conversations_is_immutable(self):
+        for committed in (False, True):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    committed=committed,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    handover = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-copy-outside",
+                        "None.",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "governed handover")
+                    base = self.git(root, "rev-parse", "HEAD")
+
+                    self.copy_or_move_handover(
+                        root,
+                        handover,
+                        "archive/copied-handover.md",
+                        copy=True,
+                        changed_bytes=changed_bytes,
+                    )
+                    self.copy_or_move_handover(
+                        root,
+                        handover,
+                        "backup/copied-handover.md",
+                        copy=True,
+                        changed_bytes=changed_bytes,
+                    )
+                    self.git(root, "add", "-A")
+                    if committed:
+                        self.git(
+                            root,
+                            "commit",
+                            "-m",
+                            "copy immutable handover outside history",
+                        )
+                        head = self.git(root, "rev-parse", "HEAD")
+                        findings = self.handover_findings_in_range(
+                            f"{base}...{head}"
+                        )
+                    else:
+                        RECONCILE.start_git_snapshot_cache()
+                        try:
+                            findings = list(
+                                RECONCILE.check_handover_queue_projection()
+                            )
+                        finally:
+                            RECONCILE.stop_git_snapshot_cache()
+
+                    mutations = [
+                        finding for finding in findings
+                        if "modified after queue-projection adoption"
+                        in finding.message
+                    ]
+                    self.assertEqual(
+                        1, len(mutations), self.messages(findings)
+                    )
+
+    def test_displaced_handover_rejects_move_outside_conversations(self):
+        for candidate_kind in ("direct", "synthetic"):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    candidate_kind=candidate_kind,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(root, "README.md", "# Common\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "common")
+                    common = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "displaced")
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    old = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-displaced-move-outside",
+                        "None.",
+                    )
+                    old_text = old.read_text(encoding="utf-8")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "old governed handover")
+                    displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "candidate", common)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    if changed_bytes:
+                        old_text = old_text.replace(
+                            "# Handover", "# Revised handover"
+                        )
+                    self.write(
+                        root, "archive/displaced-handover.md", old_text
+                    )
+                    self.git(root, "add", ".")
+                    self.git(
+                        root,
+                        "commit",
+                        "-m",
+                        "move displaced handover outside history",
+                    )
+                    range_head = self.git(root, "rev-parse", "HEAD")
+                    if candidate_kind == "synthetic":
+                        tree = self.git(
+                            root, "rev-parse", f"{range_head}^{{tree}}"
+                        )
+                        candidate = self.git(
+                            root,
+                            "commit-tree",
+                            tree,
+                            "-p",
+                            common,
+                            "-p",
+                            range_head,
+                            "-m",
+                            "synthetic admission candidate",
+                        )
+                        self.git(root, "checkout", candidate)
+
+                    findings = self.handover_findings_in_range(
+                        f"{common}...{range_head}",
+                        displaced_tip=displaced_tip,
+                    )
+                    displaced = [
+                        finding for finding in findings
+                        if "displaced old-tip handover" in finding.message
+                    ]
+                    self.assertEqual(
+                        1, len(displaced), self.messages(findings)
+                    )
+
+    def test_displaced_handover_allows_copy_to_new_conversation(self):
+        for candidate_kind in ("direct", "synthetic"):
+            for changed_bytes in (False, True):
+                with self.subTest(
+                    candidate_kind=candidate_kind,
+                    changed_bytes=changed_bytes,
+                ), self.repo() as root:
+                    self.init_git(root)
+                    self.write(
+                        root,
+                        "history/AGENTS.md",
+                        "**Queue projection schema:** v1\n"
+                        "**Queue action-entry schema:** v3\n",
+                    )
+                    source = self.make_handover(
+                        root,
+                        "2026-07-23-1200PDT-shared-copy-source",
+                        "None.",
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "shared governed handover")
+                    common = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "displaced")
+                    self.write(root, "old.md", "# Old side\n")
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "advance displaced side")
+                    displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "candidate", common)
+                    self.copy_or_move_handover(
+                        root,
+                        source,
+                        "history/conversations/"
+                        "2026-07-23-1201PDT-new-copy/handover.md",
+                        copy=True,
+                        changed_bytes=changed_bytes,
+                    )
+                    self.git(root, "add", ".")
+                    self.git(
+                        root,
+                        "commit",
+                        "-m",
+                        "add copied conversation handover",
+                    )
+                    range_head = self.git(root, "rev-parse", "HEAD")
+                    copy_status = self.git(
+                        root,
+                        "diff",
+                        "--name-status",
+                        "-C",
+                        "--find-copies-harder",
+                        displaced_tip,
+                        range_head,
+                    )
+                    if candidate_kind == "synthetic":
+                        tree = self.git(
+                            root, "rev-parse", f"{range_head}^{{tree}}"
+                        )
+                        candidate = self.git(
+                            root,
+                            "commit-tree",
+                            tree,
+                            "-p",
+                            common,
+                            "-p",
+                            range_head,
+                            "-m",
+                            "synthetic admission candidate",
+                        )
+                        self.git(root, "checkout", candidate)
+
+                    findings = self.handover_findings_in_range(
+                        f"{common}...{range_head}",
+                        displaced_tip=displaced_tip,
+                    )
+                    self.assertIn("C", copy_status)
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_external_handover_copy_is_rejected_in_displaced_topologies(self):
+        for topology in ("divergent", "synthetic", "backward"):
+            with self.subTest(topology=topology), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                source = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-shared-external-copy-source",
+                    "None.",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "shared governed handover")
+                common = self.git(root, "rev-parse", "HEAD")
+
+                if topology == "backward":
+                    external = self.copy_or_move_handover(
+                        root,
+                        source,
+                        "archive/copied-handover.md",
+                        copy=True,
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "copy handover outside")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+                    external.unlink()
+                    external.parent.rmdir()
+                    self.git(root, "add", "-A")
+                    self.git(root, "commit", "-m", "remove external copy")
+                    displaced_tip = self.git(root, "rev-parse", "HEAD")
+                    self.git(root, "checkout", range_head)
+                    change_range = f"{displaced_tip}...{range_head}"
+                else:
+                    self.git(root, "checkout", "-b", "displaced")
+                    self.write(root, "old.md", "# Old side\n")
+                    self.git(root, "add", ".")
+                    self.git(
+                        root, "commit", "-m", "advance displaced side"
+                    )
+                    displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+                    self.git(root, "checkout", "-b", "candidate", common)
+                    self.copy_or_move_handover(
+                        root,
+                        source,
+                        "archive/copied-handover.md",
+                        copy=True,
+                    )
+                    self.git(root, "add", ".")
+                    self.git(root, "commit", "-m", "copy handover outside")
+                    range_head = self.git(root, "rev-parse", "HEAD")
+                    change_range = f"{common}...{range_head}"
+                    if topology == "synthetic":
+                        tree = self.git(
+                            root, "rev-parse", f"{range_head}^{{tree}}"
+                        )
+                        candidate = self.git(
+                            root,
+                            "commit-tree",
+                            tree,
+                            "-p",
+                            common,
+                            "-p",
+                            range_head,
+                            "-m",
+                            "synthetic admission candidate",
+                        )
+                        self.git(root, "checkout", candidate)
+
+                copy_status = self.git(
+                    root,
+                    "diff",
+                    "--name-status",
+                    "-C",
+                    "--find-copies-harder",
+                    displaced_tip,
+                    range_head,
+                )
+                findings = self.handover_findings_in_range(
+                    change_range,
+                    displaced_tip=displaced_tip,
+                )
+                displaced = [
+                    finding for finding in findings
+                    if "displaced old-tip handover" in finding.message
+                ]
+                self.assertIn("C", copy_status)
+                self.assertEqual(
+                    1, len(displaced), self.messages(findings)
+                )
+
+    def test_backward_displaced_handover_rejects_move_outside_conversations(
+        self,
+    ):
+        for changed_bytes in (False, True):
+            with self.subTest(changed_bytes=changed_bytes), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                handover = self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-backward-move-outside",
+                    "None.",
+                )
+                original = handover.read_text(encoding="utf-8")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "governed handover")
+
+                archive = self.copy_or_move_handover(
+                    root,
+                    handover,
+                    "archive/backward-handover.md",
+                    changed_bytes=changed_bytes,
+                )
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "move handover outside")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                handover.parent.mkdir(parents=True)
+                handover.write_text(original, encoding="utf-8")
+                archive.unlink()
+                archive.parent.rmdir()
+                self.git(root, "add", "-A")
+                self.git(root, "commit", "-m", "restore governed path")
+                displaced_tip = self.git(root, "rev-parse", "HEAD")
+                self.git(root, "checkout", range_head)
+
+                findings = self.handover_findings_in_range(
+                    f"{displaced_tip}...{range_head}",
+                    displaced_tip=displaced_tip,
+                )
+                displaced = [
+                    finding for finding in findings
+                    if "displaced old-tip handover" in finding.message
+                ]
+                self.assertEqual(
+                    1, len(displaced), self.messages(findings)
+                )
+
+    def test_handover_move_before_projection_activation_is_grandfathered(self):
+        with self.repo() as root:
+            self.init_git(root)
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-preactivation-move-outside",
+                "Legacy prose.",
+                marker=None,
+            )
+            (root / "history/AGENTS.md").unlink()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "legacy handover")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.copy_or_move_handover(
+                root,
+                handover,
+                "archive/preactivation-handover.md",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "move legacy handover")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate handover projection")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(f"{base}...{head}")
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_displaced_handover_rejects_independent_path_reuse(self):
+        for version in ("v1", "v2", "v3"):
+            for candidate_kind in ("direct", "synthetic"):
+                for changed_bytes in (False, True):
+                    with self.subTest(
+                        version=version,
+                        candidate_kind=candidate_kind,
+                        changed_bytes=changed_bytes,
+                    ), self.repo() as root:
+                        self.init_git(root)
+                        self.write(root, "README.md", "# Common\n")
+                        self.git(root, "add", ".")
+                        self.git(root, "commit", "-m", "common")
+                        common = self.git(root, "rev-parse", "HEAD")
+
+                        self.git(root, "checkout", "-b", "displaced")
+                        self.write(
+                            root,
+                            "history/AGENTS.md",
+                            "**Queue projection schema:** v1\n"
+                            f"**Queue action-entry schema:** {version}\n",
+                        )
+                        self.make_handover(
+                            root,
+                            "2026-07-23-1200PDT-displaced-reuse",
+                            "None.",
+                        )
+                        self.git(root, "add", ".")
+                        self.git(
+                            root, "commit", "-m", "old governed handover"
+                        )
+                        displaced_tip = self.git(
+                            root, "rev-parse", "HEAD"
+                        )
+
+                        self.git(
+                            root, "checkout", "-b", "candidate", common
+                        )
+                        self.write(
+                            root,
+                            "history/AGENTS.md",
+                            "**Queue projection schema:** v1\n"
+                            f"**Queue action-entry schema:** {version}\n",
+                        )
+                        replacement = self.make_handover(
+                            root,
+                            "2026-07-23-1200PDT-displaced-reuse",
+                            "None.",
+                        )
+                        if changed_bytes:
+                            replacement.write_text(
+                                replacement.read_text(encoding="utf-8").replace(
+                                    "# Handover", "# Replacement handover"
+                                ),
+                                encoding="utf-8",
+                            )
+                        self.git(root, "add", ".")
+                        self.git(
+                            root, "commit", "-m", "replacement handover"
+                        )
+                        range_head = self.git(root, "rev-parse", "HEAD")
+                        if candidate_kind == "synthetic":
+                            tree = self.git(
+                                root, "rev-parse", f"{range_head}^{{tree}}"
+                            )
+                            candidate = self.git(
+                                root,
+                                "commit-tree",
+                                tree,
+                                "-p",
+                                common,
+                                "-p",
+                                range_head,
+                                "-m",
+                                "synthetic admission candidate",
+                            )
+                            self.git(root, "checkout", candidate)
+
+                        findings = self.handover_findings_in_range(
+                            f"{common}...{range_head}",
+                            displaced_tip=displaced_tip,
+                        )
+                        displaced = [
+                            finding for finding in findings
+                            if "displaced old-tip handover" in finding.message
+                        ]
+                        self.assertEqual(
+                            1, len(displaced), self.messages(findings)
+                        )
+
+    def test_displaced_handover_rejects_rename_but_allows_omission(self):
+        for case in ("rename", "delete"):
+            with self.subTest(case=case), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Common\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "common")
+                common = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "displaced")
+                self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-old-name",
+                    "None.",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "old governed handover")
+                displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+                self.git(root, "checkout", "-b", "candidate", common)
+                self.write(
+                    root,
+                    "history/AGENTS.md",
+                    "**Queue projection schema:** v1\n"
+                    "**Queue action-entry schema:** v3\n",
+                )
+                if case == "rename":
+                    self.make_handover(
+                        root,
+                        "2026-07-23-1201PDT-new-name",
+                        "None.",
+                    )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", f"candidate {case}")
+                range_head = self.git(root, "rev-parse", "HEAD")
+
+                findings = self.handover_findings_in_range(
+                    f"{common}...{range_head}",
+                    displaced_tip=displaced_tip,
+                )
+                displaced = [
+                    finding for finding in findings
+                    if "displaced old-tip handover" in finding.message
+                ]
+                self.assertEqual(
+                    case == "rename", bool(displaced), self.messages(findings)
+                )
+                if case == "delete":
+                    self.assertEqual([], findings, self.messages(findings))
+
+    def test_displaced_handover_accepts_unchanged_shared_incarnation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-shared-incarnation",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "shared governed handover")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.write(root, "old.md", "# Old side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "advance old side")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(root, "new.md", "# New side\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "advance replacement side")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_displaced_handover_rejects_intermediate_reuse_then_delete(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-ephemeral-reuse",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "old governed handover")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            replacement = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-ephemeral-reuse",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reuse old path")
+            replacement.unlink()
+            replacement.parent.rmdir()
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "delete replacement path")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            displaced = [
+                finding for finding in findings
+                if "displaced old-tip handover" in finding.message
+            ]
+            self.assertEqual(1, len(displaced), self.messages(findings))
+
+    def test_displaced_handover_grandfathers_preactivation_old_tip(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-preactivation",
+                "Legacy prose.",
+                marker=None,
+            )
+            (root / "history/AGENTS.md").unlink()
+            self.git(root, "add", ".")
+            self.git(root, "add", "-u")
+            self.git(root, "commit", "-m", "legacy old-tip handover")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v1\n",
+            )
+            replacement = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-preactivation",
+                "None.",
+            )
+            replacement.write_text(
+                replacement.read_text(encoding="utf-8").replace(
+                    "# Handover", "# Governed replacement"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate replacement history")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            self.assertFalse(any(
+                "displaced old-tip handover" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_displaced_handover_freezes_adopted_unmarked_old_tip(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-adopted-legacy",
+                "Legacy prose.",
+                marker=None,
+            )
+            (root / "history/AGENTS.md").unlink()
+            self.git(root, "add", ".")
+            self.git(root, "add", "-u")
+            self.git(root, "commit", "-m", "legacy old-tip handover")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "adopt legacy handover")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-adopted-legacy",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "reuse adopted path")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            displaced = [
+                finding for finding in findings
+                if "displaced old-tip handover" in finding.message
+            ]
+            self.assertEqual(1, len(displaced), self.messages(findings))
+
+    def test_displaced_handover_allows_whole_history_removal(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "displaced")
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-removed-service",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "old governed history")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate", common)
+            self.write(root, "replacement.md", "# No history service\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "replacement without history")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.handover_findings_in_range(
+                f"{common}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_backward_displaced_handover_cannot_restore_old_bytes(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v3\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-backward-rewrite",
+                "None.",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "original governed handover")
+            range_head = self.git(root, "rev-parse", "HEAD")
+
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "# Handover", "# Later bytes"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "rewrite old tip handover")
+            displaced_tip = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", range_head)
+
+            findings = self.handover_findings_in_range(
+                f"{displaced_tip}...{range_head}",
+                displaced_tip=displaced_tip,
+            )
+            messages = self.messages(findings)
+            self.assertTrue(any(
+                "displaced old-tip handover was modified" in message
+                for message in messages
+            ), messages)
 
     def test_action_entry_schema_allows_whole_history_service_removal(self):
         with self.repo() as root:

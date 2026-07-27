@@ -17,9 +17,12 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import posixpath
 import re
 import subprocess
 import sys
+import unicodedata
+import urllib.parse
 from pathlib import Path
 
 AUTOMATION = Path(__file__).resolve().parents[1]
@@ -38,14 +41,32 @@ from check_action_projection import (
     visible_outside_action_sections,
 )
 from markdown_semantics import (
+    COMMONMARK_CHARACTER_REFERENCE_RE,
     MARKDOWN_LINK_RE,
+    ambiguous_inline_markup_reason,
+    block_aware_inline_code_spans,
+    commonmark_inline_block_ranges,
+    contains_html_comment_outside_inline_code,
     contains_raw_html,
+    gfm_table_block_ranges,
+    gfm_table_delimiter_cells,
+    gfm_table_row_cells,
+    gfm_table_scan_source,
+    inline_code_spans,
+    is_default_ignorable_character,
     markdown_link_destinations,
     markdown_links,
     normalized_action_tokens,
     render_inline_code,
+    rendered_inline_text,
+    rendered_inline_text_has_visible_content,
+    rendered_link_label_text,
+    rendered_link_label_text_has_visible_content,
     rendered_human_text,
     semantic_text,
+    strict_commonmark_character_reference,
+    visible_markdown_reference_destinations,
+    visible_markdown_reference_resolution,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -172,6 +193,19 @@ HUMAN_PROJECTION_FIELDS = (
     "Why-you-might-care",
     "If-you-do-nothing",
 )
+HUMAN_ACTION_PRESENTATION_MARKER = (
+    "<!-- human-action-presentation: v2 -->"
+)
+HUMAN_ACTION_STATUS_NOTICES = {
+    "waiting": "> **Waiting for your response.**",
+    "awaiting-artifact": "> **Not ready yet. No action is requested.**",
+    "folding": "> **Response received. No further response is needed.**",
+}
+HUMAN_ACTION_LEGACY_LABELS = (
+    "Why-you-might-care",
+    "If-you-do-nothing",
+    "Look-at",
+)
 QUEUE_ROOT_DOCUMENT_PATHS = {
     "message-queue/AGENTS.md",
     "message-queue/README.md",
@@ -222,12 +256,12 @@ def fields(path):
 
 
 def text_fields(text):
-    return dict(FIELD_RE.findall(semantic_text(text)))
+    return dict(FIELD_RE.findall(detection_visual_field_source(text)))
 
 
 def field_counts(text):
     counts = {}
-    for key, _ in FIELD_RE.findall(semantic_text(text)):
+    for key, _ in FIELD_RE.findall(detection_visual_field_source(text)):
         counts[key] = counts.get(key, 0) + 1
     return counts
 
@@ -259,8 +293,13 @@ def days_old(path):
 
 
 def has_concrete_value(value):
-    value = (value or "").strip()
-    return bool(value) and not PLACEHOLDER_RE.fullmatch(value)
+    source = (value or "").strip()
+    rendered = " ".join(rendered_inline_text(source).split())
+    return bool(
+        source
+        and rendered_inline_text_has_visible_content(source)
+        and not PLACEHOLDER_RE.fullmatch(rendered)
+    )
 
 
 def delivery_class(name):
@@ -779,11 +818,43 @@ def raw_level_two_section_body(text, heading):
         text,
         flags=re.M | re.S,
     )
-    return matched.group(1).strip() if matched else None
+    return matched.group(1).strip("\r\n") if matched else None
 
 
-def context_files(value):
-    candidates = context_path_candidates(value)
+def source_relative_context_path_candidates(value, source):
+    """Resolve visible Markdown links from their queue file, code paths from root."""
+    candidates = set(context_path_candidates(
+        " ".join(f"`{path}`" for path in CONTEXT_BACKTICK_RE.findall(value or ""))
+    ))
+    source = Path(source)
+    if source.is_absolute():
+        try:
+            source = source.relative_to(REPO)
+        except ValueError:
+            return sorted(candidates)
+    for destination in markdown_link_destinations(value or ""):
+        destination = destination.strip()
+        if destination.startswith("<") and destination.endswith(">"):
+            destination = destination[1:-1].strip()
+        path_text = destination.split("#", 1)[0]
+        if not path_text \
+                or path_text.startswith("/") \
+                or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", path_text):
+            continue
+        normalized = posixpath.normpath(
+            (source.parent / Path(path_text)).as_posix()
+        )
+        if normalized != ".." and not normalized.startswith("../"):
+            candidates.add(normalized)
+    return sorted(candidates)
+
+
+def context_files(value, source=None):
+    candidates = (
+        source_relative_context_path_candidates(value, source)
+        if source is not None
+        else context_path_candidates(value)
+    )
     found = []
     for candidate in candidates:
         target = REPO / Path(candidate)
@@ -1197,6 +1268,45 @@ def queue_resolution_v1_at(revision):
     )
 
 
+def human_action_presentation_version_at(revision):
+    """Return the separately versioned human-facing queue schema."""
+    artifact = (
+        repo_artifact_bytes(QUEUE / "AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "message-queue/AGENTS.md")
+    )
+    if artifact is None:
+        return None
+    version = text_fields(decode_utf8_artifact(
+        artifact,
+        (
+            "candidate `message-queue/AGENTS.md`"
+            if revision is None
+            else f"`message-queue/AGENTS.md` at {revision}"
+        ),
+    )).get("Human action presentation schema", "").strip()
+    return version if version == "v2" else None
+
+
+def human_action_presentation_enabled():
+    return human_action_presentation_version_at(None) == "v2"
+
+
+def human_action_presentation_activations(head):
+    activations = []
+    for candidate_head in candidate_activation_heads(head):
+        found, error = schema_activation_commits(
+            candidate_head,
+            "message-queue/AGENTS.md",
+            "Human action presentation schema",
+            version="v2",
+        )
+        if error:
+            raise GitSnapshotError(error)
+        activations.extend(found)
+    return tuple(dict.fromkeys(activations))
+
+
 def schema_activation_commits(head, path, field, version="v1"):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
@@ -1256,6 +1366,48 @@ def candidate_activation_heads(head):
     if CHANGE_RANGE is None and head and head == _GIT_HEAD_OID:
         return staged_parent_oids()
     return (head,) if head else ()
+
+
+def selected_change_range_head():
+    """Return the explicit admission-range head, excluding staged candidates."""
+    if CHANGE_RANGE is None:
+        return None
+    if CHANGE_RANGE.startswith("root:"):
+        return CHANGE_RANGE[len("root:"):]
+    return CHANGE_RANGE.split("...", 1)[1]
+
+
+def selected_change_range_base():
+    """Return the trusted base of an explicit base...head admission range."""
+    if CHANGE_RANGE is None or CHANGE_RANGE.startswith("root:"):
+        return None
+    return CHANGE_RANGE.split("...", 1)[0]
+
+
+def selected_change_range_is_backward():
+    """Return whether an explicit update moves a ref to its own ancestor."""
+    base = selected_change_range_base()
+    head = selected_change_range_head()
+    return bool(
+        base is not None
+        and head is not None
+        and base != head
+        and git_is_ancestor(head, base)
+    )
+
+
+def selected_range_activates_human_action_presentation():
+    """Return whether any selected edge activates presentation v2."""
+    if CHANGE_RANGE is None:
+        return False
+    for parent, revision in queue_revision_edges(
+        (), include_selected_range=True
+    ):
+        if revision is not None \
+                and human_action_presentation_version_at(revision) == "v2" \
+                and human_action_presentation_version_at(parent) != "v2":
+            return True
+    return False
 
 
 def descended_from_any(revision, ancestors):
@@ -1354,6 +1506,62 @@ def mutated_paths_between(parent, child):
     return mutated_queue_paths_from_name_status(changed.stdout)
 
 
+def human_action_path(path):
+    parts = Path(path).parts
+    return bool(
+        len(parts) == 4
+        and parts[0] == "message-queue"
+        and parts[1] == "needs-human"
+    )
+
+
+def governed_human_action_path(path):
+    parts = Path(path).parts
+    return bool(
+        len(parts) >= 2
+        and parts[0] == "message-queue"
+        and parts[1] == "needs-human"
+        and governed_queue_path(path)
+    )
+
+
+def human_action_origin_paths_from_name_status(data):
+    """Return destinations that create a new human-action lineage."""
+    paths = []
+    for status, source, destination in name_status_records(data):
+        target = destination if status.startswith(("R", "C")) else source
+        if not human_action_path(target):
+            continue
+        if status == "A" or status.startswith("C"):
+            paths.append(target)
+        elif (
+            status.startswith("R")
+            and not governed_human_action_path(source)
+        ):
+            paths.append(target)
+    return paths
+
+
+def human_action_origin_paths_between(parent, child):
+    origins = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status", "-z", "-M", "-C",
+            "--find-copies-harder", "--diff-filter=ACR", parent, child,
+            "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if origins.returncode:
+        raise GitSnapshotError(git_failure(
+            origins, f"could not inspect human action origins in {child}"
+        ))
+    return human_action_origin_paths_from_name_status(origins.stdout)
+
+
 def staged_deleted_queue_paths(parent):
     if not parent:
         return []
@@ -1394,8 +1602,29 @@ def staged_mutated_queue_paths(parent):
     return mutated_queue_paths_from_name_status(changed.stdout)
 
 
-def queue_revision_edges(activations):
-    """Yield every governed parent/candidate edge in the staged or range view."""
+def staged_human_action_origin_paths(parent):
+    if not parent:
+        return []
+    origins = subprocess.run(
+        [
+            "git", "diff", "--cached", "--name-status", "-z", "-M", "-C",
+            "--find-copies-harder", "--diff-filter=ACR", parent, "--",
+            "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if origins.returncode:
+        raise GitSnapshotError(git_failure(
+            origins, "could not inspect staged human action origins"
+        ))
+    return human_action_origin_paths_from_name_status(origins.stdout)
+
+
+def queue_revision_edges(activations, include_selected_range=False):
+    """Yield governed edges, or every edge in an explicitly selected range."""
     if CHANGE_RANGE is None:
         for commit in staged_side_commits():
             governed, governance_error = governed_by_activation_join(
@@ -1433,7 +1662,15 @@ def queue_revision_edges(activations):
                 merge_base.stderr.strip()
                 or "could not find the queue-deletion range merge base"
             )
-        revision_range = f"{merge_base.stdout.strip()}..{range_head}"
+        merge_base_oid = merge_base.stdout.strip()
+        # A backwards update has no forward merge-base..head commits to
+        # enumerate. Replay the candidate's ancestry instead; callers with a
+        # version activation still filter pre-activation legacy edges.
+        revision_range = (
+            range_head
+            if base != range_head and merge_base_oid == range_head
+            else f"{merge_base_oid}..{range_head}"
+        )
 
     revisions = subprocess.run(
         [
@@ -1452,16 +1689,21 @@ def queue_revision_edges(activations):
             or "could not enumerate queue-deletion commits"
         )
     commits = revisions.stdout.splitlines()
+    # No-op ranges and any unexpected history simplification must still inspect
+    # the exact candidate parent edge, without duplicating ordinary heads.
+    if range_head not in commits:
+        commits.append(range_head)
     if _GIT_HEAD_OID and _GIT_HEAD_OID != range_head:
         commits.append(_GIT_HEAD_OID)
     for commit in commits:
-        governed, governance_error = governed_by_activation_join(
-            commit, activations
-        )
-        if governance_error:
-            raise GitSnapshotError(governance_error)
-        if not governed:
-            continue
+        if not include_selected_range:
+            governed, governance_error = governed_by_activation_join(
+                commit, activations
+            )
+            if governance_error:
+                raise GitSnapshotError(governance_error)
+            if not governed:
+                continue
         ancestry = subprocess.run(
             [
                 "git", "--no-replace-objects", "rev-list",
@@ -1478,13 +1720,18 @@ def queue_revision_edges(activations):
                 ancestry.stderr.strip()
                 or f"could not inspect parents of {commit}"
             )
-        for parent in ancestry.stdout.split()[1:]:
+        parents = ancestry.stdout.split()[1:]
+        if not parents:
+            yield git_empty_tree(), commit
+        for parent in parents:
             yield parent, commit
 
 
-def queue_deletion_events(activations):
+def queue_deletion_events(activations, include_selected_range=False):
     """Yield prior/candidate revisions for every governed queue deletion."""
-    for parent, revision in queue_revision_edges(activations):
+    for parent, revision in queue_revision_edges(
+        activations, include_selected_range=include_selected_range
+    ):
         deleted = (
             staged_deleted_queue_paths(parent)
             if revision is None
@@ -1498,9 +1745,11 @@ def queue_deletion_events(activations):
             yield path, git_text_at(parent, path), parent, revision
 
 
-def queue_mutation_events(activations):
+def queue_mutation_events(activations, include_selected_range=False):
     """Yield both sides of every governed action modification or move."""
-    for parent, revision in queue_revision_edges(activations):
+    for parent, revision in queue_revision_edges(
+        activations, include_selected_range=include_selected_range
+    ):
         mutated = (
             staged_mutated_queue_paths(parent)
             if revision is None
@@ -1530,6 +1779,133 @@ def queue_mutation_events(activations):
             yield source, destination, before, after, parent, revision
 
 
+def human_action_origin_events(
+    activations, include_selected_range=False
+):
+    """Yield new human-action lineages on governed or admission edges."""
+    for parent, revision in queue_revision_edges(
+        activations, include_selected_range=include_selected_range
+    ):
+        origins = (
+            staged_human_action_origin_paths(parent)
+            if revision is None
+            else human_action_origin_paths_between(parent, revision)
+        )
+        for path in origins:
+            if candidate_paths_match_other_parent(parent, revision, (path,)):
+                continue
+            artifact = (
+                repo_artifact_bytes(REPO / path)
+                if revision is None
+                else git_artifact_bytes_at(revision, path)
+            )
+            if artifact is None:
+                raise GitSnapshotError(
+                    f"could not read originated human action `{path}`"
+                )
+            yield path, decode_utf8_artifact(
+                artifact, f"originated human action `{path}`"
+            ), parent, revision
+
+
+def queue_service_present_at(revision):
+    if revision is None:
+        return bool(git_index_entries("message-queue"))
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree", "-r", "--name-only",
+            revision, "--", "message-queue",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not inspect message-queue at {revision}"
+        ))
+    return bool(tree.stdout.strip())
+
+
+def queue_resolution_schema_removal_events(activations):
+    """Yield governed edges that remove queue v1 while retaining the queue."""
+    seen = set()
+    for parent, revision in queue_revision_edges(activations):
+        edge = (parent, revision)
+        if edge in seen:
+            continue
+        seen.add(edge)
+        if queue_resolution_v1_at(parent) \
+                and not queue_resolution_v1_at(revision) \
+                and queue_service_present_at(revision):
+            yield parent, revision
+
+
+def presentation_schema_removal_events(activations):
+    """Yield every governed edge that removes v2 while retaining the queue."""
+    path = "message-queue/AGENTS.md"
+    for parent, revision in queue_revision_edges(activations):
+        before = git_artifact_bytes_at(parent, path)
+        after = (
+            repo_artifact_bytes(REPO / path)
+            if revision is None
+            else git_artifact_bytes_at(revision, path)
+        )
+        before_version = (
+            text_fields(decode_utf8_artifact(
+                before, f"`{path}` at {parent}"
+            )).get("Human action presentation schema", "").strip()
+            if before is not None
+            else None
+        )
+        after_version = (
+            text_fields(decode_utf8_artifact(
+                after, f"`{path}` in the queue candidate"
+            )).get("Human action presentation schema", "").strip()
+            if after is not None
+            else None
+        )
+        if before_version == "v2" \
+                and after_version != "v2" \
+                and queue_service_present_at(revision):
+            yield parent, revision
+
+
+def presentation_without_queue_resolution_states(continuity_edge):
+    """Yield admitted states where presentation v2 lacks queue lifecycle v1."""
+    candidates = []
+    if CHANGE_RANGE is None:
+        candidates.extend(
+            (revision, f"staged side commit {revision}")
+            for revision in staged_side_commits()
+        )
+        candidates.append((None, "staged candidate"))
+    else:
+        selected_base = selected_change_range_base()
+        if selected_base is not None:
+            candidates.append((selected_base, "trusted range base"))
+        candidates.extend(
+            (revision, f"selected commit {revision}")
+            for _parent, revision in queue_revision_edges(
+                (), include_selected_range=True
+            )
+            if revision is not None
+        )
+    if continuity_edge is not None:
+        candidates.append((continuity_edge[0], "displaced tip"))
+
+    seen = set()
+    for revision, label in candidates:
+        if revision in seen:
+            continue
+        seen.add(revision)
+        if human_action_presentation_version_at(revision) == "v2" \
+                and not queue_resolution_v1_at(revision):
+            yield revision, label
+
+
 def governed_handover_path(path):
     """Recognize a handover path even when its conversation name is malformed."""
     parts = Path(path).parts
@@ -1540,13 +1916,31 @@ def governed_handover_path(path):
     )
 
 
+def valid_handover_path(path):
+    """Recognize one well-formed conversation handover destination."""
+    parts = Path(path).parts
+    return bool(
+        governed_handover_path(path)
+        and CONVERSATION_RE.fullmatch(parts[2])
+    )
+
+
+def immutable_handover_source_mutated(status, source, destination):
+    """Distinguish source mutation from a valid new handover copy."""
+    if not governed_handover_path(source):
+        return False
+    if status.startswith("C") and valid_handover_path(destination):
+        return False
+    return status.startswith(("R", "C")) or status in {"M", "T"}
+
+
 def mutated_handover_paths_from_name_status(data):
-    """Return pre-existing handovers changed in place or renamed."""
+    """Return pre-existing handovers changed, renamed, or copied."""
     paths = []
-    for status, source, _destination in name_status_records(data):
-        if status.startswith("R") and governed_handover_path(source):
-            paths.append(source)
-        elif status in {"M", "T"} and governed_handover_path(source):
+    for status, source, destination in name_status_records(data):
+        if immutable_handover_source_mutated(
+            status, source, destination
+        ):
             paths.append(source)
     return paths
 
@@ -1556,8 +1950,8 @@ def mutated_handover_paths_between(parent, child):
         [
             "git", "--no-replace-objects", "diff-tree",
             "-r", "--no-commit-id", "--name-status",
-            "-z", "-M", "--diff-filter=MRT", parent, child, "--",
-            "history/conversations",
+            "-z", "-M", "-C", "--find-copies-harder",
+            "--diff-filter=MRTC", parent, child,
         ],
         cwd=REPO,
         stdout=subprocess.PIPE,
@@ -1576,9 +1970,9 @@ def staged_mutated_handover_paths(parent):
         return []
     changed = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
-            "--diff-filter=MRT", parent, "--",
-            "history/conversations",
+            "git", "diff", "--cached", "--name-status", "-z",
+            "-M", "-C", "--find-copies-harder",
+            "--diff-filter=MRTC", parent,
         ],
         cwd=REPO,
         stdout=subprocess.PIPE,
@@ -1606,6 +2000,61 @@ def handover_mutation_events(activations):
             ):
                 continue
             yield path, parent, revision
+
+
+def live_handover_paths_at(revision):
+    """Return exact handover record paths retained by one committed tree."""
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree", "-r",
+            "--name-only", "-z", revision, "--", "history/conversations",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not inspect handovers at {revision}"
+        ))
+    return {
+        name
+        for raw in tree.stdout.split(b"\0")
+        if raw
+        for name in [raw.decode("utf-8", errors="surrogateescape")]
+        if governed_handover_path(name)
+    }
+
+
+def displaced_handover_mutations_between(
+    parent, revision, governed_paths
+):
+    """Yield old-tip immutable paths edited, renamed, or copied."""
+    if not governed_paths:
+        return
+    changed = subprocess.run(
+        [
+            "git", "--no-replace-objects", "diff-tree",
+            "-r", "--no-commit-id", "--name-status", "-z",
+            "-M", "-C", "--find-copies-harder",
+            "--diff-filter=MRTC", parent, revision,
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if changed.returncode:
+        raise GitSnapshotError(git_failure(
+            changed,
+            f"could not inspect displaced handover continuity at {revision}",
+        ))
+    for status, source, destination in name_status_records(changed.stdout):
+        if source in governed_paths and immutable_handover_source_mutated(
+            status, source, destination
+        ):
+            yield source, destination, status
 
 
 def committed_queue_deletion_events(parent, revision):
@@ -1807,13 +2256,24 @@ def pickup_completed(path, text, prior_revision, revision):
 
 
 def normalize_claim_status(text):
-    return re.sub(
+    normalized = re.sub(
         r"^(\*\*Status:\*\*)[ \t]*.*$",
         r"\1 <claimed-status>",
         text,
         count=1,
         flags=re.M,
     )
+    if HUMAN_ACTION_PRESENTATION_MARKER in normalized:
+        normalized = re.sub(
+            r"^> \*\*(?:Waiting for your response\.|Not ready yet\. "
+            r"No action is requested\.|Response received\. "
+            r"No further response is needed\.)\*\*$",
+            "> **<human-action-status>**",
+            normalized,
+            count=1,
+            flags=re.M,
+        )
+    return normalized
 
 
 def claim_identity(text, actor, leaf):
@@ -1858,9 +2318,24 @@ def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
             "Reviewed revision", "Review outcome", "Successor action",
             "Resolution evidence",
         })
+    elif actor == "needs-human" \
+            and HUMAN_ACTION_PRESENTATION_MARKER in text \
+            and leaf in {"decisions", "clarifications"}:
+        mutable_fields.add("Your answer")
     elif actor == "needs-human":
         mutable_fields.update({"Your answer", "Your review"})
     clean = semantic_text(text)
+    if actor == "needs-human" \
+            and HUMAN_ACTION_PRESENTATION_MARKER in text:
+        clean = re.sub(
+            r"^> \*\*(?:Waiting for your response\.|Not ready yet\. "
+            r"No action is requested\.|Response received\. "
+            r"No further response is needed\.)\*\*$",
+            "> **<human-action-status>**",
+            clean,
+            count=1,
+            flags=re.M,
+        )
     if actor == "needs-agent" and leaf == "retries":
         clean = AGENT_NOTES_SECTION_RE.sub("", clean)
     lines = []
@@ -1923,8 +2398,17 @@ def human_response_fields(text):
     }
 
 
-def first_concrete_response(fields):
-    for key in ("Your answer", "Your review"):
+def response_field_for_leaf(leaf):
+    if leaf == "reviews":
+        return "Your review"
+    if leaf in {"decisions", "clarifications"}:
+        return "Your answer"
+    return None
+
+
+def first_concrete_response(fields, leaf=None):
+    required = response_field_for_leaf(leaf)
+    for key in ((required,) if required else ("Your answer", "Your review")):
         if has_concrete_value(fields.get(key, "")):
             return key
     return None
@@ -1932,10 +2416,533 @@ def first_concrete_response(fields):
 
 def unanswered_review(fields):
     return bool(
-        first_concrete_response(fields) is None
+        first_concrete_response(fields, "reviews") is None
         and not has_concrete_value(fields.get("Reviewed revision", ""))
         and fields.get("Review outcome", "pending") in {"", "pending"}
     )
+
+
+def unanswered_human_action(text, leaf=None):
+    response = human_response_fields(text)
+    return bool(
+        first_concrete_response(response, leaf) is None
+        and not has_concrete_value(response.get("Reviewed revision", ""))
+        and response.get("Review outcome", "pending") in {"", "pending"}
+    )
+
+
+def normalized_reference_targets(value, source=None):
+    """Normalize link/backtick targets without depending on their labels."""
+    normalized = []
+    for candidate in CONTEXT_BACKTICK_RE.findall(value or ""):
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+        path_text, separator, anchor = candidate.partition("#")
+        if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", path_text):
+            path_text = Path(path_text).as_posix()
+        normalized.append(
+            path_text + (separator + anchor if separator else "")
+        )
+    for candidate in markdown_link_destinations(value or ""):
+        candidate = candidate.strip()
+        if candidate.startswith("<") and candidate.endswith(">"):
+            candidate = candidate[1:-1].strip()
+        if not candidate:
+            continue
+        path_text, separator, anchor = candidate.partition("#")
+        if source is not None \
+                and not path_text.startswith("/") \
+                and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", path_text):
+            source_path = Path(source)
+            if source_path.is_absolute():
+                source_path = source_path.relative_to(REPO)
+            path_text = posixpath.normpath(
+                (source_path.parent / Path(path_text)).as_posix()
+            )
+        elif not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", path_text):
+            path_text = Path(path_text).as_posix()
+        normalized.append(
+            path_text + (separator + anchor if separator else "")
+        )
+    return tuple(sorted(set(normalized)))
+
+
+def canonical_visible_reference_target(destination, source=None):
+    """Canonicalize one visible link target for same-document deduplication."""
+    destination = (destination or "").strip()
+    if destination.startswith("<") and destination.endswith(">"):
+        destination = destination[1:-1].strip()
+    try:
+        parsed = urllib.parse.urlsplit(destination)
+        port = parsed.port
+    except ValueError:
+        return destination
+    if parsed.scheme or parsed.netloc:
+        scheme = parsed.scheme.casefold()
+        host = (parsed.hostname or "").casefold()
+        if port == {
+            "ftp": 21,
+            "http": 80,
+            "https": 443,
+            "ws": 80,
+            "wss": 443,
+        }.get(scheme):
+            port = None
+        netloc = host + (f":{port}" if port is not None else "")
+        path = posixpath.normpath(parsed.path or "/")
+        return urllib.parse.urlunsplit((
+            scheme, netloc, path, parsed.query, "",
+        ))
+    path = urllib.parse.unquote(parsed.path)
+    if source is not None:
+        source_path = Path(source)
+        if source_path.is_absolute():
+            try:
+                source_path = source_path.relative_to(REPO)
+            except ValueError:
+                return destination
+        path = (source_path.parent / Path(path)).as_posix()
+    path = posixpath.normpath(path)
+    return path + ("?" + parsed.query if parsed.query else "")
+
+
+def repeated_visible_reference_targets(text, source=None):
+    """Return reader-visible link or image targets used more than once."""
+    counts = {}
+    for destination in visible_markdown_reference_destinations(text):
+        canonical = canonical_visible_reference_target(destination, source)
+        counts[canonical] = counts.get(canonical, 0) + 1
+    return tuple(sorted(
+        destination for destination, count in counts.items() if count > 1
+    ))
+
+
+def repository_remote_identity():
+    """Return normalized (host, repository path) for remote.origin.url."""
+    result = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    remote = result.stdout.strip() if result.returncode == 0 else ""
+    if not remote:
+        return None
+    parsed = urllib.parse.urlsplit(remote)
+    if parsed.scheme:
+        host = (parsed.hostname or "").casefold()
+        path = parsed.path.lstrip("/")
+    else:
+        matched = re.fullmatch(r"(?:[^@/:]+@)?([^:/]+):(.+)", remote)
+        if matched is None:
+            return None
+        host, path = matched.groups()
+        host = host.casefold()
+    path = path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not host or not path or path.startswith("../"):
+        return None
+    return host, posixpath.normpath(path)
+
+
+def github_git_review_artifact_matches(parsed, repository, revisions):
+    """Validate GitHub's exact immutable commit and compare URL grammars."""
+    prefix = "/" + repository
+    expected = (
+        f"{prefix}/commit/{revisions[0]}"
+        if len(revisions) == 1
+        else f"{prefix}/compare/{revisions[0]}...{revisions[1]}"
+    )
+    return parsed.path == expected
+
+
+GIT_REVIEW_HTTPS_ADAPTERS = {
+    "github.com": github_git_review_artifact_matches,
+}
+
+
+def verified_https_git_review_artifact(destination, revisions):
+    """Verify one provider URL against the candidate repository and exact OIDs."""
+    try:
+        parsed = urllib.parse.urlsplit(destination)
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or parsed.username or parsed.password \
+            or parsed.query or parsed.fragment or port not in {None, 443} \
+            or "%" in parsed.path \
+            or posixpath.normpath(parsed.path) != parsed.path:
+        return False
+    remote = repository_remote_identity()
+    if remote is None:
+        return False
+    host, repository = remote
+    if (parsed.hostname or "").casefold() != host:
+        return False
+    adapter = GIT_REVIEW_HTTPS_ADAPTERS.get(host)
+    return bool(
+        adapter is not None
+        and adapter(parsed, repository, revisions)
+    )
+
+
+def verified_local_git_review_artifact(destination, source, target_value):
+    """Verify a repo-local text artifact carries an exact structured binding."""
+    if source is None:
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(destination)
+        if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment \
+                or not parsed.path or Path(parsed.path).is_absolute():
+            return False
+        source_path = Path(source)
+        if source_path.is_absolute():
+            source_path = source_path.relative_to(REPO)
+        relative = posixpath.normpath(
+            (source_path.parent / Path(urllib.parse.unquote(parsed.path))).as_posix()
+        )
+        if relative == ".." or relative.startswith("../"):
+            return False
+        artifact_path = REPO / relative
+        if artifact_path.is_symlink():
+            return False
+    except (OSError, ValueError):
+        return False
+    artifact = repo_artifact_bytes(artifact_path)
+    if artifact is None:
+        return False
+    try:
+        artifact_text = artifact.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return bool(
+        field_counts(artifact_text).get("Git review target", 0) == 1
+        and text_fields(artifact_text).get(
+            "Git review target", ""
+        ).strip() == target_value
+    )
+
+
+def crossed_merge_review_reframe(
+    source, destination, prior, current, prior_revision
+):
+    """Admit one deterministic post-merge reframe with ancestry evidence."""
+    target = prior.get("Review target", "").strip()
+    if not target.startswith("git:") or "..." not in target:
+        return False
+    object_ids = target[len("git:"):].split("...", 1)
+    if len(object_ids) != 2 \
+            or any(not FULL_GIT_OID_RE.fullmatch(oid) for oid in object_ids) \
+            or not FULL_GIT_OID_RE.fullmatch(prior_revision or ""):
+        return False
+    if any(
+        prior.get(field, "").strip() != current.get(field, "").strip()
+        for field in (
+            "Review target", "Review revision", "Resolution evidence",
+            "Blocks at",
+        )
+    ) or prior.get("Review revision", "").strip() != target:
+        return False
+    blocks_at = prior.get("Blocks at", "").strip()
+    if not re.fullmatch(
+        r"transition:merge(?: task:"
+        r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)+",
+        blocks_at,
+    ):
+        return False
+    ancestry = subprocess.run(
+        [
+            "git", "--no-replace-objects", "merge-base", "--is-ancestor",
+            object_ids[1], prior_revision,
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if ancestry.returncode != 0:
+        return False
+    action_match = re.fullmatch(
+        r"After .+, (?:review the (.+?), then approve the exact Git range|"
+        r"inspect the (.+?) and approve it), request a named change, or "
+        r"reject it before merge\.",
+        prior.get("Action", "").strip(),
+    )
+    if action_match is None:
+        return False
+    scope = next(
+        value for value in action_match.groups() if value is not None
+    )
+    expected_action = (
+        f"Review the already-merged {scope}, then accept it, request a named "
+        "repair, or require rollback before task completion."
+    )
+    expected_until = (
+        "The already-merged change remains present without inferred human "
+        "approval; the task remains in review until it is accepted, repaired, "
+        "or rolled back."
+    )
+    return bool(
+        current.get("Action", "").strip() == expected_action
+        and current.get("Until then", "").strip() == expected_until
+    )
+
+
+def legacy_confirm_review_reframe(prior, current):
+    """Turn one legacy confirmation instruction into neutral review choices."""
+    action = prior.get("Action", "").strip()
+    fixed_plain_language_reframes = {
+        (
+            "Confirm the revised design makes guard configuration, derived "
+            "assurance, manual evidence, coverage limits, and controlled-egress "
+            "non-scope clear."
+        ): (
+            "Review whether the revised design clearly separates configured guard "
+            "settings from the assurance supported by evidence, explains the limits "
+            "of manual evidence and coverage, and states that controlling where data "
+            "may be sent is outside this review and design scope; then approve, "
+            "request changes, or reject."
+        ),
+        (
+            "Confirm the incident-recovery boundary and sequence, or identify a "
+            "missing recovery obligation."
+        ): (
+            "Review whether the incident-recovery boundary and sequence are complete; "
+            "then approve, request changes by naming any missing recovery obligation, "
+            "or reject."
+        ),
+    }
+    expected = fixed_plain_language_reframes.get(action)
+    matched = re.fullmatch(r"Confirm that (.+)\.", action)
+    if matched:
+        expected = (
+            f"Review whether {matched.group(1)}; then approve, request changes, "
+            "or reject."
+        )
+    if expected is None:
+        matched = re.fullmatch(
+            r"Confirm the revised design makes (.+) clear\.", action
+        )
+        if matched:
+            expected = (
+                "Review whether the revised design makes "
+                f"{matched.group(1)} clear; then approve, request changes, "
+                "or reject."
+            )
+    if expected is None:
+        matched = re.fullmatch(r"Confirm (.+), or identify (.+)\.", action)
+        if matched:
+            expected = (
+                f"Review {matched.group(1)} and identify {matched.group(2)}; "
+                "then approve, request changes, or reject."
+            )
+    return expected is not None \
+        and current.get("Action", "").strip() == expected
+
+
+def human_action_v2_migration(
+    source, destination, before, after, prior_revision, revision
+):
+    """Allow one presentation rewrite at activation or legacy publication."""
+    source_parts = Path(source).parts
+    destination_parts = Path(destination).parts
+    if source != destination \
+            or len(source_parts) != 4 \
+            or len(destination_parts) != 4 \
+            or source_parts[1] != "needs-human" \
+            or destination_parts[1] != "needs-human" \
+            or source_parts[2] != destination_parts[2] \
+            or human_action_presentation_version_at(revision) != "v2":
+        return False
+    prior = text_fields(before)
+    current = text_fields(after)
+    prior_status = prior.get("Status", "").strip()
+    current_status = current.get("Status", "").strip()
+    activation_migration = bool(
+        prior_status == "waiting"
+        and current_status == "waiting"
+        and not human_action_presentation_activations(prior_revision)
+    )
+    legacy_review_publication = bool(
+        source_parts[2] == "reviews"
+        and prior_status == "awaiting-artifact"
+        and current_status == "waiting"
+        and before.count(HUMAN_ACTION_PRESENTATION_MARKER) == 0
+        and prior.get("Review target", "").strip() == "pending"
+        and prior.get("Review revision", "").strip() == "pending"
+        and review_target(current.get("Review target", "")) is not None
+        and has_concrete_value(current.get("Review revision", ""))
+    )
+    if not (
+        activation_migration
+        or legacy_review_publication
+    ) \
+            or not unanswered_human_action(before, source_parts[2]) \
+            or not unanswered_human_action(after, source_parts[2]) \
+            or after.count(HUMAN_ACTION_PRESENTATION_MARKER) != 1:
+        return False
+
+    exact_fields = {
+        "Status",
+        "Filed",
+        "Action",
+        "Resolution evidence",
+        "Review target",
+        "Review revision",
+        "Reviewed revision",
+        "Review outcome",
+        "Your answer",
+        "Your review",
+        "External assignment",
+        "External source",
+        "Supersedes",
+        "Depends on",
+        "Follow-up review",
+        "Successor action",
+    }
+    if legacy_review_publication:
+        exact_fields.difference_update((
+            "Status", "Review target", "Review revision",
+        ))
+    exact_fields.update(
+        field
+        for field in set(prior).union(current)
+        if field.startswith("External ")
+    )
+    crossed_merge_reframe = crossed_merge_review_reframe(
+        source,
+        destination,
+        prior,
+        current,
+        prior_revision,
+    ) if activation_migration and source_parts[2] == "reviews" else False
+    confirm_review_reframe = bool(
+        activation_migration
+        and source_parts[2] == "reviews"
+        and legacy_confirm_review_reframe(prior, current)
+    )
+    for field in exact_fields:
+        prior_value = prior.get(field, "").strip()
+        current_value = current.get(field, "").strip()
+        if prior_value != current_value \
+                and not (
+                    field == "Action"
+                    and (crossed_merge_reframe or confirm_review_reframe)
+                ):
+            return False
+    prior_references = set(normalized_reference_targets(
+        prior.get("Full context", ""),
+        source if HUMAN_ACTION_PRESENTATION_MARKER in before else None,
+    ))
+    current_references = set(normalized_reference_targets(
+        current.get("Full context", ""), destination
+    ))
+    if crossed_merge_reframe or confirm_review_reframe:
+        if prior_references != current_references:
+            return False
+    elif not prior_references.issubset(current_references):
+        return False
+    prior_timing = tuple(
+        (field, prior.get(field, "").strip())
+        for fields in QUEUE_TIMING_FIELDS.values()
+        for field in fields
+    )
+    current_timing = tuple(
+        (field, current.get(field, "").strip())
+        for fields in QUEUE_TIMING_FIELDS.values()
+        for field in fields
+    )
+    if crossed_merge_reframe:
+        return tuple(
+            pair for pair in prior_timing if pair[0] != "Until then"
+        ) == tuple(
+            pair for pair in current_timing if pair[0] != "Until then"
+        )
+    return prior_timing == current_timing
+
+
+def normalized_v2_review_transition_text(text):
+    """Remove only the exact UI fragments managed by review publication state."""
+    clean = semantic_text(text)
+    clean = re.sub(
+        r"^> \*\*(?:Waiting for your response\.|Not ready yet\. "
+        r"No action is requested\.|Response received\. "
+        r"No further response is needed\.)\*\*$",
+        "> **<status-dependent notice>**",
+        clean,
+        count=1,
+        flags=re.M,
+    )
+    clean = re.sub(
+        r"^No action is needed yet\. The review target has not been "
+        r"published\.$",
+        "",
+        clean,
+        count=1,
+        flags=re.M,
+    )
+    clean = re.sub(
+        r"^\*\*Current state:\*\*[^\n]*$",
+        "**Current state:** <status-dependent>",
+        clean,
+        flags=re.M,
+    )
+    clean = re.sub(
+        r"^## Agent recommendation\s*\n.*?(?=^##(?:\s|$)|\Z)",
+        "## Agent recommendation\n<status-dependent recommendation>\n\n",
+        clean,
+        count=1,
+        flags=re.M | re.S,
+    )
+    clean = re.sub(
+        r"^## Your response\s*\n.*?(?=^##(?:\s|$)|\Z)",
+        "## Your response\n<status-dependent response UI>\n\n",
+        clean,
+        count=1,
+        flags=re.M | re.S,
+    )
+    managed_fields = {"Status", "Review target", "Review revision"}
+    removable_fields = {"Your review", "Exact review artifact"}
+    lines = []
+    for line in clean.splitlines():
+        matched = FIELD_RE.fullmatch(line)
+        if matched and matched.group(1) in managed_fields:
+            lines.append(f"**{matched.group(1)}:** <status-dependent>")
+        elif matched and matched.group(1) in removable_fields:
+            continue
+        else:
+            lines.append(line.rstrip())
+    clean = "\n".join(lines).strip()
+    return re.sub(r"\n{3,}", "\n\n", clean)
+
+
+def human_action_v2_review_state_transition(source, destination, before, after):
+    """Allow status-managed presentation changes during v2 review publication."""
+    parts = Path(source).parts
+    if source != destination \
+            or len(parts) != 4 \
+            or parts[1:3] != ("needs-human", "reviews") \
+            or before.count(HUMAN_ACTION_PRESENTATION_MARKER) != 1 \
+            or after.count(HUMAN_ACTION_PRESENTATION_MARKER) != 1:
+        return False
+    prior = text_fields(before)
+    current = text_fields(after)
+    status_pair = (
+        prior.get("Status", "").strip(),
+        current.get("Status", "").strip(),
+    )
+    if status_pair not in {
+        ("awaiting-artifact", "waiting"),
+        ("waiting", "awaiting-artifact"),
+    } or not unanswered_human_action(before, "reviews") \
+            or not unanswered_human_action(after, "reviews"):
+        return False
+    return normalized_v2_review_transition_text(before) \
+        == normalized_v2_review_transition_text(after)
 
 
 def human_projection_context_migration(
@@ -2000,17 +3007,39 @@ def queue_mutation_problem(
     regression = queue_parent_state_regression_problem(before, after)
     if regression is not None:
         return regression
-    if queue_action_identity(source, before) != queue_action_identity(
-        destination, after
-    ) and not human_projection_context_migration(
-        source,
-        destination,
-        before,
-        after,
-        prior_revision,
-        revision,
-    ):
-        return "action identity changed while the queue item remained live"
+    identity_changed = queue_action_identity(
+        source, before
+    ) != queue_action_identity(destination, after)
+    projection_migration = False
+    review_state_transition = False
+    presentation_migration = False
+    if identity_changed:
+        projection_migration = human_projection_context_migration(
+            source,
+            destination,
+            before,
+            after,
+            prior_revision,
+            revision,
+        )
+        review_state_transition = human_action_v2_review_state_transition(
+            source,
+            destination,
+            before,
+            after,
+        )
+        presentation_migration = human_action_v2_migration(
+            source,
+            destination,
+            before,
+            after,
+            prior_revision,
+            revision,
+        )
+        if not projection_migration \
+                and not review_state_transition \
+                and not presentation_migration:
+            return "action identity changed while the queue item remained live"
 
     source_parts = Path(source).parts
     destination_parts = Path(destination).parts
@@ -2034,6 +3063,7 @@ def queue_mutation_problem(
         destination_leaf = (
             destination_parts[2] if len(destination_parts) > 2 else ""
         )
+        response_leaf = destination_leaf or source_leaf
         is_review = "reviews" in {source_leaf, destination_leaf}
         if is_review:
             binding_keys = ("Review target", "Review revision")
@@ -2067,7 +3097,7 @@ def queue_mutation_problem(
                     "awaiting-artifact -> waiting publication transition"
                 )
         response_changed = current_response != prior_response
-        if first_concrete_response(prior_response) is not None \
+        if first_concrete_response(prior_response, response_leaf) is not None \
                 and response_changed:
             return (
                 "human response or its immutable review binding changed "
@@ -2093,8 +3123,8 @@ def queue_mutation_problem(
         or prior_timing != current_timing
     )
     if actor == "needs-human" and timing_changed and (
-        first_concrete_response(prior_response) is not None
-        or first_concrete_response(current_response) is not None
+        first_concrete_response(prior_response, response_leaf) is not None
+        or first_concrete_response(current_response, response_leaf) is not None
     ):
         return "dependency timing changed with or after the human response"
     if source_timing in QUEUE_TIMING_ORDER \
@@ -2102,7 +3132,9 @@ def queue_mutation_problem(
             and QUEUE_TIMING_ORDER[destination_timing] \
             < QUEUE_TIMING_ORDER[source_timing]:
         return "dependency timing was weakened while the queue item remained live"
-    if source_timing == destination_timing and prior_timing != current_timing:
+    if source_timing == destination_timing \
+            and prior_timing != current_timing \
+            and not presentation_migration:
         return "dependency timing changed without a matching timing-prefix rename"
     return None
 
@@ -2636,7 +3668,7 @@ def resolution_evidence_problem(text, prior_revision, revision):
 @contextlib.contextmanager
 def git_revision_candidate(revision, preserve_change_range=False):
     """Temporarily expose one committed tree through the candidate-read helpers."""
-    global CHANGE_RANGE, _GIT_SNAPSHOT_CACHE_ACTIVE
+    global CHANGE_RANGE, DISPLACED_TIP, _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
     global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
@@ -2680,6 +3712,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
 
     saved = (
         CHANGE_RANGE,
+        DISPLACED_TIP,
         _GIT_SNAPSHOT_CACHE_ACTIVE,
         _GIT_INDEX_CACHE,
         _GIT_INDEX_OID_CACHE,
@@ -2699,6 +3732,11 @@ def git_revision_candidate(revision, preserve_change_range=False):
     close_git_cat_file()
     if not preserve_change_range:
         CHANGE_RANGE = f"root:{revision}"
+        # A historical creation snapshot is an internal recursive check, not the
+        # externally admitted replacement tip.  Carrying the outer force-update
+        # continuity edge into this root-range view would both misclassify the
+        # snapshot and make displaced-tip validation fail closed on its shape.
+        DISPLACED_TIP = None
     _GIT_SNAPSHOT_CACHE_ACTIVE = True
     _GIT_INDEX_CACHE = modes
     _GIT_INDEX_OID_CACHE = oids
@@ -2722,6 +3760,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
         close_git_cat_file()
         (
             CHANGE_RANGE,
+            DISPLACED_TIP,
             _GIT_SNAPSHOT_CACHE_ACTIVE,
             _GIT_INDEX_CACHE,
             _GIT_INDEX_OID_CACHE,
@@ -3595,41 +4634,189 @@ def queue_deletion_problem(path, text, prior_revision, revision):
     )
 
 
+def new_human_action_lifecycle_problem(path, text):
+    """Require a response-free initial state for post-v2 human actions."""
+    parts = Path(path).parts
+    if len(parts) != 4 or parts[1] != "needs-human":
+        return None
+    leaf = parts[2]
+    status = text_fields(text).get("Status", "").strip()
+    if leaf in {"decisions", "clarifications"}:
+        if status != "waiting":
+            return f"new {leaf} action must start as unanswered waiting"
+        if not unanswered_human_action(text, leaf):
+            return f"new {leaf} action must not contain a human response"
+    elif leaf == "reviews":
+        if status not in {"awaiting-artifact", "waiting"}:
+            return (
+                "new review action must start awaiting-artifact or unanswered waiting"
+            )
+        if not unanswered_human_action(text, leaf):
+            return "new review action must not contain a human response"
+    else:
+        if status != "waiting":
+            return f"new {leaf} action must start as unanswered waiting"
+        if not unanswered_human_action(text):
+            return f"new {leaf} action must not contain a human response"
+    return None
+
+
 def check_queue_resolution():
     if not (REPO / ".git").exists():
         return
     queue_present = bool(git_index_entries("message-queue"))
     activations = queue_resolution_activation_commits(_GIT_HEAD_OID)
     enabled = queue_resolution_enabled()
+    presentation_activations = human_action_presentation_activations(
+        _GIT_HEAD_OID
+    )
+    presentation_enabled = human_action_presentation_enabled()
+    selected_head = selected_change_range_head()
+    selected_base = selected_change_range_base()
+    selected_range_is_backward = selected_change_range_is_backward()
+    selected_range_presentation_enabled = bool(
+        selected_head is not None
+        and (
+            human_action_presentation_version_at(selected_head) == "v2"
+            or (
+                selected_base is not None
+                and human_action_presentation_version_at(selected_base) == "v2"
+            )
+            or selected_range_activates_human_action_presentation()
+        )
+    )
     continuity_edge = displaced_tip_edge()
     displaced_activations = (
         queue_resolution_activation_commits(continuity_edge[0])
         if continuity_edge is not None
         else ()
     )
-    if not activations and not enabled and not displaced_activations:
+    displaced_presentation_activations = (
+        human_action_presentation_activations(continuity_edge[0])
+        if continuity_edge is not None
+        else ()
+    )
+    displaced_presentation_enabled = bool(
+        continuity_edge is not None
+        and human_action_presentation_version_at(continuity_edge[0]) == "v2"
+    )
+    presentation_dependency_states = tuple(
+        presentation_without_queue_resolution_states(continuity_edge)
+    )
+    for _revision, label in presentation_dependency_states:
+        yield Finding(
+            "queue-resolution",
+            Path("message-queue/AGENTS.md"),
+            "Human action presentation schema v2 is active without "
+            f"queue-resolution schema v1 at {label}",
+            "activate **Queue resolution schema:** v1 no later than "
+            "presentation v2, or remove presentation v2 from that state",
+        )
+    if not activations and not enabled and not displaced_activations \
+            and not presentation_activations \
+            and not presentation_enabled \
+            and not selected_range_presentation_enabled \
+            and not displaced_presentation_activations \
+            and not displaced_presentation_enabled \
+            and not presentation_dependency_states:
         return
+    queue_resolution_removals = tuple(
+        queue_resolution_schema_removal_events(activations)
+    )
     if (activations or displaced_activations) \
-            and queue_present and not enabled:
+            and queue_present and not enabled \
+            and not queue_resolution_removals:
         yield Finding(
             "queue-resolution",
             Path("message-queue/AGENTS.md"),
             "queue-resolution v1 was removed after activation",
             "restore **Queue resolution schema:** v1 before changing queue state",
         )
+    for parent, revision in queue_resolution_removals:
+        yield Finding(
+            "queue-resolution",
+            Path("message-queue/AGENTS.md"),
+            "queue-resolution v1 was removed after activation on governed edge "
+            f"{parent} -> {revision or 'staged candidate'}",
+            "preserve v1 on every edge while the queue service remains",
+        )
+    if (presentation_activations or displaced_presentation_activations) \
+            and queue_present \
+            and not presentation_enabled:
+        yield Finding(
+            "queue-resolution",
+            Path("message-queue/AGENTS.md"),
+            "Human action presentation schema v2 was removed after activation",
+            "restore **Human action presentation schema:** v2 while the queue remains",
+        )
+    for parent, revision in presentation_schema_removal_events(
+        presentation_activations
+    ):
+        yield Finding(
+            "queue-resolution",
+            Path("message-queue/AGENTS.md"),
+            "Human action presentation schema v2 was removed on governed edge "
+            f"{parent} -> {revision or 'staged candidate'}",
+            "preserve v2 on every edge while the queue service remains",
+        )
     if not activations and enabled and _GIT_HEAD_OID:
         activations = (_GIT_HEAD_OID,)
     reported = set()
     mutation_event_groups = []
     deletion_event_groups = []
+    addition_event_groups = []
     if activations:
         mutation_event_groups.append(queue_mutation_events(activations))
         deletion_event_groups.append((
             queue_deletion_events(activations),
             False,
         ))
+    elif selected_range_is_backward and presentation_activations:
+        mutation_event_groups.append(queue_mutation_events(
+            presentation_activations
+        ))
+        deletion_event_groups.append((
+            queue_deletion_events(presentation_activations),
+            False,
+        ))
+    elif selected_range_presentation_enabled \
+            or displaced_presentation_enabled:
+        mutation_event_groups.append(queue_mutation_events(
+            (), include_selected_range=True
+        ))
+        deletion_event_groups.append((
+            queue_deletion_events((), include_selected_range=True),
+            False,
+        ))
+    elif presentation_activations or presentation_enabled:
+        lifecycle_activations = presentation_activations
+        if not lifecycle_activations and _GIT_HEAD_OID:
+            lifecycle_activations = (_GIT_HEAD_OID,)
+        if lifecycle_activations:
+            mutation_event_groups.append(
+                queue_mutation_events(lifecycle_activations)
+            )
+            deletion_event_groups.append((
+                queue_deletion_events(lifecycle_activations),
+                False,
+            ))
+    if presentation_activations or presentation_enabled \
+            or selected_range_presentation_enabled \
+            or displaced_presentation_enabled:
+        filter_backward_history = bool(
+            selected_range_is_backward and presentation_activations
+        )
+        addition_event_groups.append(
+            human_action_origin_events(
+                presentation_activations,
+                include_selected_range=(
+                    selected_range_presentation_enabled
+                    or displaced_presentation_enabled
+                ) and not filter_backward_history,
+            )
+        )
     if continuity_edge is not None and (
-        activations or displaced_activations
+        activations or displaced_activations or displaced_presentation_enabled
     ):
         parent, revision = continuity_edge
         mutation_event_groups.append(
@@ -3668,6 +4855,23 @@ def check_queue_resolution():
                 f"live queue action was rewritten: {problem}",
                 "preserve the action and response identity; file a distinct "
                 "successor action when the requested work changes",
+            )
+    for events in addition_event_groups:
+        for path, text, prior_revision, revision in events:
+            problem = new_human_action_lifecycle_problem(path, text)
+            if not problem:
+                continue
+            identity = (path, problem)
+            if identity in reported:
+                continue
+            reported.add(identity)
+            yield Finding(
+                "queue-resolution",
+                Path(path),
+                "human action was created in a claimed lifecycle state: "
+                + problem,
+                "create the action without a response, then record the human "
+                "response and folding claim on later committed edges",
             )
     for events, is_continuity_edge in deletion_event_groups:
         for path, text, prior_revision, revision in events:
@@ -3724,8 +4928,1183 @@ def check_queue_location():
             )
 
 
+def human_action_v2_marker_is_immediate(text):
+    return bool(re.match(
+        r"\A(?:<!--[\s\S]*?-->\n\n?)*# [^\n]+\n(?:\n)?"
+        + re.escape(HUMAN_ACTION_PRESENTATION_MARKER)
+        + r"(?:\n|\Z)",
+        text,
+    ))
+
+
+def h2_headings(text):
+    return re.findall(r"^## ([^#\n].*?)\s*$", semantic_text(text), flags=re.M)
+
+
+def h3_sections(body):
+    """Return ordered (heading, body) pairs for direct H3 children."""
+    if body is None:
+        return []
+    matches = list(re.finditer(r"^### ([^#\n].*?)\s*$", body, flags=re.M))
+    sections = []
+    for index, matched in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        sections.append((matched.group(1).strip(), body[matched.end():end].strip()))
+    return sections
+
+
+SENTENCE_TERMINATORS = ".!?。！？"
+SENTENCE_CLOSERS = "\"'’”»›)]}）］｝」』】〕〉》"
+SENTENCE_CLOSER_OPENERS = {
+    '"': '"',
+    "'": "'",
+    "’": "‘",
+    "”": "“",
+    "»": "«",
+    "›": "‹",
+    ")": "(",
+    "]": "[",
+    "}": "{",
+    "）": "（",
+    "］": "［",
+    "｝": "｛",
+    "」": "「",
+    "』": "『",
+    "】": "【",
+    "〕": "〔",
+    "〉": "〈",
+    "》": "《",
+}
+COMPACT_PARAGRAPH_MAX_CODEPOINTS = 240
+COMPACT_CONTEXT_MAX_CODEPOINTS = 400
+
+
+def commonmark_unescaped_text(value):
+    """Render inline text without changing Unicode identity."""
+    return rendered_inline_text(value).strip()
+
+
+def sentence_closer_is_balanced(value, index):
+    """Return whether a terminal closing mark has an unmatched opener before it."""
+    closer = value[index]
+    opener = SENTENCE_CLOSER_OPENERS.get(closer)
+    if opener is None:
+        return False
+    prefix = value[:index]
+    if opener == closer:
+        return prefix.count(opener) % 2 == 1
+    return prefix.count(opener) > prefix.count(closer)
+
+
+def rendered_text_has_terminal_punctuation(value):
+    """Recognize rendered sentence punctuation before balanced closing marks."""
+    rendered = commonmark_unescaped_text(value).rstrip()
+    final = len(rendered) - 1
+    while final >= 0 and rendered[final] in SENTENCE_CLOSERS \
+            and sentence_closer_is_balanced(rendered, final):
+        final -= 1
+    return final >= 0 and rendered[final] in SENTENCE_TERMINATORS
+
+
+def compact_rendered_paragraph_text(value):
+    """Return one paragraph's rendered text with whitespace normalized only."""
+    return " ".join(rendered_inline_text(value).split())
+
+
+VISUAL_LINE_BREAK_RE = re.compile(r"\r\n|[\n\r\u0085\u2028\u2029]")
+STRICT_CHARACTER_REFERENCE_RE = COMMONMARK_CHARACTER_REFERENCE_RE
+RAW_BOLD_FIELD_CANDIDATE_RE = re.compile(
+    r"^(?P<prefix>.*?)\*\*(?P<label>[^*\n]+?)\*\*[ \t]*(?P<value>.*)$"
+)
+
+
+def decode_visual_line_character_references(value):
+    """Decode only references that render a human-visible line boundary."""
+    def replace(matched):
+        decoded = strict_commonmark_character_reference(matched.group(0))
+        if decoded != matched.group(0) and VISUAL_LINE_BREAK_RE.search(decoded):
+            return decoded
+        return matched.group(0)
+
+    return STRICT_CHARACTER_REFERENCE_RE.sub(replace, value or "")
+
+
+def detection_visual_line_source(value):
+    """Map every supported reader-visible line boundary to LF for detection only."""
+    with_decoded_boundaries = decode_visual_line_character_references(value or "")
+    return VISUAL_LINE_BREAK_RE.sub("\n", with_decoded_boundaries)
+
+
+def visual_line_horizontal_prefix_length(value):
+    """Return the length of a prefix containing only visual horizontal spacing."""
+    cursor = 0
+    while cursor < len(value):
+        character = value[cursor]
+        if character in " \t" or unicodedata.category(character) == "Zs":
+            cursor += 1
+            continue
+        break
+    return cursor
+
+
+def detection_field_component_text(value, normalize_horizontal=False):
+    """Render refs and ignorables in a field prefix/label without NFKC."""
+    decoded = STRICT_CHARACTER_REFERENCE_RE.sub(
+        lambda matched: strict_commonmark_character_reference(matched.group(0)),
+        value or "",
+    )
+    output = []
+    for character in decoded:
+        if is_default_ignorable_character(character):
+            continue
+        if normalize_horizontal \
+                and (character in " \t" or unicodedata.category(character) == "Zs"):
+            output.append(" ")
+        else:
+            output.append(character)
+    return "".join(output)
+
+
+def structural_field_scan_source(value):
+    """Hide closed inline code while retaining a visible non-field sentinel."""
+    output = list(value or "")
+    for opening, closing in block_aware_inline_code_spans(value):
+        need_sentinel = True
+        for position in range(opening, closing):
+            if VISUAL_LINE_BREAK_RE.fullmatch(output[position]):
+                need_sentinel = True
+            elif need_sentinel:
+                output[position] = "x"
+                need_sentinel = False
+            else:
+                output[position] = " "
+    return "".join(output)
+
+
+def line_break_code_scan_source(value):
+    """Hide code spans whose contents would manufacture detection-only lines."""
+    source = value or ""
+    output = list(source)
+    for opening, closing in block_aware_inline_code_spans(source):
+        code_source = source[opening:closing]
+        if "\n" not in detection_visual_line_source(code_source):
+            continue
+        for position in range(opening, closing):
+            output[position] = "x" if position == opening else " "
+    return "".join(output)
+
+
+def detection_visual_field_source(value):
+    """Return the shared detection-only visual-line view for exact fields."""
+    inert_blanked = semantic_text(value or "")
+    table_blanked = gfm_table_scan_source(inert_blanked)
+    code_blanked = line_break_code_scan_source(table_blanked)
+    return detection_visual_line_source(code_blanked)
+
+
+def structural_field_like_lines(value):
+    """Return bold-key lines after detection-only visual-prefix handling.
+
+    The returned tuples are ``(label, disguised)``. ``disguised`` is true when the
+    source was not already one exact column-zero field line, for example because a
+    two-space/NBSP prefix or a default-ignorable character hid its structure.
+    """
+    inert_blanked = semantic_text(value or "")
+    table_blanked = gfm_table_scan_source(inert_blanked)
+    structural = detection_visual_line_source(
+        structural_field_scan_source(table_blanked)
+    )
+    found = []
+    structural_lines = structural.split("\n")
+    for structural_line in structural_lines:
+        matched = RAW_BOLD_FIELD_CANDIDATE_RE.fullmatch(structural_line)
+        if matched is not None:
+            rendered_prefix = detection_field_component_text(
+                matched.group("prefix")
+            )
+            if visual_line_horizontal_prefix_length(rendered_prefix) \
+                    == len(rendered_prefix):
+                rendered_label = detection_field_component_text(
+                    matched.group("label"), normalize_horizontal=True
+                )
+                canonical_label = re.fullmatch(
+                    r"([A-Za-z][A-Za-z -]*):", rendered_label
+                )
+                if canonical_label is not None:
+                    label = canonical_label.group(1)
+                    exact = FIELD_RE.fullmatch(structural_line)
+                    found.append((
+                        label,
+                        exact is None or exact.group(1) != label,
+                    ))
+                    continue
+
+        delimiter_positions = [
+            position
+            for position, character in enumerate(structural_line)
+            if character in "*_"
+        ]
+        for position in delimiter_positions:
+            rendered_prefix = detection_field_component_text(
+                structural_line[:position]
+            )
+            if visual_line_horizontal_prefix_length(rendered_prefix) \
+                    != len(rendered_prefix):
+                break
+            emphasized_source = structural_line[position:]
+            if ambiguous_inline_markup_reason(emphasized_source):
+                break
+            rendered = detection_field_component_text(
+                rendered_inline_text(emphasized_source),
+                normalize_horizontal=True,
+            )
+            emphasized_label = re.match(
+                r"([A-Za-z][A-Za-z -]*):", rendered
+            )
+            if emphasized_label is not None:
+                found.append((emphasized_label.group(1), True))
+            break
+    return tuple(found)
+
+
+def compact_rendered_paragraph_problem(value, required_prefix=None):
+    """Validate short human context as prose, independent of sentence counting."""
+    source = detection_visual_line_source(value or "").strip("\n")
+    if not source.strip():
+        return "must be one nonempty compact paragraph"
+    if re.search(r"\n[ \t]*\n", source):
+        return "must be one paragraph; blank lines cannot start another paragraph"
+    if contains_raw_html(source):
+        return "must be plain Markdown prose without raw HTML or comments"
+    markup_problem = ambiguous_inline_markup_reason(source)
+    if markup_problem:
+        return markup_problem
+    if structural_field_like_lines(source):
+        return "must contain prose only, not a bold-key field-looking line"
+    block_patterns = (
+        r"[ ]{4}|\t",
+        r"[ ]{0,3}(?:#{1,6}(?:[ \t]+|$)|>|`{3,}|~{3,})",
+        r"[ ]{0,3}(?:[-+*][ \t]+|\d+[.)][ \t]+)",
+        r"[ ]{0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$",
+        r"[ ]{0,3}(?:=+|-+)[ \t]*$",
+        r"[ ]{0,3}\[(?:\\.|[^\]\\])+\]:",
+        r"[ ]{0,3}\|?.*:?-{3,}:?[ \t]*(?:\|.*)+$",
+    )
+    for line in source.splitlines():
+        if any(re.match(pattern, line) for pattern in block_patterns):
+            return (
+                "must contain prose only, with no headings, lists, quotes, tables, "
+                "rules, code blocks, or reference definitions"
+            )
+    references = visible_markdown_reference_resolution(source)
+    if references.references or references.definitions or references.unresolved:
+        return "must not contain links, images, or reference definitions"
+    rendered = compact_rendered_paragraph_text(source)
+    if not rendered:
+        return "must be one nonempty compact paragraph"
+    if len(rendered) > COMPACT_PARAGRAPH_MAX_CODEPOINTS:
+        return (
+            f"must be at most {COMPACT_PARAGRAPH_MAX_CODEPOINTS} normalized "
+            "Unicode code points"
+        )
+    if required_prefix is not None and not rendered.startswith(required_prefix):
+        return f"must begin `{required_prefix}`"
+    if not rendered_text_has_terminal_punctuation(rendered):
+        return "must end in `.`, `?`, `!`, `。`, `！`, or `？`"
+    return None
+
+
+def inline_rendered_identity_problem(
+    value, forbid_references=False, link_label_context=False
+):
+    """Validate source whose exact contract is its rendered inline identity."""
+    source = (value or "").strip("\r\n")
+    if not source.strip() or "\n" in detection_visual_line_source(source):
+        return "must be one nonempty inline source line"
+    if re.match(
+        r"[ ]{0,3}(?:#{1,6}(?:[ \t]+|$)|>|`{3,}|~{3,}|"
+        r"[-+*][ \t]+|\d+[.)][ \t]+|"
+        r"(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$)",
+        source,
+    ):
+        return "must not contain block Markdown"
+    if contains_raw_html(source) \
+            or contains_html_comment_outside_inline_code(source):
+        return "must not contain raw HTML or comments"
+    markup_source = "[" + source + "]" if link_label_context else source
+    markup_problem = ambiguous_inline_markup_reason(
+        markup_source,
+        suppress_extended_autolinks=link_label_context,
+    )
+    if markup_problem:
+        return markup_problem
+    if forbid_references:
+        resolution = visible_markdown_reference_resolution(source)
+        if resolution.references or resolution.definitions \
+                or resolution.unresolved:
+            return "must not contain links, images, autolinks, or reference syntax"
+    has_visible_content = (
+        rendered_link_label_text_has_visible_content(source)
+        if link_label_context
+        else rendered_inline_text_has_visible_content(source)
+    )
+    if not has_visible_content:
+        return "must render as concrete visible inline text"
+    return None
+
+
+REVIEW_RESPONSE_GUIDANCE = {
+    "Write `approve`, `request changes`, `reject`, or `I need clarification` "
+    "followed by your question. A plain-language answer is enough; the agent "
+    "manages revision tracking.",
+    "Write `approve`, `request changes`, or `reject`, followed by any reason or "
+    "requested changes. You may also write `I need clarification`. A plain-language "
+    "answer is enough; the agent manages revision tracking.",
+}
+
+
+def source_without_html_comments(value):
+    """Remove closed non-rendered comments while preserving every visible construct."""
+    return re.sub(r"<!--[\s\S]*?-->", "", value or "")
+
+
+def source_with_standalone_comments_blanked(value):
+    """Blank standalone comments without joining adjacent field source lines."""
+    source = value or ""
+    output = list(source)
+    code_spans = tuple(block_aware_inline_code_spans(source))
+    code_span_index = 0
+    cursor = 0
+    while True:
+        start = source.find("<!--", cursor)
+        if start < 0:
+            break
+        while code_span_index < len(code_spans) \
+                and code_spans[code_span_index][1] <= start:
+            code_span_index += 1
+        if code_span_index < len(code_spans) \
+                and code_spans[code_span_index][0] <= start \
+                < code_spans[code_span_index][1]:
+            cursor = code_spans[code_span_index][1]
+            continue
+        end = source.find("-->", start + 4)
+        if end < 0:
+            return None, "contains an unclosed HTML comment"
+        end += 3
+        line_start = source.rfind("\n", 0, start) + 1
+        line_end = source.find("\n", end)
+        if line_end < 0:
+            line_end = len(source)
+        if source[line_start:start].strip() or source[end:line_end].strip():
+            return None, "comments must be standalone blocks"
+        for index in range(start, end):
+            if output[index] not in "\r\n":
+                output[index] = " "
+        cursor = end
+    return "".join(output), None
+
+
+def structural_human_action_scan_source(value):
+    """Hide literal code and default ignorables in a field-detection-only view."""
+    source = detection_visual_line_source(structural_field_scan_source(value))
+    return "".join(
+        character
+        for character in source
+        if not is_default_ignorable_character(character)
+    )
+
+
+def raw_human_action_request_parts(value):
+    """Parse the exact Action, blank separator, and explanatory paragraph shape."""
+    source = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+    cleaned, comment_problem = source_with_standalone_comments_blanked(source)
+    if comment_problem:
+        return None, None, comment_problem
+
+    raw_lines = source.split("\n")
+    clean_lines = cleaned.split("\n")
+    if len(raw_lines) != len(clean_lines):
+        return None, None, "comment removal changed source line boundaries"
+    visible = [
+        index for index, line in enumerate(clean_lines) if line.strip()
+    ]
+    structural_lines = structural_human_action_scan_source(cleaned).split("\n")
+    action_markers = [
+        line
+        for line in structural_lines
+        if re.match(r"^[ ]{0,3}\*\*Action:\*\*(?:[ \t]|$)", line)
+    ]
+    if len(action_markers) != 1:
+        return (
+            None,
+            None,
+            "must contain exactly one visible raw **Action:** field",
+        )
+    if not visible:
+        return None, None, "Action must be the first visible construct"
+
+    action_index = visible[0]
+    action_match = FIELD_RE.fullmatch(clean_lines[action_index])
+    if action_match is None or action_match.group(1) != "Action":
+        return (
+            None,
+            None,
+            "Action must be the first visible construct and occupy one source line",
+        )
+    if action_index + 2 >= len(raw_lines) \
+            or raw_lines[action_index + 1].strip() \
+            or not clean_lines[action_index + 2].strip():
+        return (
+            None,
+            None,
+            "Action must be followed immediately by one blank source line and "
+            "one explanatory compact paragraph",
+        )
+
+    last_visible = visible[-1]
+    explanation = "\n".join(clean_lines[action_index + 2:last_visible + 1])
+    return action_match.group(2), explanation, None
+
+
+def review_response_guidance_is_closed(body):
+    """Accept only the two published closed-vocabulary review instructions."""
+    detection_source = detection_visual_line_source(
+        source_without_html_comments(body)
+    )
+    without_field, field_count = re.subn(
+        r"^\*\*Your review:\*\*[^\n]*$",
+        "",
+        detection_source,
+        flags=re.M,
+    )
+    return bool(
+        field_count == 1
+        and " ".join(without_field.split()) in REVIEW_RESPONSE_GUIDANCE
+    )
+
+
+def field_pure_section(
+    body, allowed_orders, allow_blank=(), no_continuation=(),
+    allow_reference_definitions=False, require_concrete=True,
+    allow_template_placeholders=False,
+):
+    """Parse one field-only section and return logical wrapped values."""
+    cleaned, comment_problem = source_with_standalone_comments_blanked(body)
+    if comment_problem:
+        return {}, comment_problem
+    html_check_source = cleaned
+    if allow_template_placeholders:
+        html_check_source = re.sub(
+            r"<[^<>]*>",
+            lambda matched: "".join(
+                character if character in "\r\n" else " "
+                for character in matched.group(0)
+            ),
+            html_check_source,
+            flags=re.S,
+        )
+    if contains_raw_html(html_check_source):
+        return {}, "contains raw HTML outside an allowed standalone comment"
+    current = None
+    keys = []
+    values = {}
+    for line in detection_visual_line_source(cleaned).split("\n"):
+        if not line.strip():
+            current = None
+            continue
+        matched = FIELD_RE.fullmatch(line)
+        if matched:
+            current = matched.group(1)
+            keys.append(current)
+            if current in values:
+                return {}, f"contains repeated **{current}:** fields"
+            values[current] = matched.group(2).strip()
+            continue
+        continuation = re.fullmatch(r" {2}(\S.*)", line)
+        if continuation and current and current not in no_continuation:
+            content = continuation.group(1)
+            if structural_field_like_lines(content):
+                return {}, "field wrapping cannot introduce a bold-key field"
+            if re.match(
+                r"(?:`{3,}|~{3,}|#{1,6}(?:\s|$)|[-+*]\s|\d+[.)]\s|>|<"
+                r"|\[(?:\\.|[^\]\\])+\]:|(?:=+|-+)\s*$|\|)",
+                content,
+            ) or re.match(r"\|?.*:?-{3,}:?\s*(?:\|.*)+$", content):
+                return {}, "field wrapping cannot introduce a Markdown block"
+            values[current] = " ".join((values[current], content)).strip()
+            continue
+        if allow_reference_definitions:
+            resolution = visible_markdown_reference_resolution(line)
+            if len(resolution.definitions) == 1 \
+                    and resolution.definitions[0].start == 0 \
+                    and resolution.definitions[0].end == len(line):
+                current = None
+                continue
+        return {}, (
+            "must contain only declared field lines, standalone comments, and "
+            "immediate value wrapping indented by exactly two spaces"
+        )
+    allowed = [tuple(order) for order in allowed_orders]
+    if tuple(keys) not in allowed:
+        expected = " or ".join(
+            ", ".join(order) for order in allowed
+        )
+        return {}, "must use exactly this field order: " + expected
+    for field in keys:
+        if require_concrete and field not in allow_blank \
+                and not has_concrete_value(values[field]):
+            return {}, f"has an empty or placeholder **{field}:**"
+    return values, None
+
+
+def recommendation_field_layout_problem(body, required):
+    """Compatibility wrapper for the generalized field-pure parser."""
+    _values, problem = field_pure_section(
+        body, (tuple(required),), no_continuation=("Recommendation",),
+        require_concrete=False, allow_template_placeholders=True,
+    )
+    return problem
+
+
+def raw_h3_sections(body):
+    """Return direct H3 children while preserving their raw field source."""
+    if body is None:
+        return []
+    clean, problem = source_with_standalone_comments_blanked(body)
+    if problem:
+        return []
+    matches = list(re.finditer(r"^### ([^#\n].*?)\s*$", clean, flags=re.M))
+    sections = []
+    for index, matched in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
+        sections.append((matched.group(1).strip(), clean[matched.end():end].strip()))
+    return sections
+
+
+def scoped_fields_problem(body, required, allow_blank=(), optional=()):
+    """Validate one field-only scope against explicit required/optional keys."""
+    shape_problem = tracking_details_body_problem(body)
+    if shape_problem:
+        return shape_problem
+    counts = field_counts(body or "")
+    got = text_fields(body or "")
+    allowed = set(required).union(optional)
+    unknown = sorted(set(counts).difference(allowed))
+    if unknown:
+        return "contains unrecognized field(s): " + ", ".join(
+            f"**{field}:**" for field in unknown
+        )
+    repeated = sorted(field for field, count in counts.items() if count != 1)
+    if repeated:
+        return "contains repeated field(s): " + ", ".join(
+            f"**{field}:**" for field in repeated
+        )
+    for field in required:
+        if counts.get(field, 0) != 1:
+            return f"must contain exactly one **{field}:**"
+        if field not in allow_blank and not has_concrete_value(got.get(field, "")):
+            return f"has an empty or placeholder **{field}:**"
+    for field in optional:
+        if counts.get(field, 0) \
+                and field not in allow_blank \
+                and not has_concrete_value(got.get(field, "")):
+            return f"has an empty or placeholder **{field}:**"
+    return None
+
+
+TRACKING_DETAILS_OPEN = "<details>\n<summary>Tracking details</summary>\n\n"
+
+
+def human_action_v2_tracking_parts(text):
+    """Split one human presentation at its canonical final tracking wrapper."""
+    source = text or ""
+    suffix_pattern = re.compile(
+        re.escape(TRACKING_DETAILS_OPEN) + r"(.*?)\n</details>\s*\Z",
+        flags=re.S,
+    )
+    opening_positions = [
+        matched.start()
+        for matched in re.finditer(re.escape(TRACKING_DETAILS_OPEN), source)
+    ]
+    for position in reversed(opening_positions):
+        matched = suffix_pattern.fullmatch(source[position:])
+        if matched is not None:
+            return source[:position].rstrip(), matched.group(1), None
+    return (
+        source,
+        "",
+        "must end with exactly one canonical collapsed Tracking details wrapper",
+    )
+
+
+def tracking_details_body_problem(body):
+    """Require machine tracking to contain fields and non-rendered comments only."""
+    cleaned, comment_problem = source_with_standalone_comments_blanked(body)
+    if comment_problem:
+        return comment_problem
+    if contains_raw_html(cleaned):
+        return "contains raw HTML outside an allowed standalone comment or code span"
+    if any(
+        line.strip() and FIELD_RE.fullmatch(line) is None
+        for line in detection_visual_line_source(cleaned).split("\n")
+    ):
+        return "must contain only field lines and standalone comments"
+    return None
+
+
+HUMAN_ACTION_V2_STATE_FIELDS = {
+    "decisions": ("Today", "Future behavior being decided"),
+    "clarifications": ("Today", "What is unclear"),
+    "reviews": (
+        "Before this change", "Current state", "Change under review",
+        "Not included", "Additional context",
+    ),
+}
+HUMAN_ACTION_V2_CHOICE_FIELDS = {
+    "decisions": (
+        "What it means", "Benefits", "Costs and risks",
+        "Example consequence",
+    ),
+    "clarifications": ("What it would mean", "Consequence", "Example"),
+    "reviews": ("What it means", "Consequence", "Example"),
+}
+HUMAN_ACTION_V2_RECOMMENDATION_FIELDS = (
+    "Evidence checked", "Assumptions", "Confidence", "Rationale",
+    "What could change this recommendation", "Recommendation",
+)
+HUMAN_ACTION_V2_EXTERNAL_TRACKING_FIELDS = (
+    "External assignment", "External source",
+)
+
+
+def human_action_v2_visible_field_lines(value):
+    """Return field-looking lines from reader-visible presentation source."""
+    cleaned, comment_problem = source_with_standalone_comments_blanked(value)
+    if comment_problem:
+        return (), comment_problem
+    return structural_field_like_lines(semantic_text(cleaned)), None
+
+
+def human_action_v2_allowed_visible_fields(leaf, awaiting_review=False):
+    """Return the closed visible-field vocabulary for one human action kind."""
+    fields = {"Action", "Full context"}
+    fields.update(HUMAN_ACTION_V2_STATE_FIELDS.get(
+        leaf, HUMAN_ACTION_V2_STATE_FIELDS["decisions"]
+    ))
+    fields.update(HUMAN_ACTION_V2_CHOICE_FIELDS.get(
+        leaf, HUMAN_ACTION_V2_CHOICE_FIELDS["decisions"]
+    ))
+    fields.update(HUMAN_ACTION_V2_RECOMMENDATION_FIELDS)
+    if not awaiting_review:
+        fields.add("Your review" if leaf == "reviews" else "Your answer")
+    if leaf == "reviews":
+        fields.add("Exact review artifact")
+    return frozenset(fields)
+
+
+def human_action_v2_tracking_optional_fields(leaf, status, tracking_body):
+    """Return endpoint-specific optional tracking keys from the queue contract."""
+    optional = list(HUMAN_ACTION_V2_EXTERNAL_TRACKING_FIELDS)
+    if leaf in {"decisions", "clarifications"}:
+        optional.append("Supersedes")
+    elif leaf == "reviews":
+        optional.extend(("Supersedes", "Depends on"))
+        outcome = text_fields(tracking_body).get("Review outcome", "").strip()
+        if status in {"waiting", "folding"} \
+                and outcome in REVIEW_SUCCESSOR_OUTCOMES:
+            optional.append("Successor action")
+    return tuple(optional)
+
+
+def human_action_v2_problems(text, leaf, timing, source=None):
+    """Return deterministic presentation-v2 problems for one human item."""
+    problems = []
+    clean = semantic_text(text)
+    visible_text, tracking_body, tracking_wrapper_problem = (
+        human_action_v2_tracking_parts(text)
+    )
+    if tracking_wrapper_problem:
+        problems.append(tracking_wrapper_problem)
+    else:
+        visible_without_comments, visible_comment_problem = (
+            source_with_standalone_comments_blanked(visible_text)
+        )
+        if visible_comment_problem:
+            problems.append(
+                "visible presentation comments " + visible_comment_problem
+            )
+        elif contains_raw_html(visible_without_comments):
+            problems.append(
+                "visible presentation before Tracking details must not contain "
+                "raw HTML outside comments, code spans, or link destinations"
+            )
+        tracking_shape_problem = tracking_details_body_problem(tracking_body)
+        if tracking_shape_problem:
+            problems.append("Tracking details " + tracking_shape_problem)
+    status = text_fields(text).get("Status", "").strip()
+    awaiting_review = leaf == "reviews" and status == "awaiting-artifact"
+    response_field = "Your review" if leaf == "reviews" else "Your answer"
+    wrong_response = (
+        "Your answer" if response_field == "Your review" else "Your review"
+    )
+    visible_fields, visible_field_problem = human_action_v2_visible_field_lines(
+        visible_text
+    )
+    if visible_field_problem is None:
+        disguised_fields = sorted({
+            label for label, disguised in visible_fields if disguised
+        })
+        if disguised_fields:
+            problems.append(
+                "visible bold-key fields must be exact column-zero source lines; "
+                "field-looking indentation or invisible characters found for: "
+                + ", ".join(disguised_fields)
+            )
+        visible_field_counts = {}
+        for label, _disguised in visible_fields:
+            visible_field_counts[label] = visible_field_counts.get(label, 0) + 1
+        unknown_visible_fields = sorted(
+            set(visible_field_counts).difference(
+                human_action_v2_allowed_visible_fields(leaf, awaiting_review)
+            )
+        )
+        if unknown_visible_fields:
+            problems.append(
+                "visible presentation contains unrecognized bold-key field(s): "
+                + ", ".join(
+                    f"**{field}:**" for field in unknown_visible_fields
+                )
+            )
+        if visible_field_counts.get("Action", 0) != 1:
+            problems.append(
+                "visible presentation must contain exactly one **Action:** field"
+            )
+        expected_response_count = 0 if awaiting_review else 1
+        if visible_field_counts.get(response_field, 0) != expected_response_count:
+            problems.append(
+                f"visible presentation must contain exactly "
+                f"{expected_response_count} **{response_field}:** field(s)"
+            )
+        if visible_field_counts.get(wrong_response, 0):
+            problems.append(
+                f"presentation v2 must not contain **{wrong_response}:** anywhere "
+                f"for {leaf}"
+            )
+    if text.count(HUMAN_ACTION_PRESENTATION_MARKER) != 1 \
+            or not human_action_v2_marker_is_immediate(text):
+        problems.append(
+            "the exact human-action-presentation v2 marker must appear once "
+            "immediately after the H1 title"
+        )
+    expected_notice = HUMAN_ACTION_STATUS_NOTICES.get(status)
+    if expected_notice is not None:
+        notice_pattern = (
+            re.escape(HUMAN_ACTION_PRESENTATION_MARKER)
+            + r"\n\n"
+            + re.escape(expected_notice)
+            + r"\n\n## What I need from you\s*$"
+        )
+        if len(re.findall(
+            r"^> \*\*(?:Waiting for your response\.|Not ready yet\. "
+            r"No action is requested\.|Response received\. "
+            r"No further response is needed\.)\*\*$",
+            text,
+            flags=re.M,
+        )) != 1 or not re.search(notice_pattern, text, flags=re.M):
+            problems.append(
+                f"Status {status} requires exact top notice `{expected_notice}` "
+                "between the v2 marker and What I need from you"
+            )
+    if status == "folding" \
+            and first_concrete_response(
+                human_response_fields(text), leaf
+            ) is None:
+        problems.append("Status folding requires a concrete human response")
+
+    for label in HUMAN_ACTION_LEGACY_LABELS:
+        if re.search(r"\b" + re.escape(label) + r"\b", clean, flags=re.I):
+            problems.append(
+                f"uses legacy parser-style label `{label}` instead of natural "
+                "v2 section prose"
+            )
+
+    type_sections = {
+        "decisions": ("Situation", "Options"),
+        "clarifications": ("Current understanding", "Possible interpretations"),
+        "reviews": ("What changed", "Review outcomes"),
+    }
+    state_heading, choices_heading = type_sections.get(
+        leaf, ("Situation", "Options")
+    )
+    expected_headings = [
+        "What I need from you",
+        "Why this matters",
+        "If you do not respond",
+        state_heading,
+        choices_heading,
+        "Agent recommendation",
+        "Your response",
+        "References",
+    ]
+    actual_headings = h2_headings(visible_text)
+    if actual_headings != expected_headings:
+        problems.append(
+            "must use the exact ordered v2 H2 sections: "
+            + "; ".join(expected_headings)
+        )
+    reference_resolution = visible_markdown_reference_resolution(visible_text)
+    references_source = raw_level_two_section_body(
+        visible_text, "## References"
+    ) or ""
+    references_resolution = visible_markdown_reference_resolution(
+        references_source
+    )
+    if reference_resolution.duplicate_labels:
+        problems.append(
+            "reference definitions must be unique after case-insensitive label "
+            "normalization: " + ", ".join(reference_resolution.duplicate_labels)
+        )
+    if reference_resolution.unresolved:
+        problems.append(
+            "contains unresolved or ambiguous full, collapsed, shortcut, or "
+            "image reference syntax: "
+            + ", ".join(reference_resolution.unresolved)
+        )
+    all_visible_references = sorted(
+        (reference.is_image, reference.destination)
+        for reference in reference_resolution.references
+    )
+    references_section_references = sorted(
+        (reference.is_image, reference.destination)
+        for reference in references_resolution.references
+    )
+    if all_visible_references != references_section_references:
+        problems.append(
+            "every visible Markdown link and image must appear only in References"
+        )
+    used_definition_starts = {
+        reference.definition_start
+        for reference in reference_resolution.references
+        if reference.definition_start is not None
+    }
+    used_definitions = sorted(
+        (definition.normalized_label, definition.destination)
+        for definition in reference_resolution.definitions
+        if definition.start in used_definition_starts
+    )
+    reference_definitions = sorted(
+        (definition.normalized_label, definition.destination)
+        for definition in references_resolution.definitions
+    )
+    if any(definition not in reference_definitions for definition in used_definitions):
+        problems.append(
+            "every used Markdown reference definition must appear in References"
+        )
+    repeated_references = repeated_visible_reference_targets(
+        visible_text, source=source
+    )
+    if repeated_references:
+        problems.append(
+            "repeats reader-visible reference destinations: "
+            + ", ".join(repeated_references)
+        )
+
+    what_source = raw_level_two_section_body(
+        text, "## What I need from you"
+    ) or ""
+    action_source, action_explanation, action_shape_problem = (
+        raw_human_action_request_parts(what_source)
+    )
+    if action_shape_problem:
+        problems.append("What I need from you " + action_shape_problem)
+    else:
+        inline_action_problem = inline_rendered_identity_problem(
+            action_source, forbid_references=True
+        )
+        if inline_action_problem:
+            problems.append(
+                "What I need from you Action " + inline_action_problem
+            )
+        explanation_problem = compact_rendered_paragraph_problem(
+            action_explanation
+        )
+        if explanation_problem:
+            problems.append(
+                "What I need from you explanation " + explanation_problem
+            )
+    if awaiting_review and not action_shape_problem \
+            and not compact_rendered_paragraph_text(
+                action_explanation
+            ).startswith(
+                "No action is needed yet. The review target has not been published."
+            ):
+        problems.append(
+            "awaiting-artifact What I need from you explanation must begin with "
+            "the exact no-action publication notice"
+        )
+
+    why_source = raw_level_two_section_body(text, "## Why this matters") or ""
+    why_problem = compact_rendered_paragraph_problem(why_source)
+    if why_problem:
+        problems.append("Why this matters " + why_problem)
+    unattended_source = raw_level_two_section_body(
+        text, "## If you do not respond"
+    ) or ""
+    unattended_problem = compact_rendered_paragraph_problem(
+        unattended_source, required_prefix="If you do not respond, "
+    )
+    if unattended_problem:
+        problems.append(
+            "If you do not respond " + unattended_problem
+        )
+    why = compact_rendered_paragraph_text(why_source)
+    unattended = compact_rendered_paragraph_text(unattended_source)
+    if not why_problem and not unattended_problem \
+            and len(why) + len(unattended) > COMPACT_CONTEXT_MAX_CODEPOINTS:
+        problems.append(
+            "Why this matters and If you do not respond together must be at most "
+            f"{COMPACT_CONTEXT_MAX_CODEPOINTS} normalized Unicode code points"
+        )
+
+    state_fields = HUMAN_ACTION_V2_STATE_FIELDS.get(
+        leaf, HUMAN_ACTION_V2_STATE_FIELDS["decisions"]
+    )
+    _state_values, state_problem = field_pure_section(
+        raw_level_two_section_body(text, "## " + state_heading) or "",
+        (state_fields,),
+    )
+    if state_problem:
+        problems.append(state_heading + " " + state_problem)
+
+    choices = raw_h3_sections(
+        raw_level_two_section_body(text, "## " + choices_heading)
+    )
+    if leaf == "reviews":
+        expected_choices = ["Approve", "Request changes", "Reject"]
+        if [heading for heading, _body in choices] != expected_choices:
+            problems.append(
+                "Review outcomes must contain exactly ### Approve, "
+                "### Request changes, and ### Reject in that order"
+            )
+        choice_fields = HUMAN_ACTION_V2_CHOICE_FIELDS["reviews"]
+    elif leaf == "clarifications":
+        choice_ids = [
+            matched.group(1) if matched else None
+            for heading, _body in choices
+            for matched in [re.fullmatch(
+                r"Interpretation ([A-Z0-9]+) — .+", heading
+            )]
+        ]
+        if len(choices) < 2 or any(identifier is None for identifier in choice_ids):
+            problems.append(
+                "Possible interpretations needs at least two symmetric "
+                "`### Interpretation X — name` choices"
+            )
+        elif len(set(choice_ids)) != len(choice_ids):
+            problems.append("Possible interpretations must use unique Interpretation IDs")
+        choice_fields = HUMAN_ACTION_V2_CHOICE_FIELDS["clarifications"]
+    else:
+        choice_ids = [
+            matched.group(1) if matched else None
+            for heading, _body in choices
+            for matched in [re.fullmatch(r"Option ([A-Z0-9]+) — .+", heading)]
+        ]
+        if len(choices) < 2 or any(identifier is None for identifier in choice_ids):
+            problems.append(
+                "Options needs at least two symmetric `### Option X — name` choices"
+            )
+        elif len(set(choice_ids)) != len(choice_ids):
+            problems.append("Options must use unique Option IDs")
+        choice_fields = HUMAN_ACTION_V2_CHOICE_FIELDS["decisions"]
+    for index, (_heading, choice_body) in enumerate(choices, start=1):
+        _choice_values, choice_problem = field_pure_section(
+            choice_body, (choice_fields,)
+        )
+        if choice_problem:
+            problems.append(f"choice {index} {choice_problem}")
+
+    recommendation_fields = HUMAN_ACTION_V2_RECOMMENDATION_FIELDS
+    recommendation_source = raw_level_two_section_body(
+        text, "## Agent recommendation"
+    ) or ""
+    recommendation_values, recommendation_problem = field_pure_section(
+        recommendation_source, (recommendation_fields,),
+        no_continuation=("Recommendation",),
+    )
+    if recommendation_problem:
+        problems.append("Agent recommendation " + recommendation_problem)
+    else:
+        recommendation = recommendation_values.get("Recommendation", "").strip()
+        if awaiting_review:
+            if recommendation != "Wait for the exact target before deciding.":
+                problems.append(
+                    "awaiting-artifact Agent recommendation must be exactly "
+                    "`Wait for the exact target before deciding.`"
+                )
+        elif leaf == "reviews":
+            if recommendation not in {
+                "Approve.", "Request changes.", "Reject.",
+            }:
+                problems.append(
+                    "review Agent recommendation must be exactly one disposition: "
+                    "Approve., Request changes., or Reject."
+                )
+        else:
+            choice_kind = "Interpretation" if leaf == "clarifications" else "Option"
+            prefix = "Use" if leaf == "clarifications" else "Choose"
+            matched = re.fullmatch(
+                rf"{prefix} ({choice_kind} [A-Z0-9]+)\.", recommendation
+            )
+            presented_choices = {
+                f"{choice_kind} {identifier}"
+                for identifier in choice_ids
+                if identifier is not None
+            }
+            if matched is None or matched.group(1) not in presented_choices:
+                problems.append(
+                    f"Agent recommendation must be exactly `{prefix} "
+                    f"{choice_kind} X.` for one presented {choice_kind}"
+                )
+
+    response_body = level_two_section_body(clean, "## Your response")
+    response_source = raw_level_two_section_body(
+        text, "## Your response"
+    ) or ""
+    response_counts = field_counts(response_body or "")
+    if awaiting_review:
+        if " ".join(source_without_html_comments(response_source).split()) != (
+            "No response is needed until the review target is published."
+        ):
+            problems.append(
+                "awaiting-artifact Your response must contain only the exact "
+                "no-response publication notice"
+            )
+        if response_counts.get(response_field, 0):
+            problems.append(
+                "awaiting-artifact Your response must not expose a response field"
+            )
+    elif leaf in {"decisions", "clarifications"}:
+        _response_values, response_problem = field_pure_section(
+            response_source,
+            ((response_field,),),
+            allow_blank=(response_field,),
+            require_concrete=False,
+        )
+        if response_problem:
+            problems.append("Your response " + response_problem)
+    elif response_counts.get(response_field, 0) != 1:
+        problems.append(
+            f"Your response must contain exactly one **{response_field}:**"
+        )
+    if leaf == "reviews" and not awaiting_review \
+            and not review_response_guidance_is_closed(response_source):
+        problems.append(
+            "review response guidance must offer only approve, request changes, "
+            "reject, or `I need clarification`"
+        )
+    if field_counts(text).get(wrong_response, 0):
+        problems.append(
+            f"presentation v2 must not contain **{wrong_response}:** anywhere "
+            f"for {leaf}"
+        )
+
+    target_value = text_fields(text).get("Review target", "").strip()
+    reference_orders = (
+        (("Full context", "Exact review artifact"),)
+        if leaf == "reviews" and target_value.startswith("git:")
+        else (("Full context",),)
+    )
+    reference_values, references_problem = field_pure_section(
+        references_source, reference_orders,
+        allow_reference_definitions=True,
+    )
+    if references_problem:
+        problems.append("References " + references_problem)
+    if leaf == "reviews" and target_value.startswith("git:"):
+        exact_value = reference_values.get("Exact review artifact", "")
+        exact_links = markdown_link_destinations(exact_value)
+        revisions = target_value[len("git:"):].split("...", 1)
+        destination = exact_links[0] if len(exact_links) == 1 else ""
+        if destination.startswith("<") and destination.endswith(">"):
+            destination = destination[1:-1].strip()
+        verified_destination = bool(
+            verified_https_git_review_artifact(destination, revisions)
+            if destination.startswith("https://")
+            else verified_local_git_review_artifact(
+                destination, source, target_value
+            )
+        )
+        if references_problem or len(exact_links) != 1 \
+                or not verified_destination \
+                or len(revisions) not in {1, 2} \
+                or any(not FULL_GIT_OID_RE.fullmatch(revision)
+                       for revision in revisions):
+            problems.append(
+                "Git review References must contain one **Exact review artifact:** "
+                "visible Markdown link to a supported same-repository provider "
+                "commit/range URL or a readable repo-relative text artifact with "
+                "an exact **Git review target:** binding"
+            )
+
+    tracking_core = ["Status", "Filed", "Resolution evidence"]
+    if leaf == "reviews":
+        tracking_core.extend((
+            "Review target", "Review revision", "Reviewed revision",
+            "Review outcome",
+        ))
+        if awaiting_review:
+            tracking_core.append("Your review")
+    tracking_timing = list(QUEUE_TIMING_FIELDS[timing])
+    tracking_required = tracking_core + tracking_timing
+    tracking_optional = human_action_v2_tracking_optional_fields(
+        leaf, status, tracking_body
+    )
+    tracking_problem = scoped_fields_problem(
+        tracking_body,
+        tuple(tracking_required),
+        allow_blank=("Reviewed revision", "Your review"),
+        optional=tracking_optional,
+    )
+    if tracking_problem:
+        problems.append("Tracking details " + tracking_problem)
+    else:
+        tracking_keys = [
+            key for key, _value in FIELD_RE.findall(
+                detection_visual_line_source(tracking_body)
+            )
+        ]
+        optional_window = tracking_keys[
+            len(tracking_core):len(tracking_keys) - len(tracking_timing)
+        ]
+        if tracking_keys[:len(tracking_core)] != tracking_core \
+                or tracking_keys[-len(tracking_timing):] != tracking_timing \
+                or any(key not in tracking_optional for key in optional_window):
+            problems.append(
+                "Tracking details must keep the lifecycle/review core first, "
+                "optional metadata before timing, and the exact timing suffix"
+            )
+        for earlier, later in (
+            ("External assignment", "External source"),
+            ("Supersedes", "Depends on"),
+        ):
+            if earlier in optional_window and later in optional_window \
+                    and optional_window.index(earlier) > optional_window.index(later):
+                problems.append(
+                    f"Tracking details must keep **{earlier}:** before "
+                    f"**{later}:**"
+                )
+    for optional_field in tracking_optional:
+        if field_counts(visible_text).get(optional_field, 0):
+            problems.append(
+                f"optional **{optional_field}:** must stay inside collapsed "
+                "Tracking details"
+            )
+    return problems
+
+
 def check_queue_schema():
     queue_v1 = queue_resolution_enabled()
+    presentation_v2 = human_action_presentation_enabled()
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue  # queue-location owns unsafe or broken filesystem entries
@@ -3805,19 +6184,26 @@ def check_queue_schema():
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue  # queue-location owns unsafe or broken filesystem entries
+        timing = delivery_class(item.name)
+        if timing is None:
+            continue
         parts = item.parent.relative_to(QUEUE).parts
         if len(parts) != 2 or parts[0] not in ("needs-human", "needs-agent"):
             continue
         actor, leaf = parts
         rel = "/".join(parts)
+        text = repo_text(item)
+        item_uses_presentation_v2 = (
+            HUMAN_ACTION_PRESENTATION_MARKER in text
+        )
         required = QUEUE_SCHEMAS.get(rel)
         if required is None:
             required = ["Status", "Filed", "Action", "Full context"]
         else:
             required = list(required)
-        if actor == "needs-human" and queue_v1:
+        if actor == "needs-human" and queue_v1 \
+                and not item_uses_presentation_v2:
             required.extend(HUMAN_PROJECTION_FIELDS)
-        text = repo_text(item)
         clean = semantic_text(text)
         got = text_fields(text)
         status = got.get("Status", "").strip()
@@ -3835,8 +6221,33 @@ def check_queue_schema():
                 f"**Status:** must be one of: {', '.join(sorted(allowed_statuses))}",
                 "use the actor lifecycle defined by the matching queue template",
             )
+        if actor == "needs-human" and status == "folding" \
+                and first_concrete_response(
+                    human_response_fields(text), leaf
+                ) is None:
+            yield Finding(
+                "queue-schema",
+                item.relative_to(REPO),
+                "Status folding requires a concrete human response",
+                "start unanswered actions as waiting; claim folding only after a response",
+            )
+        decision_choice_fields = {
+            "What it means", "Benefits", "Costs and risks",
+            "Example consequence",
+        }
+        repeatable_v2_fields = (
+            {
+                "decisions": decision_choice_fields,
+                "clarifications": {
+                    "What it would mean", "Consequence", "Example",
+                },
+                "reviews": {"What it means", "Consequence", "Example"},
+            }.get(leaf, decision_choice_fields)
+            if actor == "needs-human" and item_uses_presentation_v2
+            else set()
+        )
         for key, count in sorted(field_counts(text).items()):
-            if count > 1:
+            if count > 1 and key not in repeatable_v2_fields:
                 yield Finding(
                     "queue-schema",
                     item.relative_to(REPO),
@@ -3848,7 +6259,8 @@ def check_queue_schema():
                 yield Finding("queue-schema", item.relative_to(REPO),
                               f"missing required field **{key}:**",
                               f"copy the base schema from templates/queue/ ({rel})")
-        if actor == "needs-human" and queue_v1:
+        if actor == "needs-human" and queue_v1 \
+                and not item_uses_presentation_v2:
             for key in HUMAN_PROJECTION_FIELDS:
                 if key in got and not has_concrete_value(got[key]):
                     yield Finding(
@@ -3872,7 +6284,10 @@ def check_queue_schema():
                 "**Action:** is empty or a placeholder",
                 "state the next actor's concrete action",
             )
-        context_targets = context_files(got.get("Full context", ""))
+        context_targets = context_files(
+            got.get("Full context", ""),
+            item if item_uses_presentation_v2 else None,
+        )
         is_pickup = (
             actor == "needs-agent"
             and leaf == "requests"
@@ -4163,6 +6578,37 @@ def check_queue_schema():
                         "review without a response must keep **Review outcome:** pending",
                         "record a response and binding before setting a terminal outcome",
                     )
+        should_use_presentation_v2 = bool(
+            presentation_v2
+            and status == "waiting"
+            and unanswered_human_action(text, leaf)
+        )
+        if should_use_presentation_v2 and not item_uses_presentation_v2:
+            yield Finding(
+                "queue-schema",
+                item.relative_to(REPO),
+                "unanswered waiting human action lacks presentation schema v2",
+                "migrate it on the v2 activation edge and add the exact item marker",
+            )
+        if item_uses_presentation_v2:
+            if not presentation_v2:
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "item declares presentation v2 before the global schema is active",
+                    "activate **Human action presentation schema:** v2 in message-queue/AGENTS.md",
+                )
+            for problem in human_action_v2_problems(
+                text, leaf, timing, source=item
+            ):
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "human-action presentation v2 " + problem,
+                    "copy the matching v2 human-action template and keep tracking details last",
+                )
+            continue
+
         summary = section_body(clean, "## What you need to know")
         if not has_concrete_value(summary):
             yield Finding(
@@ -4510,7 +6956,9 @@ def active_blocking_repair_problem(item):
     if got.get("Status", "").strip() != active_status:
         return f"status is not {active_status}"
     if actor == "needs-human" \
-            and first_concrete_response(human_response_fields(text)) is None:
+            and first_concrete_response(
+                human_response_fields(text), leaf
+            ) is None:
         return "folding has no concrete committed human response"
     revision = committed_candidate_revision()
     if revision is None:
@@ -5592,7 +8040,7 @@ def projection_schema_activation_commits(
         return (), error
     if activations:
         return activations, None
-    return (), f"could not find a v1 {field} activation commit"
+    return (), f"could not find a {version} {field} activation commit"
 
 
 def handover_action_entry_version():
@@ -5602,7 +8050,7 @@ def handover_action_entry_version():
     version = text_fields(
         contract.decode("utf-8")
     ).get("Queue action-entry schema", "").strip()
-    return version if version in {"v1", "v2"} else None
+    return version if version in {"v1", "v2", "v3"} else None
 
 
 def handover_action_entry_enabled():
@@ -5613,6 +8061,118 @@ def history_service_present():
     if (REPO / ".git").exists():
         return bool(git_index_entries("history"))
     return (REPO / "history").is_dir()
+
+
+def history_service_present_at(revision):
+    """Return whether one committed or staged state retains history/."""
+    if revision is None:
+        return bool(git_index_entries("history"))
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree", "-r", "--name-only",
+            revision, "--", "history",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not inspect history service at {revision}"
+        ))
+    return bool(tree.stdout.strip())
+
+
+def history_schema_value_at(revision, field):
+    """Read one history schema marker from a committed or staged state."""
+    artifact = (
+        repo_artifact_bytes(REPO / "history/AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "history/AGENTS.md")
+    )
+    if artifact is None:
+        return None
+    return text_fields(decode_utf8_artifact(
+        artifact,
+        (
+            "candidate `history/AGENTS.md`"
+            if revision is None
+            else f"`history/AGENTS.md` at {revision}"
+        ),
+    )).get(field, "").strip() or None
+
+
+def handover_projection_schema_removal_events(activations):
+    """Yield governed edges that remove projection v1 but retain history/."""
+    seen = set()
+    for parent, revision in queue_revision_edges(activations):
+        edge = (parent, revision)
+        if edge in seen:
+            continue
+        seen.add(edge)
+        if history_schema_value_at(parent, "Queue projection schema") == "v1" \
+                and history_schema_value_at(
+                    revision, "Queue projection schema"
+                ) != "v1" \
+                and history_service_present_at(revision):
+            yield parent, revision
+
+
+def handover_action_entry_schema_downgrade_events(activations):
+    """Yield governed retained-history edges that lower the entry schema."""
+    ranks = {"v1": 1, "v2": 2, "v3": 3}
+    seen = set()
+    for parent, revision in queue_revision_edges(activations):
+        edge = (parent, revision)
+        if edge in seen:
+            continue
+        seen.add(edge)
+        before = history_schema_value_at(parent, "Queue action-entry schema")
+        after = history_schema_value_at(revision, "Queue action-entry schema")
+        if ranks.get(before, 0) > ranks.get(after, 0) \
+                and history_service_present_at(revision):
+            yield parent, revision, before, after
+
+
+def handover_entry_without_projection_states(continuity_edge):
+    """Yield admitted states where an entry grammar lacks projection v1."""
+    candidates = []
+    if CHANGE_RANGE is None:
+        candidates.extend(
+            (revision, f"staged side commit {revision}")
+            for revision in staged_side_commits()
+        )
+        candidates.append((None, "staged candidate"))
+    else:
+        selected_base = selected_change_range_base()
+        if selected_base is not None:
+            candidates.append((selected_base, "trusted range base"))
+        candidates.extend(
+            (revision, f"selected commit {revision}")
+            for _parent, revision in queue_revision_edges(
+                (), include_selected_range=True
+            )
+            if revision is not None
+        )
+    if continuity_edge is not None:
+        candidates.append((continuity_edge[0], "displaced tip"))
+
+    seen = set()
+    for revision, label in candidates:
+        if revision in seen:
+            continue
+        seen.add(revision)
+        entry_version = history_schema_value_at(
+            revision, "Queue action-entry schema"
+        )
+        projection_version = history_schema_value_at(
+            revision, "Queue projection schema"
+        )
+        if entry_version in {"v1", "v2", "v3"} \
+                and projection_version != "v1":
+            yield revision, label, entry_version
 
 
 def handover_action_entry_activations(version="v1"):
@@ -5651,7 +8211,7 @@ def handover_action_entry_version_for(rel):
     current_version = handover_action_entry_version()
     activation_map = {
         version: handover_action_entry_activations(version)
-        for version in ("v1", "v2")
+        for version in ("v1", "v2", "v3")
     }
     if current_version is None and not any(activation_map.values()):
         return None, None
@@ -5664,7 +8224,7 @@ def handover_action_entry_version_for(rel):
             version = text_fields(decode_utf8_artifact(
                 contract, f"`history/AGENTS.md` at {created_at}"
             )).get("Queue action-entry schema", "").strip()
-            return version if version in {"v1", "v2"} else None, None
+            return version if version in {"v1", "v2", "v3"} else None, None
         return current_version, None
     created_at, creation_error = handover_creation_commit(rel)
     if creation_error:
@@ -5676,7 +8236,7 @@ def handover_action_entry_version_for(rel):
     )
     candidate = _GIT_HEAD_OID or range_head
     governed_versions = []
-    for version in ("v1", "v2"):
+    for version in ("v1", "v2", "v3"):
         activations = activation_map[version]
         if not activations:
             activations, activation_error = projection_schema_activation_commits(
@@ -6028,8 +8588,8 @@ def handover_creation_state(handover, rel):
     return artifact.stdout, live_human, live_agent, None
 
 
-def handover_queue_fields_at_creation(rel, queue_path, required):
-    """Read projection fields from the handover's immutable creation snapshot."""
+def handover_queue_text_at_creation(rel, queue_path):
+    """Read a queue item from the handover's immutable creation snapshot."""
     if CHANGE_RANGE is None:
         created_at = staged_side_creation_commit(rel.as_posix())
         artifact = (
@@ -6044,9 +8604,16 @@ def handover_queue_fields_at_creation(rel, queue_path, required):
         artifact = git_artifact_bytes_at(created_at, queue_path)
     if artifact is None:
         return None, f"`{queue_path}` is absent from the creation snapshot"
-    text = decode_utf8_artifact(
+    return decode_utf8_artifact(
         artifact, f"`{queue_path}` in the handover creation snapshot"
-    )
+    ), None
+
+
+def handover_queue_fields_at_creation(rel, queue_path, required):
+    """Read projection fields from the handover's immutable creation snapshot."""
+    text, error = handover_queue_text_at_creation(rel, queue_path)
+    if error:
+        return None, error
     counts = field_counts(text)
     got = text_fields(text)
     projected = {}
@@ -6109,8 +8676,14 @@ def handover_current_incarnation_text(rel):
     return artifact.stdout, None
 
 
-def prior_governed_v1_handover_incarnation(rel):
-    """Find an earlier immutable v1 incarnation of a newly added handover."""
+def prior_governed_v1_handover_incarnation(rel, additional_tips=()):
+    """Find an earlier immutable v1 incarnation of a newly added handover.
+
+    ``additional_tips`` carries an explicitly displaced ref tip.  A handover
+    live there after projection adoption is already a governed incarnation even
+    when its original add predates the marker; a replacement history may delete
+    it, but may not independently reuse its path.
+    """
     revision = committed_candidate_revision()
     if revision is None:
         return None, None
@@ -6121,61 +8694,65 @@ def prior_governed_v1_handover_incarnation(rel):
         if creation_error:
             return None, creation_error
 
-    history = subprocess.run(
-        [
-            "git", "--no-replace-objects", "log",
-            "--full-history", "--reverse", "--format=%H",
-            "--diff-filter=A", revision, "--", rel.as_posix(),
-        ],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if history.returncode:
-        return None, history.stderr.strip() \
-            or "could not inspect prior handover incarnations"
-    commits = history.stdout.splitlines()
-    if not commits:
-        return None, None
-
-    activations, activation_error = schema_activation_commits(
-        revision,
-        "history/AGENTS.md",
-        "Queue projection schema",
-    )
-    if activation_error:
-        return None, activation_error
-    if not activations:
-        return None, None
-
-    for commit in commits:
-        if commit == current_creation:
-            continue
-        try:
-            artifact = git_artifact_bytes_at(commit, rel.as_posix())
-            if artifact is None:
-                return None, (
-                    f"could not read prior handover incarnation at {commit}"
-                )
-            prior_text = decode_utf8_artifact(
-                artifact,
-                f"`{rel.as_posix()}` at {commit}",
-            )
-        except GitSnapshotError as error:
-            return None, str(error)
-        if text_fields(prior_text).get(
-            "Queue projection", ""
-        ).strip() != "v1":
-            continue
-        governed, governance_error = governed_by_activation_join(
-            commit, activations
+    seen_commits = set()
+    for tip in (revision,) + tuple(additional_tips):
+        activations, activation_error = schema_activation_commits(
+            tip,
+            "history/AGENTS.md",
+            "Queue projection schema",
         )
-        if governance_error:
-            return None, governance_error
-        if governed:
-            return commit, None
+        if activation_error:
+            return None, activation_error
+        if not activations:
+            continue
+        displaced_live_path = bool(
+            tip != revision
+            and git_tree_path_entry(tip, rel.as_posix()) is not None
+        )
+        history = subprocess.run(
+            [
+                "git", "--no-replace-objects", "log",
+                "--full-history", "--reverse", "--format=%H",
+                "--diff-filter=A", tip, "--", rel.as_posix(),
+            ],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if history.returncode:
+            return None, history.stderr.strip() \
+                or "could not inspect prior handover incarnations"
+        for commit in history.stdout.splitlines():
+            if commit in seen_commits or commit == current_creation:
+                continue
+            seen_commits.add(commit)
+            try:
+                artifact = git_artifact_bytes_at(commit, rel.as_posix())
+                if artifact is None:
+                    return None, (
+                        f"could not read prior handover incarnation at {commit}"
+                    )
+                prior_text = decode_utf8_artifact(
+                    artifact,
+                    f"`{rel.as_posix()}` at {commit}",
+                )
+            except GitSnapshotError as error:
+                return None, str(error)
+            if displaced_live_path:
+                return commit, None
+            if text_fields(prior_text).get(
+                "Queue projection", ""
+            ).strip() != "v1":
+                continue
+            governed, governance_error = governed_by_activation_join(
+                commit, activations
+            )
+            if governance_error:
+                return None, governance_error
+            if governed:
+                return commit, None
     return None, None
 
 
@@ -6208,7 +8785,7 @@ def handover_projection_entries(
     entry_version,
     raw_body=None,
 ):
-    """Validate strict action-owned list entries in a new v1 handover."""
+    """Validate strict action-owned list entries in a new versioned handover."""
     actor_label = "human" if actor == "needs-human" else "agent"
     entries, outside = section_entries(body)
     problems = []
@@ -6225,14 +8802,18 @@ def handover_projection_entries(
     raw_entries, raw_outside = section_entries(
         body if raw_body is None else raw_body
     )
-    if entry_version == "v2" and action_like_rendered_prose(raw_outside):
+    if entry_version in {"v2", "v3"} \
+            and action_like_rendered_prose(raw_outside):
         problems.append(
             "contains an action-like rendered question or directive outside "
             "the top-level action list"
         )
     for index, entry in enumerate(entries, start=1):
         raw_entry = raw_entries[index - 1] if index <= len(raw_entries) else ""
-        if entry_version == "v2" and contains_raw_html(raw_entry):
+        if entry_version in {"v2", "v3"} and (
+            contains_raw_html(raw_entry)
+            or contains_html_comment_outside_inline_code(raw_entry)
+        ):
             problems.append(
                 f"entry {index} contains raw HTML; strict handover action "
                 "entries permit only the sole Markdown queue link and fixed "
@@ -6256,6 +8837,17 @@ def handover_projection_entries(
                 f"needs-{actor_label} queue link"
             )
         label, destination = queue_looking[0]
+        if entry_version == "v3":
+            exact_queue_links = []
+            for matched in MARKDOWN_LINK_RE.finditer(raw_entry):
+                exact_destination = matched.group("angle")
+                if exact_destination is None:
+                    exact_destination = matched.group("bare")
+                if exact_destination == destination \
+                        and "message-queue/" in exact_destination:
+                    exact_queue_links.append(matched.group("label"))
+            if len(exact_queue_links) == 1:
+                label = exact_queue_links[0]
         canonical = new_handover_queue_target(
             handover, destination, actor=actor
         )
@@ -6294,9 +8886,9 @@ def handover_projection_entries(
         projected.append(canonical)
 
         required_fields = (
-            ("Action", "Why-you-might-care", "If-you-do-nothing")
-            if actor == "needs-human"
-            else ("Action",)
+            ("Action",)
+            if actor != "needs-human" or entry_version == "v3"
+            else ("Action", "Why-you-might-care", "If-you-do-nothing")
         )
         queue_fields, fields_error = handover_queue_fields_at_creation(
             rel, canonical, required_fields
@@ -6305,25 +8897,88 @@ def handover_projection_entries(
             problems.append(f"entry {index} {fields_error}")
             continue
         action = queue_fields["Action"]
-        if normalized_action_tokens(label) != normalized_action_tokens(action):
+        if actor == "needs-human" and entry_version == "v3":
+            action_inline_problem = inline_rendered_identity_problem(
+                action, forbid_references=True
+            )
+            label_inline_problem = inline_rendered_identity_problem(
+                label, link_label_context=True
+            )
+            if action_inline_problem or label_inline_problem:
+                problems.append(
+                    f"entry {index} Action and link label must be safe, "
+                    "unambiguous inline Markdown"
+                )
+                continue
+            projected_label = rendered_link_label_text(label)
+            projected_action = rendered_inline_text(action)
+        else:
+            projected_label = label
+            projected_action = action
+        if " ".join(projected_label.split()) != " ".join(
+            projected_action.split()
+        ):
             problems.append(
                 f"entry {index} link label must exactly project the linked "
                 f"queue item's **Action:** `{action}`"
             )
 
-        expected_context = (
-            "— Why-you-might-care: "
-            + queue_fields["Why-you-might-care"]
-            + " || If-you-do-nothing: "
-            + queue_fields["If-you-do-nothing"]
-            if actor == "needs-human"
-            else ""
-        )
-        expected_context = render_inline_code(expected_context)
-        for context in (
-            copied_prose_without_links(entry),
-            copied_prose_without_links(rendered_human_text(entry)),
-        ):
+        if actor == "needs-human" and entry_version == "v3":
+            queue_text, text_error = handover_queue_text_at_creation(
+                rel, canonical
+            )
+            if text_error:
+                problems.append(f"entry {index} {text_error}")
+                continue
+            why_source = raw_level_two_section_body(
+                queue_text, "## Why this matters"
+            ) or ""
+            unattended_source = raw_level_two_section_body(
+                queue_text, "## If you do not respond"
+            ) or ""
+            why_problem = compact_rendered_paragraph_problem(why_source)
+            unattended_problem = compact_rendered_paragraph_problem(
+                unattended_source,
+                required_prefix="If you do not respond, ",
+            )
+            why = compact_rendered_paragraph_text(why_source)
+            unattended = compact_rendered_paragraph_text(unattended_source)
+            if why_problem or unattended_problem \
+                    or len(why) + len(unattended) \
+                    > COMPACT_CONTEXT_MAX_CODEPOINTS:
+                problems.append(
+                    f"entry {index} linked human action lacks valid compact "
+                    "Why this matters or If you do not respond context"
+                )
+                continue
+            if not rendered_text_has_terminal_punctuation(action):
+                problems.append(
+                    f"entry {index} linked queue Action must end in rendered "
+                    "terminal punctuation"
+                )
+                continue
+            expected_context = (
+                " " + " ".join(why_source.split())
+                + " " + " ".join(unattended_source.split())
+            )
+            context_candidates = (
+                MARKDOWN_LINK_RE.sub("", semantic_text(entry)),
+            )
+        else:
+            expected_context = (
+                "— Why-you-might-care: "
+                + queue_fields["Why-you-might-care"]
+                + " || If-you-do-nothing: "
+                + queue_fields["If-you-do-nothing"]
+                if actor == "needs-human"
+                else ""
+            )
+            expected_context = render_inline_code(expected_context)
+            context_candidates = (
+                copied_prose_without_links(entry),
+                copied_prose_without_links(rendered_human_text(entry)),
+            )
+        for context in context_candidates:
             marker = LIST_ITEM_RE.match(context)
             if marker:
                 context = context[marker.end():]
@@ -6331,11 +8986,18 @@ def handover_projection_entries(
                 expected_context.split()
             ):
                 if actor == "needs-human":
-                    problems.append(
-                        f"entry {index} must copy the creation-snapshot "
-                        "Why-you-might-care and If-you-do-nothing fields "
-                        "using the fixed handover suffix"
-                    )
+                    if entry_version == "v3":
+                        problems.append(
+                            f"entry {index} must copy the creation-snapshot "
+                            "Why this matters and If you do not respond paragraphs "
+                            "as natural-language context"
+                        )
+                    else:
+                        problems.append(
+                            f"entry {index} must copy the creation-snapshot "
+                            "Why-you-might-care and If-you-do-nothing fields "
+                            "using the fixed handover suffix"
+                        )
                 else:
                     problems.append(
                         f"entry {index} must contain only its exact "
@@ -6445,36 +9107,148 @@ def check_handover_queue_projection():
     projection_activations = handover_projection_activations()
     entry_v1_activations = handover_action_entry_activations("v1")
     entry_v2_activations = handover_action_entry_activations("v2")
+    entry_v3_activations = handover_action_entry_activations("v3")
     entry_version_now = handover_action_entry_version()
-    if projection_activations \
-            and not handover_projection_enabled():
+    continuity_edge = displaced_tip_edge()
+    entry_dependency_states = tuple(
+        handover_entry_without_projection_states(continuity_edge)
+    )
+    for _revision, label, entry_version in entry_dependency_states:
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            f"Queue action-entry schema {entry_version} is active without "
+            f"Queue projection schema v1 at {label}",
+            "activate **Queue projection schema:** v1 no later than the "
+            "action-entry schema, or remove the action-entry marker from "
+            "that state",
+        )
+    displaced_projection_activations = ()
+    displaced_entry_activations = {
+        "v1": (), "v2": (), "v3": (),
+    }
+    displaced_tip = None
+    displaced_head = None
+    displaced_handover_paths = set()
+    if continuity_edge is not None:
+        displaced_tip, displaced_head = continuity_edge
+        displaced_projection_activations, _error = (
+            projection_schema_activation_commits(displaced_tip)
+        )
+        for version in ("v1", "v2", "v3"):
+            displaced_entry_activations[version], _error = (
+                projection_schema_activation_commits(
+                    displaced_tip,
+                    field="Queue action-entry schema",
+                    version=version,
+                )
+            )
+        if displaced_projection_activations:
+            displaced_handover_paths = live_handover_paths_at(displaced_tip)
+    projection_removals = tuple(
+        handover_projection_schema_removal_events(projection_activations)
+    )
+    entry_activations = tuple(dict.fromkeys(
+        entry_v1_activations + entry_v2_activations + entry_v3_activations
+    ))
+    entry_downgrades = tuple(
+        handover_action_entry_schema_downgrade_events(entry_activations)
+    )
+    if (projection_activations or displaced_projection_activations) \
+            and not handover_projection_enabled() \
+            and not projection_removals:
         yield Finding(
             "handover-queue-projection",
             Path("history/AGENTS.md"),
             "Queue projection schema v1 was removed after activation",
             "restore **Queue projection schema:** v1 while history remains",
         )
-    if entry_v2_activations and entry_version_now != "v2":
+    for parent, revision in projection_removals:
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            "Queue projection schema v1 was removed after activation on "
+            f"governed edge {parent} -> {revision or 'staged candidate'}",
+            "preserve **Queue projection schema:** v1 on every edge while "
+            "history remains",
+        )
+    v3_was_active = bool(
+        entry_v3_activations or displaced_entry_activations["v3"]
+    )
+    v2_was_active = bool(
+        entry_v2_activations or displaced_entry_activations["v2"]
+    )
+    v1_was_active = bool(
+        entry_v1_activations or displaced_entry_activations["v1"]
+    )
+    if v3_was_active and entry_version_now != "v3" \
+            and not entry_downgrades:
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            "Queue action-entry schema v3 was removed or downgraded after activation",
+            "restore **Queue action-entry schema:** v3 while history remains",
+        )
+    elif v2_was_active and entry_version_now not in {"v2", "v3"} \
+            and not entry_downgrades:
         yield Finding(
             "handover-queue-projection",
             Path("history/AGENTS.md"),
             "Queue action-entry schema v2 was removed or downgraded after activation",
-            "restore **Queue action-entry schema:** v2 while history remains",
+            "restore **Queue action-entry schema:** v2 or upgrade to v3",
         )
-    elif entry_v1_activations and entry_version_now not in {"v1", "v2"}:
+    elif v1_was_active \
+            and entry_version_now not in {"v1", "v2", "v3"} \
+            and not entry_downgrades:
         yield Finding(
             "handover-queue-projection",
             Path("history/AGENTS.md"),
             "Queue action-entry schema v1 was removed after activation",
-            "restore **Queue action-entry schema:** v1 or upgrade to v2",
+            "restore **Queue action-entry schema:** v1 or upgrade to v3",
         )
-    if not handover_projection_enabled() and not projection_activations:
+    for parent, revision, before, after in entry_downgrades:
+        after_label = after or "absent"
+        yield Finding(
+            "handover-queue-projection",
+            Path("history/AGENTS.md"),
+            f"Queue action-entry schema {before} was removed or downgraded "
+            f"after activation on governed edge {parent} -> "
+            f"{revision or 'staged candidate'} ({before} -> {after_label})",
+            f"preserve **Queue action-entry schema:** {before} or upgrade it "
+            "on every edge while history remains",
+        )
+    if not handover_projection_enabled() \
+            and not projection_activations \
+            and not displaced_projection_activations:
         return
     reported_mutations = set()
     mutation_activations = projection_activations
     if not mutation_activations and handover_projection_enabled() \
             and _GIT_HEAD_OID:
         mutation_activations = (_GIT_HEAD_OID,)
+    if displaced_tip is not None and displaced_handover_paths:
+        for source, destination, status in displaced_handover_mutations_between(
+            displaced_tip, displaced_head, displaced_handover_paths
+        ):
+            if source in reported_mutations:
+                continue
+            reported_mutations.add(source)
+            detail = (
+                f"renamed to `{destination}`"
+                if status.startswith("R")
+                else f"copied to `{destination}`"
+                if status.startswith("C")
+                else "changed bytes or file type"
+            )
+            yield Finding(
+                "handover-queue-projection",
+                Path(source),
+                "displaced old-tip handover was modified in the replacement "
+                f"history ({detail})",
+                "restore the exact committed handover path and bytes, or delete "
+                "the retained record and put any correction in a genuinely new "
+                "conversation handover",
+            )
     if not _HANDOVER_HISTORY_RECHECK_ACTIVE:
         reported_history = set()
         _HANDOVER_HISTORY_RECHECK_ACTIVE = True
@@ -6482,6 +9256,47 @@ def check_handover_queue_projection():
             for rel, revision in handover_creation_events(
                 mutation_activations
             ):
+                if displaced_tip is not None and displaced_handover_paths:
+                    for source, destination, status in (
+                        displaced_handover_mutations_between(
+                            displaced_tip,
+                            revision,
+                            displaced_handover_paths,
+                        )
+                    ):
+                        if source in reported_mutations:
+                            continue
+                        reported_mutations.add(source)
+                        detail = (
+                            f"renamed to `{destination}`"
+                            if status.startswith("R")
+                            else f"copied to `{destination}`"
+                            if status.startswith("C")
+                            else "changed bytes or file type"
+                        )
+                        yield Finding(
+                            "handover-queue-projection",
+                            Path(source),
+                            "displaced old-tip handover was modified in an "
+                            "admitted replacement-history state "
+                            f"({detail})",
+                            "restore the exact committed handover path and bytes, "
+                            "or delete the retained record and put any correction "
+                            "in a genuinely new conversation handover",
+                        )
+                    displaced_rel = rel.as_posix()
+                    if displaced_rel in displaced_handover_paths \
+                            and displaced_rel not in reported_mutations:
+                        reported_mutations.add(displaced_rel)
+                        yield Finding(
+                            "handover-queue-projection",
+                            rel,
+                            "displaced old-tip handover path was reused by a "
+                            "distinct replacement-history incarnation",
+                            "retain the original incarnation or use a new "
+                            "conversation path; deletion is allowed, but path "
+                            "reuse is not",
+                        )
                 if current_handover_creation_commit(rel) == revision:
                     continue
                 with git_revision_candidate(revision):
@@ -6564,8 +9379,32 @@ def check_handover_queue_projection():
                     + strict_error,
                     "preserve the schema activation and handover creation commits",
                 )
+            if entry_version == "v3":
+                waiting_human = set()
+                for queue_path in sorted(live_human):
+                    queue_fields, fields_error = (
+                        handover_queue_fields_at_creation(
+                            rel, queue_path, ("Status",)
+                        )
+                    )
+                    if fields_error:
+                        yield Finding(
+                            "handover-queue-projection",
+                            rel,
+                            "could not classify v3 human projection: "
+                            + fields_error,
+                            "keep a concrete Status on every human queue item",
+                        )
+                        continue
+                    if queue_fields["Status"] == "waiting":
+                        waiting_human.add(queue_path)
+                live_human = waiting_human
             prior_incarnation, incarnation_error = (
-                prior_governed_v1_handover_incarnation(rel)
+                prior_governed_v1_handover_incarnation(
+                    rel,
+                    (displaced_tip,)
+                    if displaced_projection_activations else (),
+                )
             )
             if incarnation_error:
                 yield Finding(
@@ -6576,7 +9415,8 @@ def check_handover_queue_projection():
                     "preserve the path history or use a new conversation folder",
                 )
                 continue
-            if prior_incarnation:
+            if prior_incarnation \
+                    and rel.as_posix() not in reported_mutations:
                 yield Finding(
                     "handover-queue-projection",
                     rel,
@@ -6633,7 +9473,7 @@ def check_handover_queue_projection():
         else:
             text = candidate_text
         strict_entries = entry_version is not None
-        if entry_version == "v2" and contains_raw_html(text):
+        if entry_version in {"v2", "v3"} and contains_raw_html(text):
             yield Finding(
                 "handover-queue-projection",
                 rel,
@@ -6642,7 +9482,7 @@ def check_handover_queue_projection():
                 "cannot define or preserve queue-projection boundaries",
             )
             continue
-        if entry_version == "v2" and action_like_rendered_prose(
+        if entry_version in {"v2", "v3"} and action_like_rendered_prose(
             visible_outside_action_sections(
                 text,
                 ("Needs your attention", "Next steps"),

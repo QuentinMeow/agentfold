@@ -4,6 +4,7 @@
 **Task:** <task id, or "none — exploratory">
 **Mode:** <autonomous | async | pair>
 **Queue projection:** v1
+**Queue action-entry schema:** v3
 
 One screen max, plain language, for a teammate who was away. Depth goes in the task
 folder; this file links to it.
@@ -23,16 +24,22 @@ no shorthand invented mid-session.>
 
 ## Needs your attention
 
-<This is a projection of every open `message-queue/needs-human/` item, not a place to
-originate an ask. Use one top-level bullet per live item, ordered by `blocking-`,
-`future-blocking-`, `non-blocking-`, then queue path. The bullet's first content is
-`[<the queue item's exact Action text>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)`.
-That is the bullet's only link. Append exactly
-` — Why-you-might-care: <copied field> || If-you-do-nothing: <copied field>`,
-copying both values from the same queue snapshot with only whitespace reflow allowed.
-No other prose can appear. The relative link must resolve to the exact live queue
-file. Repeat this section verbatim in the final chat reply. Write `None.` when no
-human items are open.>
+<This is a projection of every `Status: waiting` item under
+`message-queue/needs-human/`, not a place to originate an ask. Do not include
+`awaiting-artifact` or `folding` items: the human cannot act on them. Use one top-level
+bullet per actionable item, ordered by `blocking-`, `future-blocking-`,
+`non-blocking-`, then queue path. Use exact form:
+`- [<rendered Action>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md) <exact compact Why this matters paragraph> <exact compact If you do not respond paragraph>`
+The link is the bullet's only link. Copy the two paragraphs from the same queue snapshot
+with whitespace normalization only. Action and label may use different inline code,
+emphasis, or escapes only when they render identically; every other rendered code point
+is exact. Preserve terminal punctuation and any closing quote or bracket. The second
+paragraph already begins `If you do not respond, `. Add no labels or other prose. The
+relative link must resolve to the exact waiting queue file. In the final chat reply,
+preserve the exact rendered label and both paragraphs, but replace the
+handover-relative destination with
+a chat-resolvable link to the same queue file. Write `None.` when no human items are
+waiting.>
 
 ## Dead ends
 

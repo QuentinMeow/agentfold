@@ -1,10 +1,11 @@
 # Frontmatter is bold-key markdown lines, not YAML
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-22
 **Decided-by:** agent
 **Description:** All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
 **Review-by:** 2027-01-22
+**Superseded-by:** `memory/decisions/2026-07-26-human-actions-are-action-first.md`
 
 ## Context
 

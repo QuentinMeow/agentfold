@@ -138,6 +138,23 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual([], self.findings(root, body))
 
+    def test_semicolonless_entity_cannot_manufacture_queue_destination(self):
+        with self.repo() as root:
+            self.queue_item(root)
+            self.git(root, "add", ".")
+            body = (
+                "> [!IMPORTANT]\n>\n> ### What to review\n>\n"
+                "> 1. Context: [Review request](message-queue&#47needs-human/"
+                "reviews/future-blocking-review-boundary.md)\n"
+            )
+            findings = self.findings(root, body)
+            self.assertTrue(findings)
+            self.assertTrue(any(
+                "valid canonical needs-human queue link" in finding
+                or "not projected exactly once" in finding
+                for finding in findings
+            ), findings)
+
     def test_queue_actor_defaults_to_needs_human(self):
         with self.repo() as root:
             agent_item = self.queue_item(

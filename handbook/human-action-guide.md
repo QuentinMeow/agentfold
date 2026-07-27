@@ -1,9 +1,14 @@
 # Writing human actions that can be decided
 
-A human action is successful only when a zero-context reader can tell what to do and
-what their answer changes. Its canonical live identity is a file under
-`message-queue/needs-human/`; PRs, issues, chat, tasks, and handovers only surface a
-short linked projection. Exact schemas live in `templates/queue/`.
+A human action succeeds only when a zero-context reader can answer confidently from
+the file itself. The reader should immediately see what they need to do, why it
+matters, what is true today, what would change, the available choices, the agent's
+recommendation, and the consequence of silence. Background links add depth; they do
+not make the reader reconstruct the question.
+
+The canonical live identity is a file under `message-queue/needs-human/`. PRs, issues,
+chat, tasks, and handovers only surface a short linked projection. Exact presentation
+and lifecycle schemas live in `templates/queue/`.
 
 ## First decide whether judgment is actually human-owned
 
@@ -20,13 +25,69 @@ Example: “Does every `block` statement apply only in hard mode?” is a text a
 agent should perform. “May merge-protected deployments claim data never reached the
 remote?” is a human-reviewed security promise whose alternatives need explanation.
 
-## Give the reader a real choice
+## Put the action before the recordkeeping
 
 Copy the endpoint's exact schema from `templates/queue/`; this guide does not restate
-its fields or headings. Fill that schema so a zero-context reader can identify one
-concrete response, follow one durable source for depth, understand the meaningful
-dispositions and their different consequences, see one small example, and know the
-boundary or safe unattended result.
+its headings. Begin with the requested action and practical stakes. Put lifecycle
+identifiers and machine-managed fields in the collapsed `Tracking details` block at
+the end. `Action` and `Full context` stay beside the reader-facing content they
+describe. A review's exact target stays with its revision in tracking so a target that
+is also the full-context source does not create a duplicate visible link.
+
+Write `Action` as one safe inline Markdown line. Closed emphasis and code spans, plus
+escaped punctuation, are allowed. Links, images, autolinks, reference syntax, raw HTML,
+block Markdown, unbalanced brackets, and unclosed emphasis or code are not. This gives
+the action one unambiguous rendered identity wherever it is projected. Make it the first
+visible construct in its section, then add one blank line and one compact explanatory
+paragraph that tells the reader what their answer must decide.
+
+Immediately below the presentation marker, show the template's exact plain lifecycle
+notice. `Waiting for your response` means the human can act. `Not ready yet` and
+`Response received` explicitly remove the prompt when the artifact is unavailable or
+the answer is already being recorded. The notice mirrors tracking status; it does not
+create another status field.
+
+Write the body as a self-contained explanation:
+
+- Separate present state from future behavior. Use “Today” only for behavior that is
+  true now. Call a proposal a proposal, and say when it is not implemented.
+- Give every option the same labels and level of detail. Compare benefits, costs,
+  risks, and concrete consequences on the same basis. Do not make the recommended
+  choice look stronger by describing it more fully.
+- Put the recommendation after all options and after its calibration. In exact order,
+  name the evidence actually checked, assumptions, confidence, rationale, and what
+  would reverse the recommendation; state the recommended answer last. This reduces
+  anchoring on the agent's conclusion before the reader sees its basis and uncertainty.
+  Decisions conclude with exact `Choose Option X.` and clarifications with exact `Use
+  Interpretation X.`; negation or merely mentioning an option is not a recommendation.
+  Never hide an unverified core claim in `Assumptions` while recommending approval.
+- State the no-response behavior near the top. It is a consequence, not a threat: say
+  exactly what continues, stops, or happens by default.
+- Use complete sentences and familiar words. Expand repository shorthand on first use
+  and avoid machine-field names in explanatory prose.
+
+`Why this matters` and `If you do not respond` are each one nonempty compact
+paragraph, not one machine-counted sentence. They may contain several sentences and
+soft line wraps; inline emphasis and code are fine. Each paragraph is at most 240
+Unicode code points after normalization, and together they are at most 400. Each ends
+in `.`, `?`, `!`, `。`, `！`, or `？`, optionally before its balanced closing quote or
+bracket. The second begins exactly “If you do not respond,”. Headings, lists, quotes,
+tables, rules, code blocks, raw HTML, links, images, and reference definitions do not
+belong in these compact paragraphs. This makes them safe to reuse in a handover while
+allowing normal abbreviations, filenames, decimals, and internal punctuation.
+
+The state, each option or review outcome, the recommendation, and References contain
+only their template's fields in the declared order. Wrap a long value only on the
+immediately following source line with exactly two spaces; a blank line or standalone
+comment ends that value. Free prose belongs in a declared field—reviews use
+`Additional context`—and template-writing instructions stay in comments. References
+may additionally contain reference definitions. No heading, list, quote, table, code,
+HTML, or undeclared prose may masquerade as a field continuation.
+The response section asks only for a plain-language answer and explicitly accepts “I
+need clarification.” Decisions and clarifications also accept another option,
+interpretation, or correction in the reader's own words. Reviews accept approve,
+request changes, reject, or a clarification question. Revision binding and status
+changes are agent- or adapter-managed.
 
 For review-specific syntax, follow `templates/queue/review.md`. `Review target` names
 exactly one repository file, Git commit/range, or HTTPS artifact; `Review revision`
@@ -37,8 +98,25 @@ paths move and are not durable context; only a pickup may use one as live contex
 because its claim commit deletes that request. Retry records may quote one only as
 evidence of broken state.
 
-The summary must be sufficient to act; the full-context link is for depth, not a missing
-prerequisite. A recommendation is evidence, not permission to hide an alternative.
+A Git review also exposes one human-readable exact artifact. An HTTPS link must use a
+supported provider's exact commit or range grammar for this repository's configured
+remote. A repository-relative alternative is a regular readable text artifact whose
+content, not filename, contains exact field `**Git review target:** git:<bound target>`.
+
+An unpublished review recommends exact sentence `Wait for the exact target before
+deciding.` A published waiting review recommends exactly one presented outcome:
+approve, request changes, or reject. `abandoned` is agent-managed lifecycle state for a
+pursuit that ends without a human review judgment, not another displayed choice. A Git
+commit or range also has one visible exact-artifact link. Its destination is a
+provider-neutral HTTPS URL or an existing repository-relative artifact and contains
+the full bound commit id, or both full base and head ids for a range.
+
+The explanation must be sufficient to act; references are for depth, not a missing
+prerequisite. Every rendered Markdown link or image, and every definition used by a
+reference-style link, lives in References. Full, collapsed, and shortcut reference
+labels match case-insensitively and use their first definition; duplicate definitions
+and unresolved or ambiguous reference syntax are invalid. Link each canonical destination only
+once. A recommendation is evidence, not permission to hide an alternative.
 
 ## Choose kind and timing independently
 
@@ -56,6 +134,22 @@ UTC dates can be checked against the repository clock. An arbitrary named event,
 transition, or operation is only an agent-attested acknowledgement when its Resolution
 evidence changes; hard assurance requires a controlled adapter that observes and
 enforces that boundary.
+
+## Project only actions the human can take now
+
+Only `Status: waiting` is human-actionable. `awaiting-artifact` means there is nothing
+ready to review, and `folding` means an agent is already recording the response.
+Handovers and final replies project every and only waiting human item. This prevents a
+completed answer or an unavailable artifact from being presented as another request.
+
+Each handover projection has one queue link followed by the queue item's plain `Why
+this matters` and `If you do not respond` paragraphs. It never exposes hashes, lifecycle
+labels, or parser field names. The exact entry grammar lives in
+`templates/handover.md`. The handover keeps its repository-relative destination. Final
+chat preserves the exact rendered Action label and both paragraphs but resolves that
+same queue destination for the chat surface. Inline emphasis, code, or escapes may
+differ between Action and label only when the rendered text is identical after
+whitespace reflow; case, punctuation, negation, brackets, and Unicode width stay exact.
 
 ## Project without forking the action
 
@@ -102,8 +196,10 @@ Chat answers are first transcribed into the item. Task and handover projections 
 carry a second status or answer slot.
 
 Commit the response while status is `waiting`, then claim it in a separate one-line
-`Status: folding` commit. Every item predeclares `Resolution evidence`; a review's
-path is distinct from its target. Deletion changes that evidence in its commit. An
+`Status: folding` commit. The human changes only the plain response; an agent or
+adapter manages `Reviewed revision` and all other tracking fields. Every item
+predeclares `Resolution evidence`; a review's path is distinct from its target.
+Deletion changes that evidence in its commit. An
 unanswered review whose artifact changes first retracts to `awaiting-artifact` with
 pending binding and blank response fields; a later commit republishes the replacement.
 Publication and retraction never add a response, and the first response freezes its

@@ -11,5 +11,16 @@
       then delete the projection.
 - [x] 7. Run full verification and publish the completed implementation for first
       human review.
-- [ ] 8. After that human review, run the final immutable-revision adversarial panel
-      and fold only approved review follow-up before merge.
+- [x] 8. Record the first human review as changes requested, create its agent-owned
+      repair and artifact-pending follow-up review, and reopen the task.
+- [x] 9. Research human–AI interaction and content-design evidence with independent
+      agents; require research, repository audit, and interaction design to agree.
+- [x] 10. Add the action-first presentation schema to templates, guidance, and durable
+      decisions while preserving the queue-resolution lifecycle.
+- [x] 11. Add versioned enforcement, one-shot safe migration, and actionable-only
+      handover projections with focused regression tests.
+- [x] 12. Migrate every actionable waiting review without changing its unresolved
+      judgment; constrain neutral wording and crossed-merge reframing mechanically,
+      and preserve the answered detector receipt byte-for-byte.
+- [ ] 13. Run focused checks, the complete suite once, and a fresh immutable-revision
+      adversarial panel before publishing the follow-up review target.

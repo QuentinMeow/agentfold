@@ -20,8 +20,12 @@ anything.
 3. **Delivery timing**: name each live item `blocking-<slug>.md` when named work cannot
    proceed now, `future-blocking-<slug>.md` when work may continue only until a stated
    date/event/transition, or `non-blocking-<slug>.md` when it never stops work. A human
-   item briefly distinguishes the choices, gives a concrete example, states the safe
-   result if unattended (remaining stopped is valid), and links the full context.
+   item leads with the action and no-response result, separates today from proposed
+   behavior, compares choices symmetrically, gives examples, and links every reference
+   once. Its recommendation comes after the choices and, in order, evidence,
+   assumptions, confidence, rationale, and reversal conditions. Technical tracking is
+   collapsed at the end. Only `Status: waiting` is human-actionable; awaiting artifacts
+   and responses already being folded are not projected.
    Describe arbitrary event/transition/operation evidence as agent-attested unless a
    controlled adapter supplies hard assurance.
 4. **Memory**: a decision folded → ADR in `memory/decisions/`; a failure understood →
@@ -37,8 +41,11 @@ anything.
    shorthand.
 7. **Project, do not originate**: handovers, task notes, chat, and external review
    surfaces only summarize and link live queue items; they never become a second action
-   ledger. End the final reply with the handover's "Needs your attention" projections,
-   each linking its queue item with enough context to act. Repeat still-open items.
+   ledger. End the final reply with the handover's "Needs your attention" projections:
+   every waiting human action, each with one queue link and its two plain consequence
+   sentences. Preserve the exact rendered Action label and prose, but resolve the queue
+   destination for chat rather than copying the handover-relative link. Repeat items
+   that are still waiting.
 
 ## Skip conditions
 

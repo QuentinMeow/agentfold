@@ -1,50 +1,62 @@
 # Writing decisions humans can actually answer
 
-A decision file is an interface between an agent with full context and a human with
-none. Most unanswered decisions are unanswerable — they assume knowledge the human
-doesn't have. General rules for every human action:
-`human-action-guide.md`; schema: `templates/queue/decision.md`. This guide adds the
-decision-specific content.
+A decision file is an interface between an agent with full context and a human who may
+have none. Its job is not to prove how much research happened. Its job is to make one
+choice understandable, comparable, and safe to answer. General rules for every human
+action live in `human-action-guide.md`; the exact decision schema lives in
+`templates/queue/decision.md`.
 
-## The contract with the reader
+## Write for a reader who was not in the room
 
-Assume the human: is not an expert in this domain, has not read the codebase, skims one
-screen, and will answer from their phone. Therefore:
+Assume the human has not read the codebase, may skim one screen on a phone, and wants
+to understand consequences rather than internal terminology. The file must therefore:
 
-1. **The question fits in the title**, answerable with a word or two.
-2. **Context from zero.** Two or three sentences: what part of the system this touches,
-   why the question came up now. Link every source (the task, the code, the doc) — the
-   link is for depth, never a requirement.
-3. **Options with example consequences.** For each option: what it means in plain
-   language, then a *concrete scenario* of life after choosing it — "If we pick A and a
-   user does X, then Y happens." The example consequence is the most important part of
-   the file: it is how a non-expert experiences the difference between options.
-4. **A recommendation and dependency timing.** Say which option you'd pick and why in
-   one sentence. The filename and its matching fields state whether the choice blocks
-   now, at a named future boundary, or never; no duplicate `Blocking` field exists.
-5. **The answer slot is literal**: end with `**Your answer:** ______`. Accept a letter,
-   sentence, or counter-question; the first concrete response is immutable. For a
-   counter-question, claim and fold that disposition, answer it in the named durable
-   evidence, then create a new same-timing item whose `Supersedes` names the old path.
-   Never edit human text; claim `folding` with a status-only commit.
-6. **Background is reconstructable; delivery state is not.** Durable background belongs
-   in the task's `design.md` or `memory/`, linked from here — never written only here.
-   The live file uniquely owns the unresolved action, timing, status, and any answer;
-   do not delete it until those are folded or explicitly disposed.
+1. Ask one clear question in the title and repeat the requested choice under `What I
+   need from you`.
+2. Explain the practical stakes and the no-response behavior before background detail.
+3. Separate `Today` from `Future behavior being decided`. Never describe a proposal as
+   if it already exists.
+4. Present at least two genuinely distinct options with the same structure: meaning,
+   benefits, costs and risks, and a concrete example consequence.
+5. Recommend an option only after presenting them all. Show, in order, the evidence
+   checked, assumptions, confidence, rationale, and what would change the recommendation;
+   put the recommended option last so the reader sees calibration before conclusion.
+6. Accept a plain answer. The reader may name an option, propose another choice, or ask
+   a question without copying hashes or editing lifecycle metadata.
+7. Link each reference once. The explanation remains sufficient even if the links are
+   not opened; tracking details come last.
 
-## Example (abridged)
+## Compare options symmetrically
 
-> **Should the quote API store quotes in a JSON file or SQLite?**
-> Option A — JSON file: human-readable, diffable in git. *Example consequence: two
-> agents writing quotes at the same time can corrupt the file; you'd see occasional
-> lost quotes.* Option B — SQLite: safe concurrent writes. *Example consequence: the
-> data stops being reviewable in a pull request; you'd need a tool to inspect it.*
-> Recommendation: A, our writes are single-threaded today. Default path: A, starting
-> 2026-08-01.
+Use neutral option names and parallel examples. If one option gets operational costs,
+failure modes, and an example, every option gets those things. Avoid a false binary:
+add another option when it is genuinely viable, and explicitly say when two ideas can
+be combined.
+
+Distinguish design rationale from recommendation. The rationale explains why each
+option exists and the trade-off it makes. The recommendation explains which trade-off
+best fits the current goal. A recommendation should be easy to challenge because its
+evidence, assumptions, confidence, rationale, and reversal conditions appear before the
+agent's preferred answer. This order reduces anchoring without hiding the agent's view.
+
+## Make consequences observable
+
+Replace abstract labels with a short scenario a reader can picture. For example:
+
+> Today, quotes are stored only in memory and disappear when the service restarts.
+> Option A writes a readable JSON file; a simultaneous write can lose data. Option B
+> uses SQLite; simultaneous writes are safe, but reviewing the stored data needs a
+> tool. The agent recommends JSON while writes are single-threaded, with medium
+> confidence; evidence of concurrent writes would change the recommendation.
+
+This example identifies current behavior, future alternatives, user-visible
+consequences, the recommendation, and the condition that could reverse it. It does not
+require the reader to infer which sentences describe the present.
 
 ## After the answer
 
-Fold the answer (or the answer to a counter-question) into the affected docs, record an
-ADR in `memory/decisions/` (schema: `templates/memory/adr.md`) when a decision was made,
-then delete the resolved item. A counter-question also gets the linked successor above;
-Git history archives completed delivery but does not replace live state.
+A response is immutable while the item is `waiting`. An agent then changes only status
+to `folding`, records the answer in the declared resolution evidence, and writes an ADR
+from `templates/memory/adr.md` when a decision was made. A counter-question is a valid
+response: answer it durably, then create a same-timing successor whose `Supersedes`
+field names the old item. Never rewrite the human's words.

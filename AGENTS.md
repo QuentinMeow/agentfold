@@ -50,17 +50,20 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
 1. List filenames recursively under `message-queue/needs-agent/`. Claim and act on
    relevant requests/retries, or convert a request to a task; delete only with the
    completed action or an explicit in-file rejection.
-2. Scan recursively under `message-queue/needs-human/` for filled `**Your answer:**` or
-   `**Your review:**` lines. The response is committed while status is `waiting`; claim
-   it next with a one-line `**Status:** folding` commit, fold it into its durable source
-   (and an ADR for decisions), then delete the item in the resolving commit.
+2. Scan recursively under `message-queue/needs-human/`. Only `Status: waiting` asks the
+   human to act; `awaiting-artifact` is not ready and `folding` is agent-owned. Claim a
+   waiting item with a filled `Your answer` or `Your review` next using a one-line
+   `Status: folding` commit, fold it into its durable source (and an ADR for decisions),
+   then delete the item in the resolving commit.
 3. Before assigning any human action or durable cross-session agent action, create its
    canonical queue item from `templates/queue/`. PRs, issues, chat, tasks, and handovers
    only summarize and link that item; an answer heard in chat is transcribed before use.
-4. End every reply to the human with one entry per open `needs-human/` item you filed
-   or noticed — a clickable link to the item plus enough context to act from the reply
-   alone, never a bare name (format: the "Needs your attention" section of
-   `templates/handover.md`). Chat is the human's only push channel.
+4. End every reply to the human with one entry per waiting `needs-human/` item you filed
+   or noticed. Copy the action and plain consequence sentences using the exact "Needs
+   your attention" format in `templates/handover.md`; never surface technical tracking
+   or a bare name. Preserve the exact link label and prose, but resolve the queue link
+   for chat instead of copying the handover's repository-relative destination. Chat is
+   the human's only push channel.
 
 ## Task lifecycle
 

@@ -1,10 +1,11 @@
 # A surfaced needs-human item is a clickable link plus context, never a bare name
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-22
 **Decided-by:** human (directed in chat; transcribed by agent — chat leaves no trace)
 **Description:** Handovers and final replies surface pending items as a clickable link to the queue file plus 2–3 sentences of context; the file links onward to its sources
 **Review-by:** 2027-01-18
+**Superseded-by:** `memory/decisions/2026-07-26-human-actions-are-action-first.md`
 
 ## Context
 

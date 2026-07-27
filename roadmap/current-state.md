@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-25
+**Last-updated:** 2026-07-26
 
 What is true today, mapped to the desired-state lines.
 
@@ -42,14 +42,29 @@ What is true today, mapped to the desired-state lines.
   has one canonical queue file. Actor and message kind remain folder routes; filename
   prefixes expose blocking now, blocking at a future boundary, or never blocking.
   Tasks declare live queue actions, every unclaimed backlog task has an agent pickup
-  message, and human items mechanically require differences, a concrete example, an
-  unattended/boundary outcome, and a full-context pointer. Reviews cannot accept a
-  response before their exact artifact exists. PRs #7, #11, and #12 are admitted on
-  main; their still-unanswered human review items are now bound to immutable ranges
-  without treating those provider merges as review answers. PRs #8 and #10 landed on
-  PR #7's already-merged branch and were superseded by the hardened main recoveries.
+  message. Human action presentation v2 makes each waiting file a self-contained
+  decision interface: one action and no-response result come first, current and
+  proposed behavior are separated, alternatives are compared symmetrically, and the
+  agent recommendation follows with assumptions and uncertainty. Machine tracking is
+  collapsed at the end, visible references are not repeated, and the person never
+  edits hashes or lifecycle fields. Handovers project only waiting actions; not-ready
+  and answered records are not presented as work. Reviews cannot accept a response
+  before their exact artifact exists. PRs #7, #11, and #12 are admitted on main; their
+  still-unanswered human review items are bound to immutable ranges without treating
+  those provider merges as review answers. PRs #8 and #10 landed on PR #7's
+  already-merged branch and were superseded by the hardened main recoveries.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
+- **Test-runner isolation (2026-07-24)**: the repository runner removes inherited
+  repository-selecting Git variables, builds a metadata-free source projection outside
+  existing Git discovery paths, and starts each test from a fresh projected root. This
+  protects ordinary relative Git discovery; it is not a sandbox against a test that
+  deliberately names the real checkout. The exact immutable implementation commit
+  [fd2374d99796300ed4325c2961e696092c17875e](https://github.com/QuentinMeow/agentfold/commit/fd2374d99796300ed4325c2961e696092c17875e)
+  contains the recorded final evidence: 19 focused tests, the full repository suite,
+  a real linked-worktree state-preservation probe, and unanimous independent review.
+  The original failure, recovery, and required proof remain in the
+  [root-cause and recovery record](../history/conversations/2026-07-24-0202PDT-layered-workspace-research-handoff/artifacts/test-runner-git-environment-isolation.md).
 - **Design review (2026-07-22)**: a full grill of the harness — report in
   `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md` —
   found the eventual-consistency-vs-blocking-gate contradiction plus honesty and

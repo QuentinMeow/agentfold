@@ -178,6 +178,49 @@ Accepted decision:
 Refined actor-correct resolution lifecycle:
 `memory/decisions/2026-07-23-requested-review-changes-route-through-agent-repair.md`.
 
+## Human-action presentation repair
+
+The first human review found that the queue was durable but not understandable. Its
+review files read like database records: lifecycle tokens, hashes, and repeated paths
+preceded the judgment; proposed behavior was written in the present tense; and lists
+of alternatives did not clearly say whether the reader was choosing among them.
+
+Three independent Sol/xhigh agents researched human–AI interaction, audited the
+repository, and designed alternatives. All three approved the same repair before
+implementation began:
+
+- treat a human-action file as one small decision interface, not as frontmatter;
+- put the exact task and no-response consequence before background;
+- distinguish earlier, current, proposed, approved, and implemented behavior;
+- compare choices symmetrically before showing a separately attributed agent
+  recommendation, including evidence checked, assumptions, and uncertainty;
+- let the human answer in plain language while agents manage hashes and lifecycle
+  fields;
+- list each visible reference once and put tracking details last; and
+- surface only `waiting` items as needing attention. Not-ready and answered items are
+  retained lifecycle records, not human work.
+
+This ordering follows Microsoft Research's validated human–AI interaction guidelines,
+NIST's explanation principles, W3C clear-content guidance, and GOV.UK's one-question,
+active-choice, and confirmation patterns. A CHI 2021 study also found that explanations
+can increase agreement with incorrect AI recommendations, so the recommendation comes
+after balanced alternatives and never pre-fills the answer.
+
+The queue-resolution lifecycle remains v1. A separate presentation-v2 activation
+allows exactly one presentation migration of unanswered items while freezing their
+artifact binding, evidence, provider identity, lineage, response, and underlying
+judgment. Its two wording exceptions are deterministic transformations. The first maps
+legacy confirmation wording to a neutral three-outcome presentation; two known opaque
+asks have fixed plain-language translations rather than carrying their jargon forward.
+When Git proves
+that the bound head is already an ancestor of the trusted prior revision, the second
+maps the same pre-merge judgment to post-merge accept/repair/rollback language. That
+form uses one fixed unattended-state sentence and retains the historical merge
+boundary; it does not retroactively authorize the merge. Every other action or timing
+rewrite is rejected. The already answered detector-failure review remains byte-for-byte
+unchanged and stops appearing under “Needs your attention.” Historical handovers
+remain immutable; a new action-entry version governs only future projections.
+
 ## Core fit
 
 **Agent substitution:** pass — files, links, and deterministic checks work with any agent runtime

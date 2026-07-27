@@ -865,3 +865,422 @@
 - PRs #8 and #10 subsequently merged into PR #7's already-merged head branch as
   `d515d28` and `7fa18ca`; their hardened replacements reached main through PRs #11
   and #12.
+
+## 2026-07-26 — action-first human review repair (codex)
+
+- Recorded the owner's first review as changes requested, claimed it in a separate
+  coordination commit, reopened the task, and created an agent-owned repair plus a
+  not-yet-actionable follow-up review.
+- Three independent Sol/xhigh agents researched human–AI interaction, audited the
+  repository, and designed the replacement. All three approved the same action-first
+  model before implementation began.
+- Added Human action presentation schema v2 and Queue action-entry schema v3. Waiting
+  files now lead with one action, present-versus-proposed state, symmetric outcomes,
+  a recommendation with assumptions and uncertainty, and the consequence of silence;
+  tracking details are collapsed at the end.
+- Migrated exactly the six unanswered waiting reviews. The two answered/folding
+  receipts and the artifact-pending follow-up were not presented as human work; the
+  detector-failure receipt remained byte-for-byte unchanged.
+- Added deterministic enforcement for lifecycle notices, heading order, symmetric
+  choices, recommendation evidence, plain responses, unique visible references,
+  collapsed tracking, safe migration, and waiting-only handover projections. A legacy
+  artifact-pending review may adopt v2 only on its existing publication transition.
+- The complete repository runner passed all 11 test files. The queue suite reached 309
+  tests; focused integration also caught and repaired mixed timing-state leakage and a
+  hidden-heading false positive before publication.
+- The first immutable repair revision, `5a6d21a`, was blocked by both fresh reviewers.
+  Human-UX review found broken relative links, evidence-poor recommendations,
+  contradictory future-tense actions, and missing direct review evidence. Lifecycle
+  review reproduced stuck waiting/folding and awaiting/waiting transitions, a removable
+  v2 activation edge, and a response-free folding action hidden from handovers.
+- Reworked the candidate around those failures: relative references now resolve from
+  the queue file; reviews distinguish before/current/reviewed/not-included state;
+  recommendations name evidence actually checked; status-managed presentation changes
+  have narrow lifecycle paths; folding requires a real response; and v2 removal is
+  rejected on every governed Git edge.
+- The replacement revision `dc315f7` was also rejected by both fresh reviewers. The
+  zero-context reviewer found two already-merged changes still offering fictional
+  pre-merge outcomes and no clickable immutable range; the lifecycle reviewer showed
+  that a legacy-format blank response could still be hidden by changing Status to
+  folding after v2 activation.
+- The third immutable candidate, `ca50208`, passed the complete gate but all five
+  adversarial lenses blocked it. They found recommendation anchoring, biased wording,
+  stale dependency claims, ambiguous choices, direct-to-folding creation, wrong-field
+  responses, publication scope injection, provider-dependent Git links, doubled
+  handover punctuation, and an unsafe exception that rewrote crossed review identities.
+- Replaced the keyword-based identity exception with deterministic, activation-only
+  wording transforms. Neutralized review language preserves the same three outcomes;
+  post-merge wording is available only when Git proves the bound head was already
+  admitted, and it does not authorize that past merge. Recommendations now present
+  evidence and uncertainty before the conclusion, and creation, publication, response,
+  option, artifact-link, and handover grammars have explicit negative regressions.
+- The next frozen candidate, `850c48c`, passed the complete 11-file pre-commit gate but
+  the first three fresh review lenses all blocked it. The zero-context reviewer found
+  two projected actions that were opaque or logically biased. Lifecycle review proved
+  that a root commit could create a v2 action directly in folding. Parser review
+  reproduced negated recommendations, open-ended review dispositions, fake exact-
+  artifact links, path-spelled duplicate references, punctuation-changing handover
+  projections, and rejection of ordinary dotted prose.
+- Repaired every reproduced defect. Root commits now produce an empty-tree creation
+  edge; live projected actions use neutral plain language; decision and clarification
+  recommendations have exact positive conclusions; review answers are closed to the
+  three outcomes plus clarification; exact Git links are verified against the same
+  repository or a structured local artifact; visible references are canonicalized;
+  handover labels preserve punctuation; and the sentence scanner accepts versions,
+  filenames, abbreviations, and Unicode punctuation.
+- Candidate `9341801` passed the complete gate. Its zero-context UX reviewer approved,
+  but lifecycle and parser reviewers found four further defects: custom human-action
+  kinds could originate with an agent-authored folding response, malformed local-
+  artifact URLs could crash validation, quote-adjacent sentence boundaries were
+  misread, and recommendation sections allowed contradictory trailing prose.
+- Extended lifecycle admission conservatively to every human-action kind and hardened
+  artifact parsing, sentence boundaries, and recommendation-section purity with exact
+  reproductions. Because the panel was not unanimous, no approval from that cycle was
+  carried forward.
+- Candidate `fcefb5d` passed the complete gate and its UX reviewer approved. The two
+  enforcement reviewers nevertheless blocked it: the promised generic v2 layout for
+  adopter-defined human kinds conflicted with the repeatable-field allowlist; rendered
+  fenced or raw-HTML response prose could disappear from closed-disposition checks;
+  abbreviation and embedded-question sentence cases were misclassified; and exact
+  recommendation purity rejected normal Markdown wrapping used by the templates.
+- Kept the lifecycle protections while admitting the generic custom-kind layout, and
+  moved response, sentence, and recommendation checks toward rendered-content-aware
+  parsing that permits wrapping but rejects extra visible instructions. No approval
+  from the split panel was carried forward.
+- Candidate `8383317` passed the complete gate and its UX lens approved. Lifecycle and
+  parser lenses still blocked it because custom kinds did not inherit the generic
+  decision recommendation rule, a blank line failed to end a wrapped recommendation
+  value, a common `U.S. Supreme Court` sentence was rejected, and handover punctuation
+  did not recognize Unicode or quote-closed question endings.
+- Extended the generic custom-kind contract through recommendation validation, made
+  paragraph boundaries terminate field continuations, refined abbreviation handling,
+  and centralized rendered terminal-punctuation recognition for projections. The
+  split panel's approval was not carried forward.
+- Candidate `e6011fa` passed the complete gate and its UX lens approved. Lifecycle
+  review then reproduced a pre-activation, in-range addition that smuggled an agent-
+  authored approved response through a later v2 activation. Parser review found free
+  rendered prose in structured state sections, ambiguity in acronym-based sentence
+  heuristics, and missing CommonMark reference-style links in duplicate detection.
+- Tightened selected-range admission without retroactively governing legacy history,
+  and reopened the sentence/structured-content design with independent UX and parser
+  review instead of layering another unprincipled English heuristic onto the schema.
+  The split panel's approval was not carried forward.
+- Both independent reviewers chose a bounded rendered-paragraph contract over further
+  English sentence heuristics. Replaced the heuristic with deterministic paragraph
+  budgets, made state/choice/recommendation/reference sections field-pure, preserved
+  review explanation under an explicit `Additional context` field, and resolved full,
+  collapsed, shortcut, and image references before duplicate checking.
+- Extended selected-range creation checks to pre-activation commits inside the range,
+  while grandfathering legacy additions wholly before the selected range. This closes
+  the reproduced response-smuggling sequence without retroactively governing old
+  repository history.
+- Candidate `8bbaff8` passed the complete gate, but all three first-wave reviewers
+  blocked it. They found an undocumented combined paragraph budget, a pre-activation
+  rename-origin variant of response smuggling, visually blank field values, missed
+  CommonMark autolinks, compatibility normalization that weakened exact prefix and
+  handover copying, and source-markup characters counted as rendered length.
+- Split the repair by ownership: canonical templates now state every budget and
+  punctuation rule; range admission treats an external rename/copy into `needs-human`
+  as a new origin; and rendered-text validation keeps exact source contracts separate
+  from Unicode-aware blank/length checks.
+- Candidate `af607bd` passed the complete gate and its UX lens approved. Parser review
+  found a valid angle-bracket inline URL misclassified as an autolink. Lifecycle review
+  found that activating v2 and then removing the whole queue service made the final
+  tree look ungoverned, allowing an earlier fabricated response to disappear after
+  boundary authorization.
+- Made selected-range provenance depend on any activation inside the range, not only
+  the final tree, while leaving modular whole-service removal otherwise intact. The
+  Markdown resolver now gives an enclosing inline link precedence over angle autolink
+  recognition.
+- Candidate `f803f5f` passed the complete gate and its UX lens approved. Lifecycle
+  review found a divergent direct-head range whose trusted base had v2 but whose head
+  did not; the base governance was not enabling origin scans on the head. Parser review
+  found that a valid Action containing literal brackets could not be represented as an
+  exact v3 Markdown link label.
+- Extended selected-range governance from the trusted base as well as selected-edge
+  activation, and made handover exactness compare rendered Markdown label text so
+  escaped literal brackets preserve the Action rather than changing it.
+- Candidate `dea25d0` passed the complete gate, but all three first-wave lenses blocked
+  it. Inline code/emphasis in an Action exposed a source-versus-rendered comparison
+  mismatch; a displaced old tip with active v2 did not govern a rewritten candidate;
+  and malformed bracket floods made the balanced link scanner quadratic.
+- Aligned v3 projection on rendered Action and label text, extended governance from a
+  validated displaced tip only when v2 remains active in its final tree, and replaced
+  repeated failed label scans with bounded linear progression.
+- Candidate `60b5cc8` passed the complete gate, but all three first-wave lenses blocked
+  it. The clarification template wrapped its Action placeholder contrary to the
+  one-line contract; presentation-v2 could activate without queue-resolution-v1 and
+  skip response/folding mutation enforcement; and an Action-looking line inside an
+  HTML comment made raw Action safety validation skip the real unsafe Action.
+- Made the canonical placeholder one line, bound presentation v2 mechanically to the
+  queue lifecycle schema with defensive resolution enforcement, and validate one
+  comment-stripped raw Action line followed by its required paragraph separator.
+- Candidate `411a223` passed the complete gate and its UX lens approved. Parser review
+  found a visually duplicate Action hidden behind a zero-width format character and a
+  safe comment literal inside inline code removed as if it were an HTML comment.
+  Lifecycle review found an exact backward rollback range whose empty rev-list omitted
+  the candidate head from both v2 dependency and response/folding mutation checks.
+- Made selected-range enumeration inspect the exact head once even when a rollback
+  range has no forward commits, and separated visible-structure normalization from
+  code-span-aware comment masking in raw Action validation.
+- Kept exact Action source authoritative while adding a separate structural scan that
+  blanks closed code spans and removes Unicode format controls before duplicate-field
+  detection. Literal HTML-comment syntax inside code remains literal, while real
+  comments still have to occupy standalone source lines.
+- Extended compact-paragraph validation to reject unclosed inline markup in the
+  explanation as well as the Action. Added regressions for code-contained Action-like
+  text, standalone and inline-adjacent comments, exact Unicode preservation, and ZWSP,
+  ZWJ, word-joiner, and BOM disguises before and inside an Action label.
+- Candidate `a641dd8` passed the complete gate, but all three fresh first-wave lenses
+  blocked it. Lifecycle review found that clean padding after an invalid intermediate
+  edge hid the earlier transition in a backward rollback range. UX and parser review
+  found duplicate Actions disguised by non-`Cf` default-ignorable characters. Parser
+  review also found contradictory visible content accepted in an extra disclosure
+  block and quadratic resolution of ordinary Markdown links.
+- Split the next repair by subsystem: selected-range history must cover every relevant
+  candidate-ancestry edge, while presentation parsing must admit exactly one final
+  tracking disclosure, share the full default-ignorable definition, and bound link
+  resolution without changing valid Markdown precedence or exact Action identity.
+- Repaired the presentation parser after the `a641dd8` review. A human-action file now
+  admits exactly one canonical final tracking disclosure; extra, nested, incomplete,
+  or mixed-case disclosure/HTML markup is rejected, while literal tags in closed code
+  and comments remain inert. Tracking content is limited to its fields and comments.
+- Centralized default-ignorable character handling for the structural duplicate-Action
+  scan, including non-`Cf` characters, while preserving the exact Action source and
+  leaving code spans outside that scan. Replaced repeated Markdown overlap scans with
+  indexed spans while retaining inline-link, image, autolink, and reference precedence.
+- Backward selected ranges now replay the governed candidate ancestry instead of only
+  the exact rollback head. Activation filtering keeps pre-v2 legacy origins outside the
+  new contract, while padded invalid lifecycle and dependency edges can no longer hide
+  behind a later clean commit.
+- The repair passed all 393 queue tests and all 11 repository test files. Direct action
+  projection, reconciliation, compilation, diff, and exact temporary-index core-scope
+  checks also passed; ordinary-link stress timings stayed approximately linear through
+  6,400 links.
+- Candidate `3a7b8cc` passed the complete gate, but all three fresh first-wave lenses
+  blocked it. Lifecycle review found that removing and later restoring queue-resolution
+  v1 did not expose the downgrade edge. UX found arbitrary visible instruction fields
+  accepted inside Tracking. Parser review found field-looking continuations and
+  Unicode-indented duplicate Actions, plus quadratic malformed raw-HTML scanning.
+- Split the next repair by subsystem. Queue-v1 must be sticky across every governed
+  edge. Visible and tracking sections need explicit field ownership independent of
+  indentation tricks, and raw-HTML recognition needs bounded scanning without changing
+  code, comment, autolink, or angle-destination semantics.
+- Added an edge-level queue-resolution-v1 anti-downgrade check. Once v1 activates, a
+  governed edge that removes its marker while retaining any queue service file now
+  fails even when a later commit restores v1; duplicate traversal of the same edge is
+  collapsed. Complete removal of an empty or resolved queue service remains modular.
+- Added six focused regressions covering forward and root ranges, staged state,
+  synthetic and padded backward candidates, displaced-tip continuity, presentation-v2
+  dependency, whole-service removal/restoration, duplicate suppression, and
+  preactivation grandfathering.
+- Reverified the combined lifecycle and parser repair after the parser stabilized. All
+  402 queue tests and 55 core-scope tests passed, as did normal and disposable-index
+  reconciliation, disposable-index core admission, compilation, and diff checks.
+- Closed the parser findings with an endpoint/state/timing-specific Tracking allowlist,
+  a whole-visible-presentation field scan that treats Unicode blank prefixes and
+  default-ignorables as detection-only structure, and explicit rejection of bold-key
+  continuation lines. Exact Action extraction and literals in closed code/comments are
+  unchanged; `Follow-up review` is not admitted as human Tracking metadata.
+- Made inline raw-HTML span recognition consume each owned source range once. Nested and
+  quoted malformed opener floods now scale approximately linearly while valid quoted
+  tags, comments, autolinks, angle link destinations, and code keep their precedence.
+  The integrated repository runner passed all 11 test files.
+- Candidate `69952df` passed the complete gate, but all three fresh first-wave lenses
+  blocked it. Lifecycle review found remove-and-restore downgrade history for handover
+  schema markers. Parser review found option fields accepted in the response section
+  and character-reference-encoded directives. UX review found Unicode line separators
+  bypassing both visible-instruction detection and the Tracking allowlist.
+- Split the next repair by subsystem. Handover markers need the same edge-level
+  stickiness as queue schemas, while structural detection needs one rendering-aware
+  line and entity model that remains separate from exact source extraction and binds
+  every field to its owning section.
+- Added retained-history edge walkers for both handover schema markers. Projection v1
+  removal and any action-entry downgrade now fail on the exact governed edge even when
+  later restored; duplicate traversal is collapsed, whole-history removal remains
+  modular, and a validated displaced tip preserves its active schema requirements.
+- Bound every active action-entry schema version to Queue projection v1 in each
+  admitted staged, selected-base, selected-commit, synthetic/backward, and displaced
+  state. A later repair cannot hide an intermediate orphan entry grammar.
+- Added eight focused regression methods for forward/root remove-and-restore,
+  v3-to-v2-to-v3, staged and padded rollback candidates, synthetic/displaced history,
+  whole-service removal/restoration, preactivation legacy history, all three entry
+  versions, and dependency repair. The stabilized combined repair passed all 412 queue
+  tests and the complete core/admission checks.
+- Bound response fields to their owning section for decisions, clarifications, and
+  reviews. A detection-only visual-line model covers physical and Unicode line breaks,
+  character-reference-encoded layout and labels, default ignorables, indentation, and
+  code/comment exclusions without changing exact Action or metadata values.
+- Added regressions for named and numeric entities, NEL/Zl/Zp boundaries, encoded
+  newlines, wrong-section choice fields, every response kind/status, Tracking and
+  compact-paragraph injection, ordinary entity prose, and code/comment literals. The
+  bounded detection stress matrix remained approximately linear through 8,000 cases.
+- The first exact staged gate after that repair failed one existing invalid-fence test,
+  so no commit was created. A stray backtick in invalid fence info was pairing with a
+  later metadata backtick and hiding fields across the intervening heading.
+- Replaced the narrow exception with block-aware inline-code shielding. Unmatched
+  backticks cannot borrow a closer across headings, blank lines, lists, quotes, rules,
+  fences, reference definitions, or indented code; valid same-inline-block multiline
+  code and encoded-line literals remain inert. Ten focused cases and all 414 queue
+  tests passed on the repaired worktree.
+- Candidate `297c4b5` passed the complete gate and its lifecycle lens approved. UX and
+  parser lenses blocked it: alternate CommonMark emphasis still rendered hidden field
+  labels, inline-code pairing remained document-global before boundary filtering, two
+  crossed-merge reviews called live behavior proposed, and one Full context link did
+  not explain its review judgment. No approval carried forward.
+- Split the repair by ownership. Visible-field parsing must recognize every equivalent
+  raw emphasis form and parse code independently per inline block. The two live reviews
+  must describe current behavior as current and link the actual review context without
+  changing Action identity or available outcomes.
+- Structural field detection now recognizes underscore, triple, and nested raw
+  CommonMark emphasis when their leading rendered label is schema-shaped; entity-made
+  delimiters remain literal. Inline-code runs are parsed independently within each
+  conservative CommonMark inline block rather than globally paired and filtered.
+- Reworded the two crossed-merge reviews to call live behavior implemented/current and
+  make rejection require rollback or reviewed replacement on `main`. The test-runner
+  review now links its immutable design, verification, and root-cause record instead of
+  an unrelated roadmap page. Action text and judgment outcomes remain unchanged.
+- The combined repair passed 73 focused parser/presentation tests, all 416 queue tests,
+  all 11 repository test files, direct v2 audits of both live reviews, reconciliation,
+  compilation, and exact diff checks. Stress matrices remained approximately linear.
+- Candidate `7fb6ff0` passed the complete gate, but fresh UX and lifecycle lenses
+  blocked it and the parser lens did not approve. GFM table body rows could masquerade
+  as top-level queue fields, a divergent candidate could reuse a displaced immutable
+  handover path with different bytes, and the test-runner recommendation's final proof
+  was not reachable from its stable references.
+- Split the repair across block parsing, displaced-history immutability, and evidence
+  presentation. Table bodies must remain block content, old-tip handover incarnations
+  must constrain replacements, and the stable current-state reference must lead to the
+  exact immutable implementation evidence.
+- Added GFM header/delimiter and cell-count recognition, escaped/code-pipe handling,
+  body consumption through the actual termination boundary, and whole-table inline
+  block isolation. Table rows cannot satisfy top-level queue fields or shift later
+  inline-code pairing.
+- Extended immutable-handover checks to the displaced tip and candidate intermediate
+  history. Independently recreated, edited, or renamed old-tip paths fail across v1–v3;
+  unchanged shared incarnations, explicit deletion, preactivation legacy, and modular
+  whole-history removal remain allowed.
+- Kept the review's stable Full context identity and made its evidence reachable by
+  linking the exact immutable implementation commit from the current-state record and
+  stating the final focused, full-suite, real-worktree, and independent-review proof.
+- The combined tree passed nine GFM cases, 30 handover/topology cases, all 428 queue
+  tests in the final repository run, all 11 repository test files, projection and core
+  suites, exact-index reconciliation, core admission, compilation, and diff checks.
+- Candidate `6ba38d5` passed the complete gate, but all three fresh first-wave lenses
+  blocked it. Raw-HTML/comment shielding still paired backticks across blocks; GFM code
+  pipes were miscounted; immutable handovers could be renamed outside history;
+  intraword underscores changed rendered identity; and the layered-workspace review
+  overstated the independent-review evidence present at its exact head.
+- Split the repair across shared block-aware code semantics, exact GFM delimiter rules,
+  rendered identity, whole-tree rename discovery, and evidence wording. No live Action,
+  review outcome, or recommendation conclusion changes.
+- Made raw HTML and comment masking share the same per-inline-block code semantics as
+  field detection. Unmatched backticks cannot hide later blocks, and GFM table cells
+  now split on every unescaped pipe, including pipes inside code spans.
+- Preserved literal intraword double and triple underscores in rendered identity while
+  retaining valid boundary emphasis. The corrected layered-workspace review now cites
+  only evidence present at its exact revision.
+- Detected rename and copy operations whose source is an immutable handover even when
+  the destination leaves `history/conversations/`. Staged, direct, synthetic,
+  displaced-tip, backward, modified-byte, and multi-copy cases are covered without
+  rejecting genuine deletion, whole-service removal, or preactivation history.
+- The integrated repair passed 11 focused parser cases, 14 focused lifecycle cases,
+  all 118 action-projection tests, all 442 queue tests, core-scope checks, normal and
+  disposable-index reconciliation, core admission, compilation, and diff checks.
+- Candidate `b5edef6` passed the complete gate, but all three fresh first-wave lenses
+  blocked it. One review headline invited a yes/no answer opposite to its Approve
+  outcome; a new identical handover was mistaken for mutation of its source; and GFM
+  emphasis, link destinations, inline comments, and nested-delimiter performance had
+  concrete parser defects.
+- Split the repair across question polarity, governed-to-governed copy semantics, and
+  a bounded GFM renderer/link/comment model. The next panel restarts from zero against
+  one new immutable commit.
+- Reframed the authority review headline so its question and Approve outcome have the
+  same polarity; the other five waiting headlines already passed the same audit.
+- Allowed a copy to create a well-formed new conversation handover while continuing to
+  reject governed renames, external or malformed copies, edits, type changes, retired
+  path reuse, and divergent-history escapes.
+- Replaced approximate emphasis stripping with bounded GFM delimiter flanking and the
+  rule of three, added balanced and escaped link destinations, and rejected inline HTML
+  comments in strict handover entries. Stress coverage makes nested emphasis linear.
+- The integrated repair passed 10 focused parser cases, 26 focused lifecycle cases,
+  all 118 action-projection tests, all 452 queue tests, core-scope checks,
+  reconciliation, compilation, and diff checks.
+- Candidate `ebfe7d5` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked, so the panel was not unanimous. Exact integrated
+  reproductions found later rule-of-three checks using consumed delimiter lengths,
+  semicolonless entities decoded beyond CommonMark, user-collidable code placeholders,
+  and quadratic per-span restoration.
+- Routed the repair to a segment-based CommonMark renderer with original delimiter-run
+  metadata, exact character-reference grammar, collision-free code-span preservation,
+  and scaling assertions. The next five-review panel again restarts from zero.
+- Preserved original emphasis run lengths independently from consumed characters,
+  implemented CommonMark's exact character-reference grammar, and replaced private-use
+  placeholders with opaque code-span and autolink segments restored in one linear pass.
+- Added integrated handover and external-projection regressions for rule-of-three,
+  semicolonless/numeric entities, private-use Unicode, autolink contents, and scaling.
+  All 119 projection tests and all 456 queue tests passed on the final restarted tree.
+- Candidate `60fabe3` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked after a 13,701-source CommonMark label-context
+  differential. Complete handover reproductions exposed bracket-dependent emphasis,
+  autolink precedence over code, and backslash-parity escape handling.
+- Routed the repair to context-aware label rendering, owned-range autolink precedence,
+  and linear escape-parity detection. The next five-review panel again restarts from
+  zero.
+- Rendered handover labels within their actual brackets, resolved opaque autolink/code
+  ownership in source order, and replaced fixed lookbehind with backslash-parity
+  detection. A suffix opener index keeps escaped-run adversaries linear.
+- Exact integrated v3 and live-GFM differential fixtures now cover bracket flanking,
+  autolinks containing backticks, and even-parity URI/email escapes. All 119 projection
+  tests and all 459 queue tests passed on the final restarted tree.
+- Candidate `3d7ffa7` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked because a URI or email autolink inside the apparent
+  queue-link label makes GFM split the outer link while the gate still assigned its
+  visible text to that queue link.
+- Routed the repair to rendered link-ownership validation with exact URI/email,
+  escaped-angle, and code-span controls. The next five-review panel again restarts from
+  zero.
+- Made autolinks inside an apparent queue-link label own their rendered source ranges,
+  so GFM link splitting cannot leave an empty canonical anchor that claims adjacent
+  visible text. Literal brackets, escaped angles, and code-span labels remain valid.
+- Exact resolver and complete v3 fixtures passed with all 119 projection tests and all
+  461 queue tests; nested-label resolution remained effectively linear.
+- Candidate `74354ba` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked after an official-GFM differential found one/two-tilde
+  strikethrough could create visible Action/label collisions the gate accepted.
+- Routed the repair to bounded GFM strikethrough semantics with complete v3,
+  escaped-tilde, code-span, delimiter-interaction, and scaling controls. The next panel
+  again restarts from zero.
+- Implemented official GFM one/two-tilde strikethrough in standalone and bracketed
+  contexts, including extension-aware underscore/star flanking, code/autolink
+  ownership, escapes, intraword text, unmatched runs, and literal runs of three or more.
+- An official-GitHub differential reported zero differences across 3,804 structured
+  and seeded cases; all 119 projection tests and all 465 queue tests passed.
+- Candidate `78538b5` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked after a 9,767-source official-GFM differential found the
+  bare URL, `www`, and email autolink extensions were absent from rendered identity and
+  reference ownership.
+- Routed the repair to context-aware extended-autolink recognition with exact
+  punctuation, escape, code, existing-link, complete-v3, differential, and scaling
+  controls. The next panel again restarts from zero.
+- Added official cmark-gfm bare URL, `www`, and email autolink ownership with delimiter,
+  entity, backslash, code, explicit/reference-link, and owning-label context. Strict
+  Actions now fail closed whenever rendered text owns an external automatic link.
+- Structured and seeded official-GFM differentials found no false accept, all 119
+  projection tests passed, and all 469 queue tests passed on the final rerun.
+- Candidate `112b441` passed the complete gate. Fresh UX and lifecycle lenses approved,
+  but the parser lens blocked after a 22,591-source cmark-gfm differential found
+  emphasized email autolinks missed because their closing underscore remained attached
+  during domain scanning.
+- Routed the repair to post-emphasis extended-email ownership with plain, `+`,
+  `mailto:`, escaped/entity-at, Unicode-prefix, literal, intraword, complete-v3,
+  differential, and scaling controls. The next panel again restarts from zero.
+- Fixed post-emphasis ownership for extended email and URL autolinks, including
+  cmark-gfm's byte-oriented UTF-8/backslash domain cursor. A 23,464-source differential
+  found no remaining accepted external-link false negatives; all 119 projection tests
+  and all 472 queue tests passed.
+- Honored the owner's stopping boundary after the verified repair instead of starting
+  another review loop. Rewrote the artifact-pending human re-review as a self-contained
+  v2 status brief with the completed work, discovered problems, design decisions, and
+  exact next steps; it explicitly requests no response until the panel publishes one
+  immutable target.
