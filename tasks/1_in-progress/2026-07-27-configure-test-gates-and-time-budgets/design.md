@@ -214,3 +214,23 @@ use the smallest combination that meets the configured target with measured evid
 **User-global writes:** none
 **Why AgentFold core:** this defines the portable relationship between local feedback, final assurance, repository policy, and durable task filing rather than a personal optimization or example-service behavior
 **Thin adapter:** canonical=automation/run_test_gate.py; optional=yes; policy=none; writes=repo-only
+
+## Proposed safe replan — requires human confirmation
+
+A later security review found two P1 boundaries the current design does not close. First, the
+base-pinned floor prevents candidate deletion of trusted tests, but the candidate can still call
+`os._exit(0)` inside the same interpreter before later assertions run. Second, the included
+publisher has no independent completion oracle, so it cannot distinguish that early exit from a
+controlled test completion before posting a required status.
+
+The proposed safe endpoint for this task is manual final verification only. The starter policy
+would use `mode = "manual"`; automatic named transitions and provider-hard execution would fail
+closed; the unsafe automatic publisher would be removed; and explicit complete verification
+would be labeled cooperative rather than enforcement-eligible. Hard syntax would remain valid
+for future policy compatibility, but no included adapter would implement it.
+
+Real automatic enforcement would move to child task
+`2026-07-27-control-external-test-oracle-and-stage-migration`, followed by
+`2026-07-27-publish-hard-gate-through-external-oidc-app`. This is a proposal, not a replacement
+decision. The existing trusted pull-request gate ADR remains in force unless the human confirms
+the replan and a new ADR explicitly supersedes it.

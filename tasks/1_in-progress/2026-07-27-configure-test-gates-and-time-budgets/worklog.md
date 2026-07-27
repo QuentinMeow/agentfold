@@ -121,3 +121,27 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Kept the original waiting activation decision immutable. Filed a separate future-boundary
   clarification requiring explicit acceptance of same-repository `task/**` protection and fork
   exclusion before activation; its safe unattended outcome remains manual verification.
+
+## 2026-07-27 — manual-only replan stopping boundary (codex and delegated reviewers)
+
+- A new security review blocked the current automatic design on two P1 findings. The base-pinned
+  floor cannot prove that its same-interpreter assertions completed after candidate code calls
+  `os._exit(0)`, and the publisher has no independent oracle that can distinguish that exit from
+  controlled completion before posting a merge-authorizing status.
+- Added test-only migration commit `499b0e2`: exact current triad or complete removal are the only
+  accepted regimes. Follow-up reviews found and repaired job-name-only scanning, an unbound
+  absent-runner read, contradictory absent-event expectations, and duplicate authority hidden
+  inside an existing publisher job.
+- A later adversarial canary found that `499b0e2` still does not prove complete authority removal:
+  a renamed generic job can request `statuses: write`, use the default GitHub token, and call the
+  statuses API without matching the current literal fragments. The migration floor therefore
+  remains incomplete and needs a closed absence rule, not more ad hoc literals.
+- A managed safety check then refused the requested hard-to-manual production edit because no
+  human response yet authorizes that persistent security-policy change. All tentative production
+  edits were reverted; the hard workflow and policy remain unchanged.
+- Filed one plain yes/no clarification at the review boundary and two unclaimed core follow-ups:
+  an external test oracle with staged migration, then an independently controlled OIDC-backed
+  GitHub App publisher. No external service, credential, branch rule, or provider setting changed.
+- The records-only commit attempt ran the normal routine hook and stopped safely after its
+  required trusted-floor component exceeded the bounded interval. No commit was created and the
+  hook was not bypassed.

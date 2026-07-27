@@ -209,6 +209,95 @@ $ git diff --check
 <no output; exit 0>
 ```
 
+## Records-only stopping package structural verification
+
+The final staged package contains task, queue, design, plan, worklog, verification, and generated
+timing-investigation records only. It contains no staged change to `agentfold.toml`, the GitHub
+workflow, the gate runner, or the repository test runner. The two pre-existing waiting human
+items remain byte-for-byte unchanged.
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --cached --check
+<no output; exit 0>
+
+$ git diff --cached --name-only | rg '^(agentfold\.toml|\.github/workflows/harness\.yml|automation/run_test_gate\.py|automation/run_tests\.py)$' || true
+<no output; exit 0>
+
+$ shasum -a 256 message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md message-queue/needs-human/clarifications/future-blocking-confirm-hard-gate-source-branch-protection.md
+ddb331a800826a460051b60875c9f8caff384612722f930ea105a97415e3c7ec  message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md
+d71e91da105378da82ca95ffc5662b087e7d045db0fc088feee2ef6b009a0aff  message-queue/needs-human/clarifications/future-blocking-confirm-hard-gate-source-branch-protection.md
+```
+
+## Manual-only replan stopping evidence
+
+Two later P1 findings invalidate an automatic-enforcement claim without erasing the historical
+results above:
+
+1. The base-pinned floor prevents candidate deletion of trusted tests, but a candidate test can
+   call `os._exit(0)` in the same interpreter before the assertion driver reaches a later marker.
+   A zero process result therefore does not prove controlled completion.
+2. The included publisher consumes that same uncontrolled result and has no external completion
+   oracle. It cannot safely turn the result into a merge-authorizing status, even when its App
+   credential, event identities, and source history are otherwise restricted.
+
+The test-only migration floor was reviewed repeatedly before production work. Its current
+literal-fragment cases reject a partial hard-job triad, renamed or moved known authority,
+known authority duplicated outside the triad, duplicate known token/status authority inside the
+publisher, and contradictory absent-regime events. A later canary still bypasses its absent
+classifier with a renamed generic job using job-level `statuses: write`, the default GitHub token,
+and a direct status API call. Commit `499b0e2` is therefore not a complete migration floor and
+must be replaced by a closed absence rule rather than another list of literals.
+
+```
+$ python3 automation/tests/test_github_action_projection_workflow.py
+Ran 17 tests in 0.094s
+OK
+
+$ python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_github_adapter_binds_event_merge_and_limits_push_to_reconciliation automation.tests.test_reconcile_queue.ReconcileQueueTests.test_trusted_gate_migration_never_mixes_provider_regimes
+Ran 2 tests in 0.058s
+OK
+```
+
+The managed safety layer refused the attempted `agentfold.toml` change from hard to manual
+because the human has not authorized that persistent security-policy change. The tentative
+runner/report edits were reverted immediately. No production policy, workflow, publisher,
+receipt, or report schema change remains in the working tree.
+
+The normal amend hook for test-only commit `499b0e2` passed. Its isolated candidate reconciliation
+passed, while the selected queue suite reached the routine interval and was honestly deferred:
+
+```
+$ git commit --amend --no-edit
+pre-commit: routine test gate
+outcome: deferred
+core-scope: pass (executed, 0.37s)
+reconcile: pass (executed, 10.95s)
+repository-tests/selected: incomplete (executed, 48.13s)
+duration: 60.16s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 499b0e2] test: admit manual hard-gate removal floor
+```
+
+The first records-only commit attempt then stopped safely in the normal hook. Reconciliation
+passed, but the required trusted-floor test component did not complete within the bounded
+routine interval. No commit was created, the result was not cached as a pass, and the hook was
+not bypassed.
+
+```
+$ git commit -m "harness: file manual-only test-gate replan"
+pre-commit: routine test gate
+outcome: blocked-incomplete
+reason: required critical checks did not complete successfully: repository-tests/full
+core-scope: pass (executed, 0.25s)
+reconcile: pass (executed, 6.81s)
+repository-tests/trusted-floor: incomplete (executed, 51.94s)
+coverage: 15 selected, 0 deferred, 1 incomplete
+duration: 59.87s
+```
+
 ## Restacked repair focused verification
 
 After the transitional base-test commit and the historical implementation stack were replayed,
