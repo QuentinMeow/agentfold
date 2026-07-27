@@ -4,7 +4,7 @@
 **Filed:** 2026-07-27, by codex, from the owner's test-cycle request in chat
 **Parent:** 2026-07-26-continue-development-cycle-acceleration
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-configure-test-gates-and-time-budgets.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-configure-test-gates-and-time-budgets.md`; `message-queue/needs-human/decisions/future-blocking-authorize-direct-main-coordination-push.md`
 
 ## Goal
 
