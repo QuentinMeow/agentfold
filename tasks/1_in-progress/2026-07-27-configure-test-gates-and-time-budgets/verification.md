@@ -209,6 +209,25 @@ $ git diff --check
 <no output; exit 0>
 ```
 
+## Composite-floor integration result
+
+The exact staged candidate `32597887788914a9f06dd1ddeedf225cac2f2e76c7684744ea764efa10dc81d1`
+did not pass, and no receipt was written. Core scope passed in 0.31 seconds and reconciliation
+passed in 8.84 seconds. The trusted floor ran for 387.96 seconds and failed 2 of 15 files, so the
+whole gate blocked after 398.22 seconds and refreshed the existing timing investigation.
+
+The failure is deterministic compatibility evidence. The base workflow tests contain three
+assertions for the old broad `pull_request_target`/merge-group behavior, and the base reconciler
+test contains one matching assertion. Those exact base tests correctly reject the repaired
+workflow's narrower event/source/history boundary. Adding misleading text or dead workflow
+steps merely to satisfy the old assertions would weaken the evidence, so it was not done.
+
+The provider base is the pull request's target revision, not an earlier commit on the same head
+branch. Therefore the honest migration needs a two-pull-request stack: first merge transitional
+tests that accept both old and new behavior; then target the production security repair and
+strict tests at that revision. Two commits inside one pull request do not advance its trusted
+base and cannot solve this incompatibility.
+
 The 297-test reconciler run preceded the final `run_tests.py`-only CAP_CHOWN, view-restoration,
 and environment-allowlist repair; its focused integration test and the structural reconciler
 check passed afterward. The final isolated three-file run includes that repair.
@@ -259,6 +278,23 @@ $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 finding(s)
 ```
 
+## Immutable-checkpoint adversarial review blockers
+
+The fresh revision-bound panel reviewed checkpoint `78a5ba2` and blocked it on two P1
+findings. These verdicts supersede the earlier completion posture; this task stays in progress
+until both repairs are implemented, verified, committed, and reviewed again.
+
+1. The provider-hard final lane treated tests and helpers from the pull-request candidate as
+   the complete test oracle. A candidate could delete, rename, empty, or replace those files
+   and still produce the sole success evidence. The repair must run an immutable test/support
+   floor from the trusted base against the exact candidate product, then run candidate-added or
+   changed tests as supplemental evidence, with receipts binding both lanes and their overlays.
+2. Every `pull_request_target` metadata event could reach the stable success publisher, and a
+   force-pushed/non-fast-forward history could replace prior evidence. The repair must share one
+   restrictive event/source-branch condition across preparation, execution, and publication,
+   allow only opened or same-repository fast-forward synchronize events, and document matching
+   branch-protection requirements.
+
 The first exact staged run after that repair used candidate
 `42a75b0a7f6bf162730234b618d8b96dd842710629c7c96e71266b7435bfa716` and failed honestly:
 14 of 15 test files passed, while the new path-normalization test incorrectly assumed its
@@ -274,3 +310,36 @@ The recorded occurrence reports 309.531811406 seconds actual, including 295.5556
 the full test component. The unit fixture was then corrected to create and explicitly bind its
 own temporary Git repository; production normalization behavior was not weakened. Final exact
 verification after that fixture repair is recorded below when complete.
+
+## P1 repair focused verification
+
+The immutable-base floor regressions cover deleted, renamed, emptied, added, and helper-shadowed
+candidate tests; exact candidate product deletion remains visible beneath the floor. They also
+cover an empty trusted floor failing closed and v1 receipts becoming unusable after the v2
+composite identity was introduced. The workflow matrix rejects edited, ready-for-review,
+review, reopened, fork, wrong-source, wrong-base, zero-before, unchanged-head, and
+non-fast-forward inputs; opened and strict fast-forward synchronize inputs remain eligible.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 49 tests in 9.978s — OK (skipped=3: platform containment)
+
+$ python3 automation/tests/test_github_action_projection_workflow.py
+Ran 16 tests in 0.036s — OK
+
+$ python3 automation/run_tests.py --test-file automation/tests/test_run_test_gate.py --test-file automation/tests/test_run_tests.py --test-file automation/tests/test_github_action_projection_workflow.py
+49 gate tests, 46 runner tests, and 16 workflow tests passed
+3/3 test files passed; elapsed 16.59s
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ ruby -e "require 'yaml'; YAML.load_file('.github/workflows/harness.yml'); puts 'workflow YAML OK'"
+workflow YAML OK
+
+$ python3 -m py_compile automation/run_test_gate.py automation/tests/test_run_test_gate.py automation/tests/test_github_action_projection_workflow.py
+<no output; exit 0>
+
+$ git diff --check
+<no output; exit 0>
+```

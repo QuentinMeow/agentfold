@@ -38,7 +38,9 @@ except ImportError:  # pragma: no cover - the report remains complete without mu
 
 
 REPORT_SCHEMA = "agentfold.test-gate-report/v1"
-RECEIPT_SCHEMA = "agentfold.test-component-receipt/v1"
+RECEIPT_SCHEMA = "agentfold.test-component-receipt/v2"
+COMPOSITE_TEST_PLAN_SCHEMA = "agentfold.composite-test-plan/v1"
+TRUSTED_TEST_OVERLAY_ALGORITHM = "candidate-product-with-exact-base-test-namespaces/v1"
 CANONICAL_CONFIG = Path("agentfold.toml")
 LOCAL_STATE_DIRECTORIES = frozenset(
     (Path("tmp/test-gate-receipts"), Path("tmp/test-gate-reports"))
@@ -396,6 +398,147 @@ def _all_relative_tests(candidate_root):
         test.relative_to(candidate_root).as_posix()
         for test in run_tests.repository_test_files(candidate_root)
     )
+
+
+def _materialize_revision(revision, scratch_root, name):
+    """Materialize exact regular-file bytes for one trusted Git revision."""
+    index = scratch_root / f"{name}.index"
+    environment = os.environ.copy()
+    environment["GIT_INDEX_FILE"] = str(index)
+    result = subprocess.run(
+        ["git", "read-tree", revision],
+        cwd=REPO,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        raise GateError(f"could not create the immutable {name} index")
+    root = scratch_root / name
+    manifest = test_manifest.materialize_staged_candidate(REPO, index, root)
+    return root, manifest
+
+
+def _records_below(manifest, namespaces):
+    prefixes = tuple(namespace + "/" for namespace in namespaces)
+    return tuple(
+        record
+        for record in manifest["records"]
+        if record["path"] in namespaces or record["path"].startswith(prefixes)
+    )
+
+
+def _file_record(root, relative):
+    path = Path(root) / relative
+    if not path.is_file() or path.is_symlink():
+        raise GateError(f"declared test is unavailable or unsafe: {relative}")
+    metadata = path.stat()
+    return {
+        "path": relative,
+        "mode": stat.S_IMODE(metadata.st_mode),
+        "sha256": test_manifest.file_digest(path),
+    }
+
+
+def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root):
+    """Build a trusted-base test floor plus candidate supplemental-test plan.
+
+    Only directories that contain tests discovered at the exact base revision are
+    overlaid.  Product paths elsewhere always retain the exact candidate bytes.
+    """
+    if not candidate.base_revision:
+        raise GateError("composite full testing requires a trusted base revision")
+    base_root, base_view = _materialize_revision(
+        candidate.base_revision, scratch_root, "trusted-base"
+    )
+    base_tests = _all_relative_tests(base_root)
+    if not base_tests:
+        raise GateError("trusted base contains no discoverable repository tests")
+    namespaces = tuple(sorted({Path(test).parent.as_posix() for test in base_tests}))
+    if not namespaces or any(
+        namespace in ("", ".")
+        or Path(namespace).is_absolute()
+        or ".." in Path(namespace).parts
+        or any(part.casefold() == ".git" for part in Path(namespace).parts)
+        for namespace in namespaces
+    ):
+        raise GateError("trusted test namespace topology is unsafe")
+    for left in namespaces:
+        for right in namespaces:
+            if left != right and Path(left) in Path(right).parents:
+                raise GateError("trusted test namespaces overlap")
+
+    floor_root = scratch_root / "trusted-floor"
+    shutil.copytree(str(candidate_root), str(floor_root), symlinks=True)
+    for namespace in namespaces:
+        base_namespace = base_root / namespace
+        if not base_namespace.is_dir() or base_namespace.is_symlink():
+            raise GateError(f"trusted test namespace is unavailable: {namespace}")
+        destination = floor_root / namespace
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(str(destination))
+            else:
+                destination.unlink()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(base_namespace), str(destination), symlinks=True)
+    floor_view = test_manifest.tree_manifest(floor_root)
+    floor_tests = _all_relative_tests(floor_root)
+    if floor_tests != base_tests:
+        raise GateError("trusted test floor changed during exact overlay")
+
+    candidate_tests = _all_relative_tests(candidate_root)
+    base_test_records = {
+        path: _file_record(base_root, path) for path in base_tests
+    }
+    candidate_test_records = {
+        path: _file_record(candidate_root, path) for path in candidate_tests
+    }
+    base_namespace_records = _records_below(base_view, namespaces)
+    candidate_namespace_records = _records_below(candidate_view, namespaces)
+    changed_namespaces = {
+        namespace
+        for namespace in namespaces
+        if _records_below(base_view, (namespace,))
+        != _records_below(candidate_view, (namespace,))
+    }
+    supplemental_tests = tuple(
+        sorted(
+            path
+            for path, record in candidate_test_records.items()
+            if base_test_records.get(path) != record
+            or any(Path(namespace) in Path(path).parents for namespace in changed_namespaces)
+            or not any(Path(namespace) in Path(path).parents for namespace in namespaces)
+        )
+    )
+    supplemental_namespaces = tuple(
+        sorted({Path(path).parent.as_posix() for path in supplemental_tests})
+    )
+    supplemental_records = _records_below(
+        candidate_view, supplemental_namespaces
+    )
+    identity = {
+        "schema": COMPOSITE_TEST_PLAN_SCHEMA,
+        "trusted_base_revision": candidate.base_revision,
+        "overlay_algorithm": TRUSTED_TEST_OVERLAY_ALGORITHM,
+        "overlay_namespaces": list(namespaces),
+        "trusted_floor_tests": list(floor_tests),
+        "trusted_floor_records": list(base_namespace_records),
+        "trusted_floor_view_digest": floor_view["digest"],
+        "candidate_test_records": list(candidate_namespace_records),
+        "supplemental_tests": list(supplemental_tests),
+        "supplemental_records": list(supplemental_records),
+        "candidate_tested_view_digest": candidate_view["digest"],
+    }
+    identity["digest"] = test_manifest.canonical_digest(identity)
+    return {
+        "identity": identity,
+        "floor_root": floor_root,
+        "floor_view": floor_view,
+        "floor_tests": floor_tests,
+        "supplemental_root": candidate_root,
+        "supplemental_tests": supplemental_tests,
+    }
 
 
 def routine_test_manifest(changed_paths, all_tests):
@@ -1026,6 +1169,7 @@ def receipt_binding(
     component_id,
     candidate_root=REPO,
     environment=None,
+    composite_identity=None,
 ):
     value = {
         "candidate_digest": candidate.digest,
@@ -1036,6 +1180,7 @@ def receipt_binding(
         "runner_revision": runner_revision(candidate_root),
         "environment": environment_identity(environment),
         "component_id": component_id,
+        "composite_test_plan": composite_identity,
     }
     value["binding_digest"] = test_manifest.canonical_digest(value)
     return value
@@ -1435,6 +1580,8 @@ def _base_report(gate, started):
         "reason": "gate did not complete",
         "candidate": None,
         "tested_view": None,
+        "test_plan": None,
+        "execution_identity": None,
         "policy_digest": None,
         "critical": {},
         "selected": [],
@@ -1472,6 +1619,12 @@ def main(arguments=(), started=None):
                 candidate.base_revision,
             )
             report["policy_digest"] = policy_digest
+            report["execution_identity"] = {
+                "runner_revision": runner_revision(
+                    REPO if options.provider_hard else candidate_root
+                ),
+                "environment": environment_identity(),
+            }
             report["invocation"] = {
                 "kind": (
                     "explicit"
@@ -1508,8 +1661,24 @@ def main(arguments=(), started=None):
                 "required_check_ids": list(required_critical),
             }
             all_tests = _all_relative_tests(candidate_root)
-            if options.gate == "final" or "repository-tests/full" in required_critical:
-                selected, deferred = all_tests, ()
+            requires_full = (
+                options.gate == "final"
+                or "repository-tests/full" in required_critical
+            )
+            composite = None
+            if requires_full:
+                composite = composite_test_plan(
+                    candidate, candidate_root, tested_view, scratch_root
+                )
+                report["test_plan"] = composite["identity"]
+                selected = tuple(
+                    sorted(
+                        set(composite["floor_tests"]).union(
+                            composite["supplemental_tests"]
+                        )
+                    )
+                )
+                deferred = ()
             else:
                 selected, deferred = routine_test_manifest(
                     candidate.changed_paths, all_tests
@@ -1546,7 +1715,7 @@ def main(arguments=(), started=None):
                 if selected:
                     component_id = (
                         "repository-tests/full"
-                        if selected == all_tests
+                        if composite is not None or selected == all_tests
                         else "repository-tests/selected"
                     )
                     binding = receipt_binding(
@@ -1556,6 +1725,9 @@ def main(arguments=(), started=None):
                         policy_digest,
                         component_id,
                         REPO if options.provider_hard else candidate_root,
+                        composite_identity=(
+                            composite["identity"] if composite is not None else None
+                        ),
                     )
                     receipt = reusable_full_receipt(binding, component_id, options)
                     if receipt is not None:
@@ -1570,31 +1742,79 @@ def main(arguments=(), started=None):
                             )
                         )
                     else:
-                        command = [
-                            sys.executable,
-                            str(
-                                AUTOMATION / "run_tests.py"
-                                if options.provider_hard
-                                else candidate_root / "automation/run_tests.py"
-                            ),
-                            "--view-root",
-                            str(candidate_root),
-                        ]
-                        if options.provider_hard:
-                            command.append("--provider-hard")
-                        for test in selected:
-                            command.extend(("--test-file", test))
-                        result = run_component(
-                            component_id,
-                            command,
-                            component_deadline - time.monotonic(),
-                            cwd=candidate_root,
-                            cleanup_deadline=hard_deadline,
-                            internal_environment=component_environment,
-                            require_strong_containment=options.provider_hard,
+                        runner = (
+                            AUTOMATION / "run_tests.py"
+                            if options.provider_hard
+                            else candidate_root / "automation/run_tests.py"
                         )
-                        components.append(result)
-                        persist_full_receipt(binding, result, unchanged(), options)
+
+                        def execute_tests(lane_id, view_root, tests):
+                            command = [
+                                sys.executable,
+                                str(runner),
+                                "--view-root",
+                                str(view_root),
+                            ]
+                            if options.provider_hard:
+                                command.append("--provider-hard")
+                            for test in tests:
+                                command.extend(("--test-file", test))
+                            return run_component(
+                                lane_id,
+                                command,
+                                component_deadline - time.monotonic(),
+                                cwd=view_root,
+                                cleanup_deadline=hard_deadline,
+                                internal_environment=component_environment,
+                                require_strong_containment=options.provider_hard,
+                            )
+
+                        if composite is None:
+                            result = execute_tests(
+                                component_id, candidate_root, selected
+                            )
+                            components.append(result)
+                            receipt_result = result
+                        else:
+                            floor_result = execute_tests(
+                                "repository-tests/trusted-floor",
+                                composite["floor_root"],
+                                composite["floor_tests"],
+                            )
+                            components.append(floor_result)
+                            supplemental_result = None
+                            if (
+                                floor_result.outcome == "pass"
+                                and composite["supplemental_tests"]
+                            ):
+                                supplemental_result = execute_tests(
+                                    "repository-tests/candidate-supplemental",
+                                    composite["supplemental_root"],
+                                    composite["supplemental_tests"],
+                                )
+                                components.append(supplemental_result)
+                            lanes_passed = floor_result.outcome == "pass" and (
+                                supplemental_result is None
+                                or supplemental_result.outcome == "pass"
+                            )
+                            receipt_result = ComponentResult(
+                                component_id,
+                                "pass" if lanes_passed else "incomplete",
+                                "executed" if lanes_passed else "none",
+                                0.0,
+                                (),
+                                (
+                                    "trusted floor and candidate supplemental lanes passed; "
+                                    f"plan {composite['identity']['digest']}"
+                                    if lanes_passed
+                                    else "composite full-test lanes did not all pass"
+                                ),
+                            )
+                            if lanes_passed:
+                                components.append(receipt_result)
+                        persist_full_receipt(
+                            binding, receipt_result, unchanged(), options
+                        )
                 elif "repository-tests/full" in required_critical:
                     components.append(
                         ComponentResult(
