@@ -1,83 +1,50 @@
 #!/usr/bin/env python3
 """Static event, trust, candidate, and actor matrix for the GitHub adapter."""
-import re
 import unittest
 from pathlib import Path
+
+if __package__:
+    from .trusted_gate_snapshots import (
+        HARD_WORKFLOW_SHA256,
+        MANUAL_WORKFLOW_SHA256,
+        TRUSTED_GATE_JOBS,
+        decode_workflow,
+        manual_fixture_contract_errors,
+        manual_workflow_fixture,
+        manualize_hard_workflow,
+        migration_mutations,
+        trusted_gate_regime,
+        workflow_digest,
+        workflow_job,
+    )
+else:
+    from trusted_gate_snapshots import (
+        HARD_WORKFLOW_SHA256,
+        MANUAL_WORKFLOW_SHA256,
+        TRUSTED_GATE_JOBS,
+        decode_workflow,
+        manual_fixture_contract_errors,
+        manual_workflow_fixture,
+        manualize_hard_workflow,
+        migration_mutations,
+        trusted_gate_regime,
+        workflow_digest,
+        workflow_job,
+    )
 
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/harness.yml"
-JOB_HEADER_RE = re.compile(r"^  (?P<name>[a-z][a-z0-9-]*):\n", re.MULTILINE)
-TRUSTED_GATE_JOBS = (
-    "prepare-trusted-final-test-gate",
-    "trusted-final-test-runner",
-    "publish-trusted-final-test-check",
-)
-
-
-def workflow_job(workflow, name):
-    matches = list(JOB_HEADER_RE.finditer(workflow))
-    for index, match in enumerate(matches):
-        if match.group("name") != name:
-            continue
-        end = matches[index + 1].start() if index + 1 < len(matches) \
-            else len(workflow)
-        return workflow[match.start():end]
-    return ""
-
-
-def trusted_gate_regime(workflow):
-    """Recognize only a complete legacy or complete restricted gate shape."""
-    jobs = {name: workflow_job(workflow, name) for name in TRUSTED_GATE_JOBS}
-    present = tuple(bool(jobs[name]) for name in TRUSTED_GATE_JOBS)
-    if not any(present):
-        return "legacy"
-    if not all(present):
-        return "invalid"
-    prepare = jobs["prepare-trusted-final-test-gate"]
-    runner = jobs["trusted-final-test-runner"]
-    publisher = jobs["publish-trusted-final-test-check"]
-    common = (
-        "permissions:\n      contents: read" in prepare
-        and "permissions: {}" in runner
-        and "--provider-hard" in runner
-        and "permissions: {}" in publisher
-        and "environment: agentfold-trusted-publisher" in publisher
-        and "statuses/$TEST_GATE_CANDIDATE" in publisher
-    )
-    legacy = (
-        "if: ${{ github.event_name == 'pull_request_target' }}" in prepare
-        and "github.event_name == 'merge_group'" in runner
-        and "Reject unsupported merge-queue admission" in runner
-        and "github.event_name == 'merge_group'" not in publisher
-    )
-    restricted_fragments = (
-        "github.event.action == 'opened' || github.event.action == 'synchronize'",
-        "github.event.pull_request.base.ref == github.event.repository.default_branch",
-        "github.event.pull_request.head.repo.id == github.event.repository.id",
-        "startsWith(github.event.pull_request.head.ref, 'task/')",
-    )
-    restricted = (
-        all(
-            all(fragment in jobs[name] for fragment in restricted_fragments)
-            for name in TRUSTED_GATE_JOBS
-        )
-        and 'git merge-base --is-ancestor "$TEST_GATE_DISPLACED_TIP" "$TEST_GATE_HEAD"'
-        in prepare
-        and "github.event_name == 'merge_group'" not in runner
-        and "Reject unsupported merge-queue admission" not in runner
-    )
-    if common and legacy and not restricted:
-        return "legacy"
-    if common and restricted and not legacy:
-        return "restricted"
-    return "invalid"
 
 
 class GitHubActionProjectionWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+        cls.workflow_bytes = WORKFLOW.read_bytes()
+        cls.trusted_gate_regime = trusted_gate_regime(cls.workflow_bytes)
+        if cls.trusted_gate_regime not in ("present", "absent"):
+            raise AssertionError("workflow is outside both admitted byte snapshots")
+        cls.workflow = decode_workflow(cls.workflow_bytes)
 
     def job(self, name):
         job = workflow_job(self.workflow, name)
@@ -97,8 +64,33 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
 
+    def require_hard_gate(self):
+        if self.trusted_gate_regime == "absent":
+            self.skipTest("the complete hard-gate triad is intentionally absent")
+
     def test_trusted_gate_is_one_complete_migration_regime(self):
-        self.assertIn(trusted_gate_regime(self.workflow), ("legacy", "restricted"))
+        current = self.workflow_bytes
+        manual = manual_workflow_fixture()
+        self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(manual))
+        self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
+        self.assertEqual("absent", trusted_gate_regime(manual))
+        self.assertEqual((), manual_fixture_contract_errors(manual))
+        self.assertIn(trusted_gate_regime(current), ("present", "absent"))
+        if trusted_gate_regime(current) == "present":
+            self.assertEqual(HARD_WORKFLOW_SHA256, workflow_digest(current))
+            self.assertEqual(manual, manualize_hard_workflow(current))
+            for missing in TRUSTED_GATE_JOBS:
+                with self.subTest(partial_hard_job=missing):
+                    partial = self.workflow.replace(
+                        workflow_job(self.workflow, missing), "", 1
+                    ).encode("utf-8")
+                    self.assertEqual("invalid", trusted_gate_regime(partial))
+        else:
+            self.assertEqual(manual, current)
+        for name, mutation in migration_mutations(manual):
+            with self.subTest(manual_mutation=name):
+                self.assertEqual("invalid", trusted_gate_regime(mutation))
+        self.assertEqual("invalid", trusted_gate_regime(current + b"\n"))
 
     def test_event_matrix_registers_authoritative_and_review_surfaces(self):
         on_block = self.workflow.partition("on:\n")[2].partition(
@@ -109,9 +101,13 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "review_requested, review_request_removed, assigned, unassigned, "
             "enqueued]"
         )
-        self.assertNotIn("pull_request:\n", on_block)
         self.assertIn(f"pull_request_target:\n    types: {pr_types}", on_block)
-        self.assertIn("merge_group:\n    types: [checks_requested]", on_block)
+        if self.trusted_gate_regime == "present":
+            self.assertNotIn("pull_request:\n", on_block)
+            self.assertIn("merge_group:\n    types: [checks_requested]", on_block)
+        else:
+            self.assertIn("pull_request:\n", on_block)
+            self.assertNotIn("merge_group:\n", on_block)
         self.assertIn(
             "issues:\n"
             "    types: [opened, edited, reopened, assigned, unassigned]",
@@ -142,7 +138,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "Checkout trusted PR-base projection gate",
         )
         self.assertIn(
-            "if: ${{ github.event_name == 'pull_request_target' }}", checkout
+            "if: ${{ github.event_name == 'pull_request_target' }}",
+            checkout,
         )
         self.assertIn(
             "ref: ${{ github.event.pull_request.base.sha }}", checkout
@@ -191,6 +188,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
 
     def test_trusted_preparer_uses_base_code_and_binds_every_candidate_identity(self):
+        self.require_hard_gate()
         job = self.job("prepare-trusted-final-test-gate")
         self.assert_contains_all(job, (
             "name: Prepare trusted hard final gate candidate",
@@ -270,6 +268,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/download-artifact", job)
 
     def test_candidate_runner_has_no_repository_permissions_or_inherited_secrets(self):
+        self.require_hard_gate()
         job = self.job("trusted-final-test-runner")
         self.assert_contains_all(job, (
             "name: AgentFold credential-free final test runner",
@@ -349,6 +348,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertIn("invalid Docker cidfile", run)
 
     def test_stable_required_status_is_published_by_dedicated_app(self):
+        self.require_hard_gate()
         job = self.job("publish-trusted-final-test-check")
         self.assert_contains_all(job, (
             "name: Publish AgentFold App-authored hard final gate status",
@@ -398,6 +398,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotIn("/check-runs", job)
 
     def test_all_hard_gate_jobs_share_the_same_restricted_event_source_condition(self):
+        self.require_hard_gate()
         fragments = (
             "github.event_name == 'pull_request_target'",
             "github.event.action == 'opened' || github.event.action == 'synchronize'",
@@ -414,6 +415,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
                 self.assert_contains_all(self.job(job_name), fragments)
 
     def test_hard_gate_event_history_matrix_has_no_metadata_or_rewrite_success_path(self):
+        self.require_hard_gate()
         zero = "0" * 40
 
         def eligible(event, action, same_repository, branch, before="", head="h", ancestor=True, base_is_default=True):
@@ -472,6 +474,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         ))
 
     def test_stale_identity_canaries_bind_head_merge_parents_and_published_sha(self):
+        self.require_hard_gate()
         identities = self.step(
             "prepare-trusted-final-test-gate",
             "Fetch and verify exact pull-request identities",
@@ -497,11 +500,17 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         on_block = self.workflow.partition("on:\n")[2].partition(
             "\npermissions:"
         )[0]
-        self.assertNotIn("pull_request:\n", on_block)
         push = self.job("reconcile-and-test")
-        self.assertIn("if: ${{ github.event_name == 'push' }}", push)
         self.assertNotIn("run_test_gate.py", push)
         self.assertNotIn("Final test gate", push)
+        if self.trusted_gate_regime == "present":
+            self.assertNotIn("pull_request:\n", on_block)
+            self.assertIn("if: ${{ github.event_name == 'push' }}", push)
+            self.assertNotIn("automation/run_tests.py", push)
+        else:
+            self.assertIn("pull_request:\n", on_block)
+            self.assertIn("github.event_name == 'pull_request'", push)
+            self.assertIn("automation/run_tests.py", push)
 
     def test_issue_assignment_state_replays_on_issue_and_comment_events(self):
         projection = self.step(
@@ -688,9 +697,12 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request.head.sha", job)
 
     def test_review_surfaces_enforce_actions_with_honest_trust_ceiling(self):
-        self.assertIn("permissions:\n  contents: read", self.workflow)
-        self.assertIn("  issues: read", self.workflow)
-        self.assertIn("  pull-requests: read", self.workflow)
+        if self.trusted_gate_regime == "present":
+            self.assertIn("permissions:\n  contents: read", self.workflow)
+            self.assertIn("  issues: read", self.workflow)
+            self.assertIn("  pull-requests: read", self.workflow)
+        else:
+            self.assertIn("permissions: {}", self.workflow)
         self.assertIn(
             "# GitHub has no pull_request_review_target, "
             "pull_request_review_comment_target, or",

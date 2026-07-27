@@ -9,8 +9,38 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+if __package__:
+    from .trusted_gate_snapshots import (
+        HARD_WORKFLOW_SHA256,
+        MANUAL_WORKFLOW_SHA256,
+        TRUSTED_GATE_JOBS,
+        decode_workflow,
+        manual_fixture_contract_errors,
+        manual_workflow_fixture,
+        manualize_hard_workflow,
+        migration_mutations,
+        trusted_gate_regime,
+        workflow_digest,
+        workflow_job,
+    )
+else:
+    from trusted_gate_snapshots import (
+        HARD_WORKFLOW_SHA256,
+        MANUAL_WORKFLOW_SHA256,
+        TRUSTED_GATE_JOBS,
+        decode_workflow,
+        manual_fixture_contract_errors,
+        manual_workflow_fixture,
+        manualize_hard_workflow,
+        migration_mutations,
+        trusted_gate_regime,
+        workflow_digest,
+        workflow_job,
+    )
+
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "reconcile" / "reconcile.py"
+WORKFLOW = MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
 SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
@@ -98,69 +128,59 @@ class ReconcileQueueTests(unittest.TestCase):
         self.git(root, "config", "user.email", "test@example.invalid")
 
     def test_github_adapter_binds_event_merge_and_limits_push_to_reconciliation(self):
-        workflow = (
-            MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
-        ).read_text(encoding="utf-8")
+        workflow_bytes = WORKFLOW.read_bytes()
+        regime = trusted_gate_regime(workflow_bytes)
+        self.assertIn(regime, ("present", "absent"))
+        workflow = decode_workflow(workflow_bytes)
         on_block = workflow.partition("on:\n")[2].partition(
             "\npermissions:"
         )[0]
-        self.assertNotIn("pull_request:\n", on_block)
         self.assertIn("pull_request_target:\n", on_block)
-        self.assertIn("merge_group:\n    types: [checks_requested]", on_block)
+        if regime == "present":
+            self.assertNotIn("pull_request:\n", on_block)
+            self.assertIn("merge_group:\n    types: [checks_requested]", on_block)
+            prepare = workflow_job(workflow, TRUSTED_GATE_JOBS[0])
+            for expected in (
+                "TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}",
+                "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
+                "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
+                '"+refs/pull/$TEST_GATE_PR_NUMBER/head:refs/agentfold/test-gate/head"',
+                '"+refs/pull/$TEST_GATE_PR_NUMBER/merge:refs/agentfold/test-gate/merge"',
+                'rev-parse --verify "$TEST_GATE_CANDIDATE^1"',
+                'rev-parse --verify "$TEST_GATE_CANDIDATE^2"',
+            ):
+                self.assertIn(expected, prepare)
+            runner = workflow_job(workflow, TRUSTED_GATE_JOBS[1])
+            self.assertIn("permissions: {}", runner)
+            self.assertIn("--provider-hard", runner)
+            self.assertIn("--pull=never", runner)
+            self.assertIn("--network none", runner)
+            self.assertIn("--cap-drop ALL", runner)
+            self.assertIn("--security-opt no-new-privileges", runner)
+            self.assertIn("run: exit 1", runner)
+            publisher = workflow_job(workflow, TRUSTED_GATE_JOBS[2])
+            self.assertIn("permissions: {}", publisher)
+            self.assertIn("environment: agentfold-trusted-publisher", publisher)
+            self.assertIn("permission-statuses: write", publisher)
+            self.assertIn("AGENTFOLD_PUBLISHER_PRIVATE_KEY", publisher)
+            self.assertIn("github.event.pull_request.merge_commit_sha", publisher)
+            self.assertIn(
+                'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
+                publisher,
+            )
+            self.assertIn("AgentFold trusted hard final gate", publisher)
+            self.assertIn("statuses/$TEST_GATE_CANDIDATE", publisher)
+            self.assertIn('test "$TEST_GATE_STATE" = success', publisher)
+            self.assertNotIn("GITHUB_TOKEN", publisher)
+            self.assertNotIn("checks: write", publisher)
+            self.assertNotIn("github.event_name == 'merge_group'", publisher)
+        else:
+            self.assertIn("pull_request:\n", on_block)
+            self.assertNotIn("merge_group:\n", on_block)
 
-        prepare = workflow.partition(
-            "  prepare-trusted-final-test-gate:\n"
-        )[2].partition("  trusted-final-test-runner:\n")[0]
-        self.assertTrue(prepare, "trusted final-gate preparation is missing")
-        for expected in (
-            "TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}",
-            "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
-            "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
-            '"+refs/pull/$TEST_GATE_PR_NUMBER/head:refs/agentfold/test-gate/head"',
-            '"+refs/pull/$TEST_GATE_PR_NUMBER/merge:refs/agentfold/test-gate/merge"',
-            'rev-parse --verify "$TEST_GATE_CANDIDATE^1"',
-            'rev-parse --verify "$TEST_GATE_CANDIDATE^2"',
-        ):
-            self.assertIn(expected, prepare)
-
-        runner = workflow.partition(
-            "  trusted-final-test-runner:\n"
-        )[2].partition("  publish-trusted-final-test-check:\n")[0]
-        self.assertTrue(runner, "credential-free final-gate runner is missing")
-        self.assertIn("permissions: {}", runner)
-        self.assertIn("--provider-hard", runner)
-        self.assertIn("--pull=never", runner)
-        self.assertIn("--network none", runner)
-        self.assertIn("--cap-drop ALL", runner)
-        self.assertIn("--security-opt no-new-privileges", runner)
-        self.assertIn("run: exit 1", runner)
-
-        publisher = workflow.partition(
-            "  publish-trusted-final-test-check:\n"
-        )[2].partition("  authoritative-external-action-projection:\n")[0]
-        self.assertTrue(publisher, "exact-candidate check publisher is missing")
-        self.assertIn("permissions: {}", publisher)
-        self.assertIn("environment: agentfold-trusted-publisher", publisher)
-        self.assertIn("permission-statuses: write", publisher)
-        self.assertIn("AGENTFOLD_PUBLISHER_PRIVATE_KEY", publisher)
-        self.assertIn("github.event.pull_request.merge_commit_sha", publisher)
-        self.assertIn(
-            'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
-            publisher,
-        )
-        self.assertIn("AgentFold trusted hard final gate", publisher)
-        self.assertIn("statuses/$TEST_GATE_CANDIDATE", publisher)
-        self.assertIn('test "$TEST_GATE_STATE" = success', publisher)
-        self.assertNotIn("GITHUB_TOKEN", publisher)
-        self.assertNotIn("checks: write", publisher)
-        self.assertNotIn("github.event_name == 'merge_group'", publisher)
-
-        push = workflow.partition(
-            "  reconcile-and-test:\n"
-        )[2].partition("  prepare-trusted-final-test-gate:\n")[0]
+        push = workflow_job(workflow, "reconcile-and-test")
         self.assertTrue(push, "push reconciliation step is missing")
-        self.assertIn("if: ${{ github.event_name == 'push' }}", push)
-        self.assertIn("if: github.event_name == 'push'", push)
+        self.assertIn("github.event_name == 'push'", push)
         self.assertIn(
             '[ "$QUEUE_PUSH_BEFORE" = '
             '"0000000000000000000000000000000000000000" ]',
@@ -177,78 +197,39 @@ class ReconcileQueueTests(unittest.TestCase):
             'QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_PUSH_BEFORE")', push,
         )
         self.assertIn("automation/reconcile/reconcile.py --check", push)
-        self.assertNotIn("automation/run_tests.py", push)
         self.assertNotIn("automation/run_test_gate.py", push)
-        self.assertNotIn("pull_request", push)
+        if regime == "present":
+            self.assertNotIn("automation/run_tests.py", push)
+            self.assertNotIn("pull_request", push)
+        else:
+            self.assertIn("github.event_name == 'pull_request'", push)
+            self.assertIn("automation/run_tests.py", push)
         self.assertNotIn("--at-transition repository-admission", workflow)
 
     def test_trusted_gate_migration_never_mixes_provider_regimes(self):
-        workflow = (
-            MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
-        ).read_text(encoding="utf-8")
-        job_names = (
-            "prepare-trusted-final-test-gate",
-            "trusted-final-test-runner",
-            "publish-trusted-final-test-check",
-        )
-
-        def job(name, next_name=None):
-            marker = f"  {name}:\n"
-            if marker not in workflow:
-                return ""
-            remainder = workflow.partition(marker)[2]
-            if next_name is None:
-                return remainder
-            return remainder.partition(f"  {next_name}:\n")[0]
-
-        blocks = (
-            job(job_names[0], job_names[1]),
-            job(job_names[1], job_names[2]),
-            job(job_names[2], "authoritative-external-action-projection"),
-        )
-        present = tuple(bool(block) for block in blocks)
-        if not any(present):
-            regime = "legacy"
-        elif not all(present):
-            regime = "invalid"
+        current = WORKFLOW.read_bytes()
+        manual = manual_workflow_fixture()
+        self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(manual))
+        self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
+        self.assertEqual("absent", trusted_gate_regime(manual))
+        self.assertEqual((), manual_fixture_contract_errors(manual))
+        self.assertIn(trusted_gate_regime(current), ("present", "absent"))
+        if trusted_gate_regime(current) == "present":
+            self.assertEqual(HARD_WORKFLOW_SHA256, workflow_digest(current))
+            self.assertEqual(manual, manualize_hard_workflow(current))
+            current_text = decode_workflow(current)
+            for missing in TRUSTED_GATE_JOBS:
+                with self.subTest(partial_hard_job=missing):
+                    partial = current_text.replace(
+                        workflow_job(current_text, missing), "", 1
+                    ).encode("utf-8")
+                    self.assertEqual("invalid", trusted_gate_regime(partial))
         else:
-            prepare, runner, publisher = blocks
-            common = (
-                "permissions:\n      contents: read" in prepare
-                and "permissions: {}" in runner
-                and "--provider-hard" in runner
-                and "environment: agentfold-trusted-publisher" in publisher
-                and "statuses/$TEST_GATE_CANDIDATE" in publisher
-            )
-            legacy = (
-                "if: ${{ github.event_name == 'pull_request_target' }}" in prepare
-                and "github.event_name == 'merge_group'" in runner
-                and "Reject unsupported merge-queue admission" in runner
-            )
-            restricted_fragments = (
-                "github.event.action == 'opened' || github.event.action == 'synchronize'",
-                "github.event.pull_request.base.ref == github.event.repository.default_branch",
-                "github.event.pull_request.head.repo.id == github.event.repository.id",
-                "startsWith(github.event.pull_request.head.ref, 'task/')",
-            )
-            restricted = (
-                all(
-                    all(fragment in block for fragment in restricted_fragments)
-                    for block in blocks
-                )
-                and "github.event_name == 'merge_group'" not in runner
-                and "Reject unsupported merge-queue admission" not in runner
-            )
-            regime = (
-                "legacy" if common and legacy and not restricted
-                else "restricted" if common and restricted and not legacy
-                else "invalid"
-            )
-        self.assertIn(regime, ("legacy", "restricted"))
-        if regime == "legacy":
-            self.assertIn("github.event_name == 'merge_group'", runner)
-        else:
-            self.assertNotIn("github.event_name == 'merge_group'", runner)
+            self.assertEqual(manual, current)
+        for name, mutation in migration_mutations(manual):
+            with self.subTest(manual_mutation=name):
+                self.assertEqual("invalid", trusted_gate_regime(mutation))
+        self.assertEqual("invalid", trusted_gate_regime(current + b"\n"))
 
     def test_queue_checks_no_op_when_queue_is_absent(self):
         with self.repo() as root:

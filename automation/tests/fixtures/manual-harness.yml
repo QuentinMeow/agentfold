@@ -1,0 +1,546 @@
+name: harness
+on:
+  push:
+  pull_request:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned, enqueued]
+  issues:
+    types: [opened, edited, reopened, assigned, unassigned]
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+permissions: {}
+
+jobs:
+  reconcile-and-test:
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconciler — every harness invariant holds
+        if: github.event_name == 'push'
+        env:
+          QUEUE_PUSH_BEFORE: ${{ github.event.before }}
+          QUEUE_PUSH_HEAD: ${{ github.sha }}
+          QUEUE_PUSH_BRANCH: ${{ github.ref_name }}
+          QUEUE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          QUEUE_DISPLACED_ARGS=()
+          if [ "$QUEUE_PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            if [ "$QUEUE_PUSH_BRANCH" = "$QUEUE_DEFAULT_BRANCH" ]; then
+              QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
+            elif QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
+              QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
+            else
+              QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
+            fi
+          else
+            if ! git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$QUEUE_PUSH_BEFORE"
+            fi
+            git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"
+            QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BEFORE...$QUEUE_PUSH_HEAD"
+            QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_PUSH_BEFORE")
+          fi
+          python3 automation/reconcile/reconcile.py --check \
+            --branch "$QUEUE_PUSH_BRANCH" \
+            --range "$QUEUE_CHANGE_RANGE" \
+            "${QUEUE_DISPLACED_ARGS[@]}"
+      - name: Complete test diagnostics — pull requests
+        if: github.event_name == 'pull_request'
+        run: python3 automation/run_tests.py
+
+  authoritative-external-action-projection:
+    name: Authoritative action projection from trusted workflow code
+    if: >-
+      ${{
+        github.event_name == 'pull_request_target' ||
+        github.event_name == 'issues' ||
+        github.event_name == 'issue_comment'
+      }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default-branch projection gate
+        if: ${{ github.event_name == 'issues' || github.event_name == 'issue_comment' }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Capture immutable default-branch candidate
+        id: authoritative-default-candidate
+        if: ${{ github.event_name == 'issues' || github.event_name == 'issue_comment' }}
+        run: |
+          ACTION_PROJECTION_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )"
+          printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            >> "$GITHUB_OUTPUT"
+      - name: Checkout trusted PR-base projection gate
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch immutable PR candidate without checking it out
+        id: authoritative-pr-candidate
+        if: >-
+          ${{
+            github.event_name == 'pull_request_target' ||
+            (github.event_name == 'issue_comment' &&
+             github.event.issue.pull_request &&
+             github.event.issue.state == 'open')
+          }}
+        env:
+          ACTION_PROJECTION_EVENT: ${{ github.event_name }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.issue.number }}
+          ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || '' }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
+          ACTION_PROJECTION_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          if [ "$ACTION_PROJECTION_EVENT" = "pull_request_target" ]; then
+            test -n "$ACTION_PROJECTION_EXPECTED_REVISION"
+            test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
+              "$ACTION_PROJECTION_EXPECTED_REVISION"
+          fi
+          printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            >> "$GITHUB_OUTPUT"
+      - name: Action projection — pull-request description and state
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          ACTION_PROJECTION_BODY: ${{ github.event.pull_request.body }}
+          ACTION_PROJECTION_TITLE: ${{ github.event.pull_request.title }}
+          ACTION_PROJECTION_REQUESTED_REVIEWERS: ${{ toJSON(github.event.pull_request.requested_reviewers) }}
+          ACTION_PROJECTION_REQUESTED_TEAMS: ${{ toJSON(github.event.pull_request.requested_teams) }}
+          ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.pull_request.assignees) }}
+          ACTION_PROJECTION_ARTIFACT_ID: ${{ github.event.pull_request.node_id }}
+          ACTION_PROJECTION_BRANCH: ${{ github.event.pull_request.head.ref }}
+          ACTION_PROJECTION_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          # GitHub requested teams are human teams. Account assignments must
+          # declare User or Bot; a missing or future actor type fails closed.
+          ACTION_PROJECTION_ASSIGNMENTS="$(
+            jq -cn \
+              --argjson reviewers "$ACTION_PROJECTION_REQUESTED_REVIEWERS" \
+              --argjson teams "$ACTION_PROJECTION_REQUESTED_TEAMS" \
+              --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              --arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID" \
+              '
+              def artifact:
+                if (($artifact_id | type) == "string" and
+                    ($artifact_id | length) > 0)
+                then $artifact_id
+                else error("external assignment has no artifact identity")
+                end;
+              def identified:
+                if ((.identity | type) == "string" and
+                    (.identity | length) > 0)
+                then .
+                else error("external assignment has no identity")
+                end;
+              def account($role):
+                if .type == "User"
+                then {
+                  actor: "needs-human",
+                  identity: (
+                    "github:pull-request:node:" + artifact + ":" +
+                    $role + ":user:" + .login
+                  )
+                } | identified
+                elif .type == "Bot"
+                then {
+                  actor: "needs-agent",
+                  identity: (
+                    "github:pull-request:node:" + artifact + ":" +
+                    $role + ":bot:" + .login
+                  )
+                } | identified
+                else error("unknown external account actor type")
+                end;
+              [
+                ($reviewers[] | account("requested-reviewer")),
+                ($teams[] |
+                  {
+                    actor: "needs-human",
+                    identity: (
+                      "github:pull-request:node:" + artifact +
+                      ":requested-team:team:" + .slug
+                    )
+                  } | identified),
+                ($assignees[] | account("assignee"))
+              ]
+              '
+          )"
+          export ACTION_PROJECTION_ASSIGNMENTS
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --additional-summary-env ACTION_PROJECTION_TITLE \
+            --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
+            --action-section "What to review" \
+            --queue-actor any \
+            --required-queue-actor needs-human \
+            --branch "$ACTION_PROJECTION_BRANCH" \
+            --base-revision "$ACTION_PROJECTION_BASE_REVISION" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-description
+      - name: Collect current formal reviews and unresolved diff threads
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_GRAPHQL_URL: ${{ github.graphql_url }}
+        run: |
+          python3 .github/scripts/collect_review_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --pull-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --graphql-url "$ACTION_PROJECTION_GRAPHQL_URL" \
+            --output "$RUNNER_TEMP/agentfold-review-actions.json"
+      - name: Action projection — current review state
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-review-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-current-pull-request-review-state
+      - name: Collect current PR conversation comments
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_API_URL: ${{ github.api_url }}
+        run: |
+          python3 .github/scripts/collect_conversation_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --issue-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --api-url "$ACTION_PROJECTION_API_URL" \
+            --output "$RUNNER_TEMP/agentfold-conversation-actions.json"
+      - name: Action projection — current PR conversation state
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-conversation-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-current-pull-request-conversation-state
+      - name: Action projection — issue assignment state
+        if: >-
+          ${{
+            (github.event_name == 'issues' &&
+             github.event.issue.state == 'open') ||
+            (github.event_name == 'issue_comment' &&
+             !github.event.issue.pull_request &&
+             github.event.issue.state == 'open')
+          }}
+        env:
+          ACTION_PROJECTION_BODY: ""
+          ACTION_PROJECTION_ASSIGNEES: ${{ toJSON(github.event.issue.assignees) }}
+          ACTION_PROJECTION_ARTIFACT_ID: ${{ github.event.issue.node_id }}
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-default-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-default-candidate.outputs.revision }}
+        run: |
+          ACTION_PROJECTION_ASSIGNMENTS="$(
+            jq -cn \
+              --argjson assignees "$ACTION_PROJECTION_ASSIGNEES" \
+              --arg artifact_id "$ACTION_PROJECTION_ARTIFACT_ID" \
+              '
+              def artifact:
+                if (($artifact_id | type) == "string" and
+                    ($artifact_id | length) > 0)
+                then $artifact_id
+                else error("external assignment has no artifact identity")
+                end;
+              def identified:
+                if ((.identity | type) == "string" and
+                    (.identity | length) > 0)
+                then .
+                else error("external assignment has no identity")
+                end;
+              [
+                $assignees[] |
+                if .type == "User"
+                then {
+                  actor: "needs-human",
+                  identity: (
+                    "github:issue:node:" + artifact +
+                    ":assignee:user:" + .login
+                  )
+                } | identified
+                elif .type == "Bot"
+                then {
+                  actor: "needs-agent",
+                  identity: (
+                    "github:issue:node:" + artifact +
+                    ":assignee:bot:" + .login
+                  )
+                } | identified
+                else error("unknown external account actor type")
+                end
+              ]
+              '
+          )"
+          export ACTION_PROJECTION_ASSIGNMENTS
+          python3 automation/check_action_projection.py \
+            --from-env ACTION_PROJECTION_BODY \
+            --external-assignment-env ACTION_PROJECTION_ASSIGNMENTS \
+            --action-section "What to review" \
+            --allow-missing-action-section-if-no-action \
+            --queue-actor any \
+            --unscoped \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-issue-assignment
+      - name: Collect current event-artifact conversation state
+        if: ${{ github.event_name == 'issues' || github.event_name == 'issue_comment' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACTION_PROJECTION_API_URL: ${{ github.api_url }}
+          ACTION_PROJECTION_EVENT_KIND: ${{ github.event_name }}
+        run: |
+          python3 .github/scripts/collect_conversation_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --issue-number "$ACTION_PROJECTION_ISSUE_NUMBER" \
+            --api-url "$ACTION_PROJECTION_API_URL" \
+            --event-file "$GITHUB_EVENT_PATH" \
+            --event-kind "$ACTION_PROJECTION_EVENT_KIND" \
+            --output "$RUNNER_TEMP/agentfold-conversation-actions.json"
+      - name: Action projection — current issue or closed-PR conversation state
+        if: >-
+          ${{
+            github.event_name == 'issues' ||
+            (github.event_name == 'issue_comment' &&
+             (!github.event.issue.pull_request ||
+              github.event.issue.state != 'open'))
+          }}
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-default-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-default-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-conversation-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-issue-comment
+      - name: Action projection — open-PR conversation comment
+        if: >-
+          ${{
+            github.event_name == 'issue_comment' &&
+            github.event.issue.pull_request &&
+            github.event.issue.state == 'open'
+          }}
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.authoritative-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.authoritative-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-conversation-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-pull-request-conversation-comment
+
+  external-source-release-admission:
+    name: External source release admission
+    if: >-
+      ${{
+        github.event_name == 'pull_request_target' ||
+        (github.event_name == 'push' &&
+         github.ref_name == github.event.repository.default_branch &&
+         github.event.before !=
+           '0000000000000000000000000000000000000000')
+      }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted pre-admission source-release gate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.before }}
+      - name: Capture exact source-release base
+        id: source-release-base
+        env:
+          SOURCE_RELEASE_EXPECTED_BASE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          SOURCE_RELEASE_BASE="$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )"
+          test "$SOURCE_RELEASE_BASE" = "$SOURCE_RELEASE_EXPECTED_BASE"
+          printf 'revision=%s\n' "$SOURCE_RELEASE_BASE" >> "$GITHUB_OUTPUT"
+      - name: Fetch immutable source-release candidate
+        id: source-release-candidate
+        env:
+          SOURCE_RELEASE_EVENT: ${{ github.event_name }}
+          SOURCE_RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_RELEASE_EXPECTED_CANDIDATE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          if [ "$SOURCE_RELEASE_EVENT" = "pull_request_target" ]; then
+            git fetch --no-tags origin \
+              "refs/pull/$SOURCE_RELEASE_PR_NUMBER/merge"
+          else
+            git fetch --no-tags origin "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+          fi
+          SOURCE_RELEASE_CANDIDATE="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          test "$SOURCE_RELEASE_CANDIDATE" = \
+            "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+          printf 'revision=%s\n' "$SOURCE_RELEASE_CANDIDATE" \
+            >> "$GITHUB_OUTPUT"
+      - name: Resolve disappearing external sources from provider state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RELEASE_BASE: ${{ steps.source-release-base.outputs.revision }}
+          SOURCE_RELEASE_CANDIDATE: ${{ steps.source-release-candidate.outputs.revision }}
+          SOURCE_RELEASE_REPOSITORY: ${{ github.repository }}
+          SOURCE_RELEASE_GRAPHQL_URL: ${{ github.graphql_url }}
+          SOURCE_RELEASE_API_URL: ${{ github.api_url }}
+        run: |
+          python3 .github/scripts/resolve_external_source_releases.py \
+            --base-revision "$SOURCE_RELEASE_BASE" \
+            --candidate-revision "$SOURCE_RELEASE_CANDIDATE" \
+            --repository "$SOURCE_RELEASE_REPOSITORY" \
+            --graphql-url "$SOURCE_RELEASE_GRAPHQL_URL" \
+            --api-url "$SOURCE_RELEASE_API_URL" \
+            --output "$RUNNER_TEMP/agentfold-source-release-state.json"
+      - name: Verify final external-source bindings remain live
+        env:
+          SOURCE_RELEASE_BASE: ${{ steps.source-release-base.outputs.revision }}
+          SOURCE_RELEASE_CANDIDATE: ${{ steps.source-release-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-source-release-state-file \
+              "$RUNNER_TEMP/agentfold-source-release-state.json" \
+            --base-revision "$SOURCE_RELEASE_BASE" \
+            --candidate-revision "$SOURCE_RELEASE_CANDIDATE" \
+            --label github-external-source-release
+
+  # GitHub has no pull_request_review_target, pull_request_review_comment_target, or
+  # Actions trigger for thread resolve/unresolve. This job replays current state on
+  # direct review events; the trusted pull_request_target job separately replays PR
+  # events, including enqueue. A hard claim that a
+  # currently unresolved thread cannot merge requires the provider-native conversation-
+  # resolution rule; without it, evidence is only current at the last supported event.
+  review-state-action-projection:
+    name: Current review-state action projection
+    if: >-
+      ${{
+        github.event_name == 'pull_request_review' ||
+        github.event_name == 'pull_request_review_comment'
+      }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR-base projection gate for review state
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch event-bound PR merge candidate without checking it out
+        id: review-state-pr-candidate
+        env:
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
+          ACTION_PROJECTION_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
+          )"
+          test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
+            "$ACTION_PROJECTION_EXPECTED_REVISION"
+          printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            >> "$GITHUB_OUTPUT"
+      - name: Collect current formal reviews and unresolved diff threads
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_GRAPHQL_URL: ${{ github.graphql_url }}
+        run: |
+          python3 .github/scripts/collect_review_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --pull-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --graphql-url "$ACTION_PROJECTION_GRAPHQL_URL" \
+            --output "$RUNNER_TEMP/agentfold-review-actions.json"
+      - name: Action projection — current review state
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.review-state-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.review-state-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-review-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-current-pull-request-review-state
+      - name: Collect current PR conversation comments
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTION_PROJECTION_REPOSITORY: ${{ github.repository }}
+          ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION_PROJECTION_API_URL: ${{ github.api_url }}
+        run: |
+          python3 .github/scripts/collect_conversation_actions.py \
+            --repository "$ACTION_PROJECTION_REPOSITORY" \
+            --issue-number "$ACTION_PROJECTION_PR_NUMBER" \
+            --api-url "$ACTION_PROJECTION_API_URL" \
+            --output "$RUNNER_TEMP/agentfold-conversation-actions.json"
+      - name: Action projection — current PR conversation state
+        env:
+          ACTION_PROJECTION_CANDIDATE_REVISION: ${{ steps.review-state-pr-candidate.outputs.revision }}
+          ACTION_PROJECTION_REVISION_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.review-state-pr-candidate.outputs.revision }}
+        run: |
+          python3 automation/check_action_projection.py \
+            --external-action-sources-file \
+              "$RUNNER_TEMP/agentfold-conversation-actions.json" \
+            --action-section "What to review" \
+            --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
+            --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --label github-current-pull-request-conversation-state
