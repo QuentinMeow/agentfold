@@ -965,6 +965,233 @@ class TestGateTests(unittest.TestCase):
             self.assertEqual(merge, candidate.candidate_revision)
             self.assertEqual("head\n", (view / "head.txt").read_text())
 
+    def test_composite_plan_keeps_base_tests_and_support_while_preserving_candidate_product(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            product = repo / "services/example/product.py"
+            tests = repo / "services/example/tests"
+            tests.mkdir(parents=True)
+            product.write_text("VALUE = 'base'\n")
+            (repo / "services/example/legacy.py").write_text("legacy\n")
+            (tests / "helper.py").write_text("EXPECTED = 'base'\n")
+            (tests / "test_original.py").write_text("ORIGINAL = 'base'\n")
+            (tests / "test_emptied.py").write_text("EMPTY = 'base'\n")
+            (tests / "test_unchanged.py").write_text("UNCHANGED = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            product.write_text("VALUE = 'candidate'\n")
+            (repo / "services/example/legacy.py").unlink()
+            (tests / "helper.py").write_text("EXPECTED = 'candidate-shadow'\n")
+            (tests / "test_original.py").rename(tests / "test_renamed.py")
+            (tests / "test_emptied.py").write_text("")
+            (tests / "test_added.py").write_text("ADDED = True\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+
+            capture = Path(scratch) / "capture"
+            capture.mkdir()
+            frozen = capture / "candidate.index"
+            with mock.patch.object(GATE, "REPO", repo):
+                MANIFEST.copy_staged_index(repo, frozen)
+                candidate = MANIFEST.staged_candidate(repo, frozen)
+                candidate_root = capture / "candidate"
+                candidate_view = MANIFEST.materialize_staged_candidate(
+                    repo, frozen, candidate_root
+                )
+                plan = GATE.composite_test_plan(
+                    candidate, candidate_root, candidate_view, capture
+                )
+
+            floor = plan["floor_root"]
+            self.assertEqual("VALUE = 'candidate'\n", product.read_text())
+            self.assertEqual(
+                "VALUE = 'candidate'\n",
+                (floor / "services/example/product.py").read_text(),
+            )
+            self.assertFalse((floor / "services/example/legacy.py").exists())
+            self.assertEqual(
+                "EXPECTED = 'base'\n",
+                (floor / "services/example/tests/helper.py").read_text(),
+            )
+            self.assertTrue(
+                (floor / "services/example/tests/test_original.py").is_file()
+            )
+            self.assertEqual(
+                "EMPTY = 'base'\n",
+                (floor / "services/example/tests/test_emptied.py").read_text(),
+            )
+            self.assertFalse(
+                (floor / "services/example/tests/test_renamed.py").exists()
+            )
+            self.assertEqual(
+                (
+                    "services/example/tests/test_added.py",
+                    "services/example/tests/test_emptied.py",
+                    "services/example/tests/test_renamed.py",
+                    "services/example/tests/test_unchanged.py",
+                ),
+                plan["supplemental_tests"],
+            )
+            identity = plan["identity"]
+            self.assertEqual(base, identity["trusted_base_revision"])
+            self.assertEqual(
+                GATE.TRUSTED_TEST_OVERLAY_ALGORITHM,
+                identity["overlay_algorithm"],
+            )
+            self.assertTrue(identity["trusted_floor_records"])
+            self.assertTrue(identity["supplemental_records"])
+            self.assertEqual(
+                ["services/example/tests"],
+                identity["support_changed_namespaces"],
+            )
+
+    def test_composite_plan_selects_only_changed_tests_when_support_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            tests = repo / "services/example/tests"
+            tests.mkdir(parents=True)
+            (tests / "helper.py").write_text("SUPPORT = 'unchanged'\n")
+            (tests / "test_changed.py").write_text("VALUE = 'base'\n")
+            (tests / "test_deleted.py").write_text("DELETED = False\n")
+            (tests / "test_emptied.py").write_text("VALUE = 'base'\n")
+            (tests / "test_renamed.py").write_text("RENAMED = False\n")
+            (tests / "test_unchanged.py").write_text("UNCHANGED = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+
+            (tests / "test_changed.py").write_text("VALUE = 'candidate'\n")
+            (tests / "test_deleted.py").unlink()
+            (tests / "test_emptied.py").write_text("")
+            (tests / "test_renamed.py").rename(tests / "test_renamed_new.py")
+            (tests / "test_added.py").write_text("ADDED = True\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+
+            capture = Path(scratch) / "capture"
+            capture.mkdir()
+            frozen = capture / "candidate.index"
+            with mock.patch.object(GATE, "REPO", repo):
+                MANIFEST.copy_staged_index(repo, frozen)
+                candidate = MANIFEST.staged_candidate(repo, frozen)
+                candidate_root = capture / "candidate"
+                candidate_view = MANIFEST.materialize_staged_candidate(
+                    repo, frozen, candidate_root
+                )
+                plan = GATE.composite_test_plan(
+                    candidate, candidate_root, candidate_view, capture
+                )
+
+            self.assertEqual(
+                (
+                    "services/example/tests/test_added.py",
+                    "services/example/tests/test_changed.py",
+                    "services/example/tests/test_emptied.py",
+                    "services/example/tests/test_renamed_new.py",
+                ),
+                plan["supplemental_tests"],
+            )
+            self.assertEqual([], plan["identity"]["support_changed_namespaces"])
+            self.assertTrue(
+                (plan["floor_root"] / "services/example/tests/test_deleted.py").is_file()
+            )
+            self.assertTrue(
+                (plan["floor_root"] / "services/example/tests/test_renamed.py").is_file()
+            )
+
+    def test_composite_plan_identity_invalidates_v1_and_changed_floor_receipts(self):
+        candidate = MANIFEST.CandidateManifest(
+            "revision-range", "candidate", "closure", (), (), "index", "base", "head"
+        )
+        view = {"digest": "candidate-view"}
+        first_plan = {
+            "schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA,
+            "trusted_base_revision": "base",
+            "trusted_floor_records": [{"path": "tests/test_a.py", "sha256": "one"}],
+            "supplemental_records": [],
+            "overlay_algorithm": GATE.TRUSTED_TEST_OVERLAY_ALGORITHM,
+        }
+        second_plan = dict(first_plan)
+        second_plan["trusted_floor_records"] = [
+            {"path": "tests/test_a.py", "sha256": "two"}
+        ]
+        with mock.patch.object(GATE, "runner_revision", return_value="runner"), \
+                mock.patch.object(GATE, "environment_identity", return_value={"env": "one"}):
+            first = GATE.receipt_binding(
+                candidate,
+                view,
+                ("tests/test_a.py",),
+                "policy",
+                "repository-tests/full",
+                composite_identity=first_plan,
+            )
+            second = GATE.receipt_binding(
+                candidate,
+                view,
+                ("tests/test_a.py",),
+                "policy",
+                "repository-tests/full",
+                composite_identity=second_plan,
+            )
+        self.assertNotEqual(first["binding_digest"], second["binding_digest"])
+        self.assertEqual("agentfold.test-component-receipt/v2", GATE.RECEIPT_SCHEMA)
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            receipt_dir = repo / "tmp/test-gate-receipts"
+            receipt_dir.mkdir(parents=True)
+            (receipt_dir / f"{first['binding_digest']}.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "agentfold.test-component-receipt/v1",
+                        "outcome": "pass",
+                        "binding": first,
+                    }
+                )
+            )
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(first))
+
+    def test_composite_plan_fails_closed_when_trusted_base_has_no_tests(self):
+        candidate = MANIFEST.CandidateManifest(
+            "revision-range", "candidate", "closure", (), (), "index", "base", "head"
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_root = Path(scratch)
+            candidate_root = scratch_root / "candidate"
+            candidate_root.mkdir()
+            (candidate_root / ".git").mkdir()
+            candidate_view = MANIFEST.tree_manifest(candidate_root)
+            base_root = scratch_root / "base"
+            base_root.mkdir()
+            with mock.patch.object(
+                GATE,
+                "_materialize_revision",
+                return_value=(base_root, MANIFEST.tree_manifest(base_root)),
+            ):
+                with self.assertRaisesRegex(GATE.GateError, "no discoverable"):
+                    GATE.composite_test_plan(
+                        candidate, candidate_root, candidate_view, scratch_root
+                    )
+
     def test_full_receipt_reuse_requires_every_binding_input(self):
         candidate = MANIFEST.CandidateManifest(
             "staged-index", "candidate", "closure", (), (), "index"

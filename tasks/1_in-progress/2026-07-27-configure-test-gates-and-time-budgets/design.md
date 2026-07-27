@@ -134,6 +134,25 @@ working-tree bytes; Git and provider boundaries test the exact candidate tree na
 boundary. The result names which view was tested. A mixed or changed view fails closed instead
 of producing reusable evidence.
 
+Complete final and critical testing uses an immutable trusted-base floor plus a candidate
+supplemental lane. Exact base tests and their directory-local helpers/fixtures are overlaid only
+onto those reserved test namespaces in an exact candidate product view. Candidate product
+deletions outside those namespaces remain deleted. Candidate-added or changed tests run
+separately afterward. Receipts bind the base revision, exact floor/support and supplemental
+records, overlay algorithm, both tested views, manifests, policy, runner, and environment. This
+means incompatible API changes use two merges: introduce compatibility plus updated tests, then
+remove the old API only after those tests have become the trusted floor.
+When only test files change, the supplemental lane runs exactly the changed or added candidate
+tests; if any non-test helper, fixture, path, mode, or byte changes beneath a trusted test
+namespace, it reruns every candidate test in that namespace.
+
+The GitHub hard path is further restricted to same-repository `task/**` pull requests on
+`opened` or verified fast-forward `synchronize`. Prepare, run, and publish share that condition;
+a synchronize must identify a nonzero prior head that is a strict ancestor of the current head.
+Metadata events and history rewrites cannot replace success. Activation therefore also requires
+source-branch protection against force-push, deletion, and bypass. Forks and merge queues remain
+manual boundaries.
+
 ### Avoiding duplicate work
 
 A successful local gate receipt may be reused only when the exact tested-view fingerprint, selected or
