@@ -194,7 +194,10 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         job = self.job("prepare-trusted-final-test-gate")
         self.assert_contains_all(job, (
             "name: Prepare trusted hard final gate candidate",
-            "if: ${{ github.event_name == 'pull_request_target' }}",
+            "github.event.action == 'opened' || github.event.action == 'synchronize'",
+            "github.event.pull_request.base.ref == github.event.repository.default_branch",
+            "github.event.pull_request.head.repo.id == github.event.repository.id",
+            "startsWith(github.event.pull_request.head.ref, 'task/')",
             "permissions:\n      contents: read",
             "bundle_sha256: ${{ steps.bundle.outputs.sha256 }}",
         ))
@@ -218,6 +221,11 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
             "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
             "TEST_GATE_BRANCH: ${{ github.event.pull_request.head.ref }}",
+            "TEST_GATE_ACTION: ${{ github.event.action }}",
+            "TEST_GATE_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}",
+            "TEST_GATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}",
+            "TEST_GATE_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id }}",
+            "TEST_GATE_BASE_REPOSITORY_ID: ${{ github.event.repository.id }}",
             "github.event.before",
             '"+refs/pull/$TEST_GATE_PR_NUMBER/head:refs/agentfold/test-gate/head"',
             '"+refs/pull/$TEST_GATE_PR_NUMBER/merge:refs/agentfold/test-gate/merge"',
@@ -226,6 +234,8 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             'rev-parse --verify "$TEST_GATE_CANDIDATE^1"',
             'rev-parse --verify "$TEST_GATE_CANDIDATE^2"',
             'rev-list --parents -n 1 "$TEST_GATE_CANDIDATE"',
+            'test "$TEST_GATE_DISPLACED_TIP" != "$TEST_GATE_HEAD"',
+            'git merge-base --is-ancestor "$TEST_GATE_DISPLACED_TIP" "$TEST_GATE_HEAD"',
             "git update-ref refs/agentfold/test-gate/base",
             "git update-ref refs/agentfold/test-gate/displaced",
             "unset AUTH_HEADER GITHUB_TOKEN",
@@ -275,7 +285,6 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "trusted-final-test-runner", "Reject missing trusted preparation"
         )
         self.assert_contains_all(rejection, (
-            "github.event_name == 'pull_request_target'",
             "needs.prepare-trusted-final-test-gate.result != 'success'",
             "run: exit 1",
         ))
@@ -388,19 +397,101 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotIn("checks: write", job)
         self.assertNotIn("/check-runs", job)
 
-    def test_merge_queue_and_missing_preparation_fail_closed(self):
-        runner = self.job("trusted-final-test-runner")
-        rejection = self.step(
-            "trusted-final-test-runner", "Reject unsupported merge-queue admission"
+    def test_all_hard_gate_jobs_share_the_same_restricted_event_source_condition(self):
+        fragments = (
+            "github.event_name == 'pull_request_target'",
+            "github.event.action == 'opened' || github.event.action == 'synchronize'",
+            "github.event.pull_request.base.ref == github.event.repository.default_branch",
+            "github.event.pull_request.head.repo.id == github.event.repository.id",
+            "startsWith(github.event.pull_request.head.ref, 'task/')",
         )
-        self.assert_contains_all(rejection, (
-            "github.event_name == 'merge_group'",
-            "run: exit 1",
+        for job_name in (
+            "prepare-trusted-final-test-gate",
+            "trusted-final-test-runner",
+            "publish-trusted-final-test-check",
+        ):
+            with self.subTest(job=job_name):
+                self.assert_contains_all(self.job(job_name), fragments)
+
+    def test_hard_gate_event_history_matrix_has_no_metadata_or_rewrite_success_path(self):
+        zero = "0" * 40
+
+        def eligible(event, action, same_repository, branch, before="", head="h", ancestor=True, base_is_default=True):
+            metadata_allowed = (
+                event == "pull_request_target"
+                and action in ("opened", "synchronize")
+                and same_repository
+                and base_is_default
+                and branch.startswith("task/")
+            )
+            if not metadata_allowed:
+                return False
+            if action == "opened":
+                return before == ""
+            return bool(before) and before != zero and before != head and ancestor
+
+        rejected = (
+            ("pull_request_target", "edited", True, "task/x", "", "h", True),
+            ("pull_request_target", "ready_for_review", True, "task/x", "", "h", True),
+            ("pull_request_review", "submitted", True, "task/x", "", "h", True),
+            ("pull_request_target", "reopened", True, "task/x", "", "h", True),
+            ("pull_request_target", "opened", False, "task/x", "", "h", True),
+            ("pull_request_target", "opened", True, "feature/x", "", "h", True),
+            ("pull_request_target", "synchronize", True, "task/x", "before", "head", False),
+            ("pull_request_target", "synchronize", True, "task/x", zero, "head", True),
+            ("pull_request_target", "synchronize", True, "task/x", "head", "head", True),
+            ("pull_request_target", "opened", True, "task/x", "", "h", True, False),
+        )
+        for case in rejected:
+            with self.subTest(case=case):
+                self.assertFalse(eligible(*case))
+        self.assertTrue(
+            eligible("pull_request_target", "opened", True, "task/x")
+        )
+        self.assertTrue(
+            eligible(
+                "pull_request_target",
+                "synchronize",
+                True,
+                "task/x",
+                "before",
+                "head",
+                True,
+            )
+        )
+
+        identities = self.step(
+            "prepare-trusted-final-test-gate",
+            "Fetch and verify exact pull-request identities",
+        )
+        self.assert_contains_all(identities, (
+            'test "$TEST_GATE_HEAD_REPOSITORY_ID" = "$TEST_GATE_BASE_REPOSITORY_ID"',
+            'test "$TEST_GATE_BASE_BRANCH" = "$TEST_GATE_DEFAULT_BRANCH"',
+            'test "$TEST_GATE_DISPLACED_TIP" != "$TEST_GATE_HEAD"',
+            'git merge-base --is-ancestor "$TEST_GATE_DISPLACED_TIP" "$TEST_GATE_HEAD"',
         ))
-        publisher = self.job("publish-trusted-final-test-check")
-        self.assertIn("github.event_name == 'pull_request_target'", publisher)
-        self.assertNotIn("github.event_name == 'merge_group'", publisher)
-        self.assertIn("always()", runner)
+
+    def test_stale_identity_canaries_bind_head_merge_parents_and_published_sha(self):
+        identities = self.step(
+            "prepare-trusted-final-test-gate",
+            "Fetch and verify exact pull-request identities",
+        )
+        self.assert_contains_all(identities, (
+            'refs/agentfold/test-gate/head^{commit}',
+            'refs/agentfold/test-gate/merge^{commit}',
+            '"$TEST_GATE_CANDIDATE^1"',
+            '"$TEST_GATE_CANDIDATE^2"',
+        ))
+        publish = self.step(
+            "publish-trusted-final-test-check",
+            "Publish exact-candidate required commit status",
+        )
+        self.assert_contains_all(publish, (
+            "github.event.pull_request.merge_commit_sha",
+            "needs.prepare-trusted-final-test-gate.outputs.candidate",
+            'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
+            "statuses/$TEST_GATE_CANDIDATE",
+        ))
 
     def test_candidate_controlled_pull_request_job_cannot_replace_hard_gate(self):
         on_block = self.workflow.partition("on:\n")[2].partition(
