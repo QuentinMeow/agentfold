@@ -37,3 +37,6 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   hard enforcement. Filed the blocking decision on whether to authorize a split trusted
   preparer and credential-free candidate runner; no provider workflow was added without that
   approval.
+- Preserved the exact pre-approval implementation and blocking records in checkpoint
+  `f2d220b1ae9ddc0f47d54252c4804c356ee780c1`. Its complete staged prewarm passed in 218.94
+  seconds, and the real commit hook reused that receipt and passed in 6.93 seconds.

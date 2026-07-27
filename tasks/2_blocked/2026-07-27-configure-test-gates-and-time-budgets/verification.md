@@ -111,3 +111,41 @@ counted as an approval. The mutable tree has no final revision-bound approval.
 The remaining known boundary is explicit: the tracked `pull_request` workflow is candidate
 controlled and cannot establish configured hard enforcement. A trusted split-job provider
 adapter was not added without owner approval.
+
+## Exact checkpoint prewarm and commit-hook reuse
+
+```
+$ python3 automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+evidence: executed
+enforcement: unobserved
+reason: every required check passed
+candidate: 966014b8a09a6873818a4b9291a08fe9b745728044b71a21e23a580ad9785007
+component timings:
+  core-scope: pass (executed, 0.38s)
+  reconcile: pass (executed, 5.35s)
+  repository-tests/full: pass (executed, 212.83s)
+coverage: 15 selected, 0 deferred, 0 incomplete
+duration: 218.94s
+machine report: tmp/test-gate-reports/latest-final.json
+```
+
+```
+$ git commit -m "harness: checkpoint configurable test gates"
+pre-commit: routine test gate
+test gate: routine
+outcome: pass
+evidence: executed
+enforcement: unobserved
+reason: every required check passed
+candidate: 966014b8a09a6873818a4b9291a08fe9b745728044b71a21e23a580ad9785007
+component timings:
+  core-scope: pass (executed, 0.46s)
+  reconcile: pass (executed, 6.14s)
+  repository-tests/full: pass (reused, 0.00s)
+coverage: 15 selected, 0 deferred, 0 incomplete
+duration: 6.93s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets f2d220b] harness: checkpoint configurable test gates
+```
