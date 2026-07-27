@@ -1245,3 +1245,16 @@ covered 23,464 sources in standalone and owning-link contexts with zero accepted
 external-link false negatives, zero accepted standalone rendering differences, and
 zero owning-link structure breaks. Per the owner's stopping boundary, no new panel was
 started after these bytes; the next session owns the exact commit gate and fresh panel.
+
+The stopping-boundary candidate ran the exact pre-commit gate:
+
+```
+commit 589aafea2ec4cc7d1cda6c4f9ee4bbb50cfc5381
+Ran 472 tests in 739.035s
+OK
+tests: 11/11 files passed
+pre-commit: OK
+```
+
+No independent panel verdict is claimed for `589aafe`; the owner requested a clean
+stop after the verified candidate instead of another review-and-repair loop.

@@ -1280,7 +1280,9 @@
   found no remaining accepted external-link false negatives; all 119 projection tests
   and all 472 queue tests passed.
 - Honored the owner's stopping boundary after the verified repair instead of starting
-  another review loop. Rewrote the artifact-pending human re-review as a self-contained
-  v2 status brief with the completed work, discovered problems, design decisions, and
-  exact next steps; it explicitly requests no response until the panel publishes one
-  immutable target.
+  another review loop. Preserved the artifact-pending human review byte-for-byte because
+  its live identity is immutable; the new session handover records progress and links
+  the already queued repair and re-review work.
+- Candidate `589aafe` passed its exact pre-commit gate with all 472 queue tests and all
+  11 repository test files. It is the clean stopping boundary, not a panel-approved or
+  merge-ready revision.
