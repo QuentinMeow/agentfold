@@ -1,10 +1,10 @@
 name: harness
 on:
   push:
-  pull_request:
-    types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned, enqueued]
   pull_request_target:
     types: [opened, edited, reopened, synchronize, ready_for_review, review_requested, review_request_removed, assigned, unassigned, enqueued]
+  merge_group:
+    types: [checks_requested]
   issues:
     types: [opened, edited, reopened, assigned, unassigned]
   issue_comment:
@@ -21,44 +21,12 @@ permissions:
 
 jobs:
   reconcile-and-test:
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Final test gate — configured pull-request boundary
-        if: github.event_name == 'pull_request'
-        env:
-          TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}
-          TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}
-          TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}
-          TEST_GATE_BRANCH: ${{ github.head_ref }}
-          TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
-        run: |
-          test -n "$TEST_GATE_CANDIDATE"
-          if ! git cat-file -e "$TEST_GATE_CANDIDATE^{commit}" 2>/dev/null; then
-            git fetch --no-tags origin "refs/pull/$TEST_GATE_PR_NUMBER/merge"
-          fi
-          test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" = \
-            "$TEST_GATE_CANDIDATE"
-          TEST_GATE_DISPLACED_ARGS=()
-          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
-              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
-            if ! git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$TEST_GATE_DISPLACED_TIP"
-            fi
-            git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}"
-            TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")
-          fi
-          python3 automation/run_test_gate.py final \
-            --at-transition pull-request \
-            --base-revision "$TEST_GATE_BASE" \
-            --head-revision "$TEST_GATE_HEAD" \
-            --candidate-revision "$TEST_GATE_CANDIDATE" \
-            --branch "$TEST_GATE_BRANCH" \
-            "${TEST_GATE_DISPLACED_ARGS[@]}"
       - name: Reconciler — every harness invariant holds
         if: github.event_name == 'push'
         env:
@@ -88,6 +56,227 @@ jobs:
             --branch "$QUEUE_PUSH_BRANCH" \
             --range "$QUEUE_CHANGE_RANGE" \
             "${QUEUE_DISPLACED_ARGS[@]}"
+
+  prepare-trusted-final-test-gate:
+    name: Prepare trusted hard final gate candidate
+    if: ${{ github.event_name == 'pull_request_target' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.identities.outputs.base }}
+      head: ${{ steps.identities.outputs.head }}
+      candidate: ${{ steps.identities.outputs.candidate }}
+      displaced_tip: ${{ steps.identities.outputs.displaced_tip }}
+      branch: ${{ steps.identities.outputs.branch }}
+      bundle_sha256: ${{ steps.bundle.outputs.sha256 }}
+    steps:
+      - name: Checkout trusted pull-request base controller
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch and verify exact pull-request identities
+        id: identities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}
+          TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}
+          TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}
+          TEST_GATE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
+          test -n "$TEST_GATE_BASE"
+          test -n "$TEST_GATE_HEAD"
+          test -n "$TEST_GATE_CANDIDATE"
+          test -n "$TEST_GATE_BRANCH"
+          test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" = \
+            "$TEST_GATE_BASE"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            fetch --no-tags origin \
+            "+refs/pull/$TEST_GATE_PR_NUMBER/head:refs/agentfold/test-gate/head" \
+            "+refs/pull/$TEST_GATE_PR_NUMBER/merge:refs/agentfold/test-gate/merge"
+          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
+              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ] && \
+              ! git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}" 2>/dev/null; then
+            git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+              fetch --no-tags origin "$TEST_GATE_DISPLACED_TIP"
+          fi
+          unset AUTH_HEADER GITHUB_TOKEN
+          test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/head^{commit})" = \
+            "$TEST_GATE_HEAD"
+          test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/merge^{commit})" = \
+            "$TEST_GATE_CANDIDATE"
+          test "$(git --no-replace-objects rev-parse --verify "$TEST_GATE_CANDIDATE^1")" = \
+            "$TEST_GATE_BASE"
+          test "$(git --no-replace-objects rev-parse --verify "$TEST_GATE_CANDIDATE^2")" = \
+            "$TEST_GATE_HEAD"
+          test "$(git rev-list --parents -n 1 "$TEST_GATE_CANDIDATE" | wc -w | tr -d ' ')" = 3
+          git update-ref refs/agentfold/test-gate/base "$TEST_GATE_BASE"
+          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
+              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
+            git cat-file -e "$TEST_GATE_DISPLACED_TIP^{commit}"
+            git update-ref refs/agentfold/test-gate/displaced "$TEST_GATE_DISPLACED_TIP"
+          fi
+          printf 'base=%s\n' "$TEST_GATE_BASE" >> "$GITHUB_OUTPUT"
+          printf 'head=%s\n' "$TEST_GATE_HEAD" >> "$GITHUB_OUTPUT"
+          printf 'candidate=%s\n' "$TEST_GATE_CANDIDATE" >> "$GITHUB_OUTPUT"
+          printf 'displaced_tip=%s\n' "$TEST_GATE_DISPLACED_TIP" >> "$GITHUB_OUTPUT"
+          printf 'branch=%s\n' "$TEST_GATE_BRANCH" >> "$GITHUB_OUTPUT"
+      - name: Bundle trusted controller and immutable candidate
+        id: bundle
+        env:
+          TEST_GATE_DISPLACED_TIP: ${{ steps.identities.outputs.displaced_tip }}
+        run: |
+          TEST_GATE_REFS=(
+            refs/agentfold/test-gate/base
+            refs/agentfold/test-gate/head
+            refs/agentfold/test-gate/merge
+          )
+          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
+              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
+            TEST_GATE_REFS+=(refs/agentfold/test-gate/displaced)
+          fi
+          git bundle create "$RUNNER_TEMP/agentfold-test-gate.bundle" \
+            "${TEST_GATE_REFS[@]}"
+          git bundle verify "$RUNNER_TEMP/agentfold-test-gate.bundle"
+          TEST_GATE_BUNDLE_SHA256="$(
+            sha256sum "$RUNNER_TEMP/agentfold-test-gate.bundle" | cut -d ' ' -f 1
+          )"
+          printf 'sha256=%s\n' "$TEST_GATE_BUNDLE_SHA256" >> "$GITHUB_OUTPUT"
+      - name: Upload trusted candidate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentfold-test-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agentfold-test-gate.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  trusted-final-test-runner:
+    name: AgentFold credential-free final test runner
+    needs: prepare-trusted-final-test-gate
+    if: ${{ always() && (github.event_name == 'pull_request_target' || github.event_name == 'merge_group') }}
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject unsupported merge-queue admission
+        if: ${{ github.event_name == 'merge_group' }}
+        run: exit 1
+      - name: Reject missing trusted preparation
+        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result != 'success' }}
+        run: exit 1
+      - name: Download trusted candidate bundle
+        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: agentfold-test-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agentfold-test-gate-input
+      - name: Run trusted controller without repository credentials
+        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result == 'success' }}
+        env:
+          TEST_GATE_BASE: ${{ needs.prepare-trusted-final-test-gate.outputs.base }}
+          TEST_GATE_HEAD: ${{ needs.prepare-trusted-final-test-gate.outputs.head }}
+          TEST_GATE_CANDIDATE: ${{ needs.prepare-trusted-final-test-gate.outputs.candidate }}
+          TEST_GATE_DISPLACED_TIP: ${{ needs.prepare-trusted-final-test-gate.outputs.displaced_tip }}
+          TEST_GATE_BRANCH: ${{ needs.prepare-trusted-final-test-gate.outputs.branch }}
+          TEST_GATE_BUNDLE_SHA256: ${{ needs.prepare-trusted-final-test-gate.outputs.bundle_sha256 }}
+        run: |
+          test -n "$TEST_GATE_BUNDLE_SHA256"
+          test "$(
+            sha256sum "$RUNNER_TEMP/agentfold-test-gate-input/agentfold-test-gate.bundle" | \
+              cut -d ' ' -f 1
+          )" = "$TEST_GATE_BUNDLE_SHA256"
+          mkdir "$RUNNER_TEMP/agentfold-test-gate-controller"
+          git -C "$RUNNER_TEMP/agentfold-test-gate-controller" init -q
+          git -C "$RUNNER_TEMP/agentfold-test-gate-controller" fetch -q \
+            "$RUNNER_TEMP/agentfold-test-gate-input/agentfold-test-gate.bundle" \
+            "refs/agentfold/test-gate/*:refs/agentfold/test-gate/*"
+          cd "$RUNNER_TEMP/agentfold-test-gate-controller"
+          test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/base^{commit})" = \
+            "$TEST_GATE_BASE"
+          test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/head^{commit})" = \
+            "$TEST_GATE_HEAD"
+          test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/merge^{commit})" = \
+            "$TEST_GATE_CANDIDATE"
+          git checkout -q --detach "$TEST_GATE_BASE"
+          test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" = \
+            "$TEST_GATE_BASE"
+          TEST_GATE_DISPLACED_ARGS=()
+          if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
+              [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
+            test "$(git --no-replace-objects rev-parse --verify refs/agentfold/test-gate/displaced^{commit})" = \
+              "$TEST_GATE_DISPLACED_TIP"
+            TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")
+          fi
+          mkdir "$RUNNER_TEMP/agentfold-test-gate-home"
+          env -i \
+            PATH="$PATH" \
+            HOME="$RUNNER_TEMP/agentfold-test-gate-home" \
+            TMPDIR="$RUNNER_TEMP" \
+            LANG="${LANG:-C.UTF-8}" \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            RUNNER_OS="$RUNNER_OS" \
+            RUNNER_ARCH="$RUNNER_ARCH" \
+            python3 automation/run_test_gate.py final \
+              --provider-hard \
+              --at-transition pull-request \
+              --base-revision "$TEST_GATE_BASE" \
+              --head-revision "$TEST_GATE_HEAD" \
+              --candidate-revision "$TEST_GATE_CANDIDATE" \
+              --branch "$TEST_GATE_BRANCH" \
+              "${TEST_GATE_DISPLACED_ARGS[@]}"
+
+  publish-trusted-final-test-check:
+    name: Publish AgentFold hard final gate result
+    needs: [prepare-trusted-final-test-gate, trusted-final-test-runner]
+    if: ${{ always() && (github.event_name == 'pull_request_target' || github.event_name == 'merge_group') }}
+    permissions:
+      checks: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish exact-candidate required check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TEST_GATE_API_URL: ${{ github.api_url }}
+          TEST_GATE_REPOSITORY: ${{ github.repository }}
+          TEST_GATE_EVENT: ${{ github.event_name }}
+          TEST_GATE_CANDIDATE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+          TEST_GATE_PREPARED_CANDIDATE: ${{ needs.prepare-trusted-final-test-gate.outputs.candidate }}
+          TEST_GATE_PREPARE_RESULT: ${{ needs.prepare-trusted-final-test-gate.result }}
+          TEST_GATE_RUNNER_RESULT: ${{ needs.trusted-final-test-runner.result }}
+        run: |
+          test -n "$TEST_GATE_CANDIDATE"
+          TEST_GATE_CONCLUSION=failure
+          TEST_GATE_SUMMARY="Trusted preparation or credential-free execution failed."
+          if [ "$TEST_GATE_EVENT" = pull_request_target ] && \
+              [ "$TEST_GATE_PREPARE_RESULT" = success ] && \
+              [ "$TEST_GATE_RUNNER_RESULT" = success ] && \
+              [ "$TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE" ]; then
+            TEST_GATE_CONCLUSION=success
+            TEST_GATE_SUMMARY="Trusted base controller passed for the exact synthetic merge candidate."
+          elif [ "$TEST_GATE_EVENT" = merge_group ]; then
+            TEST_GATE_SUMMARY="Schema version 1 does not support merge-group admission."
+          fi
+          TEST_GATE_PAYLOAD="$(
+            jq -cn \
+              --arg name 'AgentFold trusted hard final gate' \
+              --arg head_sha "$TEST_GATE_CANDIDATE" \
+              --arg conclusion "$TEST_GATE_CONCLUSION" \
+              --arg summary "$TEST_GATE_SUMMARY" \
+              '{name:$name,head_sha:$head_sha,status:"completed",conclusion:$conclusion,output:{title:$name,summary:$summary}}'
+          )"
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$TEST_GATE_API_URL/repos/$TEST_GATE_REPOSITORY/check-runs" \
+            -d "$TEST_GATE_PAYLOAD"
+          test "$TEST_GATE_CONCLUSION" = success
+
   authoritative-external-action-projection:
     name: Authoritative action projection from trusted workflow code
     if: >-
@@ -476,14 +665,14 @@ jobs:
 
   # GitHub has no pull_request_review_target, pull_request_review_comment_target, or
   # Actions trigger for thread resolve/unresolve. This job replays current state on
-  # supported review/PR events, including merge-queue enqueue. A hard claim that a
+  # direct review events; the trusted pull_request_target job separately replays PR
+  # events, including enqueue. A hard claim that a
   # currently unresolved thread cannot merge requires the provider-native conversation-
   # resolution rule; without it, evidence is only current at the last supported event.
   review-state-action-projection:
     name: Current review-state action projection
     if: >-
       ${{
-        github.event_name == 'pull_request' ||
         github.event_name == 'pull_request_review' ||
         github.event_name == 'pull_request_review_comment'
       }}

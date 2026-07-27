@@ -12,7 +12,7 @@
       validation, and non-deferrable critical-scope behavior.
 - [x] 6. Implement deterministic budget-regression task and pickup generation, open-task
       deduplication, recurrence links, actor-note preservation, and read-only finding output.
-- [ ] 7. Wire pre-commit and CI/provider adapters to the configured lanes without running the
+- [x] 7. Wire pre-commit and CI/provider adapters to the configured lanes without running the
       complete suite twice for the same candidate; document the adopter-facing configuration.
 - [x] 8. Add focused regression tests, benchmark representative service, automation, and
       cross-cutting changes, and record real before/after evidence against both configured
