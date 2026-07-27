@@ -59,7 +59,14 @@ jobs:
 
   prepare-trusted-final-test-gate:
     name: Prepare trusted hard final gate candidate
-    if: ${{ github.event_name == 'pull_request_target' }}
+    if: >-
+      ${{
+        github.event_name == 'pull_request_target' &&
+        (github.event.action == 'opened' || github.event.action == 'synchronize') &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch &&
+        github.event.pull_request.head.repo.id == github.event.repository.id &&
+        startsWith(github.event.pull_request.head.ref, 'task/')
+      }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -85,13 +92,36 @@ jobs:
           TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}
           TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}
           TEST_GATE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          TEST_GATE_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          TEST_GATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          TEST_GATE_ACTION: ${{ github.event.action }}
+          TEST_GATE_HEAD_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id }}
+          TEST_GATE_BASE_REPOSITORY_ID: ${{ github.event.repository.id }}
           TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
         run: |
           test -n "$TEST_GATE_BASE"
           test -n "$TEST_GATE_HEAD"
           test -n "$TEST_GATE_CANDIDATE"
           test -n "$TEST_GATE_BRANCH"
+          test "$TEST_GATE_BASE_BRANCH" = "$TEST_GATE_DEFAULT_BRANCH"
+          test "$TEST_GATE_HEAD_REPOSITORY_ID" = "$TEST_GATE_BASE_REPOSITORY_ID"
+          case "$TEST_GATE_BRANCH" in
+            task/*) ;;
+            *) exit 1 ;;
+          esac
+          case "$TEST_GATE_ACTION" in
+            opened)
+              test -z "$TEST_GATE_DISPLACED_TIP"
+              ;;
+            synchronize)
+              test -n "$TEST_GATE_DISPLACED_TIP"
+              test "$TEST_GATE_DISPLACED_TIP" != \
+                "0000000000000000000000000000000000000000"
+              test "$TEST_GATE_DISPLACED_TIP" != "$TEST_GATE_HEAD"
+              ;;
+            *) exit 1 ;;
+          esac
           test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" = \
             "$TEST_GATE_BASE"
           AUTH_HEADER="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
@@ -115,6 +145,9 @@ jobs:
           test "$(git --no-replace-objects rev-parse --verify "$TEST_GATE_CANDIDATE^2")" = \
             "$TEST_GATE_HEAD"
           test "$(git rev-list --parents -n 1 "$TEST_GATE_CANDIDATE" | wc -w | tr -d ' ')" = 3
+          if [ "$TEST_GATE_ACTION" = synchronize ]; then
+            git merge-base --is-ancestor "$TEST_GATE_DISPLACED_TIP" "$TEST_GATE_HEAD"
+          fi
           git update-ref refs/agentfold/test-gate/base "$TEST_GATE_BASE"
           if [ -n "$TEST_GATE_DISPLACED_TIP" ] && \
               [ "$TEST_GATE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
@@ -158,25 +191,30 @@ jobs:
   trusted-final-test-runner:
     name: AgentFold credential-free final test runner
     needs: prepare-trusted-final-test-gate
-    if: ${{ always() && (github.event_name == 'pull_request_target' || github.event_name == 'merge_group') }}
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'pull_request_target' &&
+        (github.event.action == 'opened' || github.event.action == 'synchronize') &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch &&
+        github.event.pull_request.head.repo.id == github.event.repository.id &&
+        startsWith(github.event.pull_request.head.ref, 'task/')
+      }}
     permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Reject unsupported merge-queue admission
-        if: ${{ github.event_name == 'merge_group' }}
-        run: exit 1
       - name: Reject missing trusted preparation
-        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result != 'success' }}
+        if: ${{ needs.prepare-trusted-final-test-gate.result != 'success' }}
         run: exit 1
       - name: Download trusted candidate bundle
-        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result == 'success' }}
+        if: ${{ needs.prepare-trusted-final-test-gate.result == 'success' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: agentfold-test-gate-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/agentfold-test-gate-input
       - name: Run trusted controller in one-shot candidate container
-        if: ${{ github.event_name == 'pull_request_target' && needs.prepare-trusted-final-test-gate.result == 'success' }}
+        if: ${{ needs.prepare-trusted-final-test-gate.result == 'success' }}
         env:
           TEST_GATE_BASE: ${{ needs.prepare-trusted-final-test-gate.outputs.base }}
           TEST_GATE_HEAD: ${{ needs.prepare-trusted-final-test-gate.outputs.head }}
@@ -381,7 +419,15 @@ jobs:
   publish-trusted-final-test-check:
     name: Publish AgentFold App-authored hard final gate status
     needs: [prepare-trusted-final-test-gate, trusted-final-test-runner]
-    if: ${{ always() && github.event_name == 'pull_request_target' }}
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'pull_request_target' &&
+        (github.event.action == 'opened' || github.event.action == 'synchronize') &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch &&
+        github.event.pull_request.head.repo.id == github.event.repository.id &&
+        startsWith(github.event.pull_request.head.ref, 'task/')
+      }}
     permissions: {}
     environment: agentfold-trusted-publisher
     runs-on: ubuntu-latest
