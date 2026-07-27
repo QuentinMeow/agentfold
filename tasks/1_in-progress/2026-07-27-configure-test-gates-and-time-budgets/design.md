@@ -68,9 +68,13 @@ work blocks a hard boundary.
 Final mode has exactly two values. `manual` omits a trigger and runs only by explicit command.
 In schema version 1, `hard` requires the sole supported trigger, `pull-request`, and blocks it
 on functional failure or incomplete required evidence only through a provider-controlled
-adapter. A candidate-controlled `pull_request` workflow is execution evidence, not independent
-enforcement; the GitHub adapter must run trusted base code, isolate candidate execution from
-credentials, publish provider-bound evidence, and be required by protected-branch policy.
+adapter. The included GitHub adapter has three trust zones: a base-code, read-only-token
+preparer verifies and bundles exact Git identities; a fresh `permissions: {}` runner verifies
+the artifact and executes the base controller plus candidate tests with a cleared environment;
+and a checks-only publisher creates `AgentFold trusted hard final gate` on the exact synthetic
+merge. The published check becomes enforcement only when protected-branch policy requires it,
+requires a current branch, and prohibits direct pushes and bypasses. The repository-local report
+remains `unobserved` because it cannot prove those provider settings.
 Other automatic boundaries require both a controlled adapter and a future schema version;
 version 1 rejects their trigger names rather than claiming enforcement it cannot provide.
 Neither mode turns complete verification back into an every-commit gate. The only initial

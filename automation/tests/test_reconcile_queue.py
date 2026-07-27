@@ -101,40 +101,63 @@ class ReconcileQueueTests(unittest.TestCase):
         workflow = (
             MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
         ).read_text(encoding="utf-8")
-        gate = workflow.partition(
-            "      - name: Final test gate — configured pull-request boundary\n"
-        )[2].partition("      - name: Reconciler — every harness invariant holds\n")[0]
-        self.assertTrue(gate, "configured pull-request gate is missing")
-        ordered_identity = (
+        on_block = workflow.partition("on:\n")[2].partition(
+            "\npermissions:"
+        )[0]
+        self.assertNotIn("pull_request:\n", on_block)
+        self.assertIn("pull_request_target:\n", on_block)
+        self.assertIn("merge_group:\n    types: [checks_requested]", on_block)
+
+        prepare = workflow.partition(
+            "  prepare-trusted-final-test-gate:\n"
+        )[2].partition("  trusted-final-test-runner:\n")[0]
+        self.assertTrue(prepare, "trusted final-gate preparation is missing")
+        for expected in (
             "TEST_GATE_BASE: ${{ github.event.pull_request.base.sha }}",
             "TEST_GATE_HEAD: ${{ github.event.pull_request.head.sha }}",
             "TEST_GATE_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}",
-            "TEST_GATE_BRANCH: ${{ github.head_ref }}",
-            "TEST_GATE_PR_NUMBER: ${{ github.event.pull_request.number }}",
-            "TEST_GATE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}",
-            '"refs/pull/$TEST_GATE_PR_NUMBER/merge"',
-            'test "$(git --no-replace-objects rev-parse --verify HEAD^{commit})" =',
-            '"$TEST_GATE_CANDIDATE"',
-            'TEST_GATE_DISPLACED_ARGS=(--displaced-tip "$TEST_GATE_DISPLACED_TIP")',
-            "automation/run_test_gate.py final",
-            "--at-transition pull-request",
-            '--base-revision "$TEST_GATE_BASE"',
-            '--head-revision "$TEST_GATE_HEAD"',
-            '--candidate-revision "$TEST_GATE_CANDIDATE"',
-            '--branch "$TEST_GATE_BRANCH"',
+            '"+refs/pull/$TEST_GATE_PR_NUMBER/head:refs/agentfold/test-gate/head"',
+            '"+refs/pull/$TEST_GATE_PR_NUMBER/merge:refs/agentfold/test-gate/merge"',
+            'rev-parse --verify "$TEST_GATE_CANDIDATE^1"',
+            'rev-parse --verify "$TEST_GATE_CANDIDATE^2"',
+        ):
+            self.assertIn(expected, prepare)
+
+        runner = workflow.partition(
+            "  trusted-final-test-runner:\n"
+        )[2].partition("  publish-trusted-final-test-check:\n")[0]
+        self.assertTrue(runner, "credential-free final-gate runner is missing")
+        self.assertIn("permissions: {}", runner)
+        self.assertIn("--provider-hard", runner)
+        self.assertIn("github.event_name == 'merge_group'", runner)
+        self.assertIn("run: exit 1", runner)
+
+        publisher = workflow.partition(
+            "  publish-trusted-final-test-check:\n"
+        )[2].partition("  authoritative-external-action-projection:\n")[0]
+        self.assertTrue(publisher, "exact-candidate check publisher is missing")
+        self.assertIn("checks: write", publisher)
+        self.assertIn(
+            "github.event.pull_request.merge_commit_sha || github.sha",
+            publisher,
         )
-        previous = -1
-        for expected in ordered_identity:
-            position = gate.find(expected, previous + 1)
-            self.assertNotEqual(-1, position, expected)
-            previous = position
-        self.assertIn("if: github.event_name == 'pull_request'", gate)
-        self.assertNotIn("--provider-hard", gate)
+        self.assertIn(
+            'TEST_GATE_PREPARED_CANDIDATE" = "$TEST_GATE_CANDIDATE',
+            publisher,
+        )
+        self.assertIn("AgentFold trusted hard final gate", publisher)
+        self.assertIn('head_sha "$TEST_GATE_CANDIDATE"', publisher)
+        self.assertIn(
+            "Schema version 1 does not support merge-group admission.",
+            publisher,
+        )
+        self.assertIn('test "$TEST_GATE_CONCLUSION" = success', publisher)
 
         push = workflow.partition(
-            "      - name: Reconciler — every harness invariant holds\n"
-        )[2].partition("  authoritative-external-action-projection:\n")[0]
+            "  reconcile-and-test:\n"
+        )[2].partition("  prepare-trusted-final-test-gate:\n")[0]
         self.assertTrue(push, "push reconciliation step is missing")
+        self.assertIn("if: ${{ github.event_name == 'push' }}", push)
         self.assertIn("if: github.event_name == 'push'", push)
         self.assertIn(
             '[ "$QUEUE_PUSH_BEFORE" = '
@@ -154,6 +177,7 @@ class ReconcileQueueTests(unittest.TestCase):
         self.assertIn("automation/reconcile/reconcile.py --check", push)
         self.assertNotIn("automation/run_tests.py", push)
         self.assertNotIn("automation/run_test_gate.py", push)
+        self.assertNotIn("pull_request", push)
         self.assertNotIn("--at-transition repository-admission", workflow)
 
     def test_queue_checks_no_op_when_queue_is_absent(self):

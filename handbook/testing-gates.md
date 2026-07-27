@@ -126,35 +126,51 @@ objects bound by the candidate and tested-view digests.
 
 ### Provider enforcement boundary
 
-The tracked GitHub `pull_request` job is useful evidence, but it is candidate
-controlled: the proposed commit can replace its workflow or runner. It must not
-be the sole required check for a `hard` claim. A hard GitHub installation needs
-all of the following provider-owned setup:
+The included GitHub adapter is split across three trust zones. A
+`pull_request_target` preparer checks out only the exact base revision, uses its
+read-only repository token to fetch and verify the event's base, head, ordered
+two-parent synthetic merge, and displaced tip, then uploads a one-run Git bundle
+and SHA-256. It never checks out or executes candidate code. A fresh runner has
+`permissions: {}`, verifies the artifact digest and every bundled ref, clears its
+environment with `env -i`, and invokes the base controller with
+`--provider-hard`; only candidate tests execute there. A final publisher has
+only `checks: write`, receives no bundle, checks out no code, and publishes the
+stable `AgentFold trusted hard final gate` check on the exact synthetic-merge
+SHA. Success requires both prior jobs and exact candidate identity.
 
-1. invoke the controller from trusted base/default-branch code and bind the
-   event's exact base, head, synthetic merge, and displaced tip;
-2. execute candidate tests without repository credentials, persisted checkout
-   credentials, secrets, or write permissions;
-3. call the runner with `--provider-hard`, publish the result as provider-bound
-   evidence for that exact merge candidate, and require that check in a ruleset;
-4. prohibit direct pushes to the protected branch; and
-5. disable merge queues, because schema version 1 deliberately has no
-   `merge_group` candidate adapter.
+The split prevents a pull request from replacing its own controller or reading
+the preparer's repository token. It also prevents a skipped or failed preparer
+from becoming a successful required job: the runner and publisher use
+`always()`, default to failure, and fail after publishing a failing exact-SHA
+check. Artifact transfer is not authorization by itself; the trusted digest,
+refs, ordered parents, provider-hard receipt rules, and final provider check are
+all part of the binding.
 
-The trusted action-projection jobs in this repository show the base-code and
-exact-identity pattern, but do not themselves turn a candidate-controlled test
-job into hard enforcement. GitHub installations that cannot isolate untrusted
-candidate execution should use a separately controlled GitHub App/runner or set
-the final mode to `manual`. Introducing a trusted `pull_request_target` executor
-also needs an explicit security review because that event can access trusted
-repository context.
+The tracked adapter becomes hard enforcement only after these repository-owned
+settings are applied:
+
+1. require the check named `AgentFold trusted hard final gate` for the protected
+   target branch, selecting GitHub Actions as its source when the ruleset allows;
+2. require branches to be current before merging so a changed base produces a
+   new synthetic candidate and check;
+3. prohibit direct pushes and bypasses that could land without the check; and
+4. disable merge queues. The workflow handles `merge_group` only to publish a
+   failing exact-SHA check because schema version 1 has no merge-group adapter.
+
+The workflow must first exist on the trusted base/default branch before it can
+protect later pull requests. Its introducing merge therefore needs explicit
+complete verification and review; after that merge, configure the required
+check before relying on `hard` mode. Installations that cannot apply these
+provider settings should set the final mode to `manual` or use another
+independently controlled provider adapter.
 
 An adopter who needs another automatic boundary must first provide a controlled
 adapter and introduce that trigger through a future schema version; the version
-1 policy cannot select it. A report's `enforcement` field remains `unobserved`
-unless an independently controlled adapter can prove the external protection.
-`explicit` and `transition` describe invocation, not enforcement. Treat an
-unobserved result as a caveat, never proof that a boundary was protected.
+1 policy cannot select it. The runner's repository-local report keeps
+`enforcement: unobserved`: it cannot inspect rulesets or prove that bypasses are
+disabled. `explicit` and `transition` describe invocation, not enforcement. The
+provider-bound exact-SHA check plus the settings above establish the external
+boundary; never reinterpret the JSON report alone as that proof.
 
 ## Results, receipts, and budget work
 
