@@ -41,6 +41,10 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workflow_bytes = WORKFLOW.read_bytes()
+        if cls.workflow_bytes != manual_workflow_fixture():
+            raise AssertionError(
+                "current workflow must exactly equal the base-pinned manual fixture"
+            )
         cls.trusted_gate_regime = trusted_gate_regime(cls.workflow_bytes)
         if cls.trusted_gate_regime not in ("present", "absent"):
             raise AssertionError("workflow is outside both admitted byte snapshots")
@@ -68,29 +72,39 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         if self.trusted_gate_regime == "absent":
             self.skipTest("the complete hard-gate triad is intentionally absent")
 
-    def test_trusted_gate_is_one_complete_migration_regime(self):
+    def test_current_workflow_is_exact_base_pinned_manual_snapshot(self):
         current = self.workflow_bytes
         manual = manual_workflow_fixture()
         self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(manual))
         self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
         self.assertEqual("absent", trusted_gate_regime(manual))
         self.assertEqual((), manual_fixture_contract_errors(manual))
-        self.assertIn(trusted_gate_regime(current), ("present", "absent"))
-        if trusted_gate_regime(current) == "present":
-            self.assertEqual(HARD_WORKFLOW_SHA256, workflow_digest(current))
-            self.assertEqual(manual, manualize_hard_workflow(current))
-            for missing in TRUSTED_GATE_JOBS:
-                with self.subTest(partial_hard_job=missing):
-                    partial = self.workflow.replace(
-                        workflow_job(self.workflow, missing), "", 1
-                    ).encode("utf-8")
-                    self.assertEqual("invalid", trusted_gate_regime(partial))
-        else:
-            self.assertEqual(manual, current)
+        self.assertEqual("absent", trusted_gate_regime(current))
+        self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(current))
+        self.assertEqual(manual, current)
         for name, mutation in migration_mutations(manual):
             with self.subTest(manual_mutation=name):
                 self.assertEqual("invalid", trusted_gate_regime(mutation))
         self.assertEqual("invalid", trusted_gate_regime(current + b"\n"))
+
+    def test_manual_workflow_has_no_hard_authority_or_publisher_credentials(self):
+        for forbidden in (
+            "prepare-trusted-final-test-gate",
+            "trusted-final-test-runner",
+            "publish-trusted-final-test-check",
+            "agentfold-trusted-publisher",
+            "AGENTFOLD_PUBLISHER_PRIVATE_KEY",
+            "AGENTFOLD_PUBLISHER_CLIENT_ID",
+            "actions/create-github-app-token",
+            "api.github.com/repos/",
+            "AgentFold trusted hard final gate",
+            "statuses: write",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, self.workflow)
+        self.assertIn("pull_request:\n", self.workflow)
+        self.assertIn("pull_request_target:\n", self.workflow)
+        self.assertIn("Complete test diagnostics — pull requests", self.workflow)
 
     def test_event_matrix_registers_authoritative_and_review_surfaces(self):
         on_block = self.workflow.partition("on:\n")[2].partition(

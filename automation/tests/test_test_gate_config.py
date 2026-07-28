@@ -4,11 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-if __package__:
-    from . import test_gate_migration_snapshots as MIGRATION
-else:
-    import test_gate_migration_snapshots as MIGRATION
-
 REPO = Path(__file__).resolve().parents[2]
 AUTOMATION = REPO / "automation"
 sys.path.insert(0, str(AUTOMATION))
@@ -22,10 +17,6 @@ from _vendor import tomli
 
 
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
-MIGRATION_REGIME = MIGRATION.classify_repository(REPO)
-MIGRATION_EXPECTATIONS = MIGRATION.EXPECTATIONS[MIGRATION_REGIME]
-
-
 def replaced(old, new, text=VALID_TEXT):
     if old not in text:
         raise AssertionError("fixture fragment was not found: {!r}".format(old))
@@ -57,10 +48,8 @@ class StarterPolicyTests(unittest.TestCase):
 
         self.assertEqual(1, policy.schema_version)
         self.assertEqual((60.0, 60.0), (policy.routine.target_seconds, policy.routine.maximum_seconds))
-        self.assertEqual(MIGRATION_EXPECTATIONS["starter_final_mode"], policy.final.mode)
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["starter_final_trigger"], policy.final.trigger
-        )
+        self.assertEqual("manual", policy.final.mode)
+        self.assertIsNone(policy.final.trigger)
         self.assertEqual((300.0, 900.0), (policy.final.target_seconds, policy.final.maximum_seconds))
         self.assertEqual("file-task", policy.on_budget_exceeded)
         self.assertTrue(policy.unmatched_is_critical)
@@ -319,10 +308,7 @@ class PolicyUnionTests(unittest.TestCase):
         result = CONFIG.classify_paths(("services/example/app.py",), union)
         self.assertFalse(result.is_critical)
         self.assertEqual(("ordinary-repository-work",), result.reversible_ids)
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["identical_union_hard_triggers"],
-            union.hard_triggers,
-        )
+        self.assertEqual((), union.hard_triggers)
 
     def test_hard_trigger_and_smaller_limits_survive_candidate_downgrade(self):
         candidate_text = MANUAL_CONFIG.replace(
