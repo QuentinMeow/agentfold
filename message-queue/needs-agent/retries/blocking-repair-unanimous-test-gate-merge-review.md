@@ -1,6 +1,6 @@
 # Repair the unanimous test-gate merge-review blockers
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-28, by codex, from the [current task](../../../tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/task.md)
 **Action:** Repair all six unanimous-panel findings and rerun the revision-bound merge review.
 **Check:** manual
