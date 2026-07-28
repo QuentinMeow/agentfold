@@ -68,7 +68,7 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   had already passed 297 tests in 113.574 seconds; the final structural check reported zero
   findings. Docker was unavailable locally, so no live Linux-container execution is claimed.
 - External activation remains a separate future boundary owned by
-  `message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md`.
+  message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md.
   Until its GitHub App, protected environment, diagnostic pull request, and branch-protection
   setup are completed and verified, the status is not described as enforced.
 
@@ -375,3 +375,12 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   provider admission, terminal reporting, new test namespaces, and stale human asks.
 - Filed one self-contained manual retry and linked it from the task. The retry blocks the merge
   operation, not ongoing repair, so the task remains in progress.
+
+## 2026-07-28 — superseded hard-gate asks retired (codex)
+
+- Recorded the authorized manual-only disposition while both human asks were waiting in commit
+  `b826df7`, then claimed both with status-only transitions in commit `d5aefe3`.
+- Folded the withdrawal into
+  `memory/decisions/2026-07-27-github-hard-test-gate-activation.md` and removed the two resolved
+  queue items. Future enforcement remains with the existing external-oracle and OIDC-publisher
+  tasks; no workflow, provider rule, or retry was changed.

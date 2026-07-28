@@ -362,7 +362,7 @@ provider run remains distinct from the structural and unit evidence above.
 
 ## Pending external activation boundary
 
-`message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md` separately
+message-queue/needs-human/decisions/future-blocking-activate-github-hard-test-gate.md separately
 owns the future one-time GitHub App, protected-environment, diagnostic-pull-request, and branch-
 protection setup. Until that boundary is completed and verified, these results prove the local
 implementation and workflow contract only; they do not prove that GitHub currently enforces the
@@ -1027,3 +1027,11 @@ The revision-bound panel reviewed Git range `e530c428..64490ab5`. Majority resul
 - `panel_evidence` — cache/migration — BLOCK: unstaged drift can escape receipt identity, and candidate-only namespaces can escape complete coverage.
 - `panel_contract` — contract — BLOCK: cache semantics, pull-request admission, and obsolete human asks do not match the stated contract.
 - `panel_blast_radius` — blast-radius — BLOCK: pull-request admission and working-state drift leave a wider unsafe impact than claimed.
+
+## Superseded hard-gate ask lifecycle
+
+The response-transcription commit `b826df7` changed only the two blank human response fields.
+Its normal hook passed the routine gate in 17.69 seconds with cooperative, non-enforcing
+evidence. The status-only claim commit `d5aefe3` changed only `waiting` to `folding`; its normal
+hook passed the same gate in 15.54 seconds. The resolving candidate creates the predeclared ADR,
+removes both claimed items, and regenerates `memory/index.md`.
