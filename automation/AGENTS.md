@@ -13,7 +13,7 @@ Automation is Python stdlib plus vendored, policy-free Tomli, and supports Pytho
 | `install.py` | idempotent setup: git hooks path and agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
 | `mine_cochange.py` | advisory: ranks Markdown pairs that keep changing together, with their shared commit subjects as evidence; `accept`/`reject` append durable verdicts to `cochange-ledger.txt`, whose rejection rate is the effective-false-positive rate | on demand |
-| `run_test_gate.py` | validates the repository test-gate policy, runs bounded staged routine or exact-candidate final verification (including explicit staged prewarming), reports deferred coverage, contains timed-out component processes, and best-effort files budget work | pre-commit, configured final adapter, on demand; policy and use: `handbook/testing-gates.md` |
+| `run_test_gate.py` | validates the repository test-gate policy, runs bounded staged routine or exact-candidate final verification (including explicit staged prewarming), reports deferred coverage, contains timed-out component processes, and best-effort files budget work | pre-commit, explicit final command, on demand; policy and use: `handbook/testing-gates.md` |
 | `run_tests.py` | runs tests in an isolated working-tree-byte view; the full suite is the default, while `--staged` selects only ordinary add/modify paths in the known quote-service dependency closure and otherwise falls back to full (it selects from the index, but is not staged-snapshot verification) | pre-commit (`--staged`), CI and on demand (full default) |
 Rules:
 
@@ -30,9 +30,9 @@ Rules:
   target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
   checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for replaced refs; unavailable nonzero tips fail closed.
-- Provider-hard adapters use trusted controller code and exact candidate bytes; candidate tests get
-  no credentials or writes. They ignore same-user local receipts and reject tracked symlinks; details:
-  `handbook/testing-gates.md`.
+- The starter final gate is manual; same-interpreter evidence only checks cooperatively and is
+  never enforcement-eligible; named transitions and `--provider-hard` fail closed before candidate
+  execution. The retained hard syntax is future policy intent, not a live provider boundary; details: `handbook/testing-gates.md`.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned

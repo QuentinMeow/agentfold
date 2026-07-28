@@ -37,10 +37,11 @@ except ImportError:  # pragma: no cover - the report remains complete without mu
     file_test_budget_task = None
 
 
-REPORT_SCHEMA = "agentfold.test-gate-report/v1"
-RECEIPT_SCHEMA = "agentfold.test-component-receipt/v2"
+REPORT_SCHEMA = "agentfold.test-gate-report/v2"
+RECEIPT_SCHEMA = "agentfold.test-component-receipt/v3"
 COMPOSITE_TEST_PLAN_SCHEMA = "agentfold.composite-test-plan/v1"
 TRUSTED_TEST_OVERLAY_ALGORITHM = "candidate-product-with-exact-base-test-namespaces/v2"
+EVIDENCE_AUTHORITY = "cooperative-same-interpreter"
 CANONICAL_CONFIG = Path("agentfold.toml")
 LOCAL_STATE_DIRECTORIES = frozenset(
     (Path("tmp/test-gate-receipts"), Path("tmp/test-gate-reports"))
@@ -106,7 +107,7 @@ def parse_arguments(arguments):
     parser.add_argument(
         "--provider-hard",
         action="store_true",
-        help="mark a trusted provider pull-request hard-boundary invocation",
+        help="request the reserved provider-hard boundary (unavailable without an external oracle)",
     )
     options = parser.parse_args(arguments)
     if options.gate == "routine" and not options.staged:
@@ -196,7 +197,7 @@ def load_candidate_policy(candidate_root, relative_config, scratch_root, base_re
             stderr=subprocess.PIPE,
         )
         if presence.returncode != 0 or presence.stdout:
-            raise GateError("trusted base policy could not be read at canonical agentfold.toml")
+            raise GateError("base-pinned policy could not be read at canonical agentfold.toml")
         policy = test_gate_config.load_policy(candidate_path)
         return policy, _policy_digest(policy)
     base_path.write_bytes(base.stdout)
@@ -429,7 +430,7 @@ def _records_below(manifest, namespaces):
 
 
 def _support_records_below(manifest, namespaces, test_paths):
-    """Return exact regular non-test files below trusted test namespaces."""
+    """Return exact regular non-test files below base-pinned test namespaces."""
     tests = set(test_paths)
     return tuple(
         record
@@ -457,13 +458,13 @@ def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root)
     overlaid.  Product paths elsewhere always retain the exact candidate bytes.
     """
     if not candidate.base_revision:
-        raise GateError("composite full testing requires a trusted base revision")
+        raise GateError("composite full testing requires a base-pinned revision")
     base_root, base_view = _materialize_revision(
         candidate.base_revision, scratch_root, "trusted-base"
     )
     base_tests = _all_relative_tests(base_root)
     if not base_tests:
-        raise GateError("trusted base contains no discoverable repository tests")
+        raise GateError("base-pinned revision contains no discoverable repository tests")
     namespaces = tuple(sorted({Path(test).parent.as_posix() for test in base_tests}))
     if not namespaces or any(
         namespace in ("", ".")
@@ -472,18 +473,18 @@ def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root)
         or any(part.casefold() == ".git" for part in Path(namespace).parts)
         for namespace in namespaces
     ):
-        raise GateError("trusted test namespace topology is unsafe")
+        raise GateError("base-pinned test namespace topology is unsafe")
     for left in namespaces:
         for right in namespaces:
             if left != right and Path(left) in Path(right).parents:
-                raise GateError("trusted test namespaces overlap")
+                raise GateError("base-pinned test namespaces overlap")
 
     floor_root = scratch_root / "trusted-floor"
     shutil.copytree(str(candidate_root), str(floor_root), symlinks=True)
     for namespace in namespaces:
         base_namespace = base_root / namespace
         if not base_namespace.is_dir() or base_namespace.is_symlink():
-            raise GateError(f"trusted test namespace is unavailable: {namespace}")
+            raise GateError(f"base-pinned test namespace is unavailable: {namespace}")
         destination = floor_root / namespace
         if destination.exists() or destination.is_symlink():
             if destination.is_dir() and not destination.is_symlink():
@@ -495,7 +496,7 @@ def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root)
     floor_view = test_manifest.tree_manifest(floor_root)
     floor_tests = _all_relative_tests(floor_root)
     if floor_tests != base_tests:
-        raise GateError("trusted test floor changed during exact overlay")
+        raise GateError("base-pinned test floor changed during exact overlay")
 
     candidate_tests = _all_relative_tests(candidate_root)
     base_test_records = {
@@ -608,33 +609,51 @@ def _final_disposition(options, policy):
     if options.explicit:
         return None
     if options.at_transition:
-        if mode == "manual":
-            return (
-                "not-run",
-                "final mode is manual; use --explicit to run complete verification",
-            )
-        if mode == "hard" and options.at_transition not in (
-            tuple(policy.hard_triggers) if final is None else (trigger,)
-        ):
-            return (
-                "not-run",
-                "final hard gate does not bind this transition",
-            )
-        return None
+        return (
+            "blocked-incomplete",
+            "automatic final transitions are unavailable: install a controlled "
+            "external completion oracle and independently controlled publisher",
+        )
     return (
         "not-run",
         "final verification requires --explicit or --at-transition NAME",
     )
 
 
-def _descendant_pids(root_pid, deadline):
-    """Snapshot direct and indirect descendants before the root can reparent them."""
+def _portable_process_snapshot(deadline):
+    """Return one bounded portable process snapshot for cleanup discovery."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return ()
+    try:
+        result = subprocess.run(
+            ["ps", "eww", "-axo", "pid=,ppid=,uid=,command="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=min(0.3, remaining),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    rows = []
+    for line in result.stdout.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            rows.append((int(fields[0]), int(fields[1]), int(fields[2]), fields[3]))
+        except ValueError:
+            continue
+    return tuple(rows)
+
+
+def _descendant_pids(root_pid, deadline, portable_snapshot=None):
+    """Snapshot direct and indirect descendants before the root can reparent them."""
     children = {}
     proc = Path("/proc")
     if sys.platform.startswith("linux") and proc.is_dir():
+        if time.monotonic() >= deadline:
+            return ()
         for entry in proc.iterdir():
             if not entry.name.isdigit() or time.monotonic() >= deadline:
                 continue
@@ -646,21 +665,13 @@ def _descendant_pids(root_pid, deadline):
                 continue
             children.setdefault(parent, []).append(pid)
     else:
-        try:
-            result = subprocess.run(
-                ["ps", "-axo", "pid=,ppid="],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=min(0.1, remaining),
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return ()
-        for line in result.stdout.splitlines():
-            try:
-                pid, parent = (int(value) for value in line.split())
-            except (TypeError, ValueError):
-                continue
+        if portable_snapshot is None:
+            if time.monotonic() >= deadline:
+                return ()
+            rows = _portable_process_snapshot(deadline)
+        else:
+            rows = portable_snapshot
+        for pid, parent, _uid, _command in rows:
             children.setdefault(parent, []).append(pid)
     descendants = set()
     pending = [root_pid]
@@ -811,14 +822,14 @@ def process_containment_identity():
     }
 
 
-def _owned_process_pids(token, deadline):
+def _owned_process_pids(token, deadline, portable_snapshot=None):
     """Find same-user processes carrying the gate's unguessable ownership token."""
-    if time.monotonic() >= deadline:
-        return ()
     marker = f"{PROCESS_TOKEN_ENV}={token}".encode("ascii")
     proc = Path("/proc")
     owned = set()
-    if proc.is_dir():
+    if sys.platform.startswith("linux") and proc.is_dir():
+        if time.monotonic() >= deadline:
+            return ()
         for entry in proc.iterdir():
             if not entry.name.isdigit() or time.monotonic() >= deadline:
                 continue
@@ -831,27 +842,15 @@ def _owned_process_pids(token, deadline):
             if marker in environment:
                 owned.add(int(entry.name))
         return tuple(sorted(owned, reverse=True))
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        return ()
-    try:
-        result = subprocess.run(
-            ["ps", "eww", "-axo", "pid=,uid=,command="],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=min(0.15, remaining),
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ()
-    for line in result.stdout.splitlines():
-        fields = line.split(None, 2)
-        if len(fields) != 3:
-            continue
-        try:
-            pid, uid = int(fields[0]), int(fields[1])
-        except ValueError:
-            continue
-        if uid == os.getuid() and marker in fields[2].split():
+    if portable_snapshot is None:
+        if time.monotonic() >= deadline:
+            return ()
+        rows = _portable_process_snapshot(deadline)
+    else:
+        rows = portable_snapshot
+    exact_marker = marker.decode("ascii")
+    for pid, _parent, uid, command in rows:
+        if uid == os.getuid() and exact_marker in command.split():
             owned.add(pid)
     return tuple(sorted(owned, reverse=True))
 
@@ -892,8 +891,12 @@ def _signal_processes(process, owned, process_signal):
 def _contained_process_pids(
     process, token, deadline, containment_root=None, baseline_pids=()
 ):
-    owned = set(_descendant_pids(process.pid, deadline))
-    owned.update(_owned_process_pids(token, deadline))
+    proc = Path("/proc")
+    portable_snapshot = None
+    if not (sys.platform.startswith("linux") and proc.is_dir()):
+        portable_snapshot = _portable_process_snapshot(deadline)
+    owned = set(_descendant_pids(process.pid, deadline, portable_snapshot))
+    owned.update(_owned_process_pids(token, deadline, portable_snapshot))
     if containment_root is not None:
         owned.update(
             set(_descendant_pids(containment_root, deadline)).difference(
@@ -921,49 +924,45 @@ def _kill_process_tree(
     containment_root=None,
     baseline_pids=(),
 ):
+    first_snapshot_deadline = min(cleanup_deadline - 0.1, time.monotonic() + 0.3)
     owned = _contained_process_pids(
         process,
         token,
-        cleanup_deadline,
+        first_snapshot_deadline,
         containment_root,
         baseline_pids,
     )
     _signal_processes(process, owned, signal.SIGTERM)
-    remaining = cleanup_deadline - time.monotonic()
+    remaining = cleanup_deadline - 0.05 - time.monotonic()
     if remaining > 0:
         try:
             process.wait(timeout=min(0.05, remaining))
         except subprocess.TimeoutExpired:
             pass
-    while time.monotonic() < cleanup_deadline:
-        owned.update(
-            _contained_process_pids(
-                process,
-                token,
-                cleanup_deadline,
-                containment_root,
-                baseline_pids,
-            )
-        )
-        _signal_processes(process, owned, signal.SIGKILL)
-        _reap_contained_processes(process, owned)
-        live_owned = _contained_process_pids(
+    # Kill the initial owned set before any rescan: its root may already have exited.
+    _signal_processes(process, owned, signal.SIGKILL)
+    _reap_contained_processes(process, owned)
+    rescan_deadline = cleanup_deadline - 0.05
+    while time.monotonic() < rescan_deadline:
+        discovered = _contained_process_pids(
             process,
             token,
-            cleanup_deadline,
+            min(rescan_deadline, time.monotonic() + 0.3),
             containment_root,
             baseline_pids,
         )
-        if process.poll() is not None and not live_owned:
+        owned.update(discovered)
+        _signal_processes(process, owned, signal.SIGKILL)
+        _reap_contained_processes(process, owned)
+        if process.poll() is not None and not discovered:
             break
-        remaining = cleanup_deadline - time.monotonic()
+        remaining = rescan_deadline - time.monotonic()
         if remaining > 0:
             try:
                 process.wait(timeout=min(0.02, remaining))
             except subprocess.TimeoutExpired:
                 pass
-    if process.poll() is None:
-        _signal_processes(process, (), signal.SIGKILL)
+    _signal_processes(process, owned, signal.SIGKILL)
     _reap_contained_processes(process, owned)
     return tuple(sorted(owned, reverse=True))
 
@@ -1196,6 +1195,9 @@ def receipt_binding(
         "environment": environment_identity(environment),
         "component_id": component_id,
         "composite_test_plan": composite_identity,
+        "evidence_authority": EVIDENCE_AUTHORITY,
+        "controlled_completion": False,
+        "enforcement_eligible": False,
     }
     value["binding_digest"] = test_manifest.canonical_digest(value)
     return value
@@ -1315,6 +1317,9 @@ def reusable_receipt(binding):
         value.get("schema") != RECEIPT_SCHEMA
         or value.get("outcome") != "pass"
         or value.get("binding") != binding
+        or value.get("evidence_authority") != EVIDENCE_AUTHORITY
+        or value.get("controlled_completion") is not False
+        or value.get("enforcement_eligible") is not False
     ):
         return None
     return value
@@ -1325,7 +1330,14 @@ def write_receipt(binding):
     path = directory / f"{binding['binding_digest']}.json"
     _atomic_json(
         path,
-        {"schema": RECEIPT_SCHEMA, "outcome": "pass", "binding": binding},
+        {
+            "schema": RECEIPT_SCHEMA,
+            "outcome": "pass",
+            "evidence_authority": EVIDENCE_AUTHORITY,
+            "controlled_completion": False,
+            "enforcement_eligible": False,
+            "binding": binding,
+        },
     )
     return path
 
@@ -1477,6 +1489,9 @@ def _render_summary(report, path):
         f"test gate: {report['gate_id']}",
         f"outcome: {report['outcome']}",
         f"evidence: {report['evidence']}",
+        f"evidence_authority: {report['evidence_authority']}",
+        f"controlled_completion: {str(report['controlled_completion']).lower()}",
+        f"enforcement_eligible: {str(report['enforcement_eligible']).lower()}",
         f"enforcement: {report['enforcement']}",
         f"reason: {report['reason']}",
     ]
@@ -1591,7 +1606,10 @@ def _base_report(gate, started):
         "gate_id": gate,
         "outcome": "error",
         "evidence": "none",
-        "enforcement": "unobserved",
+        "evidence_authority": EVIDENCE_AUTHORITY,
+        "controlled_completion": False,
+        "enforcement_eligible": False,
+        "enforcement": "not-enforced",
         "reason": "gate did not complete",
         "candidate": None,
         "tested_view": None,
@@ -1615,6 +1633,25 @@ def main(arguments=(), started=None):
     started = PROCESS_STARTED if started is None else started
     options = parse_arguments(arguments)
     report = _base_report(options.gate, started)
+    if options.at_transition or options.provider_hard:
+        report["outcome"] = "blocked-incomplete"
+        report["reason"] = (
+            "automatic final transitions are unavailable: the repository has no "
+            "controlled external completion oracle and independently controlled publisher"
+        )
+        report["incomplete"] = [
+            "controlled-external-completion-oracle",
+            "independently-controlled-publisher",
+        ]
+        report["invocation"] = {
+            "kind": "transition",
+            "transition": options.at_transition,
+            "base_revision": options.base_revision,
+            "head_revision": options.head_revision,
+            "candidate_revision": options.candidate_revision,
+            "provider_hard": options.provider_hard,
+        }
+        return emit_report(report)
     try:
         with tempfile.TemporaryDirectory(prefix="agentfold-test-gate-") as scratch:
             scratch_root = Path(scratch).resolve()
@@ -1792,7 +1829,7 @@ def main(arguments=(), started=None):
                             receipt_result = result
                         else:
                             floor_result = execute_tests(
-                                "repository-tests/trusted-floor",
+                                "repository-tests/base-pinned-floor",
                                 composite["floor_root"],
                                 composite["floor_tests"],
                             )
@@ -1819,7 +1856,7 @@ def main(arguments=(), started=None):
                                 0.0,
                                 (),
                                 (
-                                    "trusted floor and candidate supplemental lanes passed; "
+                                    "base-pinned floor and candidate supplemental lanes passed; "
                                     f"plan {composite['identity']['digest']}"
                                     if lanes_passed
                                     else "composite full-test lanes did not all pass"

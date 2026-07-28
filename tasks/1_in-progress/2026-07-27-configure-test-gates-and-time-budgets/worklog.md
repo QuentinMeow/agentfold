@@ -207,3 +207,163 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   states, and 8 one-byte mutations, with no authority, configuration, workflow, or
   `run_tests.py` drift. The current staged revision adds only `plan.md`, `worklog.md`, and
   `verification.md` to those four implementation files, for seven staged files total.
+
+## 2026-07-28 — authorized manual-only production pivot (codex and delegated implementation)
+
+- Replaced the hard workflow byte-for-byte with the base-pinned manual fixture. The retained
+  `pull_request_target` jobs project durable actions, while a credential-free `pull_request` job
+  runs cooperative complete-test diagnostics. The workflow has no hard-gate triad, publisher
+  environment, GitHub App credential, status-writing permission, or direct status API call.
+- Changed the starter policy to `mode = "manual"` with no trigger while retaining validation of
+  the reserved `hard` plus `pull-request` syntax. Every named transition and every
+  `--provider-hard` request now returns `blocked-incomplete` before candidate discovery or
+  execution and before receipt access.
+- Bumped reports to v2 and receipts to v3. Both bind
+  `evidence_authority: cooperative-same-interpreter`, `controlled_completion: false`, and
+  `enforcement_eligible: false`; reports also say `enforcement: not-enforced`. Old or incomplete
+  receipts cannot be reused.
+- Added the adversarial `os._exit(0)` canary. It demonstrates that the cooperative runner can
+  return zero before a later completion marker, paired with a gate regression proving that an
+  automatic transition never starts that candidate-controlled interpreter.
+- The first combined focused run exposed a pre-existing macOS cleanup edge where process-group
+  signaling can return `PermissionError` even though the individual process remains killable.
+  Cleanup now treats that group-level result like an unavailable group and continues with the
+  individual process signal; the focused gate suite then passed.
+- Focused configuration, gate, runner, workflow, and queue regressions passed, as did structural
+  reconciliation, compilation, YAML parsing, exact workflow comparison, and the closed publisher-
+  authority search. The full suite was deliberately not run at this implementation checkpoint;
+  plan step 12 remains open for independent review and complete verification.
+- The required normal commit attempt ran the routine hook once and stopped safely after 60.19
+  seconds: core scope and reconciliation passed, but the base-pinned floor exhausted the routine
+  interval after 42.44 seconds. The commit was not created, the hook was not bypassed or rerun,
+  and the staged implementation remains ready for an exact final prewarm at the next boundary.
+
+## 2026-07-28 — manual-boundary documentation repair (codex)
+
+- A provider review found a P2 documentation error: the staged handbook and automation contract
+  still described a configured final adapter and a live hard admission boundary after the
+  authorized manual-only pivot.
+- Repaired the active documentation and plan. Final evidence is explicit-only; `hard` and its
+  pull-request trigger are retained only as future-compatible policy syntax; named transitions
+  and `--provider-hard` fail closed before candidate execution. The base-pinned floor now says it
+  checks cooperatively and cannot admit or reject a protected transition.
+- Focused configuration/workflow tests, reconciliation, whitespace checks, and targeted wording
+  assertions passed. No full suite, commit, push, queue record, or immutable history was changed.
+
+## 2026-07-28 — manual-boundary line-budget repair (codex)
+
+- The first post-repair reconciler run reported one finding: `automation/AGENTS.md` had grown to
+  61 lines, exceeding its 60-line budget. The prior documentation repair remains intact.
+- Compressed the manual-boundary rule to 60 lines without restoring any configured-adapter or
+  live-hard-boundary claim. The staged rerun is recorded below with the repaired zero-finding
+  result.
+
+## 2026-07-28 — portable cleanup snapshot repair (codex)
+
+- Replaced non-`/proc` serial process discovery with one bounded `ps eww` snapshot that supplies
+  both descendant ancestry and exact same-UID ownership-token matching. Linux `/proc` discovery
+  remains unchanged.
+- Cleanup now caps its first snapshot at 300 ms and keeps 100 ms before the cleanup deadline;
+  it grants at most 50 ms for `SIGTERM`, kills the initial owned set before any rescan, and keeps
+  a final 50 ms for unconditional `SIGKILL` and reaping. Permission-error handling remains
+  bounded.
+- Added deterministic portable-snapshot, exclusion, timing-reserve, initial-kill, and Linux-path
+  tests. The first focused run exposed only a test simulation mistake: the host lacked `/proc`
+  despite a mocked Linux platform. The test now mocks the Linux `/proc` branch explicitly.
+- Focused tests, three sequential real cleanup-fixture repetitions with their built-in residue
+  checks, direct gate tests, configuration/runner/workflow regressions, compilation, and
+  reconciliation passed. No full repository suite, commit, push, stash, or ref change occurred.
+- Ran the package-form gate suite sequentially after the direct run: 63 tests passed with one
+  platform skip in 17.106 seconds. Its expected argument-validation diagnostics and a pre-existing
+  subprocess `ResourceWarning` appeared on stderr; neither is a test failure. The staged records
+  continue to claim no exact-final gate or full repository suite.
+
+## 2026-07-28 — cleanup bootstrap completion and phase-2 reapplication (codex)
+
+- The cleanup bridge was subsequently verified and committed as `c78a8d6`. Its exact candidate
+  `2c7bcc1366ea9611976de5989d3e3fcc079a9870ecb6072a7d9e1b6c1d7e0af6` passed the final gate in
+  525.67 seconds: core scope 0.44 seconds, reconciliation 14.76 seconds, base-pinned floor
+  484.83 seconds, supplemental tests 23.91 seconds, and 16 selected / 0 deferred / 0 incomplete.
+  The commit hook then reused that exact full evidence and passed in 16.63 seconds.
+- Reapplied the staged manual-v3 production pivot onto `c78a8d6`, retaining the cleanup
+  `PermissionError` behavior and its deterministic `EPERM` regressions. The completed bridge-only
+  migration classifier was removed so production assertions now require manual-v3 behavior
+  unconditionally in both direct and package test imports.
+- Phase 2 remains unverified beyond its focused checks. No production full-suite pass, commit,
+  push, or provider enforcement is claimed.
+- Correction to the earlier cleanup-bridge scope note: before this record-only edit, phase 2 had
+  14 staged paths, including deletion of the automation/tests/test_gate_migration_snapshots.py
+  helper. Its exact candidate was
+  `c1cebf0973d6791824f10ee752b972f590712689768629a2dfe8a4ad32217b0a`.
+  This supersedes the historical seven-file statement only for the current phase-2 scope.
+- During the record repair, the wider gate module failed in both an interference-prone concurrent
+  run and a direct sequential retry. The sequential retry ran 58 tests with two failures and one
+  skip; the failures were the reparented-daemon and escaped-setsid cleanup tests. The smaller
+  six-test cleanup/boundary selection still passed, but phase 2 is not ready for complete
+  verification and has no full-suite or exact-final pass.
+
+## 2026-07-28 — portable cleanup late-discovery repair (codex)
+
+- A blocking review found that the portable cleanup loop performed a second discovery into
+  `live_owned` and could exit without merging or killing a PID found only by that scan. Replaced
+  the two-scan iteration with one discover, merge, `SIGKILL`, and reap sequence before any exit
+  decision or next scan.
+- Strengthened the portable union fixture with distinct ancestry-only and out-of-ancestry exact-
+  token PIDs plus foreign-UID, near-token, and self exclusions. Added delayed-`ps`, timeout,
+  fake-clock ordering, late-PID, deadline-reserve, and Linux-path coverage.
+- The escaped-setsid and reparented-daemon fixtures now register finalizers before execution.
+  A finalizer can signal only the exact recorded PID after verifying both the current UID and a
+  per-fixture unguessable command marker; the escaped child now carries that marker.
+- The first seven-test focused run had one test-only error because Python 3.7 mock calls expose
+  keyword arguments through tuple position rather than `.kwargs`; the corrected rerun passed.
+  Both real fixtures then passed three sequential repetitions with their residue assertions.
+- Correction to the prior portable-cleanup record: its claimed “direct” 63-test invocation used
+  package-form syntax. The actual direct-script run now passed 65 tests with one skip in 16.789
+  seconds, followed sequentially by the package-form run passing 65 with one skip in 18.430
+  seconds. Phase 2 still has no exact-final gate or full repository-suite result.
+
+## 2026-07-28 — completed-snapshot deadline repair (codex)
+
+- A blocking review found one remaining exact-deadline edge: portable snapshot acquisition could
+  finish at its deadline, then both parsers would reject the already-acquired rows without
+  examining them. Deadline gates now apply only to a new snapshot acquisition and Linux `/proc`
+  traversal; a supplied portable snapshot is always parsed.
+- Added an integration regression in which snapshot completion advances the clock exactly to the
+  deadline. The returned union retains ancestry-only PID 202 and out-of-ancestry exact-token PID
+  505, and the test verifies that both are subsequently sent `SIGKILL`.
+- Eight focused cleanup tests and both real fixtures passed. The actual direct script then passed
+  66 tests with one skip in 16.548 seconds, followed sequentially by package form passing 66 with
+  one skip in 16.716 seconds. Config, runner, and workflow regressions also passed.
+- No exact-final gate, full repository suite, commit, push, stash, or ref change was performed.
+
+## 2026-07-28 — phase-2 cleanup chronology correction (codex)
+
+- The causal sequence after phase 2 was: the real setsid/reparented cleanup failures; the initial
+  single portable-snapshot repair; the late-discovery merge-and-kill repair; then the completed-
+  snapshot-at-deadline repair. This correction supersedes the ordering implied by the locations
+  of earlier append-only entries without changing their historical bytes.
+- The reviewed production candidate has 14 staged paths and candidate identity
+  `12a68bf00510…`. A runtime review then found that the immutable base-floor helper still rejects
+  current gate hash `a27b85…`; exact final verification is therefore blocked pending a small
+  base-floor compatibility commit.
+- This record makes no readiness, full repository-suite, exact-final, commit, push, or provider-
+  enforcement claim for the current phase-2 candidate.
+
+## 2026-07-28 — refreshed compatibility floor and protected production reapplication (codex)
+
+- Resolved the compatibility blocker with test-only commit `7d580d3`, a one-file change with 14
+  additions and one deletion. Its refreshed immutable helper admits the repaired manual tuple
+  containing gate hash `a27b85…` and rejects the superseded manual runner tuple.
+- The refresh candidate
+  `ac6b07653007b516efaabb23f78e91ca3dcb25e9ad082681b2cc37b9b317d094` passed its exact final gate
+  in 497.64 seconds: core scope 0.49 seconds, reconciliation 16.49 seconds, immutable floor
+  477.62 seconds, supplemental tests 0.86 seconds, and 16 selected / 0 deferred / 0 incomplete.
+  The commit hook then reused repository-tests/full evidence and passed in 15.28 seconds.
+- Reapplied only the protected production stash's staged tree onto `7d580d3`; its unstaged timing
+  journal delta was not applied. The refreshed helper is deleted from the production candidate
+  but remains in the base-pinned floor for this transition.
+- Phase 2 still has no production exact-final or full-suite result and is not marked complete.
+  No production commit, push, or provider-enforcement claim was made.
+- Focused verification passed the refreshed helper floor, exact four-suite supplemental run,
+  direct and package gate/config/runner/workflow tests, deterministic and real cleanup fixtures,
+  compilation, workflow/hash assertions, reconciliation, and staged/unstaged diff checks.
