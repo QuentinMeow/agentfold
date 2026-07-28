@@ -133,7 +133,7 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual((), selected)
         self.assertEqual(("automation/tests/test_run_tests.py",), deferred)
 
-    def test_manual_final_runs_only_when_explicit(self):
+    def test_manual_final_runs_explicitly_and_named_transition_fails_closed(self):
         policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
         policy = CONFIG.TestGatePolicy(
             policy.schema_version,
@@ -160,11 +160,20 @@ class TestGateTests(unittest.TestCase):
             )
         )
         explicit = GATE.parse_arguments(("final", "--explicit"))
-        self.assertEqual("not-run", GATE._final_disposition(named, policy)[0])
+        self.assertEqual("blocked-incomplete", GATE._final_disposition(named, policy)[0])
         self.assertIsNone(GATE._final_disposition(explicit, policy))
 
-    def test_hard_final_runs_only_at_its_named_transition(self):
+    def test_reserved_hard_transition_also_fails_closed(self):
         policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
+        policy = CONFIG.TestGatePolicy(
+            policy.schema_version,
+            policy.routine,
+            CONFIG.FinalGate("hard", "pull-request", policy.final.budget),
+            policy.on_budget_exceeded,
+            policy.critical_bindings,
+            policy.reversible_bindings,
+            policy.unmatched_is_critical,
+        )
         matching = GATE.parse_arguments(
             (
                 "final",
@@ -195,9 +204,9 @@ class TestGateTests(unittest.TestCase):
                 "task/example",
             )
         )
-        self.assertIsNone(GATE._final_disposition(matching, policy))
+        self.assertEqual("blocked-incomplete", GATE._final_disposition(matching, policy)[0])
         if policy.final.trigger != "merge":
-            self.assertEqual("not-run", GATE._final_disposition(other, policy)[0])
+            self.assertEqual("blocked-incomplete", GATE._final_disposition(other, policy)[0])
 
     def test_final_admission_uses_exact_range_and_never_staged_scope(self):
         options = mock.Mock(
@@ -588,6 +597,62 @@ class TestGateTests(unittest.TestCase):
         self.assertIn("was not started", result.detail)
         popen.assert_not_called()
 
+    def test_automatic_transition_blocks_before_candidate_execution_or_receipt(self):
+        arguments = (
+            "final",
+            "--at-transition",
+            "pull-request",
+            "--base-revision",
+            "a" * 40,
+            "--head-revision",
+            "b" * 40,
+            "--candidate-revision",
+            "c" * 40,
+            "--branch",
+            "task/example",
+        )
+        captured = {}
+
+        def emit(report, *unused, **ignored):
+            captured.update(report)
+            return GATE.OUTCOME_EXIT[report["outcome"]]
+
+        with mock.patch.object(
+            GATE, "capture_candidate", side_effect=AssertionError("candidate executed")
+        ), mock.patch.object(
+            GATE, "run_component", side_effect=AssertionError("component executed")
+        ), mock.patch.object(
+            GATE, "write_receipt", side_effect=AssertionError("receipt written")
+        ), mock.patch.object(GATE, "emit_report", side_effect=emit):
+            self.assertEqual(1, GATE.main(arguments, started=time.monotonic()))
+
+        self.assertEqual("blocked-incomplete", captured["outcome"])
+        self.assertEqual("cooperative-same-interpreter", captured["evidence_authority"])
+        self.assertFalse(captured["controlled_completion"])
+        self.assertFalse(captured["enforcement_eligible"])
+        self.assertEqual("not-enforced", captured["enforcement"])
+        self.assertIn("controlled external completion oracle", captured["reason"])
+
+    def test_provider_hard_blocks_at_the_same_pre_execution_boundary(self):
+        arguments = (
+            "final",
+            "--provider-hard",
+            "--at-transition",
+            "pull-request",
+            "--base-revision",
+            "a" * 40,
+            "--head-revision",
+            "b" * 40,
+            "--candidate-revision",
+            "c" * 40,
+            "--branch",
+            "task/example",
+        )
+        with mock.patch.object(
+            GATE, "capture_candidate", side_effect=AssertionError("candidate executed")
+        ), mock.patch.object(GATE, "emit_report", return_value=1):
+            self.assertEqual(1, GATE.main(arguments, started=time.monotonic()))
+
     def test_report_states_best_effort_detached_cleanup_when_strong_is_absent(self):
         with mock.patch.object(
             GATE, "strong_process_containment_available", return_value=False
@@ -763,7 +828,10 @@ class TestGateTests(unittest.TestCase):
             "kind": "transition",
             "transition": "pull-request",
         }
-        self.assertEqual("unobserved", report["enforcement"])
+        self.assertEqual("not-enforced", report["enforcement"])
+        self.assertEqual("cooperative-same-interpreter", report["evidence_authority"])
+        self.assertFalse(report["controlled_completion"])
+        self.assertFalse(report["enforcement_eligible"])
 
     def test_staged_manifest_uses_frozen_index_and_detects_live_drift(self):
         environment = {
@@ -1151,7 +1219,7 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        self.assertEqual("agentfold.test-component-receipt/v2", GATE.RECEIPT_SCHEMA)
+        self.assertEqual("agentfold.test-component-receipt/v3", GATE.RECEIPT_SCHEMA)
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")
@@ -1169,6 +1237,26 @@ class TestGateTests(unittest.TestCase):
             )
             with mock.patch.object(GATE, "REPO", repo):
                 self.assertIsNone(GATE.reusable_receipt(first))
+
+    def test_receipt_without_cooperative_authority_is_invalid(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        with mock.patch.object(GATE, "REPO", Path(tempfile.mkdtemp())):
+            (GATE.REPO / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=GATE.REPO, check=True)
+            binding = GATE.receipt_binding(
+                candidate, view, ("test.py",), "policy", "repository-tests/full"
+            )
+            directory = GATE._safe_local_directory(Path("tmp/test-gate-receipts"))
+            path = directory / f"{binding['binding_digest']}.json"
+            path.write_text(json.dumps({
+                "schema": GATE.RECEIPT_SCHEMA,
+                "outcome": "pass",
+                "binding": binding,
+            }))
+            self.assertIsNone(GATE.reusable_receipt(binding))
 
     def test_composite_plan_fails_closed_when_trusted_base_has_no_tests(self):
         candidate = MANIFEST.CandidateManifest(

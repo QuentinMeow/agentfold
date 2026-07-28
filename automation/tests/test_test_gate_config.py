@@ -31,8 +31,8 @@ class StarterPolicyTests(unittest.TestCase):
 
         self.assertEqual(1, policy.schema_version)
         self.assertEqual((60.0, 60.0), (policy.routine.target_seconds, policy.routine.maximum_seconds))
-        self.assertEqual("hard", policy.final.mode)
-        self.assertEqual("pull-request", policy.final.trigger)
+        self.assertEqual("manual", policy.final.mode)
+        self.assertIsNone(policy.final.trigger)
         self.assertEqual((300.0, 900.0), (policy.final.target_seconds, policy.final.maximum_seconds))
         self.assertEqual("file-task", policy.on_budget_exceeded)
         self.assertTrue(policy.unmatched_is_critical)
@@ -113,21 +113,21 @@ class ClosedSchemaTests(unittest.TestCase):
                 )
 
     def test_manual_omits_trigger_and_hard_requires_supported_trigger(self):
-        manual = replaced('mode = "hard"\ntrigger = "pull-request"', 'mode = "manual"')
-        self.assertEqual("manual", CONFIG.parse_policy(manual).final.mode)
+        hard = replaced('mode = "manual"', 'mode = "hard"\ntrigger = "pull-request"')
+        self.assertEqual("hard", CONFIG.parse_policy(hard).final.mode)
         self.assertEqual(frozenset(("pull-request",)), CONFIG.FINAL_TRIGGERS)
 
         invalid = (
             (
-                replaced('mode = "hard"\ntrigger = "pull-request"', 'mode = "manual"\ntrigger = "merge"'),
+                replaced('mode = "manual"', 'mode = "manual"\ntrigger = "merge"'),
                 "trigger must be omitted",
             ),
-            (replaced('trigger = "pull-request"\n', ""), "trigger is required"),
-            (replaced('trigger = "pull-request"', 'trigger = "pre-commit"'), "trigger must be one of"),
-            (replaced('trigger = "pull-request"', 'trigger = "task-review"'), "trigger must be one of"),
-            (replaced('trigger = "pull-request"', 'trigger = "merge"'), "trigger must be one of"),
-            (replaced('mode = "hard"', 'mode = "soft"'), "mode must be one of"),
-            (replaced('mode = "hard"', 'mode = "off"'), "mode must be one of"),
+            (replaced('mode = "manual"', 'mode = "hard"'), "trigger is required"),
+            (replaced('mode = "manual"', 'mode = "hard"\ntrigger = "pre-commit"'), "trigger must be one of"),
+            (replaced('mode = "manual"', 'mode = "hard"\ntrigger = "task-review"'), "trigger must be one of"),
+            (replaced('mode = "manual"', 'mode = "hard"\ntrigger = "merge"'), "trigger must be one of"),
+            (replaced('mode = "manual"', 'mode = "soft"'), "mode must be one of"),
+            (replaced('mode = "manual"', 'mode = "off"'), "mode must be one of"),
         )
         for text, pattern in invalid:
             with self.subTest(pattern=pattern):
@@ -287,18 +287,22 @@ class PolicyUnionTests(unittest.TestCase):
         result = CONFIG.classify_paths(("services/example/app.py",), union)
         self.assertFalse(result.is_critical)
         self.assertEqual(("ordinary-repository-work",), result.reversible_ids)
-        self.assertEqual(("pull-request",), union.hard_triggers)
+        self.assertEqual((), union.hard_triggers)
 
     def test_hard_trigger_and_smaller_limits_survive_candidate_downgrade(self):
+        hard_base = CONFIG.parse_policy(replaced(
+            'mode = "manual"',
+            'mode = "hard"\ntrigger = "pull-request"',
+        ))
         candidate_text = replaced(
-            'mode = "hard"\ntrigger = "pull-request"\ntarget_seconds = 300\nmaximum_seconds = 900',
-            'mode = "manual"\ntarget_seconds = 600\nmaximum_seconds = 1200',
+            'target_seconds = 300\nmaximum_seconds = 900',
+            'target_seconds = 600\nmaximum_seconds = 1200',
         ).replace(
             "target_seconds = 60\nmaximum_seconds = 60",
             "target_seconds = 120\nmaximum_seconds = 120",
             1,
         )
-        union = CONFIG.union_policies(self.base, CONFIG.parse_policy(candidate_text))
+        union = CONFIG.union_policies(hard_base, CONFIG.parse_policy(candidate_text))
 
         self.assertEqual(("pull-request",), union.hard_triggers)
         self.assertEqual((60.0, 60.0), (union.routine.target_seconds, union.routine.maximum_seconds))

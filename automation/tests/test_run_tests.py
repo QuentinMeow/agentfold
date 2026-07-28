@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import os
 import subprocess
 import tempfile
@@ -360,6 +362,29 @@ class StagedTestSelectionTests(unittest.TestCase):
         )
         self.assertTrue(options.provider_hard)
 
+    def test_provider_hard_fails_closed_before_discovery_or_preflight(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            view = Path(scratch)
+            with mock.patch.object(
+                RUN_TESTS,
+                "repository_test_files",
+                side_effect=AssertionError("candidate discovery ran"),
+            ), mock.patch.object(
+                RUN_TESTS,
+                "provider_hard_preflight",
+                side_effect=AssertionError("obsolete preflight ran"),
+            ):
+                self.assertEqual(
+                    1,
+                    RUN_TESTS.main((
+                        "--provider-hard",
+                        "--view-root",
+                        str(view),
+                        "--test-file",
+                        "automation/tests/test_probe.py",
+                    )),
+                )
+
     def test_staged_and_explicit_view_are_mutually_exclusive(self):
         with self.assertRaises(SystemExit):
             RUN_TESTS.parse_arguments(("--staged", "--view-root", "/tmp/view"))
@@ -376,6 +401,39 @@ class StagedTestSelectionTests(unittest.TestCase):
 
 
 class RunTestsIsolationTests(unittest.TestCase):
+    def test_ordinary_runner_describes_its_cooperative_evidence_boundary(self):
+        selection = RUN_TESTS.TestSelection("full", "probe", ())
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            RUN_TESTS.report_selection(selection)
+        self.assertIn("evidence authority: cooperative-same-interpreter", output.getvalue())
+        self.assertIn("controlled completion: false", output.getvalue())
+        self.assertIn("enforcement eligible: false", output.getvalue())
+
+    def test_same_interpreter_test_can_exit_zero_before_a_completion_marker(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            view = Path(scratch) / "view"
+            test = view / "automation/tests/test_early_exit.py"
+            test.parent.mkdir(parents=True)
+            marker = view / "completion.marker"
+            test.write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "os._exit(0)\n"
+                f"Path({str(marker)!r}).write_text('completed')\n"
+            )
+
+            self.assertEqual(
+                0,
+                RUN_TESTS.main((
+                    "--view-root",
+                    str(view),
+                    "--test-file",
+                    "automation/tests/test_early_exit.py",
+                )),
+            )
+            self.assertFalse(marker.exists())
+
     def test_provider_view_is_made_nonwritable_without_changing_executability(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch) / "view"

@@ -529,3 +529,127 @@ $ git diff --cached --check
 $ python3 -m py_compile automation/reconcile/reconcile.py automation/tests/test_reconcile_queue.py
 <no output; exit 0>
 ```
+
+## Authorized manual-only production pivot
+
+The first combined focused invocation did not pass: configuration had two stale hard-starter
+expectations, and the gate suite exposed a macOS process-group `PermissionError` during timeout
+cleanup. The expectations were corrected for the manual starter, and cleanup now proceeds to
+the individually owned process when a group signal is not permitted. No full-suite result is
+claimed for this checkpoint.
+
+```
+$ python3 -m unittest automation.tests.test_test_gate_config
+Ran 28 tests in 0.201s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 53 tests in 15.856s
+OK (skipped=1: platform containment)
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 49 tests in 2.857s
+OK
+
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow
+Ran 18 tests in 0.051s
+OK (skipped=6: hard-regime-only assertions)
+
+$ python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_trusted_gate_migration_never_mixes_provider_regimes
+Ran 1 test in 0.013s
+OK
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ python3 -m py_compile automation/run_test_gate.py automation/run_tests.py automation/test_gate_config.py automation/tests/test_run_test_gate.py automation/tests/test_run_tests.py automation/tests/test_test_gate_config.py automation/tests/test_github_action_projection_workflow.py
+<no output; exit 0>
+
+$ ruby -e 'require "yaml"; YAML.safe_load(File.read(".github/workflows/harness.yml"), permitted_classes: [], aliases: true)'
+<no output; exit 0>
+
+$ sha256sum .github/workflows/harness.yml automation/tests/fixtures/manual-harness.yml
+a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1  .github/workflows/harness.yml
+a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1  automation/tests/fixtures/manual-harness.yml
+
+$ cmp -s .github/workflows/harness.yml automation/tests/fixtures/manual-harness.yml
+<no output; exit 0>
+
+$ rg -n 'AGENTFOLD_PUBLISHER|create-github-app-token|statuses: write|api.github.com/repos/.*/statuses|prepare-trusted-final-test-gate|trusted-final-test-runner|publish-trusted-final-test-check' .github/workflows/harness.yml
+<no matches; exit 1 as required by the enclosing negative assertion>
+```
+
+The single required normal commit attempt was not bypassed or rerun:
+
+```
+$ git commit -m "harness: make final verification manual and fail closed"
+pre-commit: routine test gate
+outcome: blocked-incomplete
+evidence_authority: cooperative-same-interpreter
+controlled_completion: false
+enforcement_eligible: false
+enforcement: not-enforced
+reason: required critical checks did not complete successfully: repository-tests/full
+core-scope: pass (executed, 0.58s)
+reconcile: pass (executed, 15.29s)
+repository-tests/base-pinned-floor: incomplete (executed, 42.44s)
+duration: 60.19s
+target: exceeded 60.00s; budget filing updated
+<exit 1; no commit created>
+```
+
+## Manual-boundary documentation repair
+
+Provider review P2 found that the staged handbook and automation contract still implied a live
+configured final adapter and hard admission boundary. The repair makes final evidence
+explicit-only, describes `hard` plus its pull-request trigger as reserved future-compatible
+syntax, and states that the cooperative floor cannot admit or reject a protected transition.
+No full suite was run for this documentation-only repair.
+
+```
+$ ! rg -n -i 'configured final adapter|base hard boundary|boundary that admits it|This deliberately enforces backwards-compatible|is rejected because the older base-pinned' handbook/testing-gates.md automation/AGENTS.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/plan.md
+<no matches; exit 0>
+
+$ rg -n -i 'explicit final command|fail closed before candidate execution|future policy intent|checks cooperatively|not a live provider boundary|cannot reject or admit a protected transition' handbook/testing-gates.md automation/AGENTS.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/plan.md
+<matching manual-boundary statements; exit 0>
+
+$ python3 -m unittest automation.tests.test_test_gate_config automation.tests.test_github_action_projection_workflow
+Ran 46 tests in 0.213s
+OK (skipped=6)
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```
+
+## Manual-boundary line-budget repair
+
+The first post-repair review found one line-budget finding. The working file was compressed from
+61 to 60 lines without changing the explicit-only/manual-boundary meaning. The rerun below is
+against the staged repaired candidate; no full suite was run.
+
+```
+$ wc -l automation/AGENTS.md
+61 automation/AGENTS.md
+
+$ python3 automation/reconcile/reconcile.py --check
+[agents-budget] automation/AGENTS.md: 61 lines exceeds the 60-line budget
+reconcile: 1 finding(s)
+
+$ wc -l automation/AGENTS.md
+60 automation/AGENTS.md
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```

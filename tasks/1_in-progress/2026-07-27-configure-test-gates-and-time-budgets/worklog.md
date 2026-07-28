@@ -173,3 +173,53 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Updated the task acceptance criteria, design authorization, and remaining plan. This resolving
   checkpoint changes records only: no production policy, configuration, workflow, publisher, or
   runner behavior is claimed as implemented.
+
+## 2026-07-28 — authorized manual-only production pivot (codex and delegated implementation)
+
+- Replaced the hard workflow byte-for-byte with the base-pinned manual fixture. The retained
+  `pull_request_target` jobs project durable actions, while a credential-free `pull_request` job
+  runs cooperative complete-test diagnostics. The workflow has no hard-gate triad, publisher
+  environment, GitHub App credential, status-writing permission, or direct status API call.
+- Changed the starter policy to `mode = "manual"` with no trigger while retaining validation of
+  the reserved `hard` plus `pull-request` syntax. Every named transition and every
+  `--provider-hard` request now returns `blocked-incomplete` before candidate discovery or
+  execution and before receipt access.
+- Bumped reports to v2 and receipts to v3. Both bind
+  `evidence_authority: cooperative-same-interpreter`, `controlled_completion: false`, and
+  `enforcement_eligible: false`; reports also say `enforcement: not-enforced`. Old or incomplete
+  receipts cannot be reused.
+- Added the adversarial `os._exit(0)` canary. It demonstrates that the cooperative runner can
+  return zero before a later completion marker, paired with a gate regression proving that an
+  automatic transition never starts that candidate-controlled interpreter.
+- The first combined focused run exposed a pre-existing macOS cleanup edge where process-group
+  signaling can return `PermissionError` even though the individual process remains killable.
+  Cleanup now treats that group-level result like an unavailable group and continues with the
+  individual process signal; the focused gate suite then passed.
+- Focused configuration, gate, runner, workflow, and queue regressions passed, as did structural
+  reconciliation, compilation, YAML parsing, exact workflow comparison, and the closed publisher-
+  authority search. The full suite was deliberately not run at this implementation checkpoint;
+  plan step 12 remains open for independent review and complete verification.
+- The required normal commit attempt ran the routine hook once and stopped safely after 60.19
+  seconds: core scope and reconciliation passed, but the base-pinned floor exhausted the routine
+  interval after 42.44 seconds. The commit was not created, the hook was not bypassed or rerun,
+  and the staged implementation remains ready for an exact final prewarm at the next boundary.
+
+## 2026-07-28 — manual-boundary documentation repair (codex)
+
+- A provider review found a P2 documentation error: the staged handbook and automation contract
+  still described a configured final adapter and a live hard admission boundary after the
+  authorized manual-only pivot.
+- Repaired the active documentation and plan. Final evidence is explicit-only; `hard` and its
+  pull-request trigger are retained only as future-compatible policy syntax; named transitions
+  and `--provider-hard` fail closed before candidate execution. The base-pinned floor now says it
+  checks cooperatively and cannot admit or reject a protected transition.
+- Focused configuration/workflow tests, reconciliation, whitespace checks, and targeted wording
+  assertions passed. No full suite, commit, push, queue record, or immutable history was changed.
+
+## 2026-07-28 — manual-boundary line-budget repair (codex)
+
+- The first post-repair reconciler run reported one finding: `automation/AGENTS.md` had grown to
+  61 lines, exceeding its 60-line budget. The prior documentation repair remains intact.
+- Compressed the manual-boundary rule to 60 lines without restoring any configured-adapter or
+  live-hard-boundary claim. The staged rerun is recorded below with the repaired zero-finding
+  result.
