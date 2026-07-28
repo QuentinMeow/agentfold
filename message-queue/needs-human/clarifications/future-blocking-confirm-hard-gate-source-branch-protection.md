@@ -1,6 +1,6 @@
 # Before activation, should the hard gate exclude forks and protect every `task/**` branch?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-27, by codex, from task `2026-07-27-configure-test-gates-and-time-budgets`
 **Action:** Confirm that automatic enforcement may cover only same-repository `task/**` pull requests and that those source branches will prohibit force pushes, deletion, and bypasses.
 **Full context:** `handbook/testing-gates.md`

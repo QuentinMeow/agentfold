@@ -1,6 +1,6 @@
 # Should AgentFold turn on GitHub-enforced final tests, or keep them manual?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-27, by codex, from task `2026-07-27-configure-test-gates-and-time-budgets`
 **Action:** Decide whether GitHub should automatically block a merge until the complete tests pass. Choose Option A to turn that protection on, or Option B to keep the final test as a manual check.
 **Full context:** `handbook/testing-gates.md`
