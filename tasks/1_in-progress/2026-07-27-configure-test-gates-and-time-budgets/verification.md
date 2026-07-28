@@ -529,3 +529,48 @@ $ git diff --cached --check
 $ python3 -m py_compile automation/reconcile/reconcile.py automation/tests/test_reconcile_queue.py
 <no output; exit 0>
 ```
+
+## Staged cleanup bridge: focused evidence and pre-repair final failures
+
+This bridge invalidates the earlier test-only approval. It is the bootstrap step before the full
+manual-v3 production pivot, not that production pivot, and it changes no ADR. Its classifier
+admits exactly cleanup-fixed hard-v2 and manual-v3; original hard and every unlisted state fail
+closed.
+
+The first pre-repair exact staged candidate `53213fc…` did not pass. The retained evidence records
+core scope passing in 0.36 seconds, reconciliation passing in 11.70 seconds, and the trusted floor
+failing after 469.53 seconds at
+`TestGateTests.test_maximum_terminates_the_whole_component_process_group` when `os.killpg` raised
+`EPERM`. Fourteen of 15 files passed and the full gate took 483.20 seconds. Because the gate
+failed, it wrote no receipt; no commit was created.
+
+One explicitly bounded byte-identical pre-repair retry also did not pass. The retained machine
+report records 499.307663 seconds (about 499.31 seconds), while the append-only timing journal
+records 499.207190 seconds (about 499.21 seconds). The evidence records core scope passing in
+0.35 seconds, reconciliation passing in 12.35 seconds, and the trusted floor failing after
+484.97 seconds at the different test
+`TestGateTests.test_index_drift_during_selected_test_timeout_blocks`, again when `os.killpg`
+raised `EPERM`. Fourteen of 15 files passed. The failed gate wrote no receipt, no commit was
+created, and no third retry was run.
+
+The differing failing tests and the common `EPERM` identify a real legacy Darwin/macOS cleanup
+portability defect. The staged repair covers that path in focused checks and catches
+`PermissionError` only around process-group and owned-descendant signals. Direct-child
+`PermissionError` and unrelated `OSError` still propagate and therefore remain fail-closed;
+existing real tests are unchanged. No exact post-repair final gate has run, so its result is
+unverified rather than presently proven blocked.
+
+Focused staged implementation evidence passed: deterministic cases 4/4, real timeout cases 2/2,
+classifier cases 5 direct plus 5 package, configuration cases 28 direct plus 28 package, selected
+gate checks, `reconcile: 0 finding(s)`, compilation, and whitespace/diff checks. The actual
+composite plan is 15 base-floor tests and 3 supplemental tests.
+
+Independent revision-bound cleanup-semantics and migration/provider reviews both APPROVE
+implementation diff `4ab89f5c…`. Their closure testing rejected 14 crossed combinations,
+original hard, 8 unknown states, and 8 one-byte mutations. The reviewed implementation scope was
+four files:
+`automation/run_test_gate.py`, `automation/tests/test_gate_migration_snapshots.py`,
+`automation/tests/test_run_test_gate.py`, and `automation/tests/test_test_gate_config.py`; there
+was no authority, configuration, workflow, or `automation/run_tests.py` drift. The current staged
+revision also includes this task's `plan.md`, `worklog.md`, and `verification.md`, for seven staged
+files total.

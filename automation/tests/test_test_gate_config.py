@@ -4,6 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+if __package__:
+    from . import test_gate_migration_snapshots as MIGRATION
+else:
+    import test_gate_migration_snapshots as MIGRATION
+
 REPO = Path(__file__).resolve().parents[2]
 AUTOMATION = REPO / "automation"
 sys.path.insert(0, str(AUTOMATION))
@@ -17,6 +22,8 @@ from _vendor import tomli
 
 
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
+MIGRATION_REGIME = MIGRATION.classify_repository(REPO)
+MIGRATION_EXPECTATIONS = MIGRATION.EXPECTATIONS[MIGRATION_REGIME]
 
 
 def replaced(old, new, text=VALID_TEXT):
@@ -25,14 +32,35 @@ def replaced(old, new, text=VALID_TEXT):
     return text.replace(old, new, 1)
 
 
+def final_config(mode, text=VALID_TEXT):
+    """Return an explicit final-mode fixture independent of the starter mode."""
+    start = text.index("[testing.final]")
+    end = text.index("\n[testing.performance]", start)
+    trigger = 'trigger = "pull-request"\n' if mode == "hard" else ""
+    block = (
+        "[testing.final]\n"
+        'mode = "{}"\n'.format(mode)
+        + trigger
+        + "target_seconds = 300\n"
+        + "maximum_seconds = 900\n"
+    )
+    return text[:start] + block + text[end:]
+
+
+HARD_CONFIG = final_config("hard")
+MANUAL_CONFIG = final_config("manual")
+
+
 class StarterPolicyTests(unittest.TestCase):
     def test_starter_policy_has_reviewed_gate_contract(self):
         policy = CONFIG.load_policy(REPO / "agentfold.toml")
 
         self.assertEqual(1, policy.schema_version)
         self.assertEqual((60.0, 60.0), (policy.routine.target_seconds, policy.routine.maximum_seconds))
-        self.assertEqual("hard", policy.final.mode)
-        self.assertEqual("pull-request", policy.final.trigger)
+        self.assertEqual(MIGRATION_EXPECTATIONS["starter_final_mode"], policy.final.mode)
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["starter_final_trigger"], policy.final.trigger
+        )
         self.assertEqual((300.0, 900.0), (policy.final.target_seconds, policy.final.maximum_seconds))
         self.assertEqual("file-task", policy.on_budget_exceeded)
         self.assertTrue(policy.unmatched_is_critical)
@@ -113,21 +141,25 @@ class ClosedSchemaTests(unittest.TestCase):
                 )
 
     def test_manual_omits_trigger_and_hard_requires_supported_trigger(self):
-        manual = replaced('mode = "hard"\ntrigger = "pull-request"', 'mode = "manual"')
-        self.assertEqual("manual", CONFIG.parse_policy(manual).final.mode)
+        self.assertEqual("manual", CONFIG.parse_policy(MANUAL_CONFIG).final.mode)
+        self.assertEqual("hard", CONFIG.parse_policy(HARD_CONFIG).final.mode)
         self.assertEqual(frozenset(("pull-request",)), CONFIG.FINAL_TRIGGERS)
 
         invalid = (
             (
-                replaced('mode = "hard"\ntrigger = "pull-request"', 'mode = "manual"\ntrigger = "merge"'),
+                replaced(
+                    'mode = "manual"',
+                    'mode = "manual"\ntrigger = "merge"',
+                    MANUAL_CONFIG,
+                ),
                 "trigger must be omitted",
             ),
-            (replaced('trigger = "pull-request"\n', ""), "trigger is required"),
-            (replaced('trigger = "pull-request"', 'trigger = "pre-commit"'), "trigger must be one of"),
-            (replaced('trigger = "pull-request"', 'trigger = "task-review"'), "trigger must be one of"),
-            (replaced('trigger = "pull-request"', 'trigger = "merge"'), "trigger must be one of"),
-            (replaced('mode = "hard"', 'mode = "soft"'), "mode must be one of"),
-            (replaced('mode = "hard"', 'mode = "off"'), "mode must be one of"),
+            (replaced('trigger = "pull-request"\n', "", HARD_CONFIG), "trigger is required"),
+            (replaced('trigger = "pull-request"', 'trigger = "pre-commit"', HARD_CONFIG), "trigger must be one of"),
+            (replaced('trigger = "pull-request"', 'trigger = "task-review"', HARD_CONFIG), "trigger must be one of"),
+            (replaced('trigger = "pull-request"', 'trigger = "merge"', HARD_CONFIG), "trigger must be one of"),
+            (replaced('mode = "hard"', 'mode = "soft"', HARD_CONFIG), "mode must be one of"),
+            (replaced('mode = "hard"', 'mode = "off"', HARD_CONFIG), "mode must be one of"),
         )
         for text, pattern in invalid:
             with self.subTest(pattern=pattern):
@@ -287,18 +319,24 @@ class PolicyUnionTests(unittest.TestCase):
         result = CONFIG.classify_paths(("services/example/app.py",), union)
         self.assertFalse(result.is_critical)
         self.assertEqual(("ordinary-repository-work",), result.reversible_ids)
-        self.assertEqual(("pull-request",), union.hard_triggers)
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["identical_union_hard_triggers"],
+            union.hard_triggers,
+        )
 
     def test_hard_trigger_and_smaller_limits_survive_candidate_downgrade(self):
-        candidate_text = replaced(
-            'mode = "hard"\ntrigger = "pull-request"\ntarget_seconds = 300\nmaximum_seconds = 900',
-            'mode = "manual"\ntarget_seconds = 600\nmaximum_seconds = 1200',
+        candidate_text = MANUAL_CONFIG.replace(
+            "target_seconds = 300\nmaximum_seconds = 900",
+            "target_seconds = 600\nmaximum_seconds = 1200",
+            1,
         ).replace(
             "target_seconds = 60\nmaximum_seconds = 60",
             "target_seconds = 120\nmaximum_seconds = 120",
             1,
         )
-        union = CONFIG.union_policies(self.base, CONFIG.parse_policy(candidate_text))
+        union = CONFIG.union_policies(
+            CONFIG.parse_policy(HARD_CONFIG), CONFIG.parse_policy(candidate_text)
+        )
 
         self.assertEqual(("pull-request",), union.hard_triggers)
         self.assertEqual((60.0, 60.0), (union.routine.target_seconds, union.routine.maximum_seconds))

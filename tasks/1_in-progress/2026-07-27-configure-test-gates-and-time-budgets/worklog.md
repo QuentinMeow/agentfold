@@ -173,3 +173,37 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Updated the task acceptance criteria, design authorization, and remaining plan. This resolving
   checkpoint changes records only: no production policy, configuration, workflow, publisher, or
   runner behavior is claimed as implemented.
+
+## 2026-07-28 — staged cleanup-bridge evidence (codex)
+
+- The earlier test-only approval is no longer sufficient. The staged cleanup bridge comes before
+  the full manual-v3 production pivot and makes no ADR change: it only admits the cleanup-fixed
+  hard-v2 snapshot and the manual-v3 snapshot, rejecting the original hard state and every other
+  unlisted state.
+- The first pre-repair exact `final --explicit --staged` candidate `53213fc…` failed after
+  483.20 seconds:
+  core scope passed in 0.36 seconds, reconciliation passed in 11.70 seconds, and the trusted
+  floor failed after 469.53 seconds at
+  `TestGateTests.test_maximum_terminates_the_whole_component_process_group` when `os.killpg`
+  raised `EPERM`. Fourteen of 15 files passed; no receipt or commit was created.
+- One deliberately bounded byte-identical pre-repair retry failed: the retained machine report
+  records 499.307663 seconds (about 499.31 seconds), while the timing journal records
+  499.207190 seconds (about 499.21 seconds). Core scope passed in 0.35 seconds, reconciliation
+  passed in 12.35 seconds, and the trusted floor failed after 484.97 seconds at the different test
+  `TestGateTests.test_index_drift_during_selected_test_timeout_blocks`, again on `EPERM` from
+  `os.killpg`. Fourteen of 15 files passed. No third retry was run.
+- This is a real legacy Darwin/macOS cleanup-portability defect, not a changed-test regression.
+  The staged bridge repairs that path in focused checks by tolerating `PermissionError` only
+  when signalling the process group or owned descendants; direct-child `PermissionError` and
+  unrelated `OSError` remain fail-closed. Existing real tests were not changed. No exact
+  post-repair final gate has run, so that gate remains unverified rather than proven blocked.
+- Focused evidence passed: deterministic checks 4/4; real timeout checks 2/2; classifier checks
+  5 direct and 5 package; configuration checks 28 direct and 28 package; selected gate checks;
+  reconciliation with zero findings; compilation and diff checks. The actual composite plan has
+  15 base-floor tests and only 3 supplemental tests.
+- Two independent revision-bound reviews of implementation diff `4ab89f5c…`, one on cleanup
+  semantics and one on migration/provider boundaries, both approved. The reviewed implementation
+  scope was four files. They rejected 14 crossed states, the original hard state, 8 unknown
+  states, and 8 one-byte mutations, with no authority, configuration, workflow, or
+  `run_tests.py` drift. The current staged revision adds only `plan.md`, `worklog.md`, and
+  `verification.md` to those four implementation files, for seven staged files total.

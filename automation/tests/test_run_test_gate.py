@@ -15,6 +15,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+if __package__:
+    from . import test_gate_migration_snapshots as MIGRATION
+else:
+    import test_gate_migration_snapshots as MIGRATION
+
 
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
@@ -23,6 +28,30 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
+MIGRATION_REGIME = MIGRATION.classify_repository(GATE.REPO)
+MIGRATION_EXPECTATIONS = MIGRATION.EXPECTATIONS[MIGRATION_REGIME]
+
+
+def final_policy(mode):
+    """Build an explicit final-mode fixture independent of the starter mode."""
+    policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
+    return CONFIG.TestGatePolicy(
+        policy.schema_version,
+        policy.routine,
+        CONFIG.FinalGate(
+            mode,
+            "pull-request" if mode == "hard" else None,
+            policy.final.budget,
+        ),
+        policy.on_budget_exceeded,
+        policy.critical_bindings,
+        policy.reversible_bindings,
+        policy.unmatched_is_critical,
+    )
+
+
+def disposition_outcome(disposition):
+    return None if disposition is None else disposition[0]
 
 
 class TestGateTests(unittest.TestCase):
@@ -134,16 +163,7 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual(("automation/tests/test_run_tests.py",), deferred)
 
     def test_manual_final_runs_only_when_explicit(self):
-        policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
-        policy = CONFIG.TestGatePolicy(
-            policy.schema_version,
-            policy.routine,
-            CONFIG.FinalGate("manual", None, policy.final.budget),
-            policy.on_budget_exceeded,
-            policy.critical_bindings,
-            policy.reversible_bindings,
-            policy.unmatched_is_critical,
-        )
+        policy = final_policy("manual")
         named = GATE.parse_arguments(
             (
                 "final",
@@ -160,11 +180,14 @@ class TestGateTests(unittest.TestCase):
             )
         )
         explicit = GATE.parse_arguments(("final", "--explicit"))
-        self.assertEqual("not-run", GATE._final_disposition(named, policy)[0])
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["manual_named_outcome"],
+            disposition_outcome(GATE._final_disposition(named, policy)),
+        )
         self.assertIsNone(GATE._final_disposition(explicit, policy))
 
     def test_hard_final_runs_only_at_its_named_transition(self):
-        policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
+        policy = final_policy("hard")
         matching = GATE.parse_arguments(
             (
                 "final",
@@ -195,9 +218,15 @@ class TestGateTests(unittest.TestCase):
                 "task/example",
             )
         )
-        self.assertIsNone(GATE._final_disposition(matching, policy))
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["hard_matching_outcome"],
+            disposition_outcome(GATE._final_disposition(matching, policy)),
+        )
         if policy.final.trigger != "merge":
-            self.assertEqual("not-run", GATE._final_disposition(other, policy)[0])
+            self.assertEqual(
+                MIGRATION_EXPECTATIONS["hard_other_outcome"],
+                disposition_outcome(GATE._final_disposition(other, policy)),
+            )
 
     def test_final_admission_uses_exact_range_and_never_staged_scope(self):
         options = mock.Mock(
@@ -359,6 +388,67 @@ class TestGateTests(unittest.TestCase):
         )
         self.assertEqual("incomplete", result.outcome)
         self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_group_permission_error_continues_root_and_owned_signals(self):
+        process = mock.Mock(pid=101)
+        self_pid = os.getpid()
+        with mock.patch.object(
+            GATE.os, "killpg", side_effect=PermissionError(1, "not permitted")
+        ) as killpg, mock.patch.object(GATE.os, "kill") as kill:
+            GATE._signal_processes(
+                process, (self_pid, 202), GATE.signal.SIGTERM
+            )
+
+        killpg.assert_called_once_with(101, GATE.signal.SIGTERM)
+        self.assertEqual(
+            [
+                mock.call(101, GATE.signal.SIGTERM),
+                mock.call(202, GATE.signal.SIGTERM),
+            ],
+            kill.call_args_list,
+        )
+
+    def test_owned_permission_error_is_tolerated_and_cleanup_continues(self):
+        process = mock.Mock(pid=101)
+
+        def signal_pid(pid, _process_signal):
+            if pid == 202:
+                raise PermissionError(1, "not permitted")
+
+        with mock.patch.object(GATE.os, "killpg") as killpg, mock.patch.object(
+            GATE.os, "kill", side_effect=signal_pid
+        ) as kill:
+            GATE._signal_processes(process, (202, 303), GATE.signal.SIGKILL)
+
+        killpg.assert_called_once_with(101, GATE.signal.SIGKILL)
+        self.assertEqual(
+            [
+                mock.call(101, GATE.signal.SIGKILL),
+                mock.call(202, GATE.signal.SIGKILL),
+                mock.call(303, GATE.signal.SIGKILL),
+            ],
+            kill.call_args_list,
+        )
+
+    def test_direct_root_permission_error_propagates(self):
+        process = mock.Mock(pid=101)
+        with mock.patch.object(GATE.os, "killpg"), mock.patch.object(
+            GATE.os, "kill", side_effect=PermissionError(1, "not permitted")
+        ) as kill:
+            with self.assertRaises(PermissionError):
+                GATE._signal_processes(process, (202,), GATE.signal.SIGTERM)
+
+        kill.assert_called_once_with(101, GATE.signal.SIGTERM)
+
+    def test_unrelated_group_signal_error_propagates(self):
+        process = mock.Mock(pid=101)
+        with mock.patch.object(
+            GATE.os, "killpg", side_effect=OSError(5, "input/output error")
+        ), mock.patch.object(GATE.os, "kill") as kill:
+            with self.assertRaises(OSError):
+                GATE._signal_processes(process, (202,), GATE.signal.SIGTERM)
+
+        kill.assert_not_called()
 
     def test_component_environment_drops_sensitive_values(self):
         environment = {
@@ -763,7 +853,10 @@ class TestGateTests(unittest.TestCase):
             "kind": "transition",
             "transition": "pull-request",
         }
-        self.assertEqual("unobserved", report["enforcement"])
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["transition_enforcement"],
+            report["enforcement"],
+        )
 
     def test_staged_manifest_uses_frozen_index_and_detects_live_drift(self):
         environment = {
@@ -1116,6 +1209,54 @@ class TestGateTests(unittest.TestCase):
                 (plan["floor_root"] / "services/example/tests/test_renamed.py").is_file()
             )
 
+    def test_composite_plan_treats_candidate_only_test_helper_as_a_test(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            tests = repo / "automation/tests"
+            tests.mkdir(parents=True)
+            changed_test = "automation/tests/test_changed.py"
+            helper_test = "automation/tests/test_gate_migration_snapshots.py"
+            unchanged_test = "automation/tests/test_unchanged.py"
+            (repo / changed_test).write_text("VALUE = 'base'\n")
+            (repo / unchanged_test).write_text("UNCHANGED = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+
+            (repo / changed_test).write_text("VALUE = 'candidate'\n")
+            (repo / helper_test).write_text("SNAPSHOT = 'candidate-only'\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+
+            capture = Path(scratch) / "capture"
+            capture.mkdir()
+            frozen = capture / "candidate.index"
+            with mock.patch.object(GATE, "REPO", repo):
+                MANIFEST.copy_staged_index(repo, frozen)
+                candidate = MANIFEST.staged_candidate(repo, frozen)
+                candidate_root = capture / "candidate"
+                candidate_view = MANIFEST.materialize_staged_candidate(
+                    repo, frozen, candidate_root
+                )
+                plan = GATE.composite_test_plan(
+                    candidate, candidate_root, candidate_view, capture
+                )
+
+            self.assertEqual([], plan["identity"]["support_changed_namespaces"])
+            self.assertNotIn(helper_test, plan["floor_tests"])
+            self.assertFalse((plan["floor_root"] / helper_test).exists())
+            self.assertEqual(
+                (changed_test, helper_test),
+                plan["supplemental_tests"],
+            )
+            self.assertNotIn(unchanged_test, plan["supplemental_tests"])
+
     def test_composite_plan_identity_invalidates_v1_and_changed_floor_receipts(self):
         candidate = MANIFEST.CandidateManifest(
             "revision-range", "candidate", "closure", (), (), "index", "base", "head"
@@ -1151,7 +1292,9 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        self.assertEqual("agentfold.test-component-receipt/v2", GATE.RECEIPT_SCHEMA)
+        self.assertEqual(
+            MIGRATION_EXPECTATIONS["receipt_schema"], GATE.RECEIPT_SCHEMA
+        )
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")

@@ -874,7 +874,7 @@ def process_identity_discovery_available():
 def _signal_processes(process, owned, process_signal):
     try:
         os.killpg(process.pid, process_signal)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     try:
         os.kill(process.pid, process_signal)
@@ -885,7 +885,7 @@ def _signal_processes(process, owned, process_signal):
             continue
         try:
             os.kill(pid, process_signal)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
 
 

@@ -20,9 +20,12 @@
 
 ## Authorized manual-only replan
 
-- [x] 9. Admit the test-only migration floor in `21d5a24`. It accepts the complete known hard
-      regime or complete removal and uses a closed authority scan so renamed status writers,
-      permissions, tokens, and direct status API calls cannot hide outside known job names.
+- [x] 9. Replace the invalidated test-only approval of `21d5a24` with the staged cleanup
+      bridge: admit exactly cleanup-fixed hard-v2 and manual-v3 repository snapshots, reject
+      crossed, original-hard, unknown, and one-byte-mutated states, and preserve the existing
+      hard runtime until the manual-v3 production pivot. Two pre-repair final attempts were
+      blocked by Darwin `EPERM`; focused checks cover the staged repair, but an exact post-repair
+      final gate has not yet run and remains unverified.
 - [ ] 10. Switch the starter to manual final verification, remove the unsafe publisher, and make
       every automatic/provider-hard invocation fail closed.
 - [ ] 11. Label explicit final evidence as cooperative and record the same-interpreter exit
