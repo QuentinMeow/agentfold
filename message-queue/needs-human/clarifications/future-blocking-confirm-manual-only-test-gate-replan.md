@@ -1,6 +1,6 @@
 # May this task switch the starter final gate to manual-only verification?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-27, by codex, from task `2026-07-27-configure-test-gates-and-time-budgets`
 **Action:** Answer yes or no: may this task switch the starter final mode from hard to manual, remove the unsafe automatic publisher, keep hard syntax reserved and fail-closed, and move real automatic enforcement to the two follow-up tasks?
 **Full context:** `handbook/testing-gates.md`
