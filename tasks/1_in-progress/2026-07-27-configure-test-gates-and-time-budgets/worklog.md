@@ -160,3 +160,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Committed the records-only package as `13a60b8` (`harness: stop unsafe automatic test-gate
   activation`). Its normal hook reused the exact receipt and passed in 15.17 seconds; no push or
   merge occurred.
+
+## 2026-07-27 — manual-only replan confirmation folded (codex)
+
+- The owner's plain `yes` answer was transcribed without interpretation in commit `bed486c` and
+  the waiting action was claimed for folding in commit `a789631`.
+- Recorded the authorized manual-only decision in
+  `memory/decisions/2026-07-27-manual-only-test-gate-replan.md` and superseded the earlier trusted
+  pull-request gate decision. The starter must be manual, hard invocations must fail closed,
+  complete results must remain cooperative, and automatic enforcement stays with the two ordered
+  follow-up tasks.
+- Updated the task acceptance criteria, design authorization, and remaining plan. This resolving
+  checkpoint changes records only: no production policy, configuration, workflow, publisher, or
+  runner behavior is claimed as implemented.

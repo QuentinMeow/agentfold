@@ -1,10 +1,11 @@
 # Use a trusted preparer and credential-free runner for hard pull-request tests
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-27
 **Decided-by:** human
 **Description:** Hard pull-request tests use trusted base code to prepare the exact candidate, then run candidate tests in a fresh job with no repository permissions or secrets
 **Review-by:** 2027-01-23
+**Superseded-by:** `memory/decisions/2026-07-27-manual-only-test-gate-replan.md`
 
 ## Context
 

@@ -507,3 +507,25 @@ duration: 15.17s
 pre-commit: OK
 [task/2026-07-27-configure-test-gates-and-time-budgets 13a60b8] harness: stop unsafe automatic test-gate activation
 ```
+
+## Manual-only replan response lifecycle
+
+The owner's `yes` response was recorded in commit `bed486c` and the answered action's
+`waiting` to `folding` claim was committed as `a789631`. This resolving change creates the
+named ADR, updates the task-owned authorization records, and deletes the folded queue item.
+It contains no production policy, configuration, workflow, publisher, or runner change.
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_staged_human_deletion_requires_folding_and_response
+Ran 1 test in 0.488s
+OK
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --cached --check
+<no output; exit 0>
+
+$ python3 -m py_compile automation/reconcile/reconcile.py automation/tests/test_reconcile_queue.py
+<no output; exit 0>
+```
