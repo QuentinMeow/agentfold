@@ -30,4 +30,4 @@ With **yes**, a force-pushed `task/**` branch cannot replace earlier history, an
 request needs a maintainer-run final test. With **no**, GitHub does not claim this status is a
 safe automatic merge requirement.
 
-**Your answer:** ______
+**Your answer:** Not applicable because the activation is withdrawn. Any future proposal needs fresh review and provider evidence.

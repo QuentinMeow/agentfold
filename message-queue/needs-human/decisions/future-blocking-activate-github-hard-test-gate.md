@@ -69,4 +69,4 @@ when its result is missing or failing.
 Option A. It turns the complete test into an automatic merge safeguard while limiting the
 private App to reporting that one result.
 
-**Your answer:** ______
+**Your answer:** Option B — keep the final test manual. The superseded activation is withdrawn.
