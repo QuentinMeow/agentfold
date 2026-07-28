@@ -33,7 +33,7 @@ With **yes**, a maintainer deliberately runs the complete final gate and judges 
 evidence, while GitHub receives no automatic hard status from this task. With **no**, this task
 does not enter review and neither the current publisher nor a manual-only replacement ships.
 
-**Your answer:** ______
+**Your answer:** yes
 
 <!-- A concrete response is immutable. If it is a counter-question, fold the answer into
 Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->
