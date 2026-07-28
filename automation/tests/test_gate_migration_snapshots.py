@@ -26,7 +26,7 @@ MANUAL_V3_CONFIG_SHA256 = (
     "f23f32fa5e399bea12dd49871cd9154e0922164083876c717db96ffe7427f16c"
 )
 MANUAL_V3_RUNNER_SHA256 = (
-    "fb37e8361263a054859e13789b645f57b88eb8f922161ec2818156471d0a50cc"
+    "a27b85db53896db9c81861e9e293464b3f49e014dbefc7ad4410fee30069498e"
 )
 MANUAL_V3_TEST_RUNNER_SHA256 = (
     "dbdc4cfeb4020551480c797944c203378ea26e9e2d2efea4d1dd5758b5b71c89"
@@ -170,6 +170,19 @@ class GateMigrationSnapshotTests(unittest.TestCase):
                 ):
                     with self.assertRaisesRegex(AssertionError, "not one exact admitted"):
                         classify(b"config", b"gate", b"tests", b"workflow")
+
+    def test_previous_manual_runner_tuple_is_rejected(self):
+        previous_manual = (
+            MANUAL_V3_CONFIG_SHA256,
+            "fb37e8361263a054859e13789b645f57b88eb8f922161ec2818156471d0a50cc",
+            MANUAL_V3_TEST_RUNNER_SHA256,
+            MANUAL_V3_WORKFLOW_SHA256,
+        )
+        with mock.patch(
+            "{}._sha256".format(__name__), side_effect=previous_manual
+        ):
+            with self.assertRaisesRegex(AssertionError, "not one exact admitted"):
+                classify(b"config", b"gate", b"tests", b"workflow")
 
     def test_unknown_digest_on_each_axis_is_rejected(self):
         hard = (
