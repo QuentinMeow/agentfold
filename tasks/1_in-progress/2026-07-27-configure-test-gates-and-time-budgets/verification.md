@@ -467,3 +467,43 @@ $ python3 -m py_compile automation/run_test_gate.py automation/tests/test_run_te
 $ git diff --check
 <no output; exit 0>
 ```
+
+## Records-only replan checkpoint and handover
+
+Two independent reviewers approved test-only migration snapshot `21d5a24`. This approval does
+not authorize a production-policy change: the current hard workflow and policy remain unchanged
+while the manual-only replan clarification is waiting.
+
+The exact staged records candidate was prewarmed before committing. It passed all required
+coverage and wrote receipt `4cc6c4a986628b2e3cc26c355bd7ac7cf2f19300b35c33a1c3a07b5e9a324951` for
+candidate `aa1815f2d5fbd81d63becdc08101cca9621bae1948b1ec9f53b593b642a68242`. The 300-second
+target was exceeded, so the generated final-budget evidence recorded occurrence 6; that
+append-only journal is intentionally unstaged.
+
+```
+$ python3 automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+evidence: executed
+enforcement: unobserved
+candidate: aa1815f2d5fbd81d63becdc08101cca9621bae1948b1ec9f53b593b642a68242
+component timings:
+  core-scope: pass (executed, 0.35s)
+  reconcile: pass (executed, 14.00s)
+  repository-tests/trusted-floor: pass (executed, 452.26s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 15 selected, 0 deferred, 0 incomplete
+duration: 468.19s
+target: exceeded 300.00s; budget filing updated
+```
+
+```
+$ git commit -m "harness: stop unsafe automatic test-gate activation"
+pre-commit: routine test gate
+outcome: pass
+candidate: aa1815f2d5fbd81d63becdc08101cca9621bae1948b1ec9f53b593b642a68242
+repository-tests/full: pass (reused, 0.00s)
+duration: 15.17s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 13a60b8] harness: stop unsafe automatic test-gate activation
+```

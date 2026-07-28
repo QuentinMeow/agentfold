@@ -145,3 +145,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The records-only commit attempt ran the normal routine hook and stopped safely after its
   required trusted-floor component exceeded the bounded interval. No commit was created and the
   hook was not bypassed.
+
+## 2026-07-27 — manual-test-gate replan handover (codex)
+
+- Two independent reviewers approved the test-only migration snapshot `21d5a24`; its change is
+  intentionally limited to the migration floor and leaves production policy unchanged.
+- Ran an exact staged final prewarm for the records-only package. Candidate
+  `aa1815f2d5fbd81d63becdc08101cca9621bae1948b1ec9f53b593b642a68242` received receipt
+  `4cc6c4a986628b2e3cc26c355bd7ac7cf2f19300b35c33a1c3a07b5e9a324951`: core scope took
+  0.35 seconds, reconciliation 14.00 seconds, and the trusted floor 452.26 seconds; total
+  time was 468.19 seconds.
+- The final target of 300 seconds was exceeded, so the append-only final-budget evidence now
+  records occurrence 6. The journal remains deliberately unstaged for a later records commit.
+- Committed the records-only package as `13a60b8` (`harness: stop unsafe automatic test-gate
+  activation`). Its normal hook reused the exact receipt and passed in 15.17 seconds; no push or
+  merge occurred.
