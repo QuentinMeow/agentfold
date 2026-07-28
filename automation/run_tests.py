@@ -344,6 +344,9 @@ def report_selection(selection, repository=None):
     repository = REPO if repository is None else Path(repository)
     print(f"test lane: {selection.lane}")
     print(f"test reason: {selection.reason}")
+    print("evidence authority: cooperative-same-interpreter")
+    print("controlled completion: false")
+    print("enforcement eligible: false")
     print("selected test files:")
     if selection.test_files:
         for test in selection.test_files:
@@ -990,6 +993,13 @@ def run_provider_test(test_path, cwd, environment, home, temporary):
 def main(arguments=()):
     started = time.monotonic()
     options = parse_arguments(arguments)
+    if options.provider_hard:
+        print(
+            "provider-hard testing is unavailable: install a controlled external "
+            "completion oracle and independently controlled publisher",
+            file=sys.stderr,
+        )
+        return 1
     source_repository = (
         options.view_root.resolve() if options.view_root else REPO
     )
@@ -1027,12 +1037,6 @@ def main(arguments=()):
         print("no repository tests found")
         print(f"test elapsed: {time.monotonic() - started:.2f}s")
         return 0
-    if options.provider_hard:
-        provider_hard_preflight()
-        if _provider_candidate_pids():
-            raise RuntimeError(
-                "provider-hard candidate UID is already active before tests"
-            )
     configured_identity = configured_git_identity()
     child_environment = isolated_test_environment()
     for name, value in configured_identity.items():

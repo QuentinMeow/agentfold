@@ -15,12 +15,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-if __package__:
-    from . import test_gate_migration_snapshots as MIGRATION
-else:
-    import test_gate_migration_snapshots as MIGRATION
-
-
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
 SPEC = importlib.util.spec_from_file_location("run_test_gate", MODULE_PATH)
@@ -28,10 +22,6 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
-MIGRATION_REGIME = MIGRATION.classify_repository(GATE.REPO)
-MIGRATION_EXPECTATIONS = MIGRATION.EXPECTATIONS[MIGRATION_REGIME]
-
-
 def final_policy(mode):
     """Build an explicit final-mode fixture independent of the starter mode."""
     policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
@@ -48,13 +38,38 @@ def final_policy(mode):
         policy.reversible_bindings,
         policy.unmatched_is_critical,
     )
-
-
-def disposition_outcome(disposition):
-    return None if disposition is None else disposition[0]
-
-
 class TestGateTests(unittest.TestCase):
+    @staticmethod
+    def _kill_exact_marked_fixture_pid(pid_file, marker):
+        """Best-effort finalizer that can kill only the fixture's recorded process."""
+        try:
+            pid = int(pid_file.read_text())
+        except (FileNotFoundError, OSError, ValueError):
+            return
+        try:
+            result = subprocess.run(
+                ["ps", "eww", "-p", str(pid), "-o", "uid=,command="],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=0.2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        fields = result.stdout.strip().split(None, 1)
+        if len(fields) != 2:
+            return
+        try:
+            uid = int(fields[0])
+        except ValueError:
+            return
+        if uid != os.getuid() or marker not in fields[1].split():
+            return
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
     def _make_reconciler_topology_repository(self, destination):
         environment = {
             name: value for name, value in os.environ.items() if not name.startswith("GIT_")
@@ -162,7 +177,7 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual((), selected)
         self.assertEqual(("automation/tests/test_run_tests.py",), deferred)
 
-    def test_manual_final_runs_only_when_explicit(self):
+    def test_manual_final_runs_explicitly_and_named_transition_fails_closed(self):
         policy = final_policy("manual")
         named = GATE.parse_arguments(
             (
@@ -180,13 +195,10 @@ class TestGateTests(unittest.TestCase):
             )
         )
         explicit = GATE.parse_arguments(("final", "--explicit"))
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["manual_named_outcome"],
-            disposition_outcome(GATE._final_disposition(named, policy)),
-        )
+        self.assertEqual("blocked-incomplete", GATE._final_disposition(named, policy)[0])
         self.assertIsNone(GATE._final_disposition(explicit, policy))
 
-    def test_hard_final_runs_only_at_its_named_transition(self):
+    def test_reserved_hard_transition_also_fails_closed(self):
         policy = final_policy("hard")
         matching = GATE.parse_arguments(
             (
@@ -218,15 +230,9 @@ class TestGateTests(unittest.TestCase):
                 "task/example",
             )
         )
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["hard_matching_outcome"],
-            disposition_outcome(GATE._final_disposition(matching, policy)),
-        )
+        self.assertEqual("blocked-incomplete", GATE._final_disposition(matching, policy)[0])
         if policy.final.trigger != "merge":
-            self.assertEqual(
-                MIGRATION_EXPECTATIONS["hard_other_outcome"],
-                disposition_outcome(GATE._final_disposition(other, policy)),
-            )
+            self.assertEqual("blocked-incomplete", GATE._final_disposition(other, policy)[0])
 
     def test_final_admission_uses_exact_range_and_never_staged_scope(self):
         options = mock.Mock(
@@ -430,6 +436,168 @@ class TestGateTests(unittest.TestCase):
             kill.call_args_list,
         )
 
+    def test_portable_snapshot_discovers_ancestry_and_exact_same_user_token_once(self):
+        token = "exact-token"
+        marker = f"{GATE.PROCESS_TOKEN_ENV}={token}"
+        output = "\n".join(
+            (
+                "101 1 999 root",
+                f"202 101 {os.getuid()} ancestry-only",
+                f"505 999 {os.getuid()} token-only {marker}",
+                f"303 999 {os.getuid() + 1} foreign {marker}",
+                f"404 999 {os.getuid()} near {marker}-suffix",
+                f"{os.getpid()} 999 {os.getuid()} self {marker}",
+            )
+        )
+        result = mock.Mock(stdout=output)
+        process = mock.Mock(pid=101)
+        with mock.patch.object(GATE.sys, "platform", "darwin"), mock.patch.object(
+            GATE.subprocess, "run", return_value=result
+        ) as run:
+            owned = GATE._contained_process_pids(
+                process, token, time.monotonic() + 1.0
+            )
+
+        self.assertEqual({202, 505}, owned)
+        run.assert_called_once()
+        self.assertEqual(
+            ["ps", "eww", "-axo", "pid=,ppid=,uid=,command="],
+            run.call_args[0][0],
+        )
+
+    def test_portable_snapshot_is_capped_at_300ms(self):
+        result = mock.Mock(stdout="")
+        with mock.patch.object(GATE.subprocess, "run", return_value=result) as run:
+            GATE._portable_process_snapshot(time.monotonic() + 1.0)
+
+        self.assertEqual(0.3, run.call_args[1]["timeout"])
+
+    def test_portable_snapshot_accepts_delayed_completion_within_budget(self):
+        result = mock.Mock(stdout=f"202 101 {os.getuid()} delayed\n")
+
+        def delayed_run(*_args, **_kwargs):
+            time.sleep(0.16)
+            return result
+
+        started = time.monotonic()
+        with mock.patch.object(GATE.subprocess, "run", side_effect=delayed_run):
+            rows = GATE._portable_process_snapshot(started + 0.4)
+
+        self.assertEqual(((202, 101, os.getuid(), "delayed"),), rows)
+        self.assertGreaterEqual(time.monotonic() - started, 0.15)
+
+    def test_portable_snapshot_timeout_returns_no_unbounded_discovery(self):
+        with mock.patch.object(
+            GATE.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(("ps",), 0.2),
+        ):
+            self.assertEqual((), GATE._portable_process_snapshot(time.monotonic() + 0.2))
+
+    def test_completed_portable_snapshot_is_consumed_at_exact_deadline(self):
+        token = "deadline-token"
+        marker = f"{GATE.PROCESS_TOKEN_ENV}={token}"
+        snapshot = (
+            (202, 101, os.getuid(), "ancestry-only"),
+            (505, 999, os.getuid(), f"token-only {marker}"),
+        )
+        clock = [0.0]
+
+        def complete_at_deadline(_deadline):
+            clock[0] = 1.0
+            return snapshot
+
+        process = mock.Mock(pid=101)
+        with mock.patch.object(GATE.sys, "platform", "darwin"), mock.patch.object(
+            GATE.time, "monotonic", side_effect=lambda: clock[0]
+        ), mock.patch.object(
+            GATE, "_portable_process_snapshot", side_effect=complete_at_deadline
+        ):
+            owned = GATE._contained_process_pids(process, token, 1.0)
+
+        self.assertEqual({202, 505}, owned)
+        with mock.patch.object(GATE.os, "killpg"), mock.patch.object(
+            GATE.os, "kill"
+        ) as kill:
+            GATE._signal_processes(process, owned, GATE.signal.SIGKILL)
+        self.assertIn(mock.call(202, GATE.signal.SIGKILL), kill.call_args_list)
+        self.assertIn(mock.call(505, GATE.signal.SIGKILL), kill.call_args_list)
+
+    def test_linux_discovery_does_not_use_portable_snapshot(self):
+        process = mock.Mock(pid=os.getpid())
+        proc = mock.Mock()
+        proc.is_dir.return_value = True
+        with mock.patch.object(GATE.sys, "platform", "linux"), mock.patch.object(
+            GATE, "Path", return_value=proc
+        ), mock.patch.object(GATE, "_descendant_pids", return_value=()), mock.patch.object(
+            GATE, "_owned_process_pids", return_value=()
+        ), mock.patch.object(GATE, "_portable_process_snapshot") as portable:
+            GATE._contained_process_pids(process, "token", time.monotonic() + 0.1)
+
+        portable.assert_not_called()
+
+    def test_cleanup_kills_first_owned_snapshot_before_rescanning(self):
+        process = mock.Mock(pid=101)
+        process.poll.return_value = 0
+        events = []
+
+        discoveries = iter(({202}, {303}))
+
+        def discover(*_args):
+            found = next(discoveries)
+            events.append(("discover", set(found)))
+            return found
+
+        def signal_processes(_process, owned, process_signal):
+            events.append(("signal", process_signal, set(owned)))
+
+        with mock.patch.object(
+            GATE,
+            "_contained_process_pids",
+            side_effect=discover,
+        ), mock.patch.object(GATE, "_signal_processes", side_effect=signal_processes), mock.patch.object(
+            GATE, "_reap_contained_processes"
+        ), mock.patch.object(
+            GATE.time,
+            "monotonic",
+            side_effect=(0.0, 0.0, 0.1, 0.1, 0.2, 0.96),
+        ):
+            GATE._kill_process_tree(process, 1.0, "token")
+
+        self.assertEqual(
+            [
+                ("discover", {202}),
+                ("signal", GATE.signal.SIGTERM, {202}),
+                ("signal", GATE.signal.SIGKILL, {202}),
+                ("discover", {303}),
+                ("signal", GATE.signal.SIGKILL, {202, 303}),
+                ("signal", GATE.signal.SIGKILL, {202, 303}),
+            ],
+            events,
+        )
+
+    def test_cleanup_reserves_snapshot_and_final_kill_time(self):
+        process = mock.Mock(pid=101)
+        process.poll.return_value = 0
+        deadlines = []
+
+        def discover(_process, _token, deadline, *_args):
+            deadlines.append(deadline)
+            return set()
+
+        started = time.monotonic()
+        cleanup_deadline = started + 0.2
+        with mock.patch.object(
+            GATE, "_contained_process_pids", side_effect=discover
+        ), mock.patch.object(GATE, "_signal_processes"), mock.patch.object(
+            GATE, "_reap_contained_processes"
+        ):
+            GATE._kill_process_tree(process, cleanup_deadline, "token")
+
+        self.assertLessEqual(deadlines[0], cleanup_deadline - 0.1)
+        self.assertTrue(all(deadline <= cleanup_deadline - 0.05 for deadline in deadlines[1:]))
+        self.assertTrue(all(call[2]["timeout"] <= 0.05 for call in process.wait.mock_calls))
+
     def test_direct_root_permission_error_propagates(self):
         process = mock.Mock(pid=101)
         with mock.patch.object(GATE.os, "killpg"), mock.patch.object(
@@ -544,76 +712,82 @@ class TestGateTests(unittest.TestCase):
     def test_setsid_escaped_child_holding_output_cannot_block_cleanup(self):
         if not GATE.process_identity_discovery_available():
             self.skipTest("process environment inspection is sandbox-restricted")
-        with tempfile.TemporaryDirectory() as scratch:
-            pid_file = Path(scratch) / "escaped.pid"
-            child = (
-                "import os,signal,time; os.setsid(); "
-                "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
-            )
-            parent = (
-                "import pathlib,subprocess,sys,time; "
-                f"p=subprocess.Popen([sys.executable,'-c',{child!r}]); "
-                f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid)); "
-                "time.sleep(30)"
-            )
-            started = time.monotonic()
-            result = GATE.run_component(
-                "probe",
-                [sys.executable, "-c", parent],
-                0.15,
-                cleanup_deadline=started + 0.45,
-            )
-            self.assertEqual("incomplete", result.outcome)
-            self.assertLess(time.monotonic() - started, 0.6)
-            self.assertIn("reserved execution interval", result.detail)
-            pid = int(pid_file.read_text())
-            deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.02)
-            else:
-                self.fail("setsid descendant survived gate-owned cleanup")
+        scratch_manager = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch_manager.cleanup)
+        pid_file = Path(scratch_manager.name) / "escaped.pid"
+        marker = "agentfold-setsid-" + os.urandom(12).hex()
+        self.addCleanup(self._kill_exact_marked_fixture_pid, pid_file, marker)
+        child = (
+            "import os,signal,time; os.setsid(); "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+        )
+        parent = (
+            "import pathlib,subprocess,sys,time; "
+            f"p=subprocess.Popen([sys.executable,'-c',{child!r},{marker!r}]); "
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid)); "
+            "time.sleep(30)"
+        )
+        started = time.monotonic()
+        result = GATE.run_component(
+            "probe",
+            [sys.executable, "-c", parent],
+            0.15,
+            cleanup_deadline=started + 0.75,
+        )
+        self.assertEqual("incomplete", result.outcome)
+        self.assertLess(time.monotonic() - started, 0.9)
+        self.assertIn("reserved execution interval", result.detail)
+        pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            self.fail("setsid descendant survived gate-owned cleanup")
 
     def test_reparented_daemon_is_found_by_gate_ownership_token(self):
         if not GATE.process_identity_discovery_available():
             self.skipTest("process environment inspection is sandbox-restricted")
-        with tempfile.TemporaryDirectory() as scratch:
-            pid_file = Path(scratch) / "daemon.pid"
-            daemon = (
-                "import os,pathlib,signal,time; "
-                "pid=os.fork(); "
-                "os._exit(0) if pid else None; "
-                "os.setsid(); pid=os.fork(); "
-                "os._exit(0) if pid else None; "
-                f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); "
-                "signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(30)"
-            )
-            parent = (
-                "import subprocess,sys,time; "
-                f"subprocess.Popen([sys.executable,'-c',{daemon!r}]); time.sleep(30)"
-            )
-            started = time.monotonic()
-            result = GATE.run_component(
-                "probe",
-                [sys.executable, "-c", parent],
-                0.2,
-                cleanup_deadline=started + 1.0,
-            )
-            self.assertEqual("incomplete", result.outcome)
-            self.assertTrue(pid_file.is_file())
-            pid = int(pid_file.read_text())
-            deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.02)
-            else:
-                self.fail("reparented daemon survived gate-owned cleanup")
+        scratch_manager = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch_manager.cleanup)
+        pid_file = Path(scratch_manager.name) / "daemon.pid"
+        marker = "agentfold-daemon-" + os.urandom(12).hex()
+        self.addCleanup(self._kill_exact_marked_fixture_pid, pid_file, marker)
+        daemon = (
+            "import os,pathlib,signal,time; "
+            "pid=os.fork(); "
+            "os._exit(0) if pid else None; "
+            "os.setsid(); pid=os.fork(); "
+            "os._exit(0) if pid else None; "
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); "
+            "signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(30)"
+        )
+        parent = (
+            "import subprocess,sys,time; "
+            f"subprocess.Popen([sys.executable,'-c',{daemon!r},{marker!r}]); time.sleep(30)"
+        )
+        started = time.monotonic()
+        result = GATE.run_component(
+            "probe",
+            [sys.executable, "-c", parent],
+            0.2,
+            cleanup_deadline=started + 1.15,
+        )
+        self.assertEqual("incomplete", result.outcome)
+        self.assertTrue(pid_file.is_file())
+        pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            self.fail("reparented daemon survived gate-owned cleanup")
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
@@ -677,6 +851,62 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual("none", result.evidence)
         self.assertIn("was not started", result.detail)
         popen.assert_not_called()
+
+    def test_automatic_transition_blocks_before_candidate_execution_or_receipt(self):
+        arguments = (
+            "final",
+            "--at-transition",
+            "pull-request",
+            "--base-revision",
+            "a" * 40,
+            "--head-revision",
+            "b" * 40,
+            "--candidate-revision",
+            "c" * 40,
+            "--branch",
+            "task/example",
+        )
+        captured = {}
+
+        def emit(report, *unused, **ignored):
+            captured.update(report)
+            return GATE.OUTCOME_EXIT[report["outcome"]]
+
+        with mock.patch.object(
+            GATE, "capture_candidate", side_effect=AssertionError("candidate executed")
+        ), mock.patch.object(
+            GATE, "run_component", side_effect=AssertionError("component executed")
+        ), mock.patch.object(
+            GATE, "write_receipt", side_effect=AssertionError("receipt written")
+        ), mock.patch.object(GATE, "emit_report", side_effect=emit):
+            self.assertEqual(1, GATE.main(arguments, started=time.monotonic()))
+
+        self.assertEqual("blocked-incomplete", captured["outcome"])
+        self.assertEqual("cooperative-same-interpreter", captured["evidence_authority"])
+        self.assertFalse(captured["controlled_completion"])
+        self.assertFalse(captured["enforcement_eligible"])
+        self.assertEqual("not-enforced", captured["enforcement"])
+        self.assertIn("controlled external completion oracle", captured["reason"])
+
+    def test_provider_hard_blocks_at_the_same_pre_execution_boundary(self):
+        arguments = (
+            "final",
+            "--provider-hard",
+            "--at-transition",
+            "pull-request",
+            "--base-revision",
+            "a" * 40,
+            "--head-revision",
+            "b" * 40,
+            "--candidate-revision",
+            "c" * 40,
+            "--branch",
+            "task/example",
+        )
+        with mock.patch.object(
+            GATE, "capture_candidate", side_effect=AssertionError("candidate executed")
+        ), mock.patch.object(GATE, "emit_report", return_value=1):
+            self.assertEqual(1, GATE.main(arguments, started=time.monotonic()))
 
     def test_report_states_best_effort_detached_cleanup_when_strong_is_absent(self):
         with mock.patch.object(
@@ -853,10 +1083,10 @@ class TestGateTests(unittest.TestCase):
             "kind": "transition",
             "transition": "pull-request",
         }
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["transition_enforcement"],
-            report["enforcement"],
-        )
+        self.assertEqual("not-enforced", report["enforcement"])
+        self.assertEqual("cooperative-same-interpreter", report["evidence_authority"])
+        self.assertFalse(report["controlled_completion"])
+        self.assertFalse(report["enforcement_eligible"])
 
     def test_staged_manifest_uses_frozen_index_and_detects_live_drift(self):
         environment = {
@@ -1223,7 +1453,7 @@ class TestGateTests(unittest.TestCase):
             tests = repo / "automation/tests"
             tests.mkdir(parents=True)
             changed_test = "automation/tests/test_changed.py"
-            helper_test = "automation/tests/test_gate_migration_snapshots.py"
+            helper_test = "automation/tests/test_helper_candidate.py"
             unchanged_test = "automation/tests/test_unchanged.py"
             (repo / changed_test).write_text("VALUE = 'base'\n")
             (repo / unchanged_test).write_text("UNCHANGED = True\n")
@@ -1292,9 +1522,7 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        self.assertEqual(
-            MIGRATION_EXPECTATIONS["receipt_schema"], GATE.RECEIPT_SCHEMA
-        )
+        self.assertEqual("agentfold.test-component-receipt/v3", GATE.RECEIPT_SCHEMA)
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")
@@ -1312,6 +1540,26 @@ class TestGateTests(unittest.TestCase):
             )
             with mock.patch.object(GATE, "REPO", repo):
                 self.assertIsNone(GATE.reusable_receipt(first))
+
+    def test_receipt_without_cooperative_authority_is_invalid(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        with mock.patch.object(GATE, "REPO", Path(tempfile.mkdtemp())):
+            (GATE.REPO / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=GATE.REPO, check=True)
+            binding = GATE.receipt_binding(
+                candidate, view, ("test.py",), "policy", "repository-tests/full"
+            )
+            directory = GATE._safe_local_directory(Path("tmp/test-gate-receipts"))
+            path = directory / f"{binding['binding_digest']}.json"
+            path.write_text(json.dumps({
+                "schema": GATE.RECEIPT_SCHEMA,
+                "outcome": "pass",
+                "binding": binding,
+            }))
+            self.assertIsNone(GATE.reusable_receipt(binding))
 
     def test_composite_plan_fails_closed_when_trusted_base_has_no_tests(self):
         candidate = MANIFEST.CandidateManifest(

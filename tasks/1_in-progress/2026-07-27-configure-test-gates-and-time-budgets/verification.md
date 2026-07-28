@@ -1,6 +1,6 @@
 # Verification — configurable test gates and time budgets
 
-**Verified:** 2026-07-27 by codex and delegated test agents
+**Verified:** 2026-07-28 by codex and delegated test and review agents
 
 Only commands actually run and their real reported output are recorded here.
 
@@ -568,9 +568,364 @@ composite plan is 15 base-floor tests and 3 supplemental tests.
 Independent revision-bound cleanup-semantics and migration/provider reviews both APPROVE
 implementation diff `4ab89f5c…`. Their closure testing rejected 14 crossed combinations,
 original hard, 8 unknown states, and 8 one-byte mutations. The reviewed implementation scope was
-four files:
-`automation/run_test_gate.py`, `automation/tests/test_gate_migration_snapshots.py`,
+four files: `automation/run_test_gate.py`, the then-tracked migration snapshot helper,
 `automation/tests/test_run_test_gate.py`, and `automation/tests/test_test_gate_config.py`; there
-was no authority, configuration, workflow, or `automation/run_tests.py` drift. The current staged
-revision also includes this task's `plan.md`, `worklog.md`, and `verification.md`, for seven staged
-files total.
+was no authority, configuration, workflow, or `automation/run_tests.py` drift. At that
+cleanup-bridge checkpoint, the staged revision also included this task's `plan.md`, `worklog.md`,
+and `verification.md`, for seven staged files total.
+
+## Authorized manual-only production pivot
+
+The first combined focused invocation did not pass: configuration had two stale hard-starter
+expectations, and the gate suite exposed a macOS process-group `PermissionError` during timeout
+cleanup. The expectations were corrected for the manual starter, and cleanup now proceeds to
+the individually owned process when a group signal is not permitted. No full-suite result is
+claimed for this checkpoint.
+
+Historical checkpoint summary, not retained command output: the recorded invocations were
+`python3 -m unittest automation.tests.test_test_gate_config` (28 tests passed),
+`python3 -m unittest automation.tests.test_run_test_gate` (53 tests passed, one skipped),
+`python3 -m unittest automation.tests.test_run_tests` (49 tests passed),
+`python3 -m unittest automation.tests.test_github_action_projection_workflow` (18 tests passed,
+six skipped), and
+`python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_trusted_gate_migration_never_mixes_provider_regimes`
+(one test passed). The checkpoint notes also record reconciliation with zero findings, successful
+compilation and YAML parsing, and byte equality between the workflow and manual fixture. The
+recorded SHA-256 for both files was
+`a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1`. These sentences are result
+summaries, not a reconstruction of `unittest` stdout.
+
+During this record repair, the actual successful negative assertion
+`! rg -n 'AGENTFOLD_PUBLISHER|create-github-app-token|statuses: write|api.github.com/repos/.*/statuses|prepare-trusted-final-test-gate|trusted-final-test-runner|publish-trusted-final-test-check' .github/workflows/harness.yml`
+completed with exit 0 and no output against the current staged production files.
+
+The single required normal commit attempt was not bypassed or rerun:
+
+```
+$ git commit -m "harness: make final verification manual and fail closed"
+pre-commit: routine test gate
+outcome: blocked-incomplete
+evidence_authority: cooperative-same-interpreter
+controlled_completion: false
+enforcement_eligible: false
+enforcement: not-enforced
+reason: required critical checks did not complete successfully: repository-tests/full
+core-scope: pass (executed, 0.58s)
+reconcile: pass (executed, 15.29s)
+repository-tests/base-pinned-floor: incomplete (executed, 42.44s)
+duration: 60.19s
+target: exceeded 60.00s; budget filing updated
+<exit 1; no commit created>
+```
+
+## Manual-boundary documentation repair
+
+Provider review P2 found that the staged handbook and automation contract still implied a live
+configured final adapter and hard admission boundary. The repair makes final evidence
+explicit-only, describes `hard` plus its pull-request trigger as reserved future-compatible
+syntax, and states that the cooperative floor cannot admit or reject a protected transition.
+No full suite was run for this documentation-only repair.
+
+```
+$ ! rg -n -i 'configured final adapter|base hard boundary|boundary that admits it|This deliberately enforces backwards-compatible|is rejected because the older base-pinned' handbook/testing-gates.md automation/AGENTS.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/plan.md
+<no matches; exit 0>
+
+$ rg -n -i 'explicit final command|fail closed before candidate execution|future policy intent|checks cooperatively|not a live provider boundary|cannot reject or admit a protected transition' handbook/testing-gates.md automation/AGENTS.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/plan.md
+<matching manual-boundary statements; exit 0>
+
+$ python3 -m unittest automation.tests.test_test_gate_config automation.tests.test_github_action_projection_workflow
+Ran 46 tests in 0.213s
+OK (skipped=6)
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```
+
+## Portable cleanup snapshot repair
+
+The non-`/proc` path now takes one bounded `ps eww` snapshot for ancestry and exact same-UID
+ownership-token discovery. It preserves 100 ms before cleanup deadline, 50 ms for `SIGTERM`, and
+50 ms for unconditional final `SIGKILL`/reap. This is focused verification only; no complete gate
+or full repository suite is claimed.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_discovers_ancestry_and_exact_same_user_token_once automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_is_capped_at_300ms automation.tests.test_run_test_gate.TestGateTests.test_linux_discovery_does_not_use_portable_snapshot automation.tests.test_run_test_gate.TestGateTests.test_cleanup_kills_first_owned_snapshot_before_rescanning automation.tests.test_run_test_gate.TestGateTests.test_cleanup_reserves_snapshot_and_final_kill_time
+Ran 5 tests in 0.008s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_maximum_terminates_the_whole_component_process_group automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 3 tests in 1.374s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_maximum_terminates_the_whole_component_process_group automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 3 tests in 1.382s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_maximum_terminates_the_whole_component_process_group automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 3 tests in 1.384s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 63 tests in 16.599s
+OK (skipped=1)
+
+$ python3 -m unittest automation.tests.test_test_gate_config
+Ran 28 tests in 0.204s
+OK
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 49 tests in 3.198s
+OK
+
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow
+Ran 18 tests in 0.043s
+OK (skipped=6)
+
+$ python3 -m py_compile automation/run_test_gate.py automation/tests/test_run_test_gate.py
+<no output; exit 0>
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+```
+
+An additional package-form rerun also passed. The record does not establish which direct-script
+run, if any, immediately preceded it. Its expected parser diagnostics and a subprocess
+`ResourceWarning` did not fail a test.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 63 tests in 17.106s
+OK (skipped=1)
+```
+
+## Manual-boundary line-budget repair
+
+The first post-repair review found one line-budget finding. The working file was compressed from
+61 to 60 lines without changing the explicit-only/manual-boundary meaning. The rerun below is
+against the staged repaired candidate; no full suite was run.
+
+```
+$ wc -l automation/AGENTS.md
+61 automation/AGENTS.md
+
+$ python3 automation/reconcile/reconcile.py --check
+[agents-budget] automation/AGENTS.md: 61 lines exceeds the 60-line budget
+reconcile: 1 finding(s)
+
+$ wc -l automation/AGENTS.md
+60 automation/AGENTS.md
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```
+
+## Cleanup bootstrap completion and phase-2 boundary
+
+The cleanup-only bootstrap candidate subsequently passed its exact final gate and was committed
+as `c78a8d6`. This evidence belongs to the cleanup bridge, not to the re-applied production pivot.
+
+```
+$ python3 automation/run_test_gate.py final --explicit --staged
+outcome: pass
+candidate: 2c7bcc1366ea9611976de5989d3e3fcc079a9870ecb6072a7d9e1b6c1d7e0af6
+core-scope: pass (executed, 0.44s)
+reconcile: pass (executed, 14.76s)
+repository-tests/base-pinned-floor: pass (executed, 484.83s)
+repository-tests/supplemental: pass (executed, 23.91s)
+coverage: 16 selected, 0 deferred, 0 incomplete
+duration: 525.67s
+
+$ git commit -m "fix: stabilize gate cleanup during migration"
+pre-commit: routine test gate
+repository-tests/full: pass (reused)
+duration: 16.63s
+[task/2026-07-27-configure-test-gates-and-time-budgets c78a8d6] fix: stabilize gate cleanup during migration
+```
+
+The phase-2 manual-v3 production pivot has not received an exact final or full-suite pass. Only
+the focused checks recorded after this section apply to it; no production commit, push, or hard
+enforcement claim is made.
+
+## Phase-2 focused reapplication checks
+
+The first direct gate run found one synthetic-fixture ordering mismatch after the retired
+migration-helper filename was replaced; changing the generic fixture name restored the asserted
+lexicographic order. The first reconciler run then found one historical backticked path to that
+deleted helper; describing it as the then-tracked helper removed the stale live-path claim. The
+record-repair results below supersede that summary.
+
+`python3 automation/tests/test_test_gate_config.py` passed 28 tests in 0.425 seconds, and
+`python3 -m unittest automation.tests.test_test_gate_config` passed 28 tests in 0.398 seconds.
+`python3 automation/tests/test_run_tests.py` passed 49 tests in 4.620 seconds, and
+`python3 -m unittest automation.tests.test_run_tests` passed 49 tests in 5.616 seconds.
+`python3 automation/tests/test_github_action_projection_workflow.py` passed 18 tests in 0.088
+seconds with six skipped, and
+`python3 -m unittest automation.tests.test_github_action_projection_workflow` passed 18 tests in
+0.106 seconds with six skipped. The focused queue command
+`python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_trusted_gate_migration_never_mixes_provider_regimes`
+passed one test in 0.024 seconds.
+
+The six-test command covering cleanup error handling and the two automatic-transition
+pre-execution boundaries passed six tests in 0.021 seconds. Its exact invocation was
+`python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_group_permission_error_continues_root_and_owned_signals automation.tests.test_run_test_gate.TestGateTests.test_owned_permission_error_is_tolerated_and_cleanup_continues automation.tests.test_run_test_gate.TestGateTests.test_direct_root_permission_error_propagates automation.tests.test_run_test_gate.TestGateTests.test_unrelated_group_signal_error_propagates automation.tests.test_run_test_gate.TestGateTests.test_automatic_transition_blocks_before_candidate_execution_or_receipt automation.tests.test_run_test_gate.TestGateTests.test_provider_hard_blocks_at_the_same_pre_execution_boundary`.
+The exact runner command
+`python3 -m unittest automation.tests.test_run_tests.StagedTestSelectionTests.test_provider_hard_fails_closed_before_discovery_or_preflight automation.tests.test_run_tests.RunTestsIsolationTests.test_same_interpreter_test_can_exit_zero_before_a_completion_marker`
+passed two tests in 0.260 seconds.
+
+The wider gate module did not pass during this record repair. The first two invocations were
+launched concurrently, so they are retained as interference-prone evidence rather than as a
+readiness result. `python3 automation/tests/test_run_test_gate.py` ran 58 tests in 24.335 seconds
+and exited 1 with one failure, `test_reparented_daemon_is_found_by_gate_ownership_token`, and one
+skip. `python3 -m unittest automation.tests.test_run_test_gate` ran 58 tests in 24.906 seconds and
+exited 1 with the same failure and one skip. A subsequent sequential retry of
+`python3 automation/tests/test_run_test_gate.py` ran 58 tests in 20.849 seconds and exited 1 with
+two failures, `test_reparented_daemon_is_found_by_gate_ownership_token` and
+`test_setsid_escaped_child_holding_output_cannot_block_cleanup`, and one skip. There was no
+sequential package retry. These actual failures supersede the earlier pseudo-pass summary and
+mean phase 2 is not ready for complete verification.
+
+The structural commands and negative assertions run after this record edit are recorded in the
+next section with their real exit status and output.
+
+An actual staged composite-plan inspection against base `c78a8d6` found 16 base-floor tests and
+four supplemental tests: the workflow, gate, runner, and configuration suites. The retired
+migration snapshot remains only in the immutable base floor for this transition; it is deleted
+from the candidate and no candidate production assertion imports it or conditionally admits the
+hard-v2 regime. Phase 2 remains without a full-suite or exact-final result.
+
+## Record-repair structural checks
+
+The exact command `python3 automation/reconcile/reconcile.py --check` completed with exit 0 and
+printed `reconcile: 0 finding(s)`. Both `git diff --cached --check` and `git diff --check`
+completed with exit 0 and no output. Compilation of the gate, runner, configuration, and their
+focused test modules completed with exit 0 and no output. YAML parsing and
+`cmp -s .github/workflows/harness.yml automation/tests/fixtures/manual-harness.yml` also completed
+with exit 0 and no output. `shasum -a 256 .github/workflows/harness.yml` printed
+`a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1  .github/workflows/harness.yml`,
+and `wc -l automation/AGENTS.md` printed `60 automation/AGENTS.md` with leading spacing before 60.
+
+Both actual negative assertions completed with exit 0 and no output:
+`! rg -n 'AGENTFOLD_PUBLISHER|create-github-app-token|statuses: write|api.github.com/repos/.*/statuses|prepare-trusted-final-test-gate|trusted-final-test-runner|publish-trusted-final-test-check' .github/workflows/harness.yml`
+and
+`! rg -n 'test_gate_migration_snapshots|MIGRATION_EXPECTATIONS|MIGRATION_REGIME' automation/tests/test_run_test_gate.py automation/tests/test_test_gate_config.py`.
+
+## Portable cleanup late-discovery repair
+
+Blocking review reproduced a PID-discovery race: the old rescan loop could discover a late PID
+in `live_owned` and exit without merging or killing it. The repaired loop performs exactly one
+discover/merge/kill/reap sequence per iteration. The first focused run had one test-only Python
+3.7 mock-call accessor error; the corrected command and all later commands passed. No exact-final
+gate or full repository suite was run.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_discovers_ancestry_and_exact_same_user_token_once automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_is_capped_at_300ms automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_accepts_delayed_completion_within_budget automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_timeout_returns_no_unbounded_discovery automation.tests.test_run_test_gate.TestGateTests.test_linux_discovery_does_not_use_portable_snapshot automation.tests.test_run_test_gate.TestGateTests.test_cleanup_kills_first_owned_snapshot_before_rescanning automation.tests.test_run_test_gate.TestGateTests.test_cleanup_reserves_snapshot_and_final_kill_time
+Ran 7 tests in 0.174s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 2 tests in 1.211s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 2 tests in 1.022s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 2 tests in 1.021s
+OK
+
+$ python3 automation/tests/test_run_test_gate.py
+Ran 65 tests in 16.789s
+OK (skipped=1)
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 65 tests in 18.430s
+OK (skipped=1)
+
+$ python3 -m unittest automation.tests.test_test_gate_config
+Ran 28 tests in 0.237s
+OK
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 49 tests in 3.585s
+OK
+
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow
+Ran 18 tests in 0.052s
+OK (skipped=6)
+
+$ python3 -m py_compile automation/run_test_gate.py automation/tests/test_run_test_gate.py
+<no output; exit 0>
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```
+
+## Completed-snapshot deadline repair
+
+The deadline now gates only portable snapshot acquisition. A snapshot that has already returned
+is parsed even when its completion advances the clock exactly to the scan deadline. No exact-final
+gate or full repository suite was run.
+
+```
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_discovers_ancestry_and_exact_same_user_token_once automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_is_capped_at_300ms automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_accepts_delayed_completion_within_budget automation.tests.test_run_test_gate.TestGateTests.test_portable_snapshot_timeout_returns_no_unbounded_discovery automation.tests.test_run_test_gate.TestGateTests.test_completed_portable_snapshot_is_consumed_at_exact_deadline automation.tests.test_run_test_gate.TestGateTests.test_linux_discovery_does_not_use_portable_snapshot automation.tests.test_run_test_gate.TestGateTests.test_cleanup_kills_first_owned_snapshot_before_rescanning automation.tests.test_run_test_gate.TestGateTests.test_cleanup_reserves_snapshot_and_final_kill_time
+Ran 8 tests in 0.174s
+OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_setsid_escaped_child_holding_output_cannot_block_cleanup automation.tests.test_run_test_gate.TestGateTests.test_reparented_daemon_is_found_by_gate_ownership_token
+Ran 2 tests in 1.013s
+OK
+
+$ python3 automation/tests/test_run_test_gate.py
+Ran 66 tests in 16.548s
+OK (skipped=1)
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 66 tests in 16.716s
+OK (skipped=1)
+
+$ python3 -m unittest automation.tests.test_test_gate_config
+Ran 28 tests in 0.235s
+OK
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 49 tests in 3.444s
+OK
+
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow
+Ran 18 tests in 0.051s
+OK (skipped=6)
+
+$ python3 -m py_compile automation/run_test_gate.py automation/tests/test_run_test_gate.py
+<no output; exit 0>
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ git diff --check
+<no output; exit 0>
+
+$ git diff --cached --check
+<no output; exit 0>
+```

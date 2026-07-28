@@ -8,27 +8,28 @@
       enough pure checks and integration smoke coverage to select a safe routine manifest.
 - [x] 4. Implement the routine gate's end-to-end budget, clean timeout handling, reversible
       deferral, and honest selected/deferred coverage report.
-- [ ] 5. Implement the complete final lane with manual and final-stage execution, exact receipt
+- [ ] 5. Implement the complete final lane for explicit manual execution, exact receipt
       validation, and non-deferrable critical-scope behavior.
 - [x] 6. Implement deterministic budget-regression task and pickup generation, open-task
       deduplication, recurrence links, actor-note preservation, and read-only finding output.
-- [ ] 7. Wire pre-commit and CI/provider adapters to the configured lanes without running the
-      complete suite twice for the same candidate; document the adopter-facing configuration.
+- [ ] 7. Wire pre-commit and the credential-free diagnostic to the routine and explicit-manual
+      lanes without running the complete suite twice for the same candidate; document the
+      adopter-facing configuration.
 - [ ] 8. Add focused regression tests, benchmark representative service, automation, and
-      cross-cutting changes, and record real before/after evidence against both configured
-      targets before review.
+      cross-cutting changes, and record real before/after evidence against the routine and
+      explicit-final targets before review.
 
 ## Authorized manual-only replan
 
 - [x] 9. Replace the invalidated test-only approval of `21d5a24` with the staged cleanup
       bridge: admit exactly cleanup-fixed hard-v2 and manual-v3 repository snapshots, reject
       crossed, original-hard, unknown, and one-byte-mutated states, and preserve the existing
-      hard runtime until the manual-v3 production pivot. Two pre-repair final attempts were
-      blocked by Darwin `EPERM`; focused checks cover the staged repair, but an exact post-repair
-      final gate has not yet run and remains unverified.
-- [ ] 10. Switch the starter to manual final verification, remove the unsafe publisher, and make
+      hard runtime until the manual-v3 production pivot. Two pre-repair final attempts exposed
+      the Darwin `EPERM` cleanup defect; the repaired bootstrap candidate later passed exactly
+      before cleanup commit `c78a8d6`.
+- [x] 10. Switch the starter to manual final verification, remove the unsafe publisher, and make
       every automatic/provider-hard invocation fail closed.
-- [ ] 11. Label explicit final evidence as cooperative and record the same-interpreter exit
+- [x] 11. Label explicit final evidence as cooperative and record the same-interpreter exit
       limitation without making an automatic-enforcement claim.
 - [ ] 12. Run the focused regression set and complete a fresh review of the manual-only result;
       leave controlled completion and external publication to the two backlog follow-ups.
