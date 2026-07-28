@@ -1017,3 +1017,13 @@ OK
 The first reconciler invocation after adding the refresh record found only a newly backticked
 component label that looked like a missing path. Rendering repository-tests/full as plain prose
 fixed that record-only issue. Phase 2 still has no exact-final or full repository-suite run.
+
+## Unanimous merge-review blockers
+
+The revision-bound panel reviewed Git range `e530c428..64490ab5`. Majority result: 0 approve, 5 block.
+
+- `panel_correctness` — correctness — BLOCK: terminal accounting can contradict the reported terminal outcome.
+- `panel_authority` — authority — BLOCK: the authority guard is not pre-import, and the obsolete pull-request check remains live.
+- `panel_evidence` — cache/migration — BLOCK: unstaged drift can escape receipt identity, and candidate-only namespaces can escape complete coverage.
+- `panel_contract` — contract — BLOCK: cache semantics, pull-request admission, and obsolete human asks do not match the stated contract.
+- `panel_blast_radius` — blast-radius — BLOCK: pull-request admission and working-state drift leave a wider unsafe impact than claimed.

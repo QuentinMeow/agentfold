@@ -367,3 +367,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Focused verification passed the refreshed helper floor, exact four-suite supplemental run,
   direct and package gate/config/runner/workflow tests, deterministic and real cleanup fixtures,
   compilation, workflow/hash assertions, reconciliation, and staged/unstaged diff checks.
+
+## 2026-07-28 — unanimous merge review recorded (codex)
+
+- Five independent reviewers unanimously blocked merge of `e530c428..64490ab5`; no reviewer
+  approved it. Their findings cover authority before imports, immutable executed evidence,
+  provider admission, terminal reporting, new test namespaces, and stale human asks.
+- Filed one self-contained manual retry and linked it from the task. The retry blocks the merge
+  operation, not ongoing repair, so the task remains in progress.
