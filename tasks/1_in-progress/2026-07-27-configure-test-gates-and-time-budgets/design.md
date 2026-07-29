@@ -190,11 +190,12 @@ replay state. Until both exist and are verified, the final lane stays manual.
 Security review changed the endpoint from an automatic hard gate to manual final verification.
 A later five-reviewer merge panel blocked the first manual implementation, and focused repair
 reviews found more execution, cleanup, and publication problems. The current candidate contains
-those repairs and a test-only bridge for the old and new contracts. The focused deadline and
+those repairs and test-only bridges for the old and new contracts. The focused deadline and
 receipt repair passed its regression set, and an independent rereview approved it. The complete
-candidate still needs one exact final run, an unchanged normal commit attempt, and a fresh
-five-reviewer revision-bound panel. See `worklog.md` for the chronology and `verification.md` for
-the exact commands, timings, failures, and review verdicts.
+candidate then passed an exact final run, and the unchanged normal commit hook reused that full
+receipt. A fresh five-reviewer revision-bound panel is the remaining merge boundary. See
+`worklog.md` for the chronology and `verification.md` for the exact commands, timings, failures,
+and review verdicts.
 
 ## Core fit
 

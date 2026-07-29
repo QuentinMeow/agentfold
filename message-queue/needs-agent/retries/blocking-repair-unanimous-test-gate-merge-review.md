@@ -37,7 +37,9 @@ worktree. Independent focused verification passed 34 deadline-protocol tests, 10
 with one existing skip, 28 configuration tests, 6 generation tests, compilation, diff checks,
 and reconciliation with zero findings. A focused adversarial rereview returned `APPROVE`.
 These results are not the final merge review. The complete intended candidate is now staged; the
-two generated timing journals remain deliberately unstaged. The next agent should verify that
-split without changing staged bytes, run one exact explicit final gate, and commit normally so
-the routine hook proves receipt reuse. A fresh five-reviewer panel over that committed revision
-is still required before this retry can be resolved.
+two generated timing journals remained deliberately unstaged. Test-only bridge commits
+`8cd250c` and `84c4a90` admitted the exact repaired generation across the trusted base floor.
+Candidate `d9d630b3…` then passed the explicit final gate with 18 selected files and no deferred
+or incomplete coverage, and the unchanged normal hook reused its full receipt before creating
+product commit `d966c19`. A fresh five-reviewer panel over the committed records tip is the only
+remaining requirement before this retry can be resolved.
