@@ -20,6 +20,7 @@ from unittest import mock
 if __package__:
     from .test_gate_generations import (
         DEADLINE_GENERATION,
+        PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
         gate_generation,
@@ -28,6 +29,7 @@ if __package__:
 else:
     from test_gate_generations import (
         DEADLINE_GENERATION,
+        PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
         gate_generation,
@@ -37,7 +39,11 @@ else:
 GATE_GENERATION = gate_generation()
 GATE_RECORDS = gate_generation_records()
 IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
-IS_REVIEW_REPAIR = GATE_RECORDS == REVIEW_REPAIR_RECORDS
+IS_PANEL_REPAIR = GATE_RECORDS == PANEL_REPAIR_RECORDS
+IS_REVIEW_REPAIR = GATE_RECORDS in (
+    REVIEW_REPAIR_RECORDS,
+    PANEL_REPAIR_RECORDS,
+)
 if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
     raise AssertionError(
         "test-gate endpoint tests require parser-compat or review-repair: {!r}".format(
@@ -182,6 +188,14 @@ class TestGateTests(unittest.TestCase):
         target = destination / "agentfold.toml"
         shutil.copy2(GATE.REPO / "agentfold.toml", target)
         target.chmod(stat.S_IMODE(target.stat().st_mode) | stat.S_IWUSR)
+        if IS_PANEL_REPAIR:
+            target.write_text(
+                "".join(
+                    line
+                    for line in target.read_text().splitlines(keepends=True)
+                    if not line.startswith("service_dependencies = ")
+                )
+            )
         (destination / ".gitignore").write_text("tmp/\n")
         subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=destination, check=True)
@@ -325,24 +339,38 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual(("automation/tests/test_reconcile_queue.py",), deferred)
 
     def test_unknown_routine_path_defers_every_test(self):
+        tests = ("automation/tests/test_run_tests.py",)
+        if IS_PANEL_REPAIR:
+            tests += (
+                "services/quote-api/tests/test_quote_api.py",
+                "services/quote-cli/tests/test_quote_cli.py",
+            )
         selected, deferred = self._routine_manifest(
             ("unknown/file.py",),
-            ("automation/tests/test_run_tests.py",),
+            tests,
         )
         self.assertEqual((), selected)
-        self.assertEqual(("automation/tests/test_run_tests.py",), deferred)
+        self.assertEqual(tests, deferred)
 
     def test_routine_manifest_service_ownership_matches_the_exact_endpoint(self):
-        tests = (
+        tests = [
             "services/payments/tests/test_api.py",
             "services/quote-api/tests/test_quote_api.py",
-        )
+        ]
+        if IS_PANEL_REPAIR:
+            tests.append("services/quote-cli/tests/test_quote_cli.py")
+        tests = tuple(tests)
 
         selected, deferred = self._routine_manifest(("services/payments/api.py",), tests)
 
         if IS_REVIEW_REPAIR:
             self.assertEqual(("services/payments/tests/test_api.py",), selected)
-            self.assertEqual(("services/quote-api/tests/test_quote_api.py",), deferred)
+            expected_deferred = ["services/quote-api/tests/test_quote_api.py"]
+            if IS_PANEL_REPAIR:
+                expected_deferred.append(
+                    "services/quote-cli/tests/test_quote_cli.py"
+                )
+            self.assertEqual(tuple(expected_deferred), deferred)
         else:
             self.assertEqual((), selected)
             self.assertEqual(tests, deferred)
@@ -369,6 +397,29 @@ class TestGateTests(unittest.TestCase):
             selected, deferred = GATE.routine_test_manifest(changed, tests)
             self.assertEqual((), selected)
             self.assertEqual(tests, deferred)
+
+    def test_routine_manifest_rejects_unknown_configured_service_names(self):
+        if not IS_PANEL_REPAIR:
+            self.skipTest("service dependency validation belongs to panel-repair")
+        cases = (
+            (
+                (("accounts", ("billing",)),),
+                ("services/billing/tests/test_billing.py",),
+                r"unknown owner\(s\): accounts",
+            ),
+            (
+                (("accounts", ("bililng",)),),
+                ("services/accounts/tests/test_accounts.py",),
+                r"unknown downstream target\(s\): bililng",
+            ),
+        )
+        for dependencies, tests, message in cases:
+            with self.subTest(message=message):
+                policy = mock.Mock(service_dependencies=dependencies)
+                with self.assertRaisesRegex(GATE.GateError, message):
+                    GATE.routine_test_manifest(
+                        ("docs/ordinary-change.md",), tests, policy
+                    )
 
     def test_manual_final_runs_explicitly_and_named_transition_fails_closed(self):
         policy = final_policy("manual")
@@ -2143,6 +2194,12 @@ class TestGateTests(unittest.TestCase):
                 stat.S_IMODE(policy_path.stat().st_mode) | stat.S_IWUSR
             )
             policy_text = policy_path.read_text()
+            if IS_PANEL_REPAIR:
+                policy_text = "".join(
+                    line
+                    for line in policy_text.splitlines(keepends=True)
+                    if not line.startswith("service_dependencies = ")
+                )
             reversible = policy_text.index("[[testing.risk.reversible]]")
             globs = policy_text.index("path_globs = [", reversible)
             insertion = globs + len("path_globs = [")

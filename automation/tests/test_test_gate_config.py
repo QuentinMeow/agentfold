@@ -6,6 +6,7 @@ from pathlib import Path
 
 from automation.tests.test_gate_generations import (
     DEADLINE_RECORDS,
+    PANEL_REPAIR_RECORDS,
     PARSER_COMPAT_RECORDS,
     REVIEW_REPAIR_RECORDS,
     gate_generation_records,
@@ -30,6 +31,8 @@ elif CURRENT_GATE_RECORDS == PARSER_COMPAT_RECORDS:
     POLICY_ENDPOINT = "parser-compat"
 elif CURRENT_GATE_RECORDS == REVIEW_REPAIR_RECORDS:
     POLICY_ENDPOINT = "review-repair"
+elif CURRENT_GATE_RECORDS == PANEL_REPAIR_RECORDS:
+    POLICY_ENDPOINT = "panel-repair"
 else:
     raise AssertionError(
         "config tests require one exact admitted policy endpoint: {!r}".format(
@@ -38,7 +41,8 @@ else:
     )
 HAS_SERVICE_DEPENDENCIES = POLICY_ENDPOINT != "deadline-before-parser-compat"
 HAS_HARDENED_RISK_PATHS = POLICY_ENDPOINT != "deadline-before-parser-compat"
-IS_REVIEW_REPAIR = POLICY_ENDPOINT == "review-repair"
+IS_PANEL_REPAIR = POLICY_ENDPOINT == "panel-repair"
+IS_REVIEW_REPAIR = POLICY_ENDPOINT in ("review-repair", "panel-repair")
 
 
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
@@ -79,6 +83,9 @@ EMPTY_DEPENDENCIES_TEXT = with_dependencies("{}")
 DEPENDENCY_TEXT = with_dependencies('{ quote-api = ["quote-cli"] }')
 PRE_SERVICE_DEPENDENCY_POLICY_DIGEST = (
     "fc882fa0e93966ca969ee94a2f4567320188d658b4c5739952f5c3e803889fe1"
+)
+ROOT_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST = (
+    "0fa23f695f47e93cf41e953a1ccae35d5c60143524693c7ed067d8367f26f177"
 )
 PRE_HARDENING_POLICY_DIGEST = (
     "41b2ee7b778f6fe2821179760291fffd8ff9ed85b85d52ebbab5a09f4bc1236e"
@@ -190,7 +197,12 @@ class StarterPolicyTests(unittest.TestCase):
             CONFIG.canonical_policy_json(explicit_empty),
         )
         self.assertEqual(absent.digest, explicit_empty.digest)
-        self.assertEqual(PRE_SERVICE_DEPENDENCY_POLICY_DIGEST, absent.digest)
+        expected_digest = (
+            ROOT_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST
+            if IS_PANEL_REPAIR
+            else PRE_SERVICE_DEPENDENCY_POLICY_DIGEST
+        )
+        self.assertEqual(expected_digest, absent.digest)
         self.assertEqual(
             CONFIG.canonical_policy_json(
                 CONFIG.union_policies(absent, explicit_empty)
@@ -443,12 +455,23 @@ class RiskClassificationTests(unittest.TestCase):
             "automation/test_manifest.py",
             "automation/_vendor/tomli/_parser.py",
         )
+        if IS_PANEL_REPAIR:
+            paths = ("AGENTS.md",) + paths
         for path in paths:
             with self.subTest(path=path):
                 result = CONFIG.classify_paths((path,), self.policy)
                 if HAS_HARDENED_RISK_PATHS:
                     self.assertTrue(result.is_critical)
                     self.assertIn("repository-tests/full", result.required_check_ids)
+                    if path == "AGENTS.md":
+                        self.assertEqual(
+                            ("authorization",),
+                            tuple(
+                                binding.category
+                                for binding in result.critical_bindings
+                            ),
+                        )
+                        self.assertEqual((), result.reversible_ids)
                 else:
                     self.assertFalse(result.is_critical)
                     self.assertEqual((path,), result.reversible_paths)

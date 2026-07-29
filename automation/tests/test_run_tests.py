@@ -12,6 +12,7 @@ from unittest import mock
 
 if __package__:
     from .test_gate_generations import (
+        PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
         gate_generation,
@@ -19,6 +20,7 @@ if __package__:
     )
 else:
     from test_gate_generations import (
+        PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
         gate_generation,
@@ -29,7 +31,10 @@ else:
 GATE_GENERATION = gate_generation()
 GATE_RECORDS = gate_generation_records()
 IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
-IS_REVIEW_REPAIR = GATE_RECORDS == REVIEW_REPAIR_RECORDS
+IS_REVIEW_REPAIR = GATE_RECORDS in (
+    REVIEW_REPAIR_RECORDS,
+    PANEL_REPAIR_RECORDS,
+)
 if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
     raise AssertionError(
         "run_tests endpoint tests require parser-compat or review-repair: {!r}".format(

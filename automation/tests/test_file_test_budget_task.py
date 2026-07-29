@@ -30,9 +30,12 @@ GATE_GENERATIONS.gate_generation(AUTOMATION.parent)
 PRODUCT_RECORDS = GATE_GENERATIONS.gate_generation_records(AUTOMATION.parent)
 PARSER_COMPAT_ENDPOINT = "parser-compat"
 REVIEW_REPAIR_ENDPOINT = "review-repair"
+IS_PANEL_REPAIR = PRODUCT_RECORDS == GATE_GENERATIONS.PANEL_REPAIR_RECORDS
 if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
     PRODUCT_ENDPOINT = PARSER_COMPAT_ENDPOINT
 elif PRODUCT_RECORDS == GATE_GENERATIONS.REVIEW_REPAIR_RECORDS:
+    PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
+elif IS_PANEL_REPAIR:
     PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
 else:
     raise AssertionError(
@@ -290,7 +293,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_append = FILER._append_journal_record
             attempts = 0
 
-            def actor_wins_first_append(path, identity, state):
+            def actor_wins_first_append(path, identity, state, *append_context):
                 nonlocal attempts
                 attempts += 1
                 if attempts == 1:
@@ -303,7 +306,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     return False
-                return real_append(path, identity, state)
+                return real_append(path, identity, state, *append_context)
 
             with mock.patch.object(
                 FILER, "_append_journal_record", side_effect=actor_wins_first_append
@@ -321,6 +324,11 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             task = self.task_file(root, created)
             journal = task.parent / FILER.JOURNAL_NAME
             identity = FILER._field(task.read_text(encoding="utf-8"), "Finding identity").split(":", 1)[1]
+            append_context = ()
+            if IS_PANEL_REPAIR:
+                append_context = (
+                    FILER._read_journal_snapshot(journal, identity),
+                )
             state = FILER._state_for(
                 FILER._normalize_occurrence(
                     self.occurrence(receipt=RECEIPT_B), root
@@ -337,9 +345,169 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                 return real_write(descriptor, payload)
 
             with mock.patch.object(FILER.os, "write", side_effect=replace_path_before_append):
-                appended = FILER._append_journal_record(journal, identity, state)
-            self.assertFalse(appended)
+                if IS_PANEL_REPAIR:
+                    with self.assertRaises(FILER._PublicationFailure) as raised:
+                        FILER._append_journal_record(
+                            journal, identity, state, *append_context
+                        )
+                    self.assertTrue(raised.exception.mutated)
+                else:
+                    appended = FILER._append_journal_record(
+                        journal, identity, state, *append_context
+                    )
+                    self.assertFalse(appended)
             self.assertEqual(replacement, journal.read_bytes())
+
+    @unittest.skipUnless(
+        IS_PANEL_REPAIR,
+        "pre-open journal validation belongs to the panel-repair endpoint",
+    )
+    def test_preopen_actor_replacement_is_validated_before_append(self):
+        with self.repo() as root:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            actor_bytes = b"actor-owned replacement\n"
+            real_open = FILER._open_pinned_journal
+            append_opens = 0
+
+            def replace_before_append(path, flags):
+                nonlocal append_opens
+                if flags & os.O_RDWR == os.O_RDWR:
+                    append_opens += 1
+                    if append_opens == 1:
+                        replacement = journal.with_name("actor-journal")
+                        replacement.write_bytes(actor_bytes)
+                        os.replace(replacement, journal)
+                return real_open(path, flags)
+
+            with mock.patch.object(
+                FILER, "_open_pinned_journal", side_effect=replace_before_append
+            ):
+                result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("conflict", result.disposition)
+            self.assertFalse(result.mutated)
+            self.assertEqual(1, append_opens)
+            self.assertEqual(actor_bytes, journal.read_bytes())
+
+    @unittest.skipUnless(
+        IS_PANEL_REPAIR,
+        "pre-open journal validation belongs to the panel-repair endpoint",
+    )
+    def test_preopen_valid_replacement_retries_before_writing(self):
+        with self.repo() as root:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            identity = FILER._field(
+                task.read_text(encoding="utf-8"), "Finding identity"
+            ).split(":", 1)[1]
+            original = FILER._read_journal_snapshot(journal, identity)
+            actor_state = FILER._state_for(
+                FILER._normalize_occurrence(
+                    self.occurrence(receipt=RECEIPT_C), root
+                ),
+                original.records[-1],
+            )
+            actor_bytes = original.data + FILER._journal_line(identity, actor_state)
+            real_open = FILER._open_pinned_journal
+            append_opens = 0
+
+            def replace_before_append(path, flags):
+                nonlocal append_opens
+                if flags & os.O_RDWR == os.O_RDWR:
+                    append_opens += 1
+                    if append_opens == 1:
+                        replacement = journal.with_name("actor-journal")
+                        replacement.write_bytes(actor_bytes)
+                        os.replace(replacement, journal)
+                return real_open(path, flags)
+
+            with mock.patch.object(
+                FILER, "_open_pinned_journal", side_effect=replace_before_append
+            ):
+                result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("updated", result.disposition)
+            self.assertTrue(result.mutated)
+            self.assertEqual(2, append_opens)
+            self.assertTrue(journal.read_bytes().startswith(actor_bytes))
+            self.assertEqual(
+                (RECEIPT_A, RECEIPT_C, RECEIPT_B),
+                tuple(
+                    state["receipt"]
+                    for state in FILER._read_journal(journal, identity)
+                ),
+            )
+
+    @unittest.skipUnless(
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "pinned no-follow journal access requires POSIX O_NOFOLLOW",
+    )
+    @unittest.skipUnless(
+        IS_PANEL_REPAIR,
+        "pinned no-follow journal access belongs to the panel-repair endpoint",
+    )
+    def test_symlinked_journal_fails_closed_without_touching_target(self):
+        with self.repo() as root:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            target = journal.with_name("actor-journal")
+            journal.rename(target)
+            journal.symlink_to(target.name)
+            before = target.read_bytes()
+
+            result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("conflict", result.disposition)
+            self.assertFalse(result.mutated)
+            self.assertTrue(journal.is_symlink())
+            self.assertEqual(before, target.read_bytes())
+
+    @unittest.skipUnless(
+        IS_PANEL_REPAIR,
+        "pinned no-follow journal access belongs to the panel-repair endpoint",
+    )
+    def test_missing_nofollow_capability_fails_closed(self):
+        with self.repo() as root:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            before = journal.read_bytes()
+
+            with mock.patch.object(FILER.os, "O_NOFOLLOW", 0, create=True):
+                result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("conflict", result.disposition)
+            self.assertFalse(result.mutated)
+            self.assertEqual(before, journal.read_bytes())
+
+    @unittest.skipUnless(
+        IS_PANEL_REPAIR,
+        "durable journal append belongs to the panel-repair endpoint",
+    )
+    def test_post_write_fsync_error_reports_mutation_and_keeps_journal(self):
+        with self.repo() as root:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            identity = FILER._field(
+                task.read_text(encoding="utf-8"), "Finding identity"
+            ).split(":", 1)[1]
+
+            with mock.patch.object(
+                FILER.os, "fsync", side_effect=OSError("simulated fsync failure")
+            ):
+                result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            self.assertTrue(journal.is_file())
+            self.assertEqual(
+                RECEIPT_B, FILER._read_journal(journal, identity)[-1]["receipt"]
+            )
 
     def test_nonowned_lookalike_is_a_conflict(self):
         with self.repo() as root:
