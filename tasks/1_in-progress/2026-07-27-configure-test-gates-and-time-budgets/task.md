@@ -81,10 +81,13 @@ seconds without starting selected tests. The full focused modules also pass: 34 
 103 gate tests with one skip, 28 configuration tests, and 6 generation tests. Reconciliation
 reported zero findings, and an independent focused rereview returned `APPROVE`.
 
-This is not yet the final evidence for the complete candidate. The remaining sequence is one new
-exact final run, no staged changes afterward, one normal commit attempt proving receipt reuse,
-and a fresh five-reviewer revision-bound panel. The live retry continues to block merge until
-that sequence succeeds.
+Two test-only migration bridges then made the trusted base-pinned floor compatible with the
+intended deadline generation without weakening its one-generation admission rule. Exact staged
+candidate `d9d630b39a883946fa8b07e9c444a889a0144cfcf90fd1302385f50b0829c9d1` passed the explicit
+final gate in 657.548652 seconds with 18 selected files and no deferred or incomplete work. The
+unchanged normal hook reused that full receipt and created product commit `d966c19` in 24.56
+seconds. The only remaining merge boundary is a fresh five-reviewer revision-bound panel. The
+live retry continues to block merge until that review succeeds.
 
 ## Acceptance criteria
 

@@ -1709,3 +1709,64 @@ terminal sending, post-claim filing, receipt suppression after unknown stability
 Still pending: one exact final run for the complete candidate, no staged changes after that run,
 one normal commit attempt that reuses its receipt, and a fresh five-reviewer revision-bound panel.
 The live retry remains merge-blocking until those steps pass.
+
+## Final candidate migration, exact gate, and normal hook reuse
+
+The first exact run of the intended staged tree stopped honestly after 467.40 seconds. The
+trusted base-pinned generation test still expected the prospective controller generation
+`c74be…`, while the staged repaired controller was `d52f…`. Test-only bridge commit `8cd250c`
+updated that single admitted endpoint. Its normal hook passed core scope, reconciliation, and
+the selected bridge test in 18.32 seconds.
+
+The next exact run reached the base-pinned gate tests and stopped honestly after 564.48 seconds.
+The old filing-time fixture provided only two monotonic-clock values, while the repaired bounded
+filing path makes an additional clock call. Test-only bridge commit `84c4a90` made that fixture
+conditional on the admitted generation, so it passes both the current split runner and the
+repaired controller. Its normal hook returned the permitted reversible `deferred` outcome after
+60.83 seconds; core scope and reconciliation passed, and the selected test component was reported
+incomplete rather than mislabeled as complete.
+
+After both bridge commits, `git write-tree` still returned the preserved intended product tree
+`188b359cbabddafe21bfecaa2ad023383b71eb2b`. The repaired filing fixture and all six generation
+tests passed. A restricted exact invocation then stopped after 5.101038 seconds because macOS
+process-table inspection was denied by the command sandbox. The core-scope command itself passed;
+the controller correctly failed closed because it could not prove descendant-cleanup completeness.
+The same command was rerun with read-only process-table access and no code or index change.
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: d9d630b39a883946fa8b07e9c444a889a0144cfcf90fd1302385f50b0829c9d1
+component timings:
+  core-scope: pass (executed, 0.791155s)
+  reconcile: pass (executed, 18.392368s)
+  repository-tests/base-pinned-floor: pass (executed, 561.435888s)
+  repository-tests/candidate-supplemental: pass (executed, 69.183458s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 657.548652s
+gate exit: 0
+```
+
+No staged byte changed between that pass and the normal product commit. The hook validated the
+same candidate digest, reran the mandatory admission checks, reused the exact full receipt, and
+created `d966c19` without bypassing the hook:
+
+```
+$ git commit -m "fix: enforce absolute test-gate deadlines" ...
+test gate: routine
+outcome: pass
+candidate: d9d630b39a883946fa8b07e9c444a889a0144cfcf90fd1302385f50b0829c9d1
+component timings:
+  core-scope: pass (executed, 0.72s)
+  reconcile: pass (executed, 17.79s)
+  repository-tests/full: pass (reused, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 24.56s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets d966c19] fix: enforce absolute test-gate deadlines
+```
+
+Still pending: the fresh five-reviewer revision-bound panel. The merge retry remains live until
+that committed revision receives no valid blocker.

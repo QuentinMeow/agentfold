@@ -630,3 +630,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Do not reuse the historical `44963ec4…` receipt for the repaired bytes, do not rerun the full
   suite before the staged candidate is final, and do not resolve the blocking retry before the
   new commit and panel both succeed.
+
+## 2026-07-29 — exact final gate and receipt-bound product commit (codex and delegated diagnosis)
+
+- Audited the live branch and PR graph. Draft PR 16 remains the only supported prerequisite; this
+  task branch is its direct descendant. Unfinished message-queue and queue-resolution branches
+  remain outside this stack.
+- Added two test-only migration bridges after real base-pinned failures. `8cd250c` updates the
+  admitted repaired-controller generation, and `84c4a90` makes the bounded filing fixture pass
+  both the committed split generation and the intended deadline generation. Both commits ran the
+  normal hook; no hook was bypassed.
+- Rebuilt the production index to the preserved tree `188b359c…`. The first retry inside the
+  restricted command sandbox failed closed because macOS `ps` access was denied. Independent
+  diagnosis confirmed an observability restriction, not surviving processes or a cleanup defect.
+- Reran the unchanged exact command with read-only process-table access. Candidate `d9d630b3…`
+  passed all 18 selected files in 657.548652 seconds with no deferred or incomplete coverage.
+- Committed the unchanged candidate as `d966c19`. The ordinary routine hook matched the same
+  digest, reused the full receipt, passed core scope and reconciliation, and completed in 24.56
+  seconds. A fresh five-reviewer revision-bound panel remains the only merge blocker.

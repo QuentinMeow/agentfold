@@ -16,7 +16,7 @@
 - [x] 7. Wire pre-commit and the credential-free diagnostic to the routine and explicit-manual
       lanes without running the complete suite twice for the same candidate; document the
       adopter-facing configuration.
-- [ ] 8. Add focused regression tests, benchmark representative service, automation, and
+- [x] 8. Add focused regression tests, benchmark representative service, automation, and
       cross-cutting changes, and record real before/after evidence against the routine and
       explicit-final targets before review.
 
@@ -53,7 +53,8 @@
       fallback deadline regressions without weakening full-receipt validation. Seven new focused
       regressions pass, the no-receipt path deferred in 6.608 seconds, the prewarmed exact receipt
       was reused in 5.587 seconds, and an independent rereview approved the repair.
-- [ ] 18. Stage the complete repaired candidate once, run one new exact final gate, and make no
-      further staged change before the normal commit hook reuses that receipt. Then obtain a
+- [ ] 18. The complete repaired candidate passed a new exact final gate as
+      `d9d630b39a883946fa8b07e9c444a889a0144cfcf90fd1302385f50b0829c9d1`, and the unchanged
+      normal commit hook reused that receipt before creating product commit `d966c19`. Obtain a
       fresh revision-bound panel with no valid blocker. Keep the retry live and merge blocked
-      until the commit and review both succeed.
+      until that review succeeds.
