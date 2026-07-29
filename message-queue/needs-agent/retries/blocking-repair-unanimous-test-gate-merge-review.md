@@ -20,4 +20,13 @@ Implement and verify the pre-import authority guard; execute and receipt-bind on
 
 ## Agent notes
 
-Unclaimed. This retry blocks only `operation:merge-configurable-test-gates`; the task remains in progress while repairs proceed.
+Claimed in commit `43b627e`; status remains `in-repair`. The six findings from the original
+0-approve/5-block panel were repaired, and product commit
+`3a342013063f37516b8f65e707e26e4f0c655e0a` received a fresh 3-approve/2-block review. That
+review still found one P1 product flaw: potentially unbounded Git discovery, candidate
+materialization, and controller planning can run before the configured absolute deadline exists.
+It also found the durable records stale and the original final report/stdout unavailable after
+the fixed report path was overwritten. The records now state the surviving evidence and loss
+plainly, but the P1 requires a product repair, another exact final run, a commit, and another
+fresh revision-bound panel. This retry continues to block only
+`operation:merge-configurable-test-gates`; the task remains in progress while repair proceeds.

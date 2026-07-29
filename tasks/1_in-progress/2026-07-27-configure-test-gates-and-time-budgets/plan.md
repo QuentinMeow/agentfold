@@ -39,5 +39,13 @@
 - [x] 14. Narrow runtime support to CPython 3.7+ on POSIX, carry the bootstrap monotonic source
       across controller startup, and require the v5 receipt/pass-report/v1 commit-marker set for
       reuse while keeping publication failure separate from the immutable gate decision.
-- [ ] 15. Run a fresh exact final/full verification for the repaired production candidate,
-      commit it, and obtain a new revision-bound merge review before moving the task to done.
+- [x] 15. Run the explicit final gate for product candidate
+      `843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53`, reuse its
+      exact full-test receipt in the normal hook, and commit the product as `3a342013`. Record
+      the surviving evidence honestly after the original final report and stdout were lost.
+- [ ] 16. Repair the P1 deadline gap so the configured absolute deadline exists before any
+      potentially unbounded Git discovery, candidate materialization, or controller planning.
+      Add focused regressions for delay in each pre-controller phase.
+- [ ] 17. Run a new exact final gate after the P1 repair, commit the repaired revision, and
+      obtain a fresh revision-bound panel with no valid blocker. Keep the retry live and the
+      merge blocked until all three steps succeed.

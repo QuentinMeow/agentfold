@@ -497,3 +497,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Reapplied the protected production change on top of that bridge. It remains staged and still
   needs an exact final pass, a production commit, and a fresh revision-bound merge review. The
   live unanimous-review retry remains `in-repair`.
+
+## 2026-07-28 — product commit and blocking final review recorded (codex and delegated agents)
+
+- Exact candidate `843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53`
+  passed the explicit final gate in 432.51825652701 seconds. The run exceeded the configured
+  300-second target, so the existing final-budget journal gained occurrence 5 with the component
+  timings and its timing-filer receipt field.
+- The original final stdout was not retained, and the fixed `latest-final.json` path was later
+  overwritten. The surviving v5 receipt, v1 marker, timing journal, and routine report preserve
+  the candidate, closure, binding, publication, timing, and reuse identities recorded in
+  `verification.md`; they do not recreate the missing byte-exact report or output.
+- The normal commit hook reused the exact full-test binding, passed in 14.980103 seconds, and
+  created product commit `3a342013063f37516b8f65e707e26e4f0c655e0a`.
+- Five independent reviewers examined that immutable revision. Security/authority,
+  provider/core/workflow, and migration/test-completeness approved. Gate semantics blocked on a
+  P1 gap where potentially unbounded Git/materialization/controller work can precede creation of
+  the configured absolute deadline. Records/contracts also blocked because the durable task
+  state was stale, the original final report could not be reconstructed, and the claimed retry
+  still said `Unclaimed`.
+- Reconciled the task, plan, verification, worklog, and retry wording from surviving evidence.
+  This repairs the stale description but not the P1 product flaw or the lost report. The merge
+  retry remains `in-repair`; a P1 repair, new exact final run, new commit, and fresh panel remain
+  mandatory before merge.

@@ -53,17 +53,21 @@ blocked in this task; cooperative manual evidence must not be promoted into enfo
 
 ## Current state
 
-The six blockers from the unanimous review have been repaired and covered by focused checks.
-Commit `fcc8d8d` adds a test-only bridge that recognizes only the exact old and new gate
-contracts. Its direct checks passed, and its normal commit hook honestly deferred reversible
-unfinished coverage just under the 60-second limit.
+The manual-only product implementation is committed as
+`3a342013063f37516b8f65e707e26e4f0c655e0a`. Before that commit, exact candidate
+`843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53` passed the
+explicit final gate. The normal commit hook then reused the matching full-test receipt instead
+of running the suite again. The surviving timing journal, receipt, publication marker, and
+routine report identify that result; the byte-exact final report and terminal output were later
+overwritten or not retained, so their complete original text cannot be recovered.
 
-The repaired production change is staged on top of that bridge, but it is not ready to merge.
-One final run exposed old tests that did not understand the new contract. A second run proved the
-updated trusted floor, then ran out of time because a poorly named migration helper caused the
-shared support file to rerun all 14 automation test modules. There is still no complete final
-pass, production commit, or fresh revision-bound merge approval. The exact evidence and repair
-history are in `verification.md` and `worklog.md`.
+The task is not ready to merge. A five-reviewer panel at the committed revision returned three
+approvals and two blocks. The P1 finding is that potentially unbounded Git discovery, candidate
+materialization, and controller planning can happen before the configured absolute deadline
+exists. The second block found these task records stale and noted the missing original final
+report/output. This update repairs the stale descriptions, but it cannot recreate overwritten
+evidence. The P1 needs a product repair, followed by a new exact final run, a commit, and a fresh
+revision-bound panel. The live retry therefore continues to block the merge operation.
 
 ## Acceptance criteria
 

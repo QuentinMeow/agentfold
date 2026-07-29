@@ -1399,3 +1399,84 @@ duration_seconds=59.758121
 The hook passed core scope and reconciliation, then stopped the reversible selected-test
 remainder at the routine boundary. Commit `fcc8d8d` was created. This is successful routine-gate
 deferral evidence, not a complete final-gate pass for the staged production change.
+
+## Historical exact-final pass and production commit — reconstructed record
+
+The command below actually ran before the product commit:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+```
+
+Its byte-exact stdout was not retained. The fixed `latest-final.json` path was later overwritten
+by another diagnostic run, so the complete original final report and the original three-file
+receipt/report/marker set are not recoverable. The following lines are explicitly reconstructed
+facts, not literal command output. They come from the append-only final-budget journal, the
+surviving v5 receipt and v1 publication marker, the retained routine report, and Git metadata:
+
+```
+[reconstructed fact] candidate digest:
+843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53
+[reconstructed fact] candidate closure digest:
+e975972cfa87f4f470c548a7d7c743688ea5f0add01ea4196d767cfc0a13a855
+[reconstructed fact] gate result: pass; actual duration: 432.51825652701s;
+configured final target: 300.0s
+[reconstructed fact] component durations: core-scope 0.6799s; reconcile 17.329837s;
+repository-tests/base-pinned-floor 372.917033s;
+repository-tests/candidate-supplemental 34.905171s; repository-tests/full 0.0s
+[reconstructed fact] coverage reviewed by the panel: 17 test files; 0 deferred; 0 incomplete
+[reconstructed fact] v5 receipt binding digest:
+aa49e2e680bcc4cc7cc6fdfe1d854a28de81cf69cfb5d9f76310fcd492d20d4b
+[reconstructed fact] receipt controller-closure digest:
+cd54e785a62fdbe08846b13a9bce5579b6db9793283ec1839586dea78057d973
+[reconstructed fact] publication id:
+6a8300a56f679dad5da7d35c39608a288b18d0b0f3d2e175286fa16fa8c3f2f9
+[reconstructed fact] publication marker receipt digest:
+4a6d49f138a9e0fe15f94b836430f69ea2477417d7215de9a78e81d953dc4104
+[reconstructed fact] publication marker report digest:
+454d5b5d08f34ec0ec9db2c3428630ac165856cddedb6cd08db73478570f0a0a
+[reconstructed fact] timing-filer receipt field:
+05e9db92f8393233881d796a4d0c15e0392f11d1e655ac0571c5bdbbf4ebebb9
+```
+
+The final target breach was durably appended as occurrence 5 in
+`tasks/0_backlog/2026-07-27-investigate-final-test-budget-7631c3a1b1/timing-evidence.jsonl`.
+The receipt labels the result `cooperative-same-interpreter`, with
+`controlled_completion: false` and `enforcement_eligible: false`; this was never automatic
+enforcement evidence.
+
+The normal hook for the product commit used the exact same candidate and closure. The retained
+routine report records a pass in 14.980103 seconds: core scope passed in 0.462415 seconds,
+reconciliation passed in 11.34329 seconds, and repository-tests/full took 0 seconds because it
+reused receipt binding
+`aa49e2e680bcc4cc7cc6fdfe1d854a28de81cf69cfb5d9f76310fcd492d20d4b`.
+The report lists 17 selected files, none deferred, and none incomplete. The hook created commit
+`3a342013063f37516b8f65e707e26e4f0c655e0a` (`feat: configure manual test gates and time
+budgets`). These are historical result summaries from retained machine artifacts, not recreated
+terminal output.
+
+## Fresh revision-bound merge review
+
+**Reviewed revision:** `3a342013063f37516b8f65e707e26e4f0c655e0a`
+
+- `final_panel_security` / security and authority — verdict: approval. Basis: raw hard guard; immutable
+  closure; isolated environment and cleanup; receipt/marker binding; cooperative
+  non-enforcement. No blocker.
+- `final_panel_gate_semantics` / gate semantics, timing, cache, and publication: BLOCK — P1:
+  unbounded Git/materialization/controller planning can occur before the configured absolute
+  deadline exists; P2: exact final and commit evidence were absent from durable records.
+- `final_panel_provider_core` / provider, core portability, and workflow — verdict: approval. Basis:
+  manual-only closed config; six critical categories; read-only base diagnostics; cooperative PR
+  lane; core portability. No blocker.
+- `final_panel_migration_tests` / immutable floor and test completeness — verdict: approval. Basis: exact
+  base floor; candidate supplement; isolation; cleanup; 17 test files; 0 deferred; 0 incomplete.
+  No blocker.
+- `final_panel_records_contract` / records and contracts: BLOCK — task, plan, verification, and
+  worklog were stale; the fixed latest-report path had been overwritten, so the current
+  receipt/report/marker set could not reconstruct the original final publication; the retry also
+  said `Unclaimed` despite status `in-repair`.
+
+Panel result: 3 APPROVE, 2 BLOCK. The valid P1 deadline finding keeps merge blocked regardless of
+the numerical majority. This records the surviving historical evidence and corrects the stale
+task descriptions, but cannot recreate the lost report/stdout. A product repair, new exact final
+run, new commit, and fresh revision-bound panel are still required.
