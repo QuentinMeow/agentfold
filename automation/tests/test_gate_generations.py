@@ -8,7 +8,9 @@ read from the repository view being tested and matched as one exact tuple.
 """
 
 import hashlib
+import shutil
 import stat
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -57,10 +59,7 @@ def _file_record(root, relative):
         return relative, ABSENT, ABSENT
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
         return relative, "unsupported", ABSENT
-    executable = metadata.st_mode & 0o111
-    if executable not in (0, 0o111):
-        return relative, "unsupported", ABSENT
-    mode = "100755" if executable else "100644"
+    mode = "100755" if metadata.st_mode & stat.S_IXUSR else "100644"
     return relative, mode, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -107,6 +106,53 @@ class GateMigrationGenerationTests(unittest.TestCase):
         self.assertEqual(
             SPLIT_GENERATION, classify_gate_generation_records(SPLIT_RECORDS)
         )
+
+    def test_sealed_regular_modes_preserve_exact_generation_admission(self):
+        generation = gate_generation()
+        expected_records = (
+            SPLIT_RECORDS
+            if generation == SPLIT_GENERATION
+            else LEGACY_RECORDS
+        )
+        observed_modes = set()
+        with tempfile.TemporaryDirectory() as scratch:
+            sealed_root = Path(scratch) / "sealed-view"
+            sealed_root.mkdir()
+            for record in expected_records:
+                relative, mode, _digest = record
+                if mode == ABSENT:
+                    continue
+                source = REPO / relative
+                destination = sealed_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+                sealed_mode = 0o500 if mode == "100755" else 0o400
+                destination.chmod(sealed_mode)
+                self.assertEqual(sealed_mode, destination.stat().st_mode & 0o777)
+                self.assertEqual(record, _file_record(sealed_root, relative))
+                observed_modes.add(mode)
+            self.assertEqual({"100644", "100755"}, observed_modes)
+            self.assertEqual(generation, gate_generation(sealed_root))
+            executable_record = next(
+                record for record in expected_records if record[1] == "100755"
+            )
+            executable_path = sealed_root / executable_record[0]
+            for sealed_mode in (0o410, 0o401):
+                with self.subTest(group_or_world_only_execute=oct(sealed_mode)):
+                    executable_path.chmod(sealed_mode)
+                    observed = _file_record(sealed_root, executable_record[0])
+                    self.assertEqual("100644", observed[1])
+                    self.assertEqual(executable_record[2], observed[2])
+                    records = gate_generation_records(sealed_root)
+                    self.assertEqual(
+                        "invalid", classify_gate_generation_records(records)
+                    )
+                    with self.assertRaisesRegex(
+                        AssertionError, "outside both admitted gate generations"
+                    ):
+                        gate_generation(sealed_root)
+            executable_path.chmod(0o500)
+            self.assertEqual(generation, gate_generation(sealed_root))
 
     def test_one_path_from_the_other_generation_always_rejects_the_tuple(self):
         old = dict((record[0], record) for record in LEGACY_RECORDS)
