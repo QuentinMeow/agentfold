@@ -766,3 +766,14 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   Exact candidate `477ebfb0…` passed all 18 files in 346.56 seconds; its ordinary hook reused the
   full receipt in 10.81 seconds and created `63b12b7`. The restored combined product repair is
   staged except for the two generated timing journals.
+
+## 2026-07-29 — combined panel repair committed (codex)
+
+- Immutable staged tree `ed3650f6…` passed exact final candidate `6b159196…` in 309.88
+  seconds: 19 selected files, none deferred or incomplete. The base-pinned floor took 294.65
+  seconds and candidate supplemental coverage took 0.64 seconds.
+- The unchanged normal pre-commit hook reused the exact full receipt, reran core-scope and
+  reconciliation, and passed in 13.94 seconds. Product commit `d513a70` was created without
+  bypassing the hook. Both generated timing journals remain deliberately unstaged.
+- A fresh five-reviewer revision-bound panel is the only remaining repair boundary before the
+  retry can be resolved and the task can move to review.

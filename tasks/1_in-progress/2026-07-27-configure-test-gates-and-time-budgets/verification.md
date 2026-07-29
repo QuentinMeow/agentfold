@@ -2073,4 +2073,39 @@ pre-commit: OK
 [task/2026-07-27-configure-test-gates-and-time-budgets 63b12b7] test: bridge panel review repair
 ```
 
-The combined product repair still requires its exact final gate, normal commit, and a new panel.
+## Combined panel repair final gate and commit
+
+The staged tree `ed3650f67e561c8fcd688d01019402cf96b9a803` remained byte-identical before
+and after the exact final gate. Both generated timing journals stayed outside the index. With the
+same author-only Git environment that the pre-commit hook supplies, the final gate passed all 19
+selected files with no deferred or incomplete coverage:
+
+```
+$ env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    GIT_AUTHOR_NAME='Quentin Miao' \
+    GIT_AUTHOR_EMAIL='quentinmiao98@gmail.com' \
+    python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: 6b159196d1bf1d75e5e73d7667a7cd6b8ae75c4c7e3409ee09031db6b92a7854
+component timings:
+  core-scope: pass (executed, 0.36s)
+  reconcile: pass (executed, 10.02s)
+  repository-tests/base-pinned-floor: pass (executed, 294.65s)
+  repository-tests/candidate-supplemental: pass (executed, 0.64s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 19 selected, 0 deferred, 0 incomplete
+duration: 309.88s
+gate exit: 0
+
+$ git commit -m "fix: close panel review blockers" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 19 selected, 0 deferred, 0 incomplete
+duration: 13.94s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets d513a70] fix: close panel review blockers
+```
+
+No hook was bypassed. Product commit
+`d513a70d0d18538fc0e5fd32946f2efd0a59945f` is now ready for the required fresh
+five-reviewer revision-bound panel.

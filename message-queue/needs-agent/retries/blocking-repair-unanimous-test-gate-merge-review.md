@@ -74,3 +74,10 @@ was expected fail-closed behavior and did not authorize weaker cleanup claims. T
 are repaired; exact dual-generation bridge `63b12b7` passed candidate `477ebfb0…` and reused its
 receipt normally. The combined product repair, its exact final gate and commit, and a completely
 fresh no-blocker panel remain required.
+
+The combined repair's immutable staged tree `ed3650f6…` passed exact final candidate
+`6b159196…` in 309.88 seconds with all 19 files selected and none deferred or incomplete. The
+unchanged normal hook reused the full receipt in 13.94 seconds and created product commit
+`d513a70d0d18538fc0e5fd32946f2efd0a59945f`; no hook was bypassed. A completely fresh
+five-reviewer revision-bound panel with no valid blocker is now the sole condition for resolving
+this retry and moving the task to review.

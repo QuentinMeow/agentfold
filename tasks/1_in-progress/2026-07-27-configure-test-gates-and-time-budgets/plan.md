@@ -83,4 +83,6 @@
       `63b12b7` through exact final evidence and normal hook reuse.
 - [ ] 24. Run the exact final gate for the combined panel repair, commit unchanged bytes through
       normal receipt reuse, and obtain a new five-reviewer range-bound panel with no valid blocker
-      before resolving the retry, moving the task, or publishing the PR stack.
+      before resolving the retry, moving the task, or publishing the PR stack. The exact final
+      candidate `6b159196…` passed with 19/19 files complete, and normal receipt reuse created
+      product commit `d513a70`; only the new panel remains.
