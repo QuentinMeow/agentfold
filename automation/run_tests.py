@@ -15,7 +15,9 @@ only if every selected file passes.
 import argparse
 import ctypes
 import hashlib
+import json
 import os
+import platform
 import signal
 import shlex
 import shutil
@@ -67,6 +69,62 @@ SERVICE_TEST_DEPENDENCIES = (
     ),
 )
 TestSelection = namedtuple("TestSelection", "lane reason test_files")
+_CHILD_INTERPRETER_IDENTITY = None
+
+TEST_LAUNCHER = r'''import pathlib
+import runpy
+import sys
+
+view = pathlib.Path(sys.argv[1]).resolve()
+test = pathlib.Path(sys.argv[2]).resolve()
+if view != test.parent and view not in test.parents:
+    raise SystemExit("test path is outside the tested snapshot")
+paths = [str(test.parent)]
+if test.parent != view:
+    paths.append(str(view))
+sys.path[:0] = paths
+sys.argv[:] = [str(test)]
+runpy.run_path(str(test), run_name="__main__")
+'''
+
+
+def child_interpreter_identity():
+    """Probe and validate the exact interpreter contract used for every test file."""
+    global _CHILD_INTERPRETER_IDENTITY
+    if _CHILD_INTERPRETER_IDENTITY is not None:
+        return dict(_CHILD_INTERPRETER_IDENTITY)
+    probe = (
+        "import json,platform,sys;"
+        "print(json.dumps({'implementation':platform.python_implementation(),"
+        "'version':platform.python_version(),'isolated':sys.flags.isolated,"
+        "'no_site':sys.flags.no_site,'ignore_environment':sys.flags.ignore_environment},"
+        "sort_keys=True))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", probe],
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+    try:
+        identity = json.loads(result.stdout)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("isolated child interpreter identity is malformed") from error
+    if (
+        result.returncode
+        or identity.get("isolated") != 1
+        or identity.get("no_site") != 1
+        or identity.get("ignore_environment") != 1
+        or identity.get("implementation") != platform.python_implementation()
+        or identity.get("version") != platform.python_version()
+    ):
+        raise RuntimeError("isolated child interpreter identity is unavailable")
+    identity["launcher_sha256"] = hashlib.sha256(
+        TEST_LAUNCHER.encode("utf-8")
+    ).hexdigest()
+    _CHILD_INTERPRETER_IDENTITY = dict(identity)
+    return dict(identity)
 
 
 def parse_arguments(arguments):
@@ -396,7 +454,11 @@ def isolated_test_environment(parent_environment=None):
     discovered.update(name for name in child_environment if name.startswith("GIT_"))
     for name in discovered:
         child_environment.pop(name, None)
+    for name in tuple(child_environment):
+        if name.startswith("PYTHON"):
+            child_environment.pop(name)
     child_environment.update(safe_behavior)
+    child_environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return child_environment
 
 
@@ -921,7 +983,9 @@ if view not in test.parents or os.access(str(view), os.W_OK):
     raise SystemExit("provider-hard candidate input view is writable")
 if not os.access(str(home), os.W_OK) or not os.access(str(temporary), os.W_OK):
     raise SystemExit("provider-hard candidate scratch is unavailable")
+sys.path.insert(0, str(view))
 sys.path.insert(0, str(test.parent))
+sys.argv[:] = [str(test)]
 runpy.run_path(str(test), run_name="__main__")
 '''
 
@@ -936,7 +1000,6 @@ def provider_candidate_environment(child_environment, view, home, temporary):
         "RUNNER_ARCH",
         "RUNNER_OS",
         "TZ",
-        "PYTHONWARNINGS",
     }.union(SAFE_GIT_BEHAVIOR_VARIABLES)
     environment = {
         name: value
@@ -963,6 +1026,7 @@ def run_provider_test(test_path, cwd, environment, home, temporary):
         [
             sys.executable,
             "-I",
+            "-S",
             "-c",
             PROVIDER_TEST_LAUNCHER,
             str(test_path),
@@ -990,8 +1054,25 @@ def run_provider_test(test_path, cwd, environment, home, temporary):
     return subprocess.CompletedProcess(process.args, returncode)
 
 
+def run_isolated_test(test_path, cwd, environment):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            TEST_LAUNCHER,
+            str(cwd),
+            str(test_path),
+        ],
+        cwd=cwd,
+        env=environment,
+    )
+
+
 def main(arguments=()):
     started = time.monotonic()
+    child_interpreter_identity()
     options = parse_arguments(arguments)
     if options.provider_hard:
         print(
@@ -1084,10 +1165,8 @@ def main(arguments=()):
                 )
                 restore_provider_test_view(test_cwd)
             else:
-                result = subprocess.run(
-                    [sys.executable, str(test_cwd / rel)],
-                    cwd=test_cwd,
-                    env=child_environment,
+                result = run_isolated_test(
+                    test_cwd / rel, test_cwd, child_environment
                 )
             (print(f"PASS {rel}") if result.returncode == 0 else failed.append(rel))
     for rel in failed:

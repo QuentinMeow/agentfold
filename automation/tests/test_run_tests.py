@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import sys
@@ -9,23 +10,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-if __package__:
-    from .test_gate_generations import (
-        SPLIT_GENERATION,
-        gate_generation,
-    )
-else:
-    from test_gate_generations import (
-        SPLIT_GENERATION,
-        gate_generation,
-    )
-
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "run_tests.py"
 SPEC = importlib.util.spec_from_file_location("run_tests", MODULE_PATH)
 RUN_TESTS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUN_TESTS)
-GATE_GENERATION = gate_generation()
 
 
 class StagedTestSelectionTests(unittest.TestCase):
@@ -336,7 +325,7 @@ class StagedTestSelectionTests(unittest.TestCase):
     def test_pre_commit_requests_the_staged_lane(self):
         hook = (RUN_TESTS.REPO / "automation/hooks/pre-commit").read_text()
 
-        self.assertIn('automation/run_test_gate.py" routine --staged', hook)
+        self.assertIn('python3 -I -S "$ROOT/automation/run_test_gate.py" routine --staged', hook)
 
     def test_explicit_view_requires_safe_discovered_test_paths(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -414,6 +403,109 @@ class StagedTestSelectionTests(unittest.TestCase):
 
 
 class RunTestsIsolationTests(unittest.TestCase):
+    def setUp(self):
+        previous = RUN_TESTS._CHILD_INTERPRETER_IDENTITY
+        RUN_TESTS._CHILD_INTERPRETER_IDENTITY = None
+        self.addCleanup(
+            setattr, RUN_TESTS, "_CHILD_INTERPRETER_IDENTITY", previous
+        )
+
+    def test_child_interpreter_identity_is_isolated_no_site_and_ignore_environment(self):
+        identity = RUN_TESTS.child_interpreter_identity()
+        self.assertEqual(1, identity["isolated"])
+        self.assertEqual(1, identity["no_site"])
+        self.assertEqual(1, identity["ignore_environment"])
+        self.assertEqual(64, len(identity["launcher_sha256"]))
+
+    def test_normal_test_launch_uses_trusted_isolated_launcher(self):
+        completed = subprocess.CompletedProcess(["python"], 0)
+        with mock.patch.object(
+            RUN_TESTS.subprocess, "run", return_value=completed
+        ) as run:
+            result = RUN_TESTS.run_isolated_test(
+                Path("/view/automation/tests/test_probe.py"),
+                Path("/view"),
+                {"PATH": "/bin"},
+            )
+        self.assertEqual(0, result.returncode)
+        command = run.call_args[0][0]
+        self.assertEqual(
+            [sys.executable, "-I", "-S", "-c"], command[:4]
+        )
+        self.assertEqual(RUN_TESTS.TEST_LAUNCHER, command[4])
+        self.assertEqual("/view", command[-2])
+        self.assertEqual("/view/automation/tests/test_probe.py", command[-1])
+
+    def test_isolated_launcher_blocks_external_site_and_preserves_view_imports(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            view = root / "view"
+            external = root / "external"
+            test = view / "automation/tests/test_probe.py"
+            sibling = test.parent / "sibling_probe.py"
+            root_module = view / "root_probe.py"
+            result_path = root / "result.json"
+            site_marker = root / "sitecustomize-loaded"
+            test.parent.mkdir(parents=True)
+            external.mkdir()
+            sibling.write_text("VALUE = 'sibling'\n")
+            root_module.write_text("VALUE = 'root'\n")
+            poison = (
+                "from pathlib import Path\n"
+                f"Path({str(site_marker)!r}).write_text('loaded')\n"
+            )
+            (external / "sitecustomize.py").write_text(poison)
+            (external / "mutable_external.py").write_text("VALUE = 'external'\n")
+            user_environment = dict(os.environ)
+            user_environment["PYTHONUSERBASE"] = str(root / "user-base")
+            user_site = Path(
+                subprocess.check_output(
+                    [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+                    env=user_environment,
+                    text=True,
+                ).strip()
+            )
+            user_site.mkdir(parents=True)
+            (user_site / "sitecustomize.py").write_text(poison)
+            (user_site / "mutable_external.py").write_text("VALUE = 'user-site'\n")
+            test.write_text(
+                "import json,sys\n"
+                "from pathlib import Path\n"
+                "import root_probe,sibling_probe\n"
+                "try:\n import mutable_external\n loaded=True\n"
+                "except ImportError:\n loaded=False\n"
+                f"Path({str(result_path)!r}).write_text(json.dumps({{"
+                "'isolated':sys.flags.isolated,'no_site':sys.flags.no_site,"
+                "'ignore_environment':sys.flags.ignore_environment,"
+                "'root':root_probe.VALUE,'sibling':sibling_probe.VALUE,"
+                "'external_loaded':loaded,'path':sys.path}))\n"
+            )
+            contaminated = {
+                "PYTHONPATH": str(external),
+                "PYTHONUSERBASE": str(root / "user-base"),
+                "PYTHONSTARTUP": str(external / "startup.py"),
+            }
+            with mock.patch.dict(os.environ, contaminated, clear=False):
+                exit_code = RUN_TESTS.main(
+                    (
+                        "--view-root",
+                        str(view),
+                        "--test-file",
+                        "automation/tests/test_probe.py",
+                    )
+                )
+            self.assertEqual(0, exit_code)
+            observed = json.loads(result_path.read_text())
+            self.assertEqual(1, observed["isolated"])
+            self.assertEqual(1, observed["no_site"])
+            self.assertEqual(1, observed["ignore_environment"])
+            self.assertEqual("root", observed["root"])
+            self.assertEqual("sibling", observed["sibling"])
+            self.assertFalse(observed["external_loaded"])
+            self.assertNotIn(str(external), observed["path"])
+            self.assertNotIn(str(user_site), observed["path"])
+            self.assertFalse(site_marker.exists())
+
     def test_ordinary_runner_describes_its_cooperative_evidence_boundary(self):
         selection = RUN_TESTS.TestSelection("full", "probe", ())
         output = io.StringIO()
@@ -499,11 +591,8 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("/usr/local/bin:/usr/bin:/bin", environment["PATH"])
         self.assertEqual("/work/state/home", environment["HOME"])
         self.assertEqual("/work/state/tmp", environment["TMPDIR"])
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertNotIn("PYTHONWARNINGS", environment)
-            self.assertEqual("1", environment["PYTHONDONTWRITEBYTECODE"])
-        else:
-            self.assertEqual("error", environment["PYTHONWARNINGS"])
+        self.assertNotIn("PYTHONWARNINGS", environment)
+        self.assertEqual("1", environment["PYTHONDONTWRITEBYTECODE"])
         self.assertNotIn("GITHUB_TOKEN", environment)
         self.assertNotIn("PYTHON_CREDENTIAL", environment)
         self.assertNotIn("UNRELATED", environment)
@@ -540,6 +629,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             popen.call_args[1]["preexec_fn"],
         )
         self.assertTrue(popen.call_args[1]["start_new_session"])
+        self.assertIn("-S", popen.call_args[0][0])
         self.assertEqual("/state/home", popen.call_args[0][0][-2])
         self.assertEqual("/state/tmp", popen.call_args[0][0][-1])
 
@@ -713,10 +803,9 @@ class RunTestsIsolationTests(unittest.TestCase):
         with mock.patch.object(RUN_TESTS.subprocess, "run", return_value=truncated):
             child = RUN_TESTS.isolated_test_environment(contaminated)
 
-        expected = {"KEEP": "present"}
-        if GATE_GENERATION == SPLIT_GENERATION:
-            expected["PYTHONDONTWRITEBYTECODE"] = "1"
-        self.assertEqual(expected, child)
+        self.assertEqual(
+            {"KEEP": "present", "PYTHONDONTWRITEBYTECODE": "1"}, child
+        )
 
     def test_scratch_root_rejects_a_path_separator(self):
         unsafe = Path(tempfile.gettempdir()) / f"agentfold{os.pathsep}unsafe"
@@ -1080,8 +1169,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             )
 
     def test_main_passes_the_isolated_environment_to_each_test(self):
-        if GATE_GENERATION == SPLIT_GENERATION:
-            RUN_TESTS.child_interpreter_identity()
+        RUN_TESTS.child_interpreter_identity()
         child_environment = {
             "PATH": os.environ.get("PATH", ""),
             "HOME": "/caller/home",
@@ -1130,18 +1218,13 @@ class RunTestsIsolationTests(unittest.TestCase):
             child_environment["GIT_CEILING_DIRECTORIES"],
         )
         command = run.call_args[0][0]
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual([sys.executable, "-I", "-S", "-c"], command[:4])
-            self.assertEqual(RUN_TESTS.TEST_LAUNCHER, command[4])
-            self.assertEqual(str(test_cwd), command[-2])
-            self.assertEqual(str(test_cwd / relative_test), command[-1])
-            executed_test = command[-1]
-        else:
-            self.assertEqual(str(test_cwd / relative_test), command[1])
-            executed_test = command[1]
+        self.assertEqual([sys.executable, "-I", "-S", "-c"], command[:4])
+        self.assertEqual(RUN_TESTS.TEST_LAUNCHER, command[4])
+        self.assertEqual(str(test_cwd), command[-2])
+        self.assertEqual(str(test_cwd / relative_test), command[-1])
         self.assertNotEqual(
             str(RUN_TESTS.REPO / relative_test),
-            executed_test,
+            command[-1],
         )
         self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
@@ -1149,6 +1232,7 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("/caller/xdg", child_environment["XDG_CONFIG_HOME"])
 
     def test_main_materializes_a_fresh_view_for_each_discovered_test(self):
+        RUN_TESTS.child_interpreter_identity()
         child_environment = {"PATH": os.environ.get("PATH", "")}
         tests = [
             RUN_TESTS.REPO / "automation/tests/test_first.py",
