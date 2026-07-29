@@ -66,6 +66,23 @@ DEADLINE_RECORDS = tuple(sorted((
     ("automation/test_gate_controller.py", "100644", "d52f5ce066d0415250678d9d2a8e5c32b0a6deeb1a8dcf7f988483fba6f5772c"),
 )))
 
+PARSER_COMPAT_RECORDS = tuple(sorted((
+    ("agentfold.toml", "100644", "e1db9aea6f6f21415709fd1e566e55323dbc2db0594869d1e74a186ab10d54e9"),
+    ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
+    ("automation/_vendor/tomli/__init__.py", "100644", "26153057ae830758381efb7551009531d7c2bbe220015f055e6bc353da27c5de"),
+    ("automation/_vendor/tomli/_parser.py", "100644", "83df8435a00b4be07c768918a42bb35056a55a5a20ed3f922183232d9496aed3"),
+    ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
+    ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
+    ("automation/file_test_budget_task.py", "100644", "5ea2e7afda7194f51e78cdb431f8088307a12d9258793d1c35afdcde03473239"),
+    ("automation/test_gate_config.py", "100644", "4b883d081f4472f4dd73465d440f71438637acd65d5c7f6a82b437639a2d9853"),
+    ("automation/test_manifest.py", "100644", "d20b545f9db9566f74be26cb3ce5518b6893544d377e389f577925b0eba5679e"),
+    (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
+    ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
+    ("automation/run_test_gate.py", "100644", "f11b9ca71684b18b9dd3be913f95a5b27662b8f6f0ccece304945a06540a8a88"),
+    ("automation/run_tests.py", "100644", "fadefe0bb6ca063c6fbbf03a2c3fc010287d4466161ab2b564501ff4aeaf5cda"),
+    ("automation/test_gate_controller.py", "100644", "d52f5ce066d0415250678d9d2a8e5c32b0a6deeb1a8dcf7f988483fba6f5772c"),
+)))
+
 REVIEW_REPAIR_RECORDS = tuple(sorted((
     ("agentfold.toml", "100644", "b126e7224c1236bfd6f7bbe2f2bd61cd759d42c282aaf59433fdbc93d8ca5e6f"),
     ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
@@ -74,7 +91,7 @@ REVIEW_REPAIR_RECORDS = tuple(sorted((
     ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
     ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
     ("automation/file_test_budget_task.py", "100644", "bbd756ba55ebafb25b76992d36bc81de396641295532dd15f7462494903990de"),
-    ("automation/test_gate_config.py", "100644", "537cc42b8bcff4f41ebcdd5507e78ede698925edba64058426beee800880f104"),
+    ("automation/test_gate_config.py", "100644", "4b883d081f4472f4dd73465d440f71438637acd65d5c7f6a82b437639a2d9853"),
     ("automation/test_manifest.py", "100644", "d20b545f9db9566f74be26cb3ce5518b6893544d377e389f577925b0eba5679e"),
     (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
     ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
@@ -113,6 +130,8 @@ def classify_gate_generation_records(records):
         return SPLIT_GENERATION
     if records == DEADLINE_RECORDS:
         return DEADLINE_GENERATION
+    if records == PARSER_COMPAT_RECORDS:
+        return DEADLINE_GENERATION
     if records == REVIEW_REPAIR_RECORDS:
         return DEADLINE_GENERATION
     return "invalid"
@@ -147,6 +166,10 @@ class GateMigrationGenerationTests(unittest.TestCase):
         )
         self.assertEqual(
             DEADLINE_GENERATION, classify_gate_generation_records(DEADLINE_RECORDS)
+        )
+        self.assertEqual(
+            DEADLINE_GENERATION,
+            classify_gate_generation_records(PARSER_COMPAT_RECORDS),
         )
         self.assertEqual(
             DEADLINE_GENERATION,
@@ -201,6 +224,7 @@ class GateMigrationGenerationTests(unittest.TestCase):
             (LEGACY_GENERATION, LEGACY_RECORDS),
             (SPLIT_GENERATION, SPLIT_RECORDS),
             (DEADLINE_GENERATION + "-before-review", DEADLINE_RECORDS),
+            (DEADLINE_GENERATION + "-parser-compat", PARSER_COMPAT_RECORDS),
             (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
         )
         for base_name, base_records in generations:
@@ -231,6 +255,7 @@ class GateMigrationGenerationTests(unittest.TestCase):
             (LEGACY_GENERATION, LEGACY_RECORDS),
             (SPLIT_GENERATION, SPLIT_RECORDS),
             (DEADLINE_GENERATION, DEADLINE_RECORDS),
+            (DEADLINE_GENERATION + "-parser-compat", PARSER_COMPAT_RECORDS),
             (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
         ):
             for index, record in enumerate(admitted):

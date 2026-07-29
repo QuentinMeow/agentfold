@@ -4,6 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from automation.tests.test_gate_generations import (
+    DEADLINE_RECORDS,
+    PARSER_COMPAT_RECORDS,
+    gate_generation_records,
+)
+
 REPO = Path(__file__).resolve().parents[2]
 AUTOMATION = REPO / "automation"
 sys.path.insert(0, str(AUTOMATION))
@@ -16,11 +22,45 @@ CONFIG_SPEC.loader.exec_module(CONFIG)
 from _vendor import tomli
 
 
+CURRENT_GATE_RECORDS = gate_generation_records()
+if CURRENT_GATE_RECORDS == DEADLINE_RECORDS:
+    POLICY_ENDPOINT = "deadline-before-parser-compat"
+elif CURRENT_GATE_RECORDS == PARSER_COMPAT_RECORDS:
+    POLICY_ENDPOINT = "parser-compat"
+else:
+    raise AssertionError(
+        "config tests require one exact admitted policy endpoint: {!r}".format(
+            CURRENT_GATE_RECORDS
+        )
+    )
+HAS_SERVICE_DEPENDENCIES = POLICY_ENDPOINT != "deadline-before-parser-compat"
+HAS_HARDENED_RISK_PATHS = POLICY_ENDPOINT != "deadline-before-parser-compat"
+
+
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
 def replaced(old, new, text=VALID_TEXT):
     if old not in text:
         raise AssertionError("fixture fragment was not found: {!r}".format(old))
     return text.replace(old, new, 1)
+
+
+def with_dependencies(value, text=VALID_TEXT):
+    return replaced(
+        "target_seconds = 60\nmaximum_seconds = 60",
+        "target_seconds = 60\nmaximum_seconds = 60\n"
+        "service_dependencies = {}".format(value),
+        text,
+    )
+
+
+EMPTY_DEPENDENCIES_TEXT = with_dependencies("{}")
+DEPENDENCY_TEXT = with_dependencies('{ quote-api = ["quote-cli"] }')
+PRE_SERVICE_DEPENDENCY_POLICY_DIGEST = (
+    "fc882fa0e93966ca969ee94a2f4567320188d658b4c5739952f5c3e803889fe1"
+)
+PRE_HARDENING_POLICY_DIGEST = (
+    "41b2ee7b778f6fe2821179760291fffd8ff9ed85b85d52ebbab5a09f4bc1236e"
+)
 
 
 def final_config(mode, text=VALID_TEXT):
@@ -48,6 +88,10 @@ class StarterPolicyTests(unittest.TestCase):
 
         self.assertEqual(1, policy.schema_version)
         self.assertEqual((60.0, 60.0), (policy.routine.target_seconds, policy.routine.maximum_seconds))
+        if HAS_SERVICE_DEPENDENCIES:
+            self.assertEqual((), policy.service_dependencies)
+        else:
+            self.assertFalse(hasattr(policy, "service_dependencies"))
         self.assertEqual("manual", policy.final.mode)
         self.assertIsNone(policy.final.trigger)
         self.assertEqual((300.0, 900.0), (policy.final.target_seconds, policy.final.maximum_seconds))
@@ -101,6 +145,72 @@ class StarterPolicyTests(unittest.TestCase):
         changed = CONFIG.parse_policy(replaced("target_seconds = 300", "target_seconds = 301"))
         original = CONFIG.parse_policy(VALID_TEXT)
         self.assertNotEqual(original.digest, changed.digest)
+
+    def test_empty_dependency_compatibility_preserves_old_policy_identity(self):
+        absent = CONFIG.parse_policy(VALID_TEXT)
+        if not HAS_SERVICE_DEPENDENCIES:
+            with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
+                CONFIG.parse_policy(EMPTY_DEPENDENCIES_TEXT)
+            self.assertEqual(PRE_HARDENING_POLICY_DIGEST, absent.digest)
+            self.assertFalse(hasattr(absent, "service_dependencies"))
+            return
+        explicit_empty = CONFIG.parse_policy(EMPTY_DEPENDENCIES_TEXT)
+
+        self.assertEqual((), absent.service_dependencies)
+        self.assertEqual((), explicit_empty.service_dependencies)
+        self.assertEqual(
+            CONFIG.canonical_policy_json(absent),
+            CONFIG.canonical_policy_json(explicit_empty),
+        )
+        self.assertEqual(absent.digest, explicit_empty.digest)
+        self.assertEqual(PRE_SERVICE_DEPENDENCY_POLICY_DIGEST, absent.digest)
+        self.assertEqual(
+            CONFIG.canonical_policy_json(
+                CONFIG.union_policies(absent, explicit_empty)
+            ),
+            CONFIG.canonical_policy_json(CONFIG.union_policies(absent, absent)),
+        )
+        self.assertNotIn(
+            b'"service_dependencies"',
+            CONFIG.canonical_policy_json(absent),
+        )
+
+    def test_nonempty_dependencies_are_digest_bound(self):
+        absent = CONFIG.parse_policy(VALID_TEXT)
+        if not HAS_SERVICE_DEPENDENCIES:
+            with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
+                CONFIG.parse_policy(DEPENDENCY_TEXT)
+            self.assertFalse(hasattr(absent, "service_dependencies"))
+            return
+        configured = CONFIG.parse_policy(DEPENDENCY_TEXT)
+
+        self.assertEqual(
+            (("quote-api", ("quote-cli",)),),
+            configured.service_dependencies,
+        )
+        self.assertIn(
+            b'"service_dependencies":{"quote-api":["quote-cli"]}',
+            CONFIG.canonical_policy_json(configured),
+        )
+        self.assertNotEqual(absent.digest, configured.digest)
+
+    def test_existing_positional_construction_defaults_to_no_dependencies(self):
+        policy = CONFIG.parse_policy(VALID_TEXT)
+        reconstructed = CONFIG.TestGatePolicy(
+            policy.schema_version,
+            policy.routine,
+            policy.final,
+            policy.on_budget_exceeded,
+            policy.critical_bindings,
+            policy.reversible_bindings,
+            policy.unmatched_is_critical,
+        )
+
+        if HAS_SERVICE_DEPENDENCIES:
+            self.assertEqual((), reconstructed.service_dependencies)
+        else:
+            self.assertFalse(hasattr(reconstructed, "service_dependencies"))
+        self.assertEqual(policy.digest, reconstructed.digest)
 
 
 class ClosedSchemaTests(unittest.TestCase):
@@ -159,6 +269,53 @@ class ClosedSchemaTests(unittest.TestCase):
             replaced('on_budget_exceeded = "file-task"', 'on_budget_exceeded = "warn"'),
             "on_budget_exceeded must be one of",
         )
+
+    def test_service_dependencies_are_closed_and_lowercase_kebab_case(self):
+        if not HAS_SERVICE_DEPENDENCIES:
+            for text in (
+                EMPTY_DEPENDENCIES_TEXT,
+                DEPENDENCY_TEXT,
+            ):
+                with self.subTest(endpoint=POLICY_ENDPOINT, text=text):
+                    self.assert_config_error(text, "unknown key")
+            return
+        cases = (
+            (
+                replaced(
+                    'service_dependencies = { quote-api = ["quote-cli"] }',
+                    'service_dependencies = { "Quote API" = ["quote-cli"] }',
+                    DEPENDENCY_TEXT,
+                ),
+                "lowercase kebab-case",
+            ),
+            (
+                replaced(
+                    'service_dependencies = { quote-api = ["quote-cli"] }',
+                    'service_dependencies = { quote-api = ["Quote CLI"] }',
+                    DEPENDENCY_TEXT,
+                ),
+                "lowercase kebab-case",
+            ),
+            (
+                replaced(
+                    'service_dependencies = { quote-api = ["quote-cli"] }',
+                    'service_dependencies = { quote-api = ["quote-api"] }',
+                    DEPENDENCY_TEXT,
+                ),
+                "must not depend on itself",
+            ),
+            (
+                replaced(
+                    'service_dependencies = { quote-api = ["quote-cli"] }',
+                    'service_dependencies = { quote-api = ["quote-cli", "quote-cli"] }',
+                    DEPENDENCY_TEXT,
+                ),
+                "duplicate values",
+            ),
+        )
+        for text, pattern in cases:
+            with self.subTest(pattern=pattern):
+                self.assert_config_error(text, pattern)
 
     def test_budget_numbers_reject_boolean_nonfinite_nonpositive_and_target_over_maximum(self):
         cases = (
@@ -230,6 +387,46 @@ class RiskClassificationTests(unittest.TestCase):
         self.assertEqual(("services/quote-api/quote_api.py",), result.reversible_paths)
         self.assertEqual((), result.required_check_ids)
 
+    def test_gate_control_paths_are_authorization_critical(self):
+        paths = (
+            "agentfold.toml",
+            "automation/file_test_budget_task.py",
+            "automation/hooks/pre-commit",
+            "automation/run_test_gate.py",
+            "automation/run_tests.py",
+            "automation/test_gate_config.py",
+            "automation/test_gate_controller.py",
+            "automation/test_manifest.py",
+            "automation/_vendor/tomli/_parser.py",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                result = CONFIG.classify_paths((path,), self.policy)
+                if HAS_HARDENED_RISK_PATHS:
+                    self.assertTrue(result.is_critical)
+                    self.assertIn("repository-tests/full", result.required_check_ids)
+                else:
+                    self.assertFalse(result.is_critical)
+                    self.assertEqual((path,), result.reversible_paths)
+                    self.assertEqual((), result.required_check_ids)
+
+    def test_new_executable_paths_fail_closed_while_allowlisted_paths_stay_reversible(self):
+        for path in ("services/quote-api/handler.py", "automation/helper.py"):
+            with self.subTest(path=path):
+                result = CONFIG.classify_paths((path,), self.policy)
+                if HAS_HARDENED_RISK_PATHS:
+                    self.assertTrue(result.is_critical)
+                    self.assertEqual((path,), result.unmatched_paths)
+                else:
+                    self.assertFalse(result.is_critical)
+                    self.assertEqual((path,), result.reversible_paths)
+        for path in (
+            "services/quote-api/quote_api.py",
+            "automation/mine_cochange.py",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(CONFIG.classify_paths((path,), self.policy).is_critical)
+
     def test_critical_match_wins_over_reversible_and_unions_checks(self):
         result = CONFIG.classify_paths(
             ("services/quote-api/private-auth-secret.py",),
@@ -258,10 +455,20 @@ class RiskClassificationTests(unittest.TestCase):
 
     def test_classification_deduplicates_and_sorts_paths(self):
         result = CONFIG.classify_paths(
-            ("services/z.py", "services/a.py", "services/z.py"),
+            (
+                "services/quote-cli/quote_cli.py",
+                "services/quote-api/quote_api.py",
+                "services/quote-cli/quote_cli.py",
+            ),
             self.policy,
         )
-        self.assertEqual(("services/a.py", "services/z.py"), result.reversible_paths)
+        self.assertEqual(
+            (
+                "services/quote-api/quote_api.py",
+                "services/quote-cli/quote_cli.py",
+            ),
+            result.reversible_paths,
+        )
 
     def test_runtime_paths_must_also_be_relative_posix(self):
         for path in ("/absolute", "../escape", "windows\\path"):
@@ -305,10 +512,41 @@ class PolicyUnionTests(unittest.TestCase):
 
     def test_path_reversible_under_both_policies_stays_reversible(self):
         union = CONFIG.union_policies(self.base, CONFIG.parse_policy(VALID_TEXT))
-        result = CONFIG.classify_paths(("services/example/app.py",), union)
+        result = CONFIG.classify_paths(("services/quote-api/quote_api.py",), union)
         self.assertFalse(result.is_critical)
         self.assertEqual(("ordinary-repository-work",), result.reversible_ids)
         self.assertEqual((), union.hard_triggers)
+
+    def test_union_preserves_base_service_dependencies(self):
+        if not HAS_SERVICE_DEPENDENCIES:
+            with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
+                CONFIG.parse_policy(DEPENDENCY_TEXT)
+            return
+        union = CONFIG.union_policies(
+            CONFIG.parse_policy(DEPENDENCY_TEXT),
+            self.base,
+        )
+        self.assertEqual((("quote-api", ("quote-cli",)),), union.service_dependencies)
+
+    def test_union_combines_distinct_base_and_candidate_dependencies(self):
+        if not HAS_SERVICE_DEPENDENCIES:
+            with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
+                CONFIG.parse_policy(DEPENDENCY_TEXT)
+            return
+        base = CONFIG.parse_policy(DEPENDENCY_TEXT)
+        candidate = CONFIG.parse_policy(
+            with_dependencies('{ payments = ["worker"] }')
+        )
+
+        union = CONFIG.union_policies(base, candidate)
+
+        self.assertEqual(
+            (
+                ("payments", ("worker",)),
+                ("quote-api", ("quote-cli",)),
+            ),
+            union.service_dependencies,
+        )
 
     def test_hard_trigger_and_smaller_limits_survive_candidate_downgrade(self):
         candidate_text = MANUAL_CONFIG.replace(
