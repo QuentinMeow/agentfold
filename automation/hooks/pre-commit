@@ -7,6 +7,6 @@ set -e
 ROOT="$(git rev-parse --show-toplevel)"
 
 echo "pre-commit: routine test gate"
-python3 "$ROOT/automation/run_test_gate.py" routine --staged
+python3 -I -S "$ROOT/automation/run_test_gate.py" routine --staged
 
 echo "pre-commit: OK"
