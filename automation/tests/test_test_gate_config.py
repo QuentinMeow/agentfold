@@ -7,6 +7,7 @@ from pathlib import Path
 from automation.tests.test_gate_generations import (
     DEADLINE_RECORDS,
     PARSER_COMPAT_RECORDS,
+    REVIEW_REPAIR_RECORDS,
     gate_generation_records,
 )
 
@@ -27,6 +28,8 @@ if CURRENT_GATE_RECORDS == DEADLINE_RECORDS:
     POLICY_ENDPOINT = "deadline-before-parser-compat"
 elif CURRENT_GATE_RECORDS == PARSER_COMPAT_RECORDS:
     POLICY_ENDPOINT = "parser-compat"
+elif CURRENT_GATE_RECORDS == REVIEW_REPAIR_RECORDS:
+    POLICY_ENDPOINT = "review-repair"
 else:
     raise AssertionError(
         "config tests require one exact admitted policy endpoint: {!r}".format(
@@ -35,6 +38,7 @@ else:
     )
 HAS_SERVICE_DEPENDENCIES = POLICY_ENDPOINT != "deadline-before-parser-compat"
 HAS_HARDENED_RISK_PATHS = POLICY_ENDPOINT != "deadline-before-parser-compat"
+IS_REVIEW_REPAIR = POLICY_ENDPOINT == "review-repair"
 
 
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
@@ -44,7 +48,25 @@ def replaced(old, new, text=VALID_TEXT):
     return text.replace(old, new, 1)
 
 
-def with_dependencies(value, text=VALID_TEXT):
+DEPENDENCY_PREFIX = "service_dependencies = "
+dependency_lines = tuple(
+    line for line in VALID_TEXT.splitlines(keepends=True)
+    if line.startswith(DEPENDENCY_PREFIX)
+)
+expected_dependency_lines = 1 if IS_REVIEW_REPAIR else 0
+if len(dependency_lines) != expected_dependency_lines:
+    raise AssertionError(
+        "{} endpoint has an unexpected starter dependency shape".format(
+            POLICY_ENDPOINT
+        )
+    )
+NO_DEPENDENCIES_TEXT = "".join(
+    line for line in VALID_TEXT.splitlines(keepends=True)
+    if not line.startswith(DEPENDENCY_PREFIX)
+)
+
+
+def with_dependencies(value, text=NO_DEPENDENCIES_TEXT):
     return replaced(
         "target_seconds = 60\nmaximum_seconds = 60",
         "target_seconds = 60\nmaximum_seconds = 60\n"
@@ -88,7 +110,12 @@ class StarterPolicyTests(unittest.TestCase):
 
         self.assertEqual(1, policy.schema_version)
         self.assertEqual((60.0, 60.0), (policy.routine.target_seconds, policy.routine.maximum_seconds))
-        if HAS_SERVICE_DEPENDENCIES:
+        if IS_REVIEW_REPAIR:
+            self.assertEqual(
+                (("quote-api", ("quote-cli",)),),
+                policy.service_dependencies,
+            )
+        elif HAS_SERVICE_DEPENDENCIES:
             self.assertEqual((), policy.service_dependencies)
         else:
             self.assertFalse(hasattr(policy, "service_dependencies"))
@@ -147,7 +174,7 @@ class StarterPolicyTests(unittest.TestCase):
         self.assertNotEqual(original.digest, changed.digest)
 
     def test_empty_dependency_compatibility_preserves_old_policy_identity(self):
-        absent = CONFIG.parse_policy(VALID_TEXT)
+        absent = CONFIG.parse_policy(NO_DEPENDENCIES_TEXT)
         if not HAS_SERVICE_DEPENDENCIES:
             with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
                 CONFIG.parse_policy(EMPTY_DEPENDENCIES_TEXT)
@@ -176,7 +203,7 @@ class StarterPolicyTests(unittest.TestCase):
         )
 
     def test_nonempty_dependencies_are_digest_bound(self):
-        absent = CONFIG.parse_policy(VALID_TEXT)
+        absent = CONFIG.parse_policy(NO_DEPENDENCIES_TEXT)
         if not HAS_SERVICE_DEPENDENCIES:
             with self.assertRaisesRegex(CONFIG.ConfigError, "unknown key"):
                 CONFIG.parse_policy(DEPENDENCY_TEXT)
@@ -195,7 +222,7 @@ class StarterPolicyTests(unittest.TestCase):
         self.assertNotEqual(absent.digest, configured.digest)
 
     def test_existing_positional_construction_defaults_to_no_dependencies(self):
-        policy = CONFIG.parse_policy(VALID_TEXT)
+        policy = CONFIG.parse_policy(NO_DEPENDENCIES_TEXT)
         reconstructed = CONFIG.TestGatePolicy(
             policy.schema_version,
             policy.routine,
@@ -211,6 +238,23 @@ class StarterPolicyTests(unittest.TestCase):
         else:
             self.assertFalse(hasattr(reconstructed, "service_dependencies"))
         self.assertEqual(policy.digest, reconstructed.digest)
+        if HAS_SERVICE_DEPENDENCIES:
+            configured = CONFIG.parse_policy(DEPENDENCY_TEXT)
+            configured_reconstructed = CONFIG.TestGatePolicy(
+                configured.schema_version,
+                configured.routine,
+                configured.final,
+                configured.on_budget_exceeded,
+                configured.critical_bindings,
+                configured.reversible_bindings,
+                configured.unmatched_is_critical,
+                configured.service_dependencies,
+            )
+            self.assertEqual(
+                (("quote-api", ("quote-cli",)),),
+                configured_reconstructed.service_dependencies,
+            )
+            self.assertEqual(configured.digest, configured_reconstructed.digest)
 
 
 class ClosedSchemaTests(unittest.TestCase):

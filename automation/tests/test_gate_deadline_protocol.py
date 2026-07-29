@@ -10,12 +10,32 @@ import stat
 import struct
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 
 AUTOMATION = Path(__file__).resolve().parents[1]
+GENERATION_PATH = AUTOMATION / "tests" / "test_gate_generations.py"
+GENERATION_SPEC = importlib.util.spec_from_file_location(
+    "deadline_protocol_gate_generations", GENERATION_PATH
+)
+GATE_GENERATIONS = importlib.util.module_from_spec(GENERATION_SPEC)
+GENERATION_SPEC.loader.exec_module(GATE_GENERATIONS)
+GATE_GENERATIONS.gate_generation(AUTOMATION.parent)
+PRODUCT_RECORDS = GATE_GENERATIONS.gate_generation_records(AUTOMATION.parent)
+PARSER_COMPAT_ENDPOINT = "parser-compat"
+REVIEW_REPAIR_ENDPOINT = "review-repair"
+if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
+    PRODUCT_ENDPOINT = PARSER_COMPAT_ENDPOINT
+elif PRODUCT_RECORDS == GATE_GENERATIONS.REVIEW_REPAIR_RECORDS:
+    PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
+else:
+    raise AssertionError(
+        "deadline endpoint is neither exact parser-compat nor exact review-repair"
+    )
+
 SPEC = importlib.util.spec_from_file_location(
     "deadline_protocol_gate", AUTOMATION / "run_test_gate.py"
 )
@@ -550,7 +570,11 @@ class DeadlineProtocolTests(unittest.TestCase):
             self.assertEqual(1, GATE._dispatch(("routine", "--staged")))
         cleanup.assert_called_once_with(process, mock.ANY)
 
-    def test_pre_policy_frame_timeout_reports_real_elapsed_and_cleanup(self):
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == PARSER_COMPAT_ENDPOINT,
+        "direct stdout static reporting belongs to the parser-compat endpoint",
+    )
+    def test_parser_compat_pre_policy_timeout_writes_direct_stdout(self):
         process = mock.Mock(pid=12345)
         cleanup = {
             "worker_started": True,
@@ -587,6 +611,54 @@ class DeadlineProtocolTests(unittest.TestCase):
         self.assertEqual(5.25, report["duration_seconds"])
         self.assertEqual(5.25, report["decision"]["duration_seconds"])
         self.assertTrue(report["process_containment"]["worker_started"])
+        cleanup_call.assert_called_once_with(process, mock.ANY)
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static reporting belongs to the review-repair endpoint",
+    )
+    def test_pre_policy_frame_timeout_reports_real_elapsed_and_cleanup(self):
+        process = mock.Mock(pid=12345)
+        cleanup = {
+            "worker_started": True,
+            "worker_result": "exited",
+            "process_group_cleanup": {
+                "attempted": True,
+                "result": "signal-sent",
+            },
+            "ownership_token_cleanup": {
+                "attempted": True,
+                "result": "no-match",
+                "discovery_completeness": "best-effort-portable",
+            },
+        }
+        output = []
+
+        def deliver(payload, *_arguments, **_kwargs):
+            output.append(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+            return {"disposition": "written", "written": True}
+
+        with mock.patch.object(
+            GATE,
+            "_bootstrap_monotonic_start",
+            side_effect=(
+                (GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE, 10.0),
+                (GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE, 15.25),
+            ),
+        ), mock.patch.object(GATE.subprocess, "Popen", return_value=process), mock.patch.object(
+            GATE,
+            "_receive_control_frame",
+            side_effect=TimeoutError("test-gate control frame missed its deadline"),
+        ), mock.patch.object(
+            GATE, "_kill_worker_group", return_value=cleanup
+        ) as cleanup_call, mock.patch.object(
+            GATE, "_deliver_static_output", side_effect=deliver
+        ):
+            self.assertEqual(1, GATE._dispatch(("routine", "--staged")))
+        report = json.loads(output[0])
+        self.assertEqual(5.25, report["duration_seconds"])
+        self.assertEqual(5.25, report["decision"]["duration_seconds"])
+        self.assertTrue(report["process_containment"]["worker_started"])
         self.assertEqual(
             {"attempted": True, "result": "signal-sent"},
             report["process_containment"]["process_group_cleanup"],
@@ -599,7 +671,11 @@ class DeadlineProtocolTests(unittest.TestCase):
         )
         cleanup_call.assert_called_once_with(process, mock.ANY)
 
-    def test_post_policy_hang_uses_absolute_deadline_and_triggers_cleanup(self):
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == PARSER_COMPAT_ENDPOINT,
+        "pre-static cleanup belongs to the parser-compat endpoint",
+    )
+    def test_parser_compat_post_policy_hang_triggers_cleanup(self):
         process = mock.Mock(pid=12345)
         frame = signed_policy_frame(maximum=5.0, target=5.0)
         with mock.patch.object(
@@ -616,6 +692,271 @@ class DeadlineProtocolTests(unittest.TestCase):
             self.assertEqual(1, GATE._dispatch(("routine", "--staged")))
         self.assertEqual(15.0, receive.call_args_list[1][0][1])
         cleanup.assert_called_once_with(process, mock.ANY)
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "post-claim cleanup belongs to the review-repair endpoint",
+    )
+    def test_post_policy_hang_uses_absolute_deadline_and_triggers_cleanup(self):
+        process = mock.Mock(pid=12345)
+        frame = signed_policy_frame(maximum=5.0, target=5.0)
+        with mock.patch.object(
+            GATE, "_bootstrap_monotonic_start", return_value=(GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE, 10.0)
+        ), mock.patch.object(GATE, "_clock_value", return_value=10.1), mock.patch.object(
+            GATE.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            GATE,
+            "_receive_control_frame",
+            side_effect=(frame, TimeoutError("terminal decision timed out")),
+        ) as receive, mock.patch.object(GATE, "_send_control_frame"), mock.patch.object(
+            GATE, "_kill_worker_group"
+        ) as cleanup, mock.patch.object(
+            GATE,
+            "_static_result",
+            side_effect=lambda *args, **kwargs: (
+                kwargs["post_claim_cleanup"](),
+                1,
+            )[1],
+        ) as static:
+            self.assertEqual(1, GATE._dispatch(("routine", "--staged")))
+        self.assertEqual(15.0, receive.call_args_list[1][0][1])
+        cleanup.assert_called_once_with(process, mock.ANY)
+        self.assertEqual(frame, static.call_args[1]["policy_frame"])
+        self.assertTrue(static.call_args[1]["deadline_reached"])
+        self.assertNotIn("duration", static.call_args[1])
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "post-policy static facts belong to the review-repair endpoint",
+    )
+    def test_post_policy_timeout_claims_before_cleanup_and_files_known_breach(self):
+        frame = signed_policy_frame(maximum=60.0, target=60.0)
+        events = []
+        output = []
+
+        def cleanup():
+            events.append("cleanup")
+            return GATE._not_run_cleanup(True, "worker-killed")
+
+        def filing(*_arguments):
+            events.append("filing")
+            return {"disposition": "created", "mutated": True}
+
+        def deliver(payload, *_arguments, **_kwargs):
+            value = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+            output.append(value)
+            if len(output) == 1:
+                events.append("claim")
+            return {"disposition": "written", "written": True}
+
+        with mock.patch.object(
+            GATE, "_deliver_static_output", side_effect=deliver
+        ), mock.patch.object(
+            GATE, "_static_elapsed", return_value=61.75
+        ) as elapsed, mock.patch.object(
+            GATE, "_file_static_target_breach", side_effect=filing
+        ):
+            self.assertEqual(
+                1,
+                GATE._static_result(
+                    "routine",
+                    "blocked-incomplete",
+                    "terminal decision timed out",
+                    ("gate-interval",),
+                    GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE,
+                    10.0,
+                    True,
+                    policy_frame=frame,
+                    deadline_reached=True,
+                    post_claim_cleanup=cleanup,
+                    arguments=("routine", "--staged"),
+                ),
+            )
+
+        report = json.loads(output[0])
+        self.assertEqual(["claim", "cleanup", "filing"], events)
+        elapsed.assert_called_once_with(GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE, 10.0)
+        self.assertEqual(61.75, report["duration_seconds"])
+        self.assertEqual(60.0, report["target_seconds"])
+        self.assertEqual(60.0, report["maximum_seconds"])
+        self.assertTrue(report["target_exceeded"])
+        self.assertTrue(report["maximum_exceeded"])
+        self.assertEqual(frame["policy_digest"], report["policy_digest"])
+        self.assertEqual(
+            frame["authoritative_index"]["semantic_sha256"],
+            report["decision"]["candidate_digest"],
+        )
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static claims belong to the review-repair endpoint",
+    )
+    def test_failed_static_claim_cleans_worker_and_skips_filing(self):
+        frame = signed_policy_frame(maximum=60.0, target=60.0)
+        events = []
+
+        def cleanup():
+            events.append("cleanup")
+            return GATE._not_run_cleanup(True, "worker-killed")
+
+        with mock.patch.object(
+            GATE,
+            "_deliver_static_output",
+            return_value={"disposition": "timed-out", "written": False},
+        ) as deliver, mock.patch.object(
+            GATE, "_static_elapsed", return_value=61.0
+        ), mock.patch.object(
+            GATE, "_file_static_target_breach"
+        ) as filing:
+            self.assertEqual(
+                2,
+                GATE._static_result(
+                    "routine",
+                    "blocked-incomplete",
+                    "terminal decision timed out",
+                    ("gate-interval",),
+                    GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE,
+                    10.0,
+                    True,
+                    policy_frame=frame,
+                    deadline_reached=True,
+                    post_claim_cleanup=cleanup,
+                    arguments=("routine", "--staged"),
+                ),
+            )
+        self.assertEqual(["cleanup"], events)
+        self.assertEqual(1, deliver.call_count)
+        filing.assert_not_called()
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static telemetry belongs to the review-repair endpoint",
+    )
+    def test_static_telemetry_is_bounded_after_successful_claim(self):
+        frame = signed_policy_frame(maximum=60.0, target=60.0)
+        events = []
+
+        def cleanup():
+            events.append("cleanup")
+            return GATE._not_run_cleanup(True, "worker-killed")
+
+        def filing(*_arguments):
+            events.append("filing")
+            return {"disposition": "created", "mutated": True}
+
+        with mock.patch.object(
+            GATE,
+            "_deliver_static_output",
+            side_effect=(
+                {"disposition": "written", "written": True},
+                {"disposition": "timed-out", "written": False},
+            ),
+        ), mock.patch.object(
+            GATE, "_static_elapsed", return_value=61.0
+        ), mock.patch.object(
+            GATE, "_file_static_target_breach", side_effect=filing
+        ):
+            self.assertEqual(
+                2,
+                GATE._static_result(
+                    "routine",
+                    "blocked-incomplete",
+                    "terminal decision timed out",
+                    ("gate-interval",),
+                    GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE,
+                    10.0,
+                    True,
+                    policy_frame=frame,
+                    deadline_reached=True,
+                    post_claim_cleanup=cleanup,
+                    arguments=("routine", "--staged"),
+                ),
+            )
+        self.assertEqual(["cleanup", "filing"], events)
+
+    @unittest.skipUnless(os.name == "posix", "static writer requires POSIX fork")
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static writer belongs to the review-repair endpoint",
+    )
+    def test_static_output_writer_times_out_under_backpressure(self):
+        reader, writer = os.pipe()
+        os.set_blocking(writer, False)
+        try:
+            while True:
+                try:
+                    os.write(writer, b"x" * 65536)
+                except BlockingIOError:
+                    break
+            os.set_blocking(writer, True)
+            started = time.monotonic()
+            delivery = GATE._deliver_static_output(b"claim\n", writer, timeout=0.02)
+            self.assertEqual("timed-out", delivery["disposition"])
+            self.assertFalse(delivery["written"])
+            self.assertLess(time.monotonic() - started, 0.3)
+        finally:
+            os.close(writer)
+            os.close(reader)
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static writer belongs to the review-repair endpoint",
+    )
+    def test_static_output_timeout_never_blocks_reaping_unresponsive_child(self):
+        with mock.patch.object(GATE.os, "fork", return_value=12345), mock.patch.object(
+            GATE.os, "waitpid", return_value=(0, 0)
+        ) as waitpid, mock.patch.object(GATE.os, "kill") as kill, mock.patch.object(
+            GATE.time, "monotonic", return_value=1.0
+        ), mock.patch.object(GATE.time, "sleep") as sleep:
+            delivery = GATE._deliver_static_output(b"claim\n", 9, timeout=0.0)
+
+        self.assertEqual({"disposition": "timed-out", "written": False}, delivery)
+        kill.assert_called_once_with(12345, GATE.signal.SIGKILL)
+        self.assertEqual(
+            [mock.call(12345, GATE.os.WNOHANG), mock.call(12345, GATE.os.WNOHANG)],
+            waitpid.call_args_list,
+        )
+        sleep.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "static writer requires POSIX fork")
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static writer belongs to the review-repair endpoint",
+    )
+    def test_static_output_writer_delivers_exact_bytes(self):
+        reader, writer = os.pipe()
+        try:
+            delivery = GATE._deliver_static_output(b"claim\n", writer, timeout=0.1)
+            self.assertEqual({"disposition": "written", "written": True}, delivery)
+            os.close(writer)
+            writer = None
+            self.assertEqual(b"claim\n", os.read(reader, 64))
+        finally:
+            if writer is not None:
+                os.close(writer)
+            os.close(reader)
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "static timeout filing belongs to the review-repair endpoint",
+    )
+    def test_static_filing_timeout_reports_unknown_mutation(self):
+        frame = signed_policy_frame(maximum=60.0, target=60.0)
+        report = {
+            "gate_id": "routine",
+            "duration_seconds": 60.0,
+            "target_seconds": 60.0,
+            "decision_digest": "a" * 64,
+        }
+        with mock.patch.object(
+            GATE.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(("python3",), 1.0),
+        ):
+            filing = GATE._file_static_target_breach(
+                report, frame, ("routine", "--staged")
+            )
+        self.assertEqual({"disposition": "timed-out", "mutated": None}, filing)
 
     def test_cleanup_targets_reparented_exact_token_processes(self):
         process = mock.Mock(pid=111)
@@ -709,6 +1050,36 @@ class DeadlineProtocolTests(unittest.TestCase):
         self.assertEqual("routine", report["decision"]["gate_id"])
         self.assertEqual("deferred", report["decision"]["outcome"])
 
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == PARSER_COMPAT_ENDPOINT,
+        "direct stdout static reporting belongs to the parser-compat endpoint",
+    )
+    def test_parser_compat_static_reports_write_direct_stdout(self):
+        for arguments, expected_gate in (
+            (("routine", "--staged"), "routine"),
+            (("final", "--explicit"), "final"),
+            (("--malformed",), "unknown"),
+        ):
+            output = []
+            with mock.patch.object(
+                GATE.sys.stdout, "write", side_effect=output.append
+            ), mock.patch.object(GATE.sys.stdout, "flush"):
+                self.assertEqual(
+                    2,
+                    GATE._static_result(
+                        GATE._raw_gate(arguments), "error", "protocol failure"
+                    ),
+                )
+            report = json.loads(output[0])
+            self.assertEqual(GATE.REPORT_SCHEMA, report["schema"])
+            self.assertEqual(expected_gate, report["gate_id"])
+            self.assertIsNone(report["duration_seconds"])
+            self.assertIsNone(report["process_containment"]["worker_started"])
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "bounded static reporting belongs to the review-repair endpoint",
+    )
     def test_static_reports_are_lane_correct_full_v4_objects(self):
         for arguments, expected_gate in (
             (("routine", "--staged"), "routine"),
@@ -716,9 +1087,12 @@ class DeadlineProtocolTests(unittest.TestCase):
             (("--malformed",), "unknown"),
         ):
             output = []
-            with mock.patch.object(GATE.sys.stdout, "write", side_effect=output.append), mock.patch.object(
-                GATE.sys.stdout, "flush"
-            ):
+
+            def deliver(payload, *_arguments, **_kwargs):
+                output.append(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+                return {"disposition": "written", "written": True}
+
+            with mock.patch.object(GATE, "_deliver_static_output", side_effect=deliver):
                 self.assertEqual(
                     2,
                     GATE._static_result(

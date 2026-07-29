@@ -18,9 +18,32 @@ from pathlib import Path
 from unittest import mock
 
 if __package__:
-    from .test_gate_generations import DEADLINE_GENERATION, gate_generation
+    from .test_gate_generations import (
+        DEADLINE_GENERATION,
+        PARSER_COMPAT_RECORDS,
+        REVIEW_REPAIR_RECORDS,
+        gate_generation,
+        gate_generation_records,
+    )
 else:
-    from test_gate_generations import DEADLINE_GENERATION, gate_generation
+    from test_gate_generations import (
+        DEADLINE_GENERATION,
+        PARSER_COMPAT_RECORDS,
+        REVIEW_REPAIR_RECORDS,
+        gate_generation,
+        gate_generation_records,
+    )
+
+GATE_GENERATION = gate_generation()
+GATE_RECORDS = gate_generation_records()
+IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
+IS_REVIEW_REPAIR = GATE_RECORDS == REVIEW_REPAIR_RECORDS
+if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
+    raise AssertionError(
+        "test-gate endpoint tests require parser-compat or review-repair: {!r}".format(
+            GATE_RECORDS
+        )
+    )
 
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
@@ -29,26 +52,36 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
-GATE_GENERATION = gate_generation()
 
 
 def final_policy(mode):
     """Build an explicit final-mode fixture independent of the starter mode."""
     policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
     return CONFIG.TestGatePolicy(
-        policy.schema_version,
-        policy.routine,
-        CONFIG.FinalGate(
+        schema_version=policy.schema_version,
+        routine=policy.routine,
+        final=CONFIG.FinalGate(
             mode,
             "pull-request" if mode == "hard" else None,
             policy.final.budget,
         ),
-        policy.on_budget_exceeded,
-        policy.critical_bindings,
-        policy.reversible_bindings,
-        policy.unmatched_is_critical,
+        on_budget_exceeded=policy.on_budget_exceeded,
+        critical_bindings=policy.critical_bindings,
+        reversible_bindings=policy.reversible_bindings,
+        unmatched_is_critical=policy.unmatched_is_critical,
+        service_dependencies=policy.service_dependencies,
     )
 class TestGateTests(unittest.TestCase):
+    @staticmethod
+    def _routine_manifest(changed_paths, all_tests):
+        if IS_REVIEW_REPAIR:
+            return GATE.routine_test_manifest(
+                changed_paths,
+                all_tests,
+                CONFIG.load_policy(GATE.REPO / "agentfold.toml"),
+            )
+        return GATE.routine_test_manifest(changed_paths, all_tests)
+
     @staticmethod
     def _freeze_for_generation(repo, arguments, capture, started, source):
         if GATE_GENERATION == DEADLINE_GENERATION:
@@ -277,7 +310,7 @@ class TestGateTests(unittest.TestCase):
             "automation/tests/test_reconcile_queue.py",
         )
 
-        selected, deferred = GATE.routine_test_manifest(
+        selected, deferred = self._routine_manifest(
             ("services/quote-api/quote_api.py", "automation/run_tests.py"), tests
         )
 
@@ -292,11 +325,50 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual(("automation/tests/test_reconcile_queue.py",), deferred)
 
     def test_unknown_routine_path_defers_every_test(self):
-        selected, deferred = GATE.routine_test_manifest(
-            ("unknown/file.py",), ("automation/tests/test_run_tests.py",)
+        selected, deferred = self._routine_manifest(
+            ("unknown/file.py",),
+            ("automation/tests/test_run_tests.py",),
         )
         self.assertEqual((), selected)
         self.assertEqual(("automation/tests/test_run_tests.py",), deferred)
+
+    def test_routine_manifest_service_ownership_matches_the_exact_endpoint(self):
+        tests = (
+            "services/payments/tests/test_api.py",
+            "services/quote-api/tests/test_quote_api.py",
+        )
+
+        selected, deferred = self._routine_manifest(("services/payments/api.py",), tests)
+
+        if IS_REVIEW_REPAIR:
+            self.assertEqual(("services/payments/tests/test_api.py",), selected)
+            self.assertEqual(("services/quote-api/tests/test_quote_api.py",), deferred)
+        else:
+            self.assertEqual((), selected)
+            self.assertEqual(tests, deferred)
+
+    def test_routine_manifest_dependency_closure_matches_the_exact_endpoint(self):
+        tests = (
+            "services/accounts/tests/test_accounts.py",
+            "services/billing/tests/test_billing.py",
+            "services/ledger/tests/test_ledger.py",
+        )
+        changed = ("services/accounts/api.py",)
+
+        if IS_REVIEW_REPAIR:
+            policy = mock.Mock(
+                service_dependencies=(
+                    ("accounts", ("billing",)),
+                    ("billing", ("ledger",)),
+                )
+            )
+            selected, deferred = GATE.routine_test_manifest(changed, tests, policy)
+            self.assertEqual(tests, selected)
+            self.assertEqual((), deferred)
+        else:
+            selected, deferred = GATE.routine_test_manifest(changed, tests)
+            self.assertEqual((), selected)
+            self.assertEqual(tests, deferred)
 
     def test_manual_final_runs_explicitly_and_named_transition_fails_closed(self):
         policy = final_policy("manual")
@@ -2065,7 +2137,21 @@ class TestGateTests(unittest.TestCase):
                 destination = repo / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source_repo / relative, destination)
-            shutil.copy2(source_repo / "agentfold.toml", repo / "agentfold.toml")
+            policy_path = repo / "agentfold.toml"
+            shutil.copy2(source_repo / "agentfold.toml", policy_path)
+            policy_path.chmod(
+                stat.S_IMODE(policy_path.stat().st_mode) | stat.S_IWUSR
+            )
+            policy_text = policy_path.read_text()
+            reversible = policy_text.index("[[testing.risk.reversible]]")
+            globs = policy_text.index("path_globs = [", reversible)
+            insertion = globs + len("path_globs = [")
+            policy_path.write_text(
+                policy_text[:insertion]
+                + '\n  "automation/tests/test_smoke.py",'
+                + '\n  "automation/tests/test_stable.py",'
+                + policy_text[insertion:]
+            )
             hook_source = source_repo / "automation/hooks/pre-commit"
             hook = repo / "automation/hooks/pre-commit"
             hook.parent.mkdir(parents=True, exist_ok=True)
@@ -2121,6 +2207,15 @@ class TestGateTests(unittest.TestCase):
                 "        self.assertTrue(True)\n"
             )
             subprocess.run(["git", "add", str(smoke)], cwd=repo, check=True)
+            identity_environment = os.environ.copy()
+            identity_environment.update(
+                {
+                    "GIT_AUTHOR_NAME": "Gate Fixture",
+                    "GIT_AUTHOR_EMAIL": "gate-fixture@example.invalid",
+                    "GIT_COMMITTER_NAME": "Gate Fixture",
+                    "GIT_COMMITTER_EMAIL": "gate-fixture@example.invalid",
+                }
+            )
 
             prewarm = subprocess.run(
                 [
@@ -2133,6 +2228,7 @@ class TestGateTests(unittest.TestCase):
                     "--staged",
                 ],
                 cwd=repo,
+                env=identity_environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -2159,6 +2255,7 @@ class TestGateTests(unittest.TestCase):
             committed = subprocess.run(
                 ["git", "commit", "-m", "exercise canonical routine hook"],
                 cwd=repo,
+                env=identity_environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -2168,11 +2265,17 @@ class TestGateTests(unittest.TestCase):
             routine_report = json.loads(
                 (repo / "tmp/test-gate-reports/latest-routine.json").read_text()
             )
-            routine_full = next(
+            routine_full_components = [
                 component
                 for component in routine_report["components"]
                 if component["component_id"] == "repository-tests/full"
+            ]
+            self.assertEqual(
+                1,
+                len(routine_full_components),
+                (final_report, routine_report, committed.stdout),
             )
+            routine_full = routine_full_components[0]
             self.assertEqual("reused", routine_full["evidence"], routine_report)
             self.assertEqual("pass", routine_report["outcome"], routine_report)
             self.assertEqual(
@@ -3158,6 +3261,46 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual(1, identity["child"]["ignore_environment"])
         self.assertEqual(
             identity, GATE.controller_closure()["interpreter_identity"]
+        )
+
+    def test_safe_component_environment_preserves_and_binds_git_identity(self):
+        source = {
+            "PATH": "/bin",
+            "GIT_AUTHOR_NAME": "Caller Author",
+            "GIT_AUTHOR_EMAIL": "caller-author@example.invalid",
+            "GIT_COMMITTER_NAME": "Caller Committer",
+            "GIT_COMMITTER_EMAIL": "caller-committer@example.invalid",
+            "GIT_AUTHOR_DATE": "2001-02-03T04:05:06Z",
+            "GIT_COMMITTER_DATE": "2001-02-03T04:05:06Z",
+        }
+
+        admitted = GATE.safe_process_environment(source)
+
+        identity_names = (
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+        )
+        if IS_REVIEW_REPAIR:
+            for name in identity_names:
+                self.assertEqual(source[name], admitted[name])
+        else:
+            for name in identity_names:
+                self.assertNotIn(name, admitted)
+        self.assertNotIn("GIT_AUTHOR_DATE", admitted)
+        self.assertNotIn("GIT_COMMITTER_DATE", admitted)
+        changed = dict(source)
+        changed["GIT_AUTHOR_NAME"] = "Different Author"
+        first_digest = GATE.environment_identity(admitted)[
+            "component_environment_digest"
+        ]
+        changed_digest = GATE.environment_identity(
+            GATE.safe_process_environment(changed)
+        )["component_environment_digest"]
+        self.assertEqual(
+            IS_REVIEW_REPAIR,
+            first_digest != changed_digest,
         )
 
     def test_exact_maximum_terminalizes_before_projection(self):

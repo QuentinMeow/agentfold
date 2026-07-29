@@ -10,6 +10,33 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+if __package__:
+    from .test_gate_generations import (
+        PARSER_COMPAT_RECORDS,
+        REVIEW_REPAIR_RECORDS,
+        gate_generation,
+        gate_generation_records,
+    )
+else:
+    from test_gate_generations import (
+        PARSER_COMPAT_RECORDS,
+        REVIEW_REPAIR_RECORDS,
+        gate_generation,
+        gate_generation_records,
+    )
+
+
+GATE_GENERATION = gate_generation()
+GATE_RECORDS = gate_generation_records()
+IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
+IS_REVIEW_REPAIR = GATE_RECORDS == REVIEW_REPAIR_RECORDS
+if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
+    raise AssertionError(
+        "run_tests endpoint tests require parser-compat or review-repair: {!r}".format(
+            GATE_RECORDS
+        )
+    )
+
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "run_tests.py"
 SPEC = importlib.util.spec_from_file_location("run_tests", MODULE_PATH)
@@ -724,38 +751,63 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("0", child["GIT_TERMINAL_PROMPT"])
         self.assertNotIn("GIT_DIR", child)
 
-    def test_configured_git_identity_resolves_only_name_and_email(self):
-        responses = (
-            subprocess.CompletedProcess(
-                ["git", "config", "--get", "user.name"],
-                0,
-                stdout="Test Author\n",
-                stderr="",
-            ),
-            subprocess.CompletedProcess(
-                ["git", "config", "--get", "user.email"],
-                0,
-                stdout="test@example.invalid\n",
-                stderr="",
-            ),
-        )
-
-        with mock.patch.object(
-            RUN_TESTS.subprocess,
-            "run",
-            side_effect=responses,
-        ):
+    @staticmethod
+    def endpoint_configured_identity():
+        if IS_PARSER_COMPAT:
+            responses = (
+                subprocess.CompletedProcess(
+                    ["git", "config", "--get", "user.name"],
+                    0,
+                    stdout="Test Author\n",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    ["git", "config", "--get", "user.email"],
+                    0,
+                    stdout="test@example.invalid\n",
+                    stderr="",
+                ),
+            )
+            with mock.patch.object(
+                RUN_TESTS.subprocess, "run", side_effect=responses
+            ):
+                return RUN_TESTS.configured_git_identity({"HOME": "/caller"})
+        with mock.patch.object(RUN_TESTS.subprocess, "run") as run:
             identity = RUN_TESTS.configured_git_identity({"HOME": "/caller"})
+        run.assert_not_called()
+        return identity
 
-        self.assertEqual(
+    def test_configured_git_identity_matches_the_exact_endpoint(self):
+        identity = self.endpoint_configured_identity()
+
+        expected = (
             {
                 "GIT_AUTHOR_NAME": "Test Author",
                 "GIT_AUTHOR_EMAIL": "test@example.invalid",
                 "GIT_COMMITTER_NAME": "Test Author",
                 "GIT_COMMITTER_EMAIL": "test@example.invalid",
-            },
-            identity,
+            }
+            if IS_PARSER_COMPAT
+            else RUN_TESTS.DEFAULT_GIT_IDENTITY
         )
+        self.assertEqual(expected, identity)
+
+    def test_caller_identity_wins_and_missing_fields_use_endpoint_identity(self):
+        child = RUN_TESTS.isolated_test_environment(
+            {
+                "GIT_AUTHOR_NAME": "Caller Author",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+            }
+        )
+        configured = self.endpoint_configured_identity()
+        for name, value in configured.items():
+            child.setdefault(name, value)
+
+        self.assertEqual("Caller Author", child["GIT_AUTHOR_NAME"])
+        self.assertEqual(configured["GIT_AUTHOR_EMAIL"], child["GIT_AUTHOR_EMAIL"])
+        self.assertEqual(configured["GIT_COMMITTER_NAME"], child["GIT_COMMITTER_NAME"])
+        self.assertEqual(configured["GIT_COMMITTER_EMAIL"], child["GIT_COMMITTER_EMAIL"])
 
     def test_git_local_variable_discovery_failure_stops_the_runner(self):
         discover = getattr(RUN_TESTS, "git_local_environment_names", None)

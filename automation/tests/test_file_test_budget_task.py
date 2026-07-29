@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import errno
 import importlib.util
 import io
 import json
@@ -19,6 +20,25 @@ except ImportError:
 
 
 AUTOMATION = Path(__file__).resolve().parents[1]
+GENERATION_PATH = AUTOMATION / "tests" / "test_gate_generations.py"
+GENERATION_SPEC = importlib.util.spec_from_file_location(
+    "test_budget_gate_generations", GENERATION_PATH
+)
+GATE_GENERATIONS = importlib.util.module_from_spec(GENERATION_SPEC)
+GENERATION_SPEC.loader.exec_module(GATE_GENERATIONS)
+GATE_GENERATIONS.gate_generation(AUTOMATION.parent)
+PRODUCT_RECORDS = GATE_GENERATIONS.gate_generation_records(AUTOMATION.parent)
+PARSER_COMPAT_ENDPOINT = "parser-compat"
+REVIEW_REPAIR_ENDPOINT = "review-repair"
+if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
+    PRODUCT_ENDPOINT = PARSER_COMPAT_ENDPOINT
+elif PRODUCT_RECORDS == GATE_GENERATIONS.REVIEW_REPAIR_RECORDS:
+    PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
+else:
+    raise AssertionError(
+        "test-budget endpoint is neither exact parser-compat nor exact review-repair"
+    )
+
 MODULE_PATH = AUTOMATION / "file_test_budget_task.py"
 SPEC = importlib.util.spec_from_file_location("file_test_budget_task", MODULE_PATH)
 FILER = importlib.util.module_from_spec(SPEC)
@@ -526,7 +546,11 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual("error", invalid.disposition)
             self.assertFalse(invalid.mutated)
 
-    def test_pair_write_failure_rolls_back_and_returns_error(self):
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == PARSER_COMPAT_ENDPOINT,
+        "legacy rollback belongs to the parser-compat endpoint",
+    )
+    def test_parser_compat_pair_write_failure_rolls_back(self):
         with self.repo() as root:
             real_replace = os.replace
             calls = 0
@@ -547,6 +571,181 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual(
                 [], list((root / "message-queue/needs-agent/requests").glob("*.md"))
             )
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "no-delete publication belongs to the review-repair endpoint",
+    )
+    def test_pair_write_failure_leaves_visible_partial_pair_and_reports_mutation(self):
+        with self.repo() as root:
+            real_publish = FILER._publish_exclusive_file
+            calls = 0
+
+            def fail_request(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise OSError("simulated pickup write failure")
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                FILER, "_publish_exclusive_file", side_effect=fail_request
+            ):
+                result, stderr = self.file(root)
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            self.assertEqual("", stderr)
+            tasks = list((root / "tasks/0_backlog").glob("*"))
+            self.assertEqual(1, len(tasks))
+            self.assertTrue((tasks[0] / "task.md").is_file())
+            self.assertTrue((tasks[0] / FILER.JOURNAL_NAME).is_file())
+            self.assertEqual(
+                [], list((root / "message-queue/needs-agent/requests").glob("*.md"))
+            )
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "exclusive publication belongs to the review-repair endpoint",
+    )
+    def test_concurrent_actor_request_is_never_replaced(self):
+        with self.repo() as root:
+            real_publish = FILER._publish_exclusive_file
+            actor_bytes = b"actor-owned request\n"
+
+            def create_actor_request(source, destination):
+                if destination.parent.name == "requests":
+                    destination.write_bytes(actor_bytes)
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                FILER,
+                "_publish_exclusive_file",
+                side_effect=create_actor_request,
+            ):
+                result, _ = self.file(root)
+
+            self.assertEqual("conflict", result.disposition)
+            self.assertTrue(result.mutated)
+            requests = list(
+                (root / "message-queue/needs-agent/requests").glob("*.md")
+            )
+            self.assertEqual(1, len(requests))
+            self.assertEqual(actor_bytes, requests[0].read_bytes())
+            self.assertEqual(1, len(list((root / "tasks/0_backlog").glob("*"))))
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "no-delete publication belongs to the review-repair endpoint",
+    )
+    def test_rollback_preserves_actor_file_added_to_owned_task_directory(self):
+        with self.repo() as root:
+            real_publish = FILER._publish_exclusive_file
+            actor_name = "actor-note.txt"
+
+            def add_actor_file_then_fail(source, destination):
+                if destination.parent.name == "requests":
+                    task_directories = list((root / "tasks/0_backlog").glob("*"))
+                    self.assertEqual(1, len(task_directories))
+                    (task_directories[0] / actor_name).write_text("preserve me\n")
+                    raise OSError("simulated request race")
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                FILER,
+                "_publish_exclusive_file",
+                side_effect=add_actor_file_then_fail,
+            ):
+                result, _ = self.file(root)
+
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            task_directories = list((root / "tasks/0_backlog").glob("*"))
+            self.assertEqual(1, len(task_directories))
+            self.assertEqual("preserve me\n", (task_directories[0] / actor_name).read_text())
+            self.assertTrue((task_directories[0] / "task.md").exists())
+            self.assertTrue((task_directories[0] / FILER.JOURNAL_NAME).exists())
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "no-delete publication belongs to the review-repair endpoint",
+    )
+    def test_actor_replacement_after_publish_survives_later_failure(self):
+        with self.repo() as root:
+            real_publish = FILER._publish_exclusive_file
+            actor_bytes = b"actor replacement\n"
+            calls = 0
+
+            def replace_then_fail(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    real_publish(source, destination)
+                    destination.unlink()
+                    destination.write_bytes(actor_bytes)
+                    return
+                if calls == 3:
+                    raise OSError("simulated request failure")
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                FILER, "_publish_exclusive_file", side_effect=replace_then_fail
+            ):
+                result, _ = self.file(root)
+
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            task_directories = list((root / "tasks/0_backlog").glob("*"))
+            self.assertEqual(1, len(task_directories))
+            self.assertEqual(actor_bytes, (task_directories[0] / "task.md").read_bytes())
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "exclusive fallback belongs to the review-repair endpoint",
+    )
+    def test_exclusive_fallback_failure_never_unlinks_partial_destination(self):
+        with self.repo() as root:
+            source = root / "source.txt"
+            destination = root / "destination.txt"
+            source.write_text("complete source\n")
+            with mock.patch.object(
+                FILER.os, "link", side_effect=OSError(errno.EPERM, "unsupported")
+            ), mock.patch.object(
+                FILER.os, "write", side_effect=OSError("simulated write failure")
+            ):
+                with self.assertRaises(FILER._PublicationFailure) as raised:
+                    FILER._publish_exclusive_file(source, destination)
+            self.assertTrue(raised.exception.mutated)
+            self.assertTrue(destination.exists())
+
+    @unittest.skipUnless(
+        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
+        "reciprocal request validation belongs to the review-repair endpoint",
+    )
+    def test_orphan_backlog_task_conflicts_instead_of_appending(self):
+        with self.repo() as root:
+            real_publish = FILER._publish_exclusive_file
+            calls = 0
+
+            def fail_request(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise OSError("simulated request failure")
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                FILER, "_publish_exclusive_file", side_effect=fail_request
+            ):
+                first, _ = self.file(root)
+            self.assertEqual("error", first.disposition)
+            task = next((root / "tasks/0_backlog").iterdir())
+            journal = task / FILER.JOURNAL_NAME
+            before = journal.read_bytes()
+
+            second, _ = self.file(root, self.occurrence(receipt="b" * 64))
+            self.assertEqual("conflict", second.disposition)
+            self.assertFalse(second.mutated)
+            self.assertEqual(before, journal.read_bytes())
 
     def test_generated_records_pass_current_task_and_queue_reconciler_checks(self):
         with self.repo() as root:
