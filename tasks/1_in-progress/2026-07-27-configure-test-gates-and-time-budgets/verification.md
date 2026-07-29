@@ -1968,3 +1968,46 @@ pre-commit: OK
 
 The restored final product and records remain staged. Their own exact final gate, unchanged
 normal commit, and fresh revision-bound panel are still pending.
+
+## Exact final repair and identity-aligned hook reuse
+
+The immutable product-and-records candidate `677e74a30ee70261887917ea24c4b4c473ed738b55af797815cfd6f1670ae0ca`
+passed three exact final executions while the commit environment was diagnosed. The first used
+the fixed fallback identity and passed in 308.12 seconds, but the ordinary hook reconstructed a
+different receipt-bound component environment and correctly blocked after 56.58 seconds instead
+of reusing incompatible evidence. A second run supplied all four Git author/committer variables
+and passed in 310.81 seconds; the hook still blocked after 56.68 seconds.
+
+A temporary pre-commit hook printed only the gate's documented safe and internal Git variables
+and exited 1 before candidate execution. It created no commit and was deleted immediately. That
+observation showed that Git supplies author name and email to pre-commit but leaves both
+committer variables absent. The next exact final run used precisely that two-variable shape, and
+its environment digest `d95f9678…` matched both hook reports:
+
+```
+$ env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    GIT_AUTHOR_NAME='Quentin Miao' \
+    GIT_AUTHOR_EMAIL='quentinmiao98@gmail.com' \
+    python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: 677e74a30ee70261887917ea24c4b4c473ed738b55af797815cfd6f1670ae0ca
+component timings:
+  core-scope: pass (executed, 0.41s)
+  reconcile: pass (executed, 10.35s)
+  repository-tests/base-pinned-floor: pass (executed, 293.85s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 308.25s
+gate exit: 0
+
+$ git commit -m "fix: complete unanimous test-gate repair" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 13.78s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 962cca3] fix: complete unanimous test-gate repair
+```
+
+No hook was bypassed. A fresh five-reviewer revision-bound panel remains the only condition for
+resolving the retry and moving the task to review.

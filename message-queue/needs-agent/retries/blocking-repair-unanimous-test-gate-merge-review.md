@@ -59,3 +59,10 @@ third passed candidate `c122a31f…` in 442.08 seconds, and normal hook reuse cr
 in 17.29 seconds. The remaining repair passes 28 filer tests, 41 deadline tests, and 42 exact
 configuration/generation tests. Its expanded focused set, exact final gate, normal commit, and a
 fresh no-blocker panel remain required before this retry can be resolved.
+
+The six-file compatibility bridge passed exact candidate `bb4a6cef…` and landed as `01a58fd`
+through receipt reuse. The complete repair then passed exact candidate `677e74a3…`; after the
+final invocation reproduced Git's author-only hook environment, the normal hook reused that
+receipt in 13.78 seconds and created product commit `962cca3`. No hook was bypassed. A fresh
+five-reviewer revision-bound panel with no valid blocker is now the sole remaining requirement
+before this retry can be deleted and the task moved to review.

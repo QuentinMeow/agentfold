@@ -728,3 +728,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   incomplete coverage. Its normal hook reused the exact receipt in 10.81 seconds and created
   test commit `01a58fd`. The full repair snapshot is restored, both timing journals remain
   unstaged, and the next boundary is the product candidate's exact final gate.
+
+## 2026-07-29 — final product receipt and normal commit (codex)
+
+- Product candidate `677e74a3…` passed the complete exact final gate in 308.12 seconds, but the
+  first normal hook correctly refused that receipt because Git supplied a different bound
+  environment. It started the full base floor and blocked at 56.58 seconds; no commit was made.
+- Repeating the unchanged final with all four author/committer variables passed in 310.81
+  seconds, but another normal hook still blocked at 56.68 seconds. Receipt comparison proved
+  every product, policy, view, plan, manifest, and controller input matched; only the component
+  environment digest differed.
+- A deliberately aborting temporary hook observed the documented safe variables without running
+  candidate code: Git populated author name and email but did not populate either committer
+  variable. The hook was deleted and created no commit. This diagnosis avoided another guessed
+  invocation.
+- The unchanged candidate passed again in 308.25 seconds with exactly the two author variables,
+  producing the hook's `d95f9678…` environment digest. The next ordinary hook reused the exact
+  full receipt in 13.78 seconds and created product commit `962cca3`; no hook was bypassed. The
+  fresh revision-bound panel is now the only live merge blocker.

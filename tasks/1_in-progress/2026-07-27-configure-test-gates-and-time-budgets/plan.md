@@ -73,6 +73,7 @@
       bound static stdout delivery. Land dual-generation test bridges `5397fc5` and `68af0e4`;
       pass exact parser-floor candidate `c122a31f…`; and commit it as `236b90d` through a
       receipt-reusing normal hook.
-- [ ] 22. Run the expanded focused set and exact final gate for the remaining review repair,
-      commit unchanged bytes through the normal hook, and obtain a new five-reviewer panel with
-      no valid blocker before resolving the retry, moving the task, or publishing the PR stack.
+- [ ] 22. The expanded focused set and exact final gate passed for candidate `677e74a3…`, and the
+      normal hook reused its identity-aligned receipt before product commit `962cca3`. Obtain a
+      new five-reviewer panel with no valid blocker before resolving the retry, moving the task,
+      or publishing the PR stack.
