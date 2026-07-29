@@ -3,14 +3,17 @@
 
 import argparse
 import ctypes
+import hashlib
 import json
 import math
 import os
 import platform
+import select
 import secrets
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -41,9 +44,17 @@ except ImportError:  # pragma: no cover - the report remains complete without mu
     file_test_budget_task = None
 
 
-REPORT_SCHEMA = "agentfold.test-gate-report/v3"
-RECEIPT_SCHEMA = "agentfold.test-component-receipt/v5"
+REPORT_SCHEMA = "agentfold.test-gate-report/v4"
+RECEIPT_SCHEMA = "agentfold.test-component-receipt/v6"
 PUBLICATION_COMMIT_SCHEMA = "agentfold.test-publication-commit/v1"
+HANDOFF_SCHEMA = "agentfold.test-gate-bootstrap/v2"
+POLICY_FRAME_SCHEMA = "agentfold.test-gate-policy-frame/v1"
+TERMINAL_FRAME_SCHEMA = "agentfold.test-gate-broker-decision/v1"
+CONTROLLER_CLAIM_SCHEMA = "agentfold.test-gate-controller-claim/v1"
+DECISION_SCHEMA = "agentfold.test-gate-decision/v1"
+CONTROL_FRAME_MAX_BYTES = 65536
+POST_CLAIM_FILING_TIMEOUT_SECONDS = 1.0
+DISCOVERY_CEILING_SECONDS = 5.0
 COMPOSITE_TEST_PLAN_SCHEMA = "agentfold.composite-test-plan/v2"
 TRUSTED_TEST_OVERLAY_ALGORITHM = "candidate-product-with-exact-union-test-namespaces/v3"
 EVIDENCE_AUTHORITY = "cooperative-same-interpreter"
@@ -80,6 +91,8 @@ REPORT_PROJECTIONS = frozenset(
 )
 _HANDOFF_CLOCK_GETTIME_SOURCE = "clock_gettime:CLOCK_MONOTONIC"
 _HANDOFF_OS_TIMES_SOURCE = "os.times:elapsed"
+_CONTROL_FD_ENV = "AGENTFOLD_GATE_INNER_CONTROL_FD"
+_OWNER_ENV = "AGENTFOLD_GATE_OWNER"
 OUTCOME_EXIT = {
     "pass": 0,
     "deferred": 0,
@@ -285,7 +298,7 @@ def validate_bootstrap_handoff():
     if _HANDOFF is None:
         return controller_closure()
     if (
-        _HANDOFF.get("schema") != "agentfold.test-gate-bootstrap/v1"
+        _HANDOFF.get("schema") != HANDOFF_SCHEMA
         or Path(_HANDOFF.get("source_repository", "")).resolve() != REPO
         or Path(_HANDOFF.get("execution_root", "")).resolve() != EXECUTION_ROOT
     ):
@@ -307,12 +320,13 @@ def validate_bootstrap_handoff():
     return controller_closure()
 
 
-def gate_interval_started():
-    """Use the same-OS monotonic bootstrap boundary for the whole gate interval."""
+def gate_interval_bounds():
+    """Map supervisor clock values into this process's monotonic epoch."""
     if _HANDOFF is None:
-        return PROCESS_STARTED
+        return PROCESS_STARTED, None
     source = _HANDOFF.get("started_monotonic_source")
     value = _HANDOFF.get("started_monotonic")
+    deadline = _HANDOFF.get("absolute_deadline_monotonic")
     selected_source, now = _controller_monotonic_sample()
     if source != selected_source:
         raise GateError("test-gate bootstrap monotonic source mismatch")
@@ -322,10 +336,129 @@ def gate_interval_started():
         or not math.isfinite(value)
         or value < 0
         or value > now
+        or isinstance(deadline, bool)
+        or not isinstance(deadline, (int, float))
+        or not math.isfinite(deadline)
+        or deadline <= value
     ):
-        raise GateError("test-gate bootstrap monotonic start is invalid")
+        raise GateError("test-gate bootstrap monotonic bounds are invalid")
     bootstrap_elapsed = now - float(value)
-    return time.monotonic() - bootstrap_elapsed
+    local_now = time.monotonic()
+    return (
+        local_now - bootstrap_elapsed,
+        local_now + (float(deadline) - now),
+    )
+
+
+def gate_interval_started():
+    return gate_interval_bounds()[0]
+
+
+def _require_work_time(deadline, phase):
+    if deadline is not None and time.monotonic() >= deadline:
+        raise GateError("configured absolute deadline expired during " + phase)
+
+
+def _bounded_json_call(call, deadline):
+    """Run one potentially blocking local check in a killable helper process."""
+    if deadline is None:
+        return True, call()
+    if os.name != "posix" or time.monotonic() >= deadline:
+        return False, None
+    read_fd, write_fd = os.pipe()
+    try:
+        pid = os.fork()
+    except BaseException:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    if pid == 0:  # pragma: no cover - the parent verifies the framed result
+        os.close(read_fd)
+        try:
+            try:
+                os.setsid()
+            except OSError:
+                pass
+            raw_control_fd = os.environ.get(_CONTROL_FD_ENV, "")
+            if raw_control_fd.isdigit() and int(raw_control_fd) != write_fd:
+                try:
+                    os.close(int(raw_control_fd))
+                except OSError:
+                    pass
+            value = call()
+            payload = json.dumps(
+                {"ok": True, "value": value},
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(payload) > CONTROL_FRAME_MAX_BYTES:
+                raise ValueError("bounded helper result is oversized")
+            data = memoryview(struct.pack("!I", len(payload)) + payload)
+            while data:
+                written = os.write(write_fd, data)
+                if written <= 0:
+                    raise OSError("bounded helper result could not be sent")
+                data = data[written:]
+        except BaseException:
+            pass
+        finally:
+            os.close(write_fd)
+            os._exit(0)
+
+    os.close(write_fd)
+    data = bytearray()
+    expected = None
+    completed = False
+    value = None
+    try:
+        while expected is None or len(data) < expected + 4:
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            readable, _, _ = select.select((read_fd,), (), (), deadline - now)
+            if not readable or time.monotonic() >= deadline:
+                break
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if expected is None and len(data) >= 4:
+                expected = struct.unpack("!I", data[:4])[0]
+                if expected <= 0 or expected > CONTROL_FRAME_MAX_BYTES:
+                    break
+        if expected is not None and len(data) == expected + 4:
+            frame = json.loads(bytes(data[4:]).decode("utf-8"))
+            if isinstance(frame, dict) and frame.get("ok") is True:
+                completed = True
+                value = frame.get("value")
+    except (OSError, ValueError, UnicodeDecodeError):
+        completed = False
+        value = None
+    finally:
+        os.close(read_fd)
+        try:
+            child, _status = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            child = pid
+        if child == 0:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            # Reaping is deliberately nonblocking here.  A killed helper may remain
+            # a zombie until the controller exits, but terminalization never waits
+            # past its own deadline merely to collect it.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                pass
+    return completed, value
 
 
 @dataclass
@@ -472,6 +605,108 @@ def load_candidate_policy(candidate_root, relative_config, scratch_root, base_re
         raise GateError("downgrade-resistant policy union support is unavailable")
     policy = union_loader(base_path, candidate_path)
     return policy, _policy_digest(policy)
+
+
+def _protocol_parser_records(closure):
+    wanted = {
+        "automation/test_gate_config.py",
+        "automation/_vendor/__init__.py",
+        "automation/_vendor/tomli/__init__.py",
+        "automation/_vendor/tomli/_parser.py",
+        "automation/_vendor/tomli/_re.py",
+        "automation/_vendor/tomli/_types.py",
+    }
+    return [
+        {"path": record["path"], "mode": record["mode"], "sha256": record["sha256"]}
+        for record in closure
+        if record["path"] in wanted
+    ]
+
+
+def validate_policy_frame(policy, policy_digest, candidate_root, base_revision, gate):
+    """Recompute discovery claims from the same frozen candidate and parser bytes."""
+    if _HANDOFF is None:
+        return None
+    frame = _HANDOFF.get("policy_frame")
+    if not isinstance(frame, dict) or frame.get("schema") != POLICY_FRAME_SCHEMA:
+        raise GateError("test-gate policy frame is unavailable")
+    unsigned = dict(frame)
+    frame_digest = unsigned.pop("frame_digest", None)
+    if frame_digest != test_manifest.canonical_digest(unsigned):
+        raise GateError("test-gate policy frame digest is invalid")
+    candidate_path = candidate_root / CANONICAL_CONFIG
+    if candidate_path.is_symlink() or not candidate_path.is_file():
+        raise GateError("candidate policy is unavailable: agentfold.toml")
+    base = subprocess.run(
+        ["git", "show", "{}:{}".format(base_revision, CANONICAL_CONFIG.as_posix())],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if base.returncode:
+        raise GateError("base-pinned policy could not be revalidated")
+    base_digest = hashlib.sha256(base.stdout).hexdigest()
+    closure = _HANDOFF.get("controller_closure", ())
+    parser_records = _protocol_parser_records(closure)
+    budget = _budget_for(gate, policy)
+    routine_budget = _budget_for("routine", policy)
+    final_budget = _budget_for("final", policy)
+    expected = {
+        "gate_id": gate,
+        "target_seconds": float(budget.target_seconds),
+        "maximum_seconds": float(budget.maximum_seconds),
+        "budgets": {
+            "routine": {
+                "target_seconds": float(routine_budget.target_seconds),
+                "maximum_seconds": float(routine_budget.maximum_seconds),
+            },
+            "final": {
+                "target_seconds": float(final_budget.target_seconds),
+                "maximum_seconds": float(final_budget.maximum_seconds),
+            },
+        },
+        "discovery_ceiling_seconds": DISCOVERY_CEILING_SECONDS,
+        "policy_digest": policy_digest,
+        "base_config_sha256": base_digest,
+        "candidate_config_sha256": test_manifest.file_digest(candidate_path),
+        "candidate_parser_closure_digest": test_manifest.canonical_digest(parser_records),
+        "authoritative_index": {
+            "file_sha256": _HANDOFF.get("frozen_index_sha256"),
+            "semantic_sha256": _HANDOFF.get("index_semantic_sha256"),
+        },
+        "launcher": {
+            "path": "automation/run_test_gate.py",
+            "sha256": next(
+                (
+                    record["sha256"]
+                    for record in closure
+                    if record["path"] == "automation/run_test_gate.py"
+                ),
+                None,
+            ),
+        },
+        "candidate_kind": _HANDOFF.get("candidate_kind"),
+        "base_revision": _HANDOFF.get("base_revision"),
+        "candidate_revision": _HANDOFF.get("candidate_revision"),
+    }
+    for name, value in expected.items():
+        if frame.get(name) != value:
+            raise GateError("test-gate policy frame disagrees with frozen " + name)
+    return {
+        "policy_frame_schema": frame["schema"],
+        "policy_frame_digest": frame_digest,
+        "discovery_ceiling_seconds": frame["discovery_ceiling_seconds"],
+        "target_seconds": frame["target_seconds"],
+        "maximum_seconds": frame["maximum_seconds"],
+        "budgets": frame["budgets"],
+        "policy_digest": frame["policy_digest"],
+        "base_config_sha256": frame["base_config_sha256"],
+        "candidate_config_sha256": frame["candidate_config_sha256"],
+        "trusted_parser_closure_digest": frame["trusted_parser_closure_digest"],
+        "candidate_parser_closure_digest": frame["candidate_parser_closure_digest"],
+        "authoritative_index": frame["authoritative_index"],
+        "launcher": frame["launcher"],
+    }
 
 
 def _resolve_commit(revision):
@@ -1094,6 +1329,7 @@ SAFE_ENVIRONMENT_NAMES = frozenset(
         "TMP",
         "TMPDIR",
         "TZ",
+        _OWNER_ENV,
     )
 )
 FIXED_PYTHON_ENVIRONMENT = {"PYTHONDONTWRITEBYTECODE": "1"}
@@ -1565,6 +1801,27 @@ def run_component(
         )
 
 
+def gate_work_cutoffs(hard_deadline, maximum):
+    """Reserve separate execution, cleanup, and terminal-decision windows."""
+    cleanup_window = min(2.0, max(0.5, maximum * 0.2))
+    report_window = min(2.0, max(0.5, maximum * 0.2))
+    terminal_guard = min(0.25, max(0.05, maximum * 0.05))
+    cleanup_deadline = hard_deadline - report_window
+    execution_deadline = cleanup_deadline - cleanup_window
+    terminal_decision_deadline = hard_deadline - terminal_guard
+    validation_window = min(
+        1.0,
+        max(0.0, terminal_decision_deadline - cleanup_deadline) * (2.0 / 3.0),
+    )
+    final_validation_deadline = cleanup_deadline + validation_window
+    return (
+        execution_deadline,
+        cleanup_deadline,
+        final_validation_deadline,
+        terminal_decision_deadline,
+    )
+
+
 def missing_required_checks(required_check_ids, components):
     passed = {
         component.component_id
@@ -1663,6 +1920,8 @@ def environment_identity(source=None):
     for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
         if name in normalized:
             normalized[name] = "<" + name.lower().replace("_", "-") + ">"
+    if _OWNER_ENV in normalized:
+        normalized[_OWNER_ENV] = "<gate-owner-token>"
     git = subprocess.run(
         ["git", "--version"],
         stdout=subprocess.PIPE,
@@ -1688,12 +1947,60 @@ def receipt_binding(
     environment=None,
     composite_identity=None,
 ):
+    protocol = None
+    if _HANDOFF is not None:
+        frame = _HANDOFF.get("policy_frame")
+        if isinstance(frame, dict):
+            protocol = {
+                "handoff_schema": HANDOFF_SCHEMA,
+                "policy_frame_schema": frame.get("schema"),
+                "controller_claim_schema": CONTROLLER_CLAIM_SCHEMA,
+                "terminal_frame_schema": TERMINAL_FRAME_SCHEMA,
+                "discovery_ceiling_seconds": frame.get("discovery_ceiling_seconds"),
+                "budgets": frame.get("budgets"),
+                "base_config_sha256": frame.get("base_config_sha256"),
+                "candidate_config_sha256": frame.get("candidate_config_sha256"),
+                "trusted_parser_closure_digest": frame.get("trusted_parser_closure_digest"),
+                "candidate_parser_closure_digest": frame.get("candidate_parser_closure_digest"),
+                "authoritative_index_semantic_sha256": (
+                    frame.get("authoritative_index") or {}
+                ).get("semantic_sha256"),
+                "launcher": frame.get("launcher"),
+            }
+    if protocol is None:
+        launcher = next(
+            (
+                record
+                for record in controller_closure()["records"]
+                if record["path"] == "automation/run_test_gate.py"
+            ),
+            None,
+        )
+        protocol = {
+            "handoff_schema": HANDOFF_SCHEMA,
+            "policy_frame_schema": POLICY_FRAME_SCHEMA,
+            "controller_claim_schema": CONTROLLER_CLAIM_SCHEMA,
+            "terminal_frame_schema": TERMINAL_FRAME_SCHEMA,
+            "discovery_ceiling_seconds": DISCOVERY_CEILING_SECONDS,
+            "budgets": None,
+            "base_config_sha256": None,
+            "candidate_config_sha256": None,
+            "trusted_parser_closure_digest": None,
+            "candidate_parser_closure_digest": None,
+            "authoritative_index_semantic_sha256": None,
+            "launcher": (
+                {"path": launcher["path"], "sha256": launcher["sha256"]}
+                if launcher is not None
+                else None
+            ),
+        }
     value = {
         "candidate_digest": candidate.digest,
         "candidate_closure_digest": candidate.closure_digest,
         "tested_view_digest": tested_view["digest"],
         "test_manifest_digest": test_manifest.canonical_digest(selected_tests),
         "policy_digest": policy_digest,
+        "gate_protocol": protocol,
         "runner_revision": runner_revision(candidate_root),
         "controller_closure": controller_closure(),
         "environment": environment_identity(environment),
@@ -1901,6 +2208,9 @@ def reusable_receipt(binding):
         or report.get("evidence_authority") != EVIDENCE_AUTHORITY
         or report.get("controlled_completion") is not False
         or report.get("enforcement_eligible") is not False
+        or report.get("decision_digest")
+        != test_manifest.canonical_digest(report.get("decision"))
+        or value.get("decision_digest") != report.get("decision_digest")
         or not isinstance(candidate, dict)
         or candidate.get("digest") != binding.get("candidate_digest")
         or candidate.get("closure_digest")
@@ -1949,6 +2259,77 @@ def reusable_full_receipt(binding, component_id, options):
     if not component_id.endswith("/full") or not local_receipts_allowed(options):
         return None
     return reusable_receipt(binding)
+
+
+def latest_reusable_full_receipt_binding(candidate, options):
+    """Use the fixed final report only as a pointer to exact full evidence."""
+    if not local_receipts_allowed(options):
+        return None
+    try:
+        report_directory = _safe_local_directory(Path("tmp/test-gate-reports"))
+        report_path = report_directory / "latest-final.json"
+        if not report_path.is_file() or report_path.is_symlink():
+            return None
+        report = json.loads(report_path.read_text())
+        if not isinstance(report, dict):
+            return None
+        report_candidate = report.get("candidate")
+        binding_digest = report.get("receipt_binding_digest")
+        if (
+            not isinstance(report_candidate, dict)
+            or report_candidate.get("digest") != candidate.digest
+            or report_candidate.get("closure_digest") != candidate.closure_digest
+            or report_candidate.get("base_revision") != candidate.base_revision
+            or report_candidate.get("candidate_revision")
+            != candidate.candidate_revision
+            or not isinstance(binding_digest, str)
+            or len(binding_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in binding_digest
+            )
+        ):
+            return None
+        receipt_directory = _safe_local_directory(Path("tmp/test-gate-receipts"))
+        receipt_path = receipt_directory / (binding_digest + ".json")
+        if not receipt_path.is_file() or receipt_path.is_symlink():
+            return None
+        receipt = json.loads(receipt_path.read_text())
+        if not isinstance(receipt, dict):
+            return None
+        binding = receipt.get("binding")
+        if (
+            not isinstance(binding, dict)
+            or binding.get("binding_digest") != binding_digest
+            or binding.get("component_id") != "repository-tests/full"
+            or binding.get("candidate_digest") != candidate.digest
+            or binding.get("candidate_closure_digest")
+            != candidate.closure_digest
+            or reusable_receipt(binding) is None
+        ):
+            return None
+        return binding
+    except (GateError, OSError, ValueError):
+        return None
+
+
+def full_receipt_current_identity_matches(binding, current_identity):
+    """Compare every full binding input except its exact manifest and plan."""
+    fields = (
+        "candidate_digest",
+        "candidate_closure_digest",
+        "tested_view_digest",
+        "policy_digest",
+        "gate_protocol",
+        "runner_revision",
+        "controller_closure",
+        "environment",
+        "component_id",
+        "evidence_authority",
+        "controlled_completion",
+        "enforcement_eligible",
+    )
+    return all(binding.get(name) == current_identity.get(name) for name in fields)
 
 
 def persist_full_receipt(
@@ -2167,6 +2548,7 @@ def _receipt_value(binding, terminal_report, report_path, marker_path=None):
         "controlled_completion": False,
         "enforcement_eligible": False,
         "binding": binding,
+        "decision_digest": terminal_report["decision_digest"],
         "publication": {
             "id": publication_id,
             "status": "success",
@@ -2234,6 +2616,94 @@ def _remove_projection(path):
     return True
 
 
+def _decision_value(report):
+    value = {
+        "schema": DECISION_SCHEMA,
+        "gate_id": report["gate_id"],
+        "outcome": report["outcome"],
+        "gate_exit_code": report["gate_exit_code"],
+        "terminalized_pass": report["terminalized_pass"],
+        "reason": report["reason"],
+        "duration_seconds": report["duration_seconds"],
+        "target_seconds": report.get("target_seconds"),
+        "maximum_seconds": report.get("maximum_seconds"),
+        "policy_digest": report.get("policy_digest"),
+        "candidate_digest": (report.get("candidate") or {}).get("digest"),
+        "incomplete": list(report.get("incomplete", ())),
+        "evidence_authority": report["evidence_authority"],
+        "controlled_completion": report["controlled_completion"],
+        "enforcement_eligible": report["enforcement_eligible"],
+        "enforcement": report["enforcement"],
+    }
+    return value
+
+
+def _send_terminal_decision(
+    report,
+    deadline=None,
+    *,
+    clock=time.monotonic,
+    select_fn=select.select,
+    write_fn=os.write,
+    get_blocking=os.get_blocking,
+    set_blocking=os.set_blocking,
+):
+    raw_fd = os.environ.get(_CONTROL_FD_ENV)
+    if raw_fd is None:
+        return
+    if not raw_fd.isdigit():
+        raise GateError("test-gate control descriptor is invalid")
+    frame = {
+        "schema": CONTROLLER_CLAIM_SCHEMA,
+        "gate_id": report["gate_id"],
+        "outcome": report["outcome"],
+        "gate_exit_code": report["gate_exit_code"],
+        "terminalized_pass": report["terminalized_pass"],
+        "policy_digest": report.get("policy_digest"),
+        "decision_digest": report["decision_digest"],
+        "receipt_binding_digest": report.get("receipt_binding_digest"),
+        "evidence_authority": report["evidence_authority"],
+        "controlled_completion": report["controlled_completion"],
+        "enforcement_eligible": report["enforcement_eligible"],
+    }
+    frame["claim_digest"] = test_manifest.canonical_digest(frame)
+    payload = json.dumps(
+        frame,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(payload) > CONTROL_FRAME_MAX_BYTES:
+        raise GateError("test-gate terminal decision is oversized")
+    data = memoryview(struct.pack("!I", len(payload)) + payload)
+    descriptor = int(raw_fd)
+    original_blocking = get_blocking(descriptor)
+    try:
+        if deadline is not None:
+            set_blocking(descriptor, False)
+        while data:
+            if deadline is not None:
+                now = clock()
+                if now >= deadline:
+                    raise GateError("test-gate terminal decision missed its deadline")
+                _, writable, _ = select_fn((), (descriptor,), (), deadline - now)
+                if not writable or clock() >= deadline:
+                    raise GateError("test-gate terminal decision missed its deadline")
+            try:
+                written = write_fn(descriptor, data)
+            except (BlockingIOError, InterruptedError):
+                continue
+            if written <= 0:
+                raise GateError("test-gate terminal decision could not be sent")
+            data = data[written:]
+        if deadline is not None and clock() >= deadline:
+            raise GateError("test-gate terminal decision completed at its deadline")
+    finally:
+        if deadline is not None:
+            set_blocking(descriptor, original_blocking)
+
+
 def emit_report(
     report,
     target=None,
@@ -2243,6 +2713,7 @@ def emit_report(
     receipt_binding_value=None,
     receipt_stable=None,
     component_environment=None,
+    terminal_decision_deadline=None,
 ):
     """Terminalize once, then project the frozen report and one optional receipt.
 
@@ -2253,9 +2724,66 @@ def emit_report(
     started = report.pop("_started")
     publication_preparation_error = None
     publication_preparation_disposition = "failed"
+    path = None
     receipt_path = None
     marker_path = None
     receipt_value = None
+    elapsed = time.monotonic() - started
+    _account_elapsed(report, started, target, maximum, elapsed)
+    report["terminalized_pass"] = report["outcome"] == "pass"
+    report["gate_exit_code"] = OUTCOME_EXIT[report["outcome"]]
+    report["publication_status"] = "success"
+    report["publication_reason"] = "required projections persisted"
+    report["report_write"] = {"disposition": "written"}
+    report["command_outcome"] = report["outcome"]
+    report["exit_code"] = report["gate_exit_code"]
+    report["publication_id"] = secrets.token_hex(32)
+    report["receipt_binding_digest"] = (
+        receipt_binding_value.get("binding_digest")
+        if receipt_binding_value is not None
+        else None
+    )
+    report["decision"] = _decision_value(report)
+    report["decision_digest"] = test_manifest.canonical_digest(report["decision"])
+
+    try:
+        _send_terminal_decision(report, terminal_decision_deadline)
+    except (GateError, OSError, ValueError) as error:
+        _write_publication_error("terminal decision publication failed: " + str(error))
+        return OUTCOME_EXIT["error"]
+
+    if (
+        report.get("target_exceeded")
+        and target is not None
+        and options is not None
+        and "budget_filing" not in report
+    ):
+        filing_deadline = time.monotonic() + POST_CLAIM_FILING_TIMEOUT_SECONDS
+        completed, filing = _bounded_json_call(
+            lambda: file_target_breach(
+                report,
+                target,
+                policy_digest,
+                options,
+                actual_seconds=elapsed,
+                environment=component_environment,
+            ),
+            filing_deadline,
+        )
+        report["budget_filing"] = (
+            filing
+            if completed and isinstance(filing, dict)
+            else {
+                "disposition": "timed-out",
+                # The helper may have crossed a mutation boundary before it was
+                # killed.  A later deduplicated filing pass determines the truth.
+                "mutated": None,
+            }
+        )
+
+    # State-path checks and all filesystem projection happen after the immutable
+    # terminal claim.  A projection error can change only the command/publication
+    # status, never the already brokered gate decision.
     try:
         report_directory = _safe_local_directory(Path("tmp/test-gate-reports"))
         path = report_directory / f"latest-{report['gate_id']}.json"
@@ -2267,47 +2795,14 @@ def emit_report(
                 raise GateError("refusing to replace symlinked gate receipt")
             if marker_path.exists() and marker_path.is_symlink():
                 raise GateError("refusing to replace symlinked publication marker")
-            if receipt_stable is None or not receipt_stable():
+            if receipt_stable is None or not receipt_stable:
                 raise GateError("candidate or controller closure drifted before receipt persistence")
-            # Recompute the complete manifest immediately before the terminal boundary.
-            if receipt_binding_value.get("controller_closure") != controller_closure():
-                raise GateError("controller closure drifted before receipt persistence")
     except (GateError, OSError, ValueError) as error:
         path = None
         receipt_path = None
         marker_path = None
         publication_preparation_error = str(error)
         publication_preparation_disposition = "refused"
-
-    elapsed = time.monotonic() - started
-    _account_elapsed(report, started, target, maximum, elapsed)
-    if (
-        report.get("target_exceeded")
-        and target is not None
-        and options is not None
-        and "budget_filing" not in report
-    ):
-        try:
-            report["budget_filing"] = file_target_breach(
-                report,
-                target,
-                policy_digest,
-                options,
-                actual_seconds=elapsed,
-                environment=component_environment,
-            )
-        except (GateError, OSError, ValueError):
-            report["budget_filing"] = {"disposition": "failed", "mutated": False}
-        elapsed = time.monotonic() - started
-        _account_elapsed(report, started, target, maximum, elapsed)
-    report["terminalized_pass"] = report["outcome"] == "pass"
-    report["gate_exit_code"] = OUTCOME_EXIT[report["outcome"]]
-    report["publication_status"] = "success"
-    report["publication_reason"] = "required projections persisted"
-    report["report_write"] = {"disposition": "written"}
-    report["command_outcome"] = report["outcome"]
-    report["exit_code"] = report["gate_exit_code"]
-    report["publication_id"] = secrets.token_hex(32)
 
     if not report["terminalized_pass"]:
         receipt_path = None
@@ -2411,6 +2906,7 @@ def _base_report(gate, started):
         "tested_view": None,
         "test_plan": None,
         "execution_identity": None,
+        "decision_protocol": None,
         "policy_digest": None,
         "critical": {},
         "selected": [],
@@ -2422,21 +2918,55 @@ def _base_report(gate, started):
         "maximum_exceeded": False,
         "terminalized_pass": False,
         "invocation": None,
+        "receipt_binding_digest": None,
         "_started": started,
     }
 
 
 def main(arguments=(), started=None):
     options = parse_arguments(arguments)
-    if started is None:
+    absolute_deadline = None
+    terminal_decision_deadline = None
+    if _HANDOFF is not None:
+        raw_started = _HANDOFF.get("started_monotonic")
+        raw_deadline = _HANDOFF.get("absolute_deadline_monotonic")
+        if (
+            not isinstance(raw_started, bool)
+            and isinstance(raw_started, (int, float))
+            and math.isfinite(raw_started)
+            and not isinstance(raw_deadline, bool)
+            and isinstance(raw_deadline, (int, float))
+            and math.isfinite(raw_deadline)
+            and raw_deadline > raw_started
+        ):
+            # Even a later handoff-validation failure should use the supervisor's
+            # raw absolute bound for a deadline-bounded error claim.
+            terminal_decision_deadline = gate_work_cutoffs(
+                float(raw_deadline), float(raw_deadline - raw_started)
+            )[3]
         try:
-            started = gate_interval_started()
+            handoff_started, absolute_deadline = gate_interval_bounds()
         except GateError as error:
             report = _base_report(options.gate, PROCESS_STARTED)
             report["outcome"] = "error"
             report["reason"] = str(error)
-            return emit_report(report)
+            return emit_report(
+                report, terminal_decision_deadline=terminal_decision_deadline
+            )
+        if started is None:
+            started = handoff_started
+        terminal_decision_deadline = gate_work_cutoffs(
+            absolute_deadline, absolute_deadline - started
+        )[3]
+    elif started is None:
+        started = PROCESS_STARTED
     report = _base_report(options.gate, started)
+    if _HANDOFF is not None:
+        frame = _HANDOFF.get("policy_frame")
+        if isinstance(frame, dict):
+            # The broker accepts only claims bound to its authoritative policy.
+            # Preserve that identity even when candidate-side reproduction fails.
+            report["policy_digest"] = frame.get("policy_digest")
     if options.at_transition or options.provider_hard:
         report["outcome"] = "blocked-incomplete"
         report["reason"] = (
@@ -2455,14 +2985,18 @@ def main(arguments=(), started=None):
             "candidate_revision": options.candidate_revision,
             "provider_hard": options.provider_hard,
         }
-        return emit_report(report)
+        return emit_report(
+            report, terminal_decision_deadline=terminal_decision_deadline
+        )
     try:
         validated_closure = validate_bootstrap_handoff()
+        _require_work_time(absolute_deadline, "controller admission")
         with tempfile.TemporaryDirectory(prefix="agentfold-test-gate-") as scratch:
             scratch_root = Path(scratch).resolve()
             candidate, tested_view, candidate_root, unchanged = capture_candidate(
                 options, scratch_root
             )
+            _require_work_time(absolute_deadline, "candidate capture")
             if not unchanged():
                 raise GateError("candidate capture or controller closure drifted before execution")
             report["candidate"] = candidate.as_dict()
@@ -2477,7 +3011,16 @@ def main(arguments=(), started=None):
                 scratch_root,
                 candidate.base_revision,
             )
+            protocol_identity = validate_policy_frame(
+                policy,
+                policy_digest,
+                candidate_root,
+                candidate.base_revision,
+                options.gate,
+            )
+            _require_work_time(absolute_deadline, "policy validation")
             report["policy_digest"] = policy_digest
+            report["decision_protocol"] = protocol_identity
             report["invocation"] = {
                 "kind": (
                     "explicit"
@@ -2495,9 +3038,12 @@ def main(arguments=(), started=None):
             disposition = _final_disposition(options, policy)
             if disposition is not None:
                 report["outcome"], report["reason"] = disposition
-                return emit_report(report)
+                return emit_report(
+                    report, terminal_decision_deadline=terminal_decision_deadline
+                )
 
             classification = classify_candidate(candidate.changed_paths, policy)
+            _require_work_time(absolute_deadline, "risk classification")
             required_critical = tuple(classification.required_check_ids)
             critical = bool(
                 classification.critical_bindings
@@ -2536,15 +3082,28 @@ def main(arguments=(), started=None):
                 selected, deferred = routine_test_manifest(
                     candidate.changed_paths, all_tests
                 )
+            _require_work_time(absolute_deadline, "test planning")
             report["selected"] = list(selected)
             report["deferred"] = list(deferred)
 
             budget = _budget_for(options.gate, policy)
             maximum = float(budget.maximum_seconds)
             target = float(budget.target_seconds)
-            hard_deadline = started + maximum
-            reporting_reserve = min(0.5, max(0.05, maximum * 0.05))
-            component_deadline = hard_deadline - reporting_reserve
+            hard_deadline = (
+                absolute_deadline
+                if absolute_deadline is not None
+                else started + maximum
+            )
+            if absolute_deadline is not None and abs(
+                (absolute_deadline - started) - maximum
+            ) > 0.001:
+                raise GateError("configured budget disagrees with supervisor deadline")
+            (
+                execution_deadline,
+                cleanup_deadline,
+                final_validation_deadline,
+                terminal_decision_deadline,
+            ) = gate_work_cutoffs(hard_deadline, maximum)
             components = []
             frozen_index = (
                 Path(_HANDOFF["frozen_index"])
@@ -2567,6 +3126,10 @@ def main(arguments=(), started=None):
                     authoritative_index_identity,
                 )
 
+            def candidate_stable_before(deadline):
+                completed, stable = _bounded_json_call(candidate_stable, deadline)
+                return completed and stable is True
+
             internal_component_environment = candidate_git_environment(
                 candidate_root, frozen_index
             )
@@ -2584,11 +3147,20 @@ def main(arguments=(), started=None):
             def guarded_component(
                 component_id,
                 command,
-                remaining_seconds,
+                run_until,
                 cwd,
                 require_strong_containment=False,
             ):
-                if not candidate_stable():
+                if time.monotonic() >= run_until:
+                    return ComponentResult(
+                        component_id,
+                        "incomplete",
+                        "none",
+                        0.0,
+                        tuple(command),
+                        "component was not started because its execution window expired",
+                    )
+                if not candidate_stable_before(run_until):
                     return ComponentResult(
                         component_id,
                         "incomplete",
@@ -2598,7 +3170,9 @@ def main(arguments=(), started=None):
                         "authoritative frozen index or candidate changed before component execution",
                     )
                 index_directory = Path(
-                    tempfile.mkdtemp(prefix="agentfold-component-index-")
+                    tempfile.mkdtemp(
+                        prefix="agentfold-component-index-", dir=str(scratch_root)
+                    )
                 ).resolve()
                 component_index = index_directory / "candidate.index"
                 try:
@@ -2610,17 +3184,28 @@ def main(arguments=(), started=None):
                     result = run_component(
                         component_id,
                         command,
-                        remaining_seconds,
+                        run_until - time.monotonic(),
                         cwd=cwd,
-                        cleanup_deadline=hard_deadline,
+                        cleanup_deadline=cleanup_deadline,
                         effective_environment=effective_environment,
                         require_strong_containment=require_strong_containment,
                     )
-                    authoritative_stable = candidate_stable()
-                    component_index_stable = frozen_index_matches(
-                        component_index,
-                        candidate.base_revision,
-                        component_index_identity,
+                    completed, stability = _bounded_json_call(
+                        lambda: {
+                            "authoritative": candidate_stable(),
+                            "component": frozen_index_matches(
+                                component_index,
+                                candidate.base_revision,
+                                component_index_identity,
+                            ),
+                        },
+                        cleanup_deadline,
+                    )
+                    authoritative_stable = bool(
+                        completed and stability.get("authoritative")
+                    )
+                    component_index_stable = bool(
+                        completed and stability.get("component")
                     )
                     if not authoritative_stable or not component_index_stable:
                         reasons = []
@@ -2641,18 +3226,16 @@ def main(arguments=(), started=None):
                         )
                     return result
                 finally:
-                    try:
-                        index_directory.chmod(0o700)
-                    except OSError:
-                        pass
-                    shutil.rmtree(str(index_directory), ignore_errors=True)
+                    # The enclosing scratch directory is removed only after emit_report
+                    # has sent the immutable terminal claim.
+                    pass
 
             commands = admission_commands(options, candidate, candidate_root)
             for component_id, command in commands:
                 result = guarded_component(
                     component_id,
                     command,
-                    component_deadline - time.monotonic(),
+                    execution_deadline,
                     cwd=candidate_root,
                     require_strong_containment=options.provider_hard,
                 )
@@ -2662,7 +3245,7 @@ def main(arguments=(), started=None):
 
             if (
                 (not components or all(result.outcome == "pass" for result in components))
-                and not candidate_stable()
+                and not candidate_stable_before(execution_deadline)
             ):
                 components.append(
                     ComponentResult(
@@ -2696,6 +3279,66 @@ def main(arguments=(), started=None):
                         ),
                     )
                     receipt = reusable_full_receipt(binding, component_id, options)
+                    if receipt is None and composite is None:
+                        cached_binding = latest_reusable_full_receipt_binding(
+                            candidate, options
+                        )
+                        current_full_identity = receipt_binding(
+                            candidate,
+                            tested_view,
+                            (),
+                            policy_digest,
+                            "repository-tests/full",
+                            candidate_root,
+                            environment=component_environment,
+                            composite_identity=None,
+                        )
+                        if cached_binding is not None and (
+                            full_receipt_current_identity_matches(
+                                cached_binding, current_full_identity
+                            )
+                        ):
+                            receipt_plan_root = scratch_root / "full-receipt-plan"
+                            receipt_plan_root.mkdir()
+                            receipt_composite = composite_test_plan(
+                                candidate,
+                                candidate_root,
+                                tested_view,
+                                receipt_plan_root,
+                            )
+                            receipt_tests = tuple(
+                                sorted(
+                                    set(receipt_composite["floor_tests"]).union(
+                                        receipt_composite["supplemental_tests"]
+                                    )
+                                )
+                            )
+                            expected_full_binding = receipt_binding(
+                                candidate,
+                                tested_view,
+                                receipt_tests,
+                                policy_digest,
+                                "repository-tests/full",
+                                candidate_root,
+                                environment=component_environment,
+                                composite_identity=receipt_composite["identity"],
+                            )
+                            if cached_binding == expected_full_binding:
+                                receipt = reusable_full_receipt(
+                                    expected_full_binding,
+                                    "repository-tests/full",
+                                    options,
+                                )
+                                if receipt is not None:
+                                    binding = expected_full_binding
+                                    component_id = "repository-tests/full"
+                                    selected = receipt_tests
+                                    deferred = ()
+                                    report["selected"] = list(selected)
+                                    report["deferred"] = []
+                                    report["test_plan"] = receipt_composite[
+                                        "identity"
+                                    ]
                     if receipt is not None:
                         components.append(
                             ComponentResult(
@@ -2730,7 +3373,7 @@ def main(arguments=(), started=None):
                             return guarded_component(
                                 lane_id,
                                 command,
-                                component_deadline - time.monotonic(),
+                                execution_deadline,
                                 cwd=view_root,
                                 require_strong_containment=options.provider_hard,
                             )
@@ -2781,7 +3424,6 @@ def main(arguments=(), started=None):
                         if (
                             receipt_result.outcome == "pass"
                             and composite is not None
-                            and candidate_stable()
                             and local_receipts_allowed(options)
                         ):
                             pending_receipt_binding = binding
@@ -2809,7 +3451,7 @@ def main(arguments=(), started=None):
                     )
 
             if (
-                time.monotonic() >= component_deadline
+                time.monotonic() >= terminal_decision_deadline
                 and not any(result.outcome == "incomplete" for result in components)
             ):
                 components.append(
@@ -2819,11 +3461,24 @@ def main(arguments=(), started=None):
                         "none",
                         0.0,
                         (),
-                        "component work consumed the interval reserved for cleanup and reporting",
+                        "component work consumed the interval reserved for terminal decision",
                     )
                 )
             report["components"] = [result.as_dict() for result in components]
-            final_candidate_stable = candidate_stable()
+            def terminal_stability():
+                if not candidate_stable():
+                    return False
+                if pending_receipt_binding is None:
+                    return True
+                return (
+                    pending_receipt_binding.get("controller_closure")
+                    == controller_closure()
+                )
+
+            completed, stable = _bounded_json_call(
+                terminal_stability, final_validation_deadline
+            )
+            final_candidate_stable = completed and stable is True
             apply_gate_outcome(
                 report,
                 options.gate,
@@ -2834,6 +3489,10 @@ def main(arguments=(), started=None):
                 required_critical,
                 final_candidate_stable,
             )
+            if not completed:
+                report["reason"] = (
+                    "candidate stability could not be verified before the terminal deadline"
+                )
             report["evidence"] = (
                 "executed"
                 if any(result.evidence == "executed" for result in components)
@@ -2847,22 +3506,31 @@ def main(arguments=(), started=None):
                 maximum,
                 policy_digest,
                 options,
-                receipt_binding_value=pending_receipt_binding,
-                receipt_stable=candidate_stable,
+                receipt_binding_value=(
+                    pending_receipt_binding if final_candidate_stable else None
+                ),
+                receipt_stable=final_candidate_stable,
                 component_environment=component_environment,
+                terminal_decision_deadline=terminal_decision_deadline,
             )
     except getattr(test_gate_config, "ConfigError", ()) as error:
         report["outcome"] = "invalid"
         report["reason"] = str(error)
-        return emit_report(report)
+        return emit_report(
+            report, terminal_decision_deadline=terminal_decision_deadline
+        )
     except (GateError, test_manifest.ManifestError, OSError, ValueError) as error:
         report["outcome"] = "error"
         report["reason"] = str(error)
-        return emit_report(report)
+        return emit_report(
+            report, terminal_decision_deadline=terminal_decision_deadline
+        )
     except Exception as error:  # keep unexpected operational failures machine-visible
         report["outcome"] = "error"
         report["reason"] = f"unexpected gate error: {error}"
-        return emit_report(report)
+        return emit_report(
+            report, terminal_decision_deadline=terminal_decision_deadline
+        )
 
 
 if __name__ == "__main__":

@@ -520,3 +520,113 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   This repairs the stale description but not the P1 product flaw or the lost report. The merge
   retry remains `in-repair`; a P1 repair, new exact final run, new commit, and fresh panel remain
   mandatory before merge.
+
+## 2026-07-28 — isolated absolute-deadline repair (delegated implementation)
+
+- Built an uncommitted repair from clean revision `19ca430` in an isolated worktree. The shared
+  task worktree was not changed.
+- Replaced the pre-deadline bootstrap gap with a small standard-library supervisor and one owned
+  POSIX worker. Policy discovery now has a five-second ceiling, uses exact base/candidate config
+  and the canonical parser closure, and returns a bounded frame from which the supervisor derives
+  the absolute deadline. A maximum of exactly five seconds is valid; a smaller one is rejected.
+- The same worker continues snapshot and controller execution. The controller rechecks the policy
+  frame against its frozen inputs and sends one bounded terminal-decision frame before publication.
+  The supervisor accepts it only strictly before the deadline. A late, absent, contradictory, or
+  oversized frame blocks and triggers process-group plus exact-token same-user cleanup.
+- Advanced reports to v4, receipts to v6, and handoffs to v2. Receipt identity binds both lane
+  budgets, config and policy identities, parser and launcher identities, and the controller
+  closure. It deliberately excludes invocation clock values, preserving exact final-prewarm reuse
+  by a later routine hook.
+- Focused protocol tests, canonical config tests, the exact prewarm/reuse integration, nine
+  existing safety regressions, compilation, whitespace checks, and reconciliation passed. One
+  broader ten-test batch hit the existing macOS descendant-cleanup flake; the same prewarm/reuse
+  test passed alone before and after that batch. No full repository suite, exact final gate,
+  commit, or fresh panel ran, so plan step 16 and the merge retry remain open.
+
+## 2026-07-28 — isolated deadline-protocol hardening (delegated implementation)
+
+- Reworked authoritative discovery after two blocking reviews. Discovery now materializes the
+  exact base parser/Tomli closure and base configuration from the base revision, materializes the
+  candidate configuration and parser closure from one captured candidate index, and executes
+  only the trusted base parser. Missing base inputs, malformed candidate configuration, or a
+  closure mutation blocks; there is no fallback to live or candidate-controlled parser bytes.
+- Reused that exact authoritative index for the later sealed controller snapshot. The candidate
+  parser must reproduce the signed policy in the frozen controller or the run blocks.
+- Split control authority into two sockets. The worker alone keeps the outer supervisor socket;
+  the controller receives a new inner socket; components receive neither. The worker validates
+  the controller claim and sends a distinct broker decision to the supervisor.
+- Added an immutable decision object and digest to normal v4 reports and bound v6 receipts to the
+  hardened protocol identity. The worker verifies the fixed-lane report after controller exit.
+  Normal process exit must equal the gate exit; only post-freeze publication may turn gate exit
+  0 or 1 into command exit 2. Missing frames, signals, and contradictory exits are errors.
+- The focused protocol suite passed 26/26, the policy suite passed 28/28, and the real final
+  prewarm-to-routine-hook integration passed in 8.991 seconds. Compilation, diff checks, the
+  60-line automation contract, and reconciliation also passed. No broad suite or final gate ran.
+- An existing nine-test safety subset passed eight tests. Its receipt-marker test exposed one
+  additional compatibility-bridge item: `_publish_receipt_pair` still constructs a legacy report
+  without the now-required `decision_digest`. This is added to the explicit task-branch migration
+  list; the isolated product contract was not weakened to accept that legacy report.
+
+## 2026-07-28 — honest supervisor-static telemetry (delegated implementation)
+
+- Removed the static report's fabricated zero duration and `none-started` containment claim.
+  Static results now retain the supervisor clock source/start, measure current elapsed time when
+  possible, and use null when it is not. They record the real worker-started state and structured
+  process-group and ownership-token cleanup attempts, results, and discovery completeness.
+- Timeout, EOF, protocol-error, unsupported-host, control-channel, and worker-start failures now
+  pass the facts available at their exact boundary. The fixed-lane v4 shape and immutable
+  decision digest remain intact.
+- The focused protocol suite passed 27/27, configuration passed 28/28, compilation passed, and
+  the real prewarm-to-hook reuse test passed in 5.898 seconds. No broad suite or final gate ran.
+
+## 2026-07-28 — integrated final evidence exposed reversible reuse gap (codex)
+
+- Integrated the absolute-deadline supervisor/worker repair and the old/new generation bridge on
+  the task branch. Exact staged candidate `44963ec4…` passed the explicit final gate in
+  552.679782 seconds with 18 selected files and no deferred or incomplete coverage.
+- Preserved the ignored v6 full receipt `08dbee980350…` and its matching v4 report and v1 marker.
+  Read-only validation still accepts that evidence for the exact staged candidate.
+- The following real routine hook classified the candidate as reversible, built a selected lane,
+  and started the deadline-protocol, gate-runner, and configuration tests instead of reading the
+  full receipt. It missed the supervisor deadline at 60.26752 seconds and created no commit.
+- Traced the miss to two separate issues. Full-receipt reuse is reached only after planning a
+  full component, so reversible selected planning bypasses it. The selected path also leaves only
+  half a second for cleanup and terminal brokering, which this real run proved insufficient.
+- Approved the bounded repair sequence: validate an exact latest-final full evidence set before
+  selected execution, and leave a larger explicit terminalization reserve for the selected
+  fallback. Focused regressions come first, followed by one exact final run for the complete
+  repaired candidate, no further staging, one normal hook reuse attempt, and a fresh panel.
+- No repair result, commit, or review is claimed here. The live merge retry remains `in-repair`.
+
+## 2026-07-28 — focused receipt and deadline repair verified (delegated implementation)
+
+- Moved exact latest-final receipt validation ahead of reversible selected execution. An exact
+  complete evidence set now satisfies the routine gate without rerunning selected tests; missing
+  or mismatched evidence still falls back to ordinary planning.
+- Split the remaining decision time into explicit execution, cleanup, final-validation, and
+  terminal-delivery windows. Final validation is killable and bounded, and terminal delivery uses
+  a nonblocking deadline-bounded channel.
+- Froze and sent the terminal claim before budget-task filing or result projection. Filing is a
+  bounded post-claim attempt and cannot change the decision, duration, or gate exit code. A filer
+  timeout reports mutation as unknown when a write may already have started.
+- Seven new focused regressions passed. The 10-second no-receipt path deferred in 6.608 seconds,
+  and the exact prewarm path reused its full receipt in 5.587 seconds without selected execution.
+  The broader focused modules passed 34 protocol tests, 103 gate tests with one skip, 28
+  configuration tests, and 6 generation tests. Reconciliation reported zero findings.
+- An independent focused rereview returned `APPROVE`. One new exact final run, an unchanged normal
+  commit attempt, and a fresh five-reviewer revision-bound panel remain pending. The live retry
+  continues to block merge.
+
+## 2026-07-28 — handover checkpoint (codex)
+
+- Paused with `HEAD` at `a89eccc`; no deadline-repair commit was created. The earlier normal
+  commit attempt failed honestly at 60.26752 seconds, and no hook was bypassed.
+- The reviewed repair, plain-English records, queue note, two automation lessons, memory index,
+  and handover are staged as one candidate. The two generated timing journals remain unstaged and
+  are deliberately excluded. See the latest conversation handover for the exact status split.
+- The next safe sequence is: verify that staged/unstaged split without changing staged bytes; run
+  one exact explicit final gate; make one normal commit so the hook reuses the receipt; then run a
+  fresh five-reviewer panel.
+- Do not reuse the historical `44963ec4…` receipt for the repaired bytes, do not rerun the full
+  suite before the staged candidate is final, and do not resolve the blocking retry before the
+  new commit and panel both succeed.

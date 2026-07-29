@@ -2047,7 +2047,7 @@ class TestGateTests(unittest.TestCase):
             self.assertEqual(first["binding_digest"], changed["binding_digest"])
             self.assertIsNotNone(GATE.reusable_receipt(changed))
 
-    def test_final_prewarm_is_reused_by_actual_git_commit_hook(self):
+    def test_final_full_prewarm_covers_routine_selected_commit_hook(self):
         source_repo = GATE.REPO
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch) / "repo"
@@ -2090,6 +2090,10 @@ class TestGateTests(unittest.TestCase):
             smoke.write_text(
                 "import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n"
             )
+            stable = repo / "automation/tests/test_stable.py"
+            stable.write_text(
+                "import unittest\n\nclass Stable(unittest.TestCase):\n    pass\n"
+            )
             workflow = repo / ".github/workflows/harness.yml"
             workflow.parent.mkdir(parents=True)
             workflow.write_text("name: base\n")
@@ -2110,8 +2114,13 @@ class TestGateTests(unittest.TestCase):
                 text=True,
             ).strip()
             self.assertEqual("automation/hooks", configured_hook)
-            workflow.write_text("name: critical-candidate\n")
-            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
+            smoke.write_text(
+                "import unittest\n\n"
+                "class Smoke(unittest.TestCase):\n"
+                "    def test_candidate(self):\n"
+                "        self.assertTrue(True)\n"
+            )
+            subprocess.run(["git", "add", str(smoke)], cwd=repo, check=True)
 
             prewarm = subprocess.run(
                 [
@@ -2165,6 +2174,104 @@ class TestGateTests(unittest.TestCase):
                 if component["component_id"] == "repository-tests/full"
             )
             self.assertEqual("reused", routine_full["evidence"], routine_report)
+            self.assertEqual("pass", routine_report["outcome"], routine_report)
+            self.assertEqual(
+                [
+                    "automation/tests/test_smoke.py",
+                    "automation/tests/test_stable.py",
+                ],
+                routine_report["selected"],
+            )
+            self.assertEqual([], routine_report["deferred"])
+            self.assertFalse(
+                any(
+                    component["component_id"] == "repository-tests/selected"
+                    for component in routine_report["components"]
+                ),
+                routine_report,
+            )
+
+    def test_routine_without_receipt_brokers_deferred_before_deadline(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            policy = repo / "agentfold.toml"
+            policy.write_text(
+                policy.read_text()
+                .replace("target_seconds = 60", "target_seconds = 10", 1)
+                .replace("maximum_seconds = 60", "maximum_seconds = 10", 1)
+            )
+            for relative in (
+                "automation/check_core_scope.py",
+                "automation/reconcile/reconcile.py",
+            ):
+                script = repo / relative
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n")
+            smoke = repo / "automation/tests/test_smoke.py"
+            smoke.parent.mkdir(parents=True)
+            smoke.write_text(
+                "import unittest\n\n"
+                "class Smoke(unittest.TestCase):\n"
+                "    pass\n"
+            )
+            stable = repo / "automation/tests/test_stable.py"
+            stable.write_text(
+                "import unittest\n\nclass Stable(unittest.TestCase):\n    pass\n"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "ten-second routine floor"],
+                cwd=repo,
+                check=True,
+            )
+            smoke.write_text(
+                "import time\n"
+                "import unittest\n\n"
+                "class Smoke(unittest.TestCase):\n"
+                "    def test_slow(self):\n"
+                "        time.sleep(30)\n\n"
+                "if __name__ == '__main__':\n"
+                "    unittest.main()\n"
+            )
+            subprocess.run(["git", "add", str(smoke)], cwd=repo, check=True)
+
+            started = time.monotonic()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(repo / "automation/run_test_gate.py"),
+                    "routine",
+                    "--staged",
+                ],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            elapsed = time.monotonic() - started
+            report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-routine.json").read_text()
+            )
+            self.assertEqual(0, result.returncode, result.stdout)
+            self.assertLess(elapsed, 10.0, result.stdout)
+            self.assertEqual("deferred", report["outcome"], report)
+            self.assertLess(report["decision"]["duration_seconds"], 9.75)
+            selected = next(
+                component
+                for component in report["components"]
+                if component["component_id"] == "repository-tests/selected"
+            )
+            self.assertEqual("incomplete", selected["outcome"], report)
+            self.assertTrue(
+                "execution interval" in selected["detail"]
+                or "execution window expired" in selected["detail"],
+                report,
+            )
+            receipts = repo / "tmp/test-gate-receipts"
+            self.assertFalse(receipts.exists() and any(receipts.iterdir()))
 
     def test_provider_hard_boundary_disallows_local_receipts(self):
         provider = mock.Mock(provider_hard=True)
@@ -3063,13 +3170,6 @@ class TestGateTests(unittest.TestCase):
         self.assertFalse(report["terminalized_pass"])
 
     def test_target_filing_accounts_once_then_freezes_without_correction(self):
-        clock = iter((0.6, 0.8))
-
-        def monotonic():
-            if GATE_GENERATION == DEADLINE_GENERATION:
-                return 0.6
-            return next(clock)
-
         report = GATE._base_report("routine", 0.0)
         report.update(
             {
@@ -3080,19 +3180,12 @@ class TestGateTests(unittest.TestCase):
             }
         )
         options = mock.Mock(at_transition=None, explicit=False)
-        with mock.patch.object(
-            GATE.time, "monotonic", side_effect=monotonic
-        ), mock.patch.object(
-            GATE,
-            "file_target_breach",
-            return_value={"disposition": "filed", "mutated": True},
+        with mock.patch.object(GATE.time, "monotonic", return_value=0.6), mock.patch.object(
+            GATE, "file_target_breach", return_value={"disposition": "filed", "mutated": True}
         ) as filing, mock.patch.object(GATE, "_atomic_json") as persist, mock.patch.object(
             GATE, "_write_summary"
         ) as summary, mock.patch.object(
-            GATE,
-            "_bounded_json_call",
-            side_effect=lambda call, _deadline: (True, call()),
-            create=True,
+            GATE, "_bounded_json_call", side_effect=lambda call, _deadline: (True, call())
         ):
             exit_code = GATE.emit_report(
                 report,
@@ -3102,10 +3195,7 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
         self.assertEqual(0, exit_code)
-        self.assertEqual(
-            0.6 if GATE_GENERATION == DEADLINE_GENERATION else 0.8,
-            report["duration_seconds"],
-        )
+        self.assertEqual(0.6, report["duration_seconds"])
         self.assertTrue(report["target_exceeded"])
         self.assertFalse(report["maximum_exceeded"])
         filing.assert_called_once()

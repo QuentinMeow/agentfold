@@ -13,7 +13,7 @@ Automation is Python stdlib plus vendored, policy-free Tomli, and supports Pytho
 | `install.py` | idempotent setup: git hooks path and agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
 | `mine_cochange.py` | advisory: ranks Markdown pairs that keep changing together, with their shared commit subjects as evidence; `accept`/`reject` append durable verdicts to `cochange-ledger.txt`, whose rejection rate is the effective-false-positive rate | on demand |
-| `run_test_gate.py` | CPython 3.7+ POSIX-only bootstrap that rejects reserved automatic modes, carries one cross-process monotonic clock into a frozen cooperative snapshot, and measures invocation through terminal gate decision; v5 receipt/report publication commits last with a marker outside that interval; canonical use is `python3 -I -S automation/run_test_gate.py …` | pre-commit, explicit final command, on demand; policy and use: `handbook/testing-gates.md` |
+| `run_test_gate.py` | CPython 3.7+ POSIX supervisor that rejects reserved automatic modes, lets one worker use the exact base parser and one captured index to discover policy within 5 seconds, enforces the resulting absolute deadline, and accepts only the worker-brokered terminal frame; canonical use is `python3 -I -S automation/run_test_gate.py …` | pre-commit, explicit final command, on demand; policy and use: `handbook/testing-gates.md` |
 | `run_tests.py` | runs tests in an isolated working-tree-byte view; the full suite is the default, while `--staged` selects only ordinary add/modify paths in the known quote-service dependency closure and otherwise falls back to full (it selects from the index, but is not staged-snapshot verification) | pre-commit (`--staged`), CI and on demand (full default) |
 Rules:
 
@@ -30,9 +30,9 @@ Rules:
   target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
   checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
 - Admission adapters pass `--displaced-tip <full oid>` for replaced refs; unavailable nonzero tips fail closed.
-- The starter final gate is manual and cooperative. Its POSIX snapshot controller gives each
-  component a disposable index; v3 reports plus v5 receipts require a last-written publication
-  marker. Named transitions and `--provider-hard` fail before imports; hard syntax is future policy.
+- The starter final gate is manual and cooperative. One POSIX worker owns discovery, the outer
+  control channel, snapshot, and components; v4 decision-bound reports plus v6 receipts require a last-written v1 marker. Named transitions
+  and `--provider-hard` fail before imports; hard syntax remains future policy.
 - PR adapters treat titles as summaries, bind one task from the trusted base/candidate
   range, require and cross-check that evidence even for a task-named branch, and
   project the task completely. Scoped external assignments require distinct task-owned

@@ -40,25 +40,50 @@ path_globs = ["services/**"]
 ```
 
 `target_seconds` and `maximum_seconds` are positive, finite numbers (booleans
-do not count), and the target cannot exceed the maximum. A target breach is a
+do not count), every maximum is at least 5 seconds, and the target cannot exceed the maximum. A target breach is a
 performance finding; reaching the maximum ends remaining work. The only
 current breach action is `file-task`.
 
-The maximum is a decision deadline. It starts when the gate is invoked, before
-bootstrap discovery, freezing, materialization, sealing, and controller startup.
-It continues through every fallible gate operation, component cleanup, budget-task
-filing, final validation, and the one terminal outcome freeze. Atomic receipt,
-report, publication-marker, and stdout projection follows that freeze and is outside the measured
-decision interval: self-reporting cannot include its own completion in the value
-it reports. Slow or blocked external projection I/O can therefore make wall-clock
-return exceed the maximum, even without a bound supplied by the gate, but cannot
-change the already-frozen outcome.
+The maximum is an absolute decision deadline. A small supervisor starts the cross-process
+clock before filesystem or Git discovery. It rejects reserved hard syntax, then starts one
+owned worker. That worker gets exactly 5 seconds to capture one authoritative candidate index,
+materialize `agentfold.toml` and the parser/Tomli closure from both that index and the exact base
+revision, and return a size-capped policy frame. Only the trusted base parser runs during this
+discovery; it parses both configuration files and applies the stricter union. The candidate
+parser is recorded but cannot execute while the worker holds the supervisor channel. The
+supervisor checks the frame and derives the absolute deadline from the smaller base/candidate
+maximum. A configured maximum of exactly 5 seconds is valid; a smaller one is not.
 
-The bootstrap samples `CLOCK_MONOTONIC` with `clock_gettime` and hands that source
-and start value to the new controller process, so freezing and startup time cannot
+The same worker reuses that authoritative index for freezing, materialization, sealing,
+controller planning, and tests; it never recaptures the candidate after policy discovery.
+The decision interval continues through component execution, cleanup, bounded final validation,
+and the one terminal outcome claim. Separate cutoffs reserve time for each of those stages. Final
+validation runs in a killable helper; a timeout blocks rather than being deferred. The worker
+retains the outer supervisor socket and gives the controller a distinct inner socket; the
+controller and test components never receive the outer descriptor, and components receive
+neither descriptor. The controller sends its immutable decision claim over a nonblocking,
+deadline-bounded channel. After validating the claim, the worker brokers a distinct terminal
+frame to the supervisor. Both sends must finish before their cutoffs, and the supervisor frame
+must arrive strictly before the absolute deadline; arrival at the deadline is late. Missing,
+malformed, oversized, or late frames block, even if the worker exits zero.
+
+Only after the claim is frozen and sent does the controller attempt budget-task filing and
+evidence projection. Budget filing has its own bound and is best-effort. If it times out after a
+write may have started, the report records the mutation state as unknown instead of claiming that
+nothing changed. Filing and projection cannot change the frozen gate decision, its measured
+duration, or its gate exit code. Publication failure can still make the overall command return an
+error and prevents receipt reuse. Slow external projection I/O may therefore make wall-clock
+return exceed the maximum without changing the already-frozen gate result.
+
+The supervisor samples `CLOCK_MONOTONIC` with `clock_gettime` and hands that source,
+start value, and absolute deadline to the worker and controller, so freezing and startup time cannot
 disappear across `exec`. On POSIX systems lacking that Python clock API, it falls
 back to the monotonic elapsed field from `os.times()`. A source mismatch, rollback,
-invalid value, or unavailable source blocks the gate.
+invalid value, or unavailable source blocks the gate. On a missed terminal boundary it kills
+the worker process group and also searches for same-user descendants carrying the invocation's
+unguessable ownership token. This exact-token escapee cleanup is honest POSIX containment, not
+a claim of kernel-enforced isolation: process discovery can be incomplete, especially without
+Linux `/proc`, and the gate fails closed when it cannot establish required completion.
 
 There are exactly two final modes. The starter uses `manual`, omits `trigger`,
 and runs only with an explicit command. Schema version 1 reserves `hard` with
@@ -95,7 +120,7 @@ python3 -I -S automation/run_test_gate.py routine --staged
 ```
 
 Use that isolated, no-site interpreter form for every direct gate invocation. The
-small bootstrap is standard-library-only and checks raw arguments before it imports
+small supervisor is standard-library-only and checks raw arguments before it imports
 any candidate-controlled module. Reserved automatic transitions and
 `--provider-hard` therefore fail before Git discovery, configuration loading,
 candidate imports, reports, receipts, or budget-task state are read.
@@ -121,10 +146,9 @@ index fingerprint is retained only to detect drift during one invocation. The
 subsequent routine gate still runs admission and reconciliation inside its own
 60-second interval, and reuses the full-suite receipt only if the staged object
 ids, modes, paths, base, tested view, test manifest, policy, runner bytes, and
-the digest of every caller variable admitted by the sanitized component
-environment boundary are unchanged.
-That digest includes every inherited `PYTHON*` setting, so interpreter behavior
-such as `PYTHONPATH` cannot reuse evidence from a different environment.
+the sanitized component-environment identity are unchanged. Inherited `PYTHON*`
+settings are removed; fixed isolated/no-site interpreter flags and the remaining admitted
+environment are bound instead.
 Restaging changed content or topology invalidates that binding and requires
 another prewarm; there is no override for missing critical evidence.
 
@@ -134,14 +158,15 @@ Run a complete final gate explicitly from a clean checkout:
 python3 -I -S automation/run_test_gate.py final --explicit
 ```
 
-Explicit prewarming and routine testing use one immutable snapshot. The bootstrap
-copies and seals the selected index, materializes the controller from those staged
-objects, and hands both to that controller. The report records the bootstrap
-controller identity separately from the isolated child-interpreter identity. Each
+Explicit prewarming and routine testing use one immutable snapshot. Bounded policy discovery
+captures the authoritative index once; the same owned worker seals and reuses it, materializes
+the controller from those staged objects, and hands both to that controller. The report records the supervised
+launcher identity separately from the isolated child-interpreter identity. Each
 component gets a disposable copy of the sealed index and a sanitized Git/Python
 environment; mutations block the run and receipt rather than changing what a later
-component executes. All snapshot, index, report, receipt, publication-marker, and process-group scratch
-is cleaned on normal, failed, timed-out, interrupted, and bootstrap-error exits.
+component executes. Forced supervisor termination may leave system-temporary snapshot files for
+the operating system to reap, but it cannot publish a reusable receipt without a timely terminal
+decision.
 
 The parser retains exact-range arguments for a future pull-request adapter, but
 this repository blocks every named transition before candidate execution. In every
@@ -207,17 +232,16 @@ verified, keep final mode manual.
 
 ## Results, receipts, and budget work
 
-Every invocation attempts to print a human summary and write a machine-readable v3 report
+Every invocation attempts to print a human summary and write a machine-readable v4 report
 under ignored `tmp/test-gate-reports/`. Its outcome has these exit codes:
 
-The measured decision interval starts at invocation, includes bootstrap and all
-fallible gate work, and ends when the runner freezes one gate outcome and gate exit
-code. Publication then has its own command outcome. Atomic receipt and pass-report
-projection occurs outside the interval, followed by stdout. The publication commit
-marker is atomically written last and attests that all prior projections succeeded.
-Projection cannot change the frozen gate
-decision, although its I/O may delay return beyond the maximum. A receipt, report,
-stdout, or marker failure makes the command return an error and prevents reuse.
+The measured decision interval starts at invocation and covers bootstrap, component work,
+cleanup, final validation, and the terminal claim. The gate freezes and sends that claim before
+it files a timing investigation or projects results. Filing and publication occur outside the
+measured decision interval and cannot change its decision, duration, or gate exit code. The
+publication commit marker is atomically written last and attests that the required earlier
+projections succeeded. A receipt, report, stdout, or marker failure makes the command return an
+error and prevents reuse, while leaving the frozen gate result intact.
 
 | Outcome | Exit code |
 | --- | ---: |
@@ -228,14 +252,28 @@ stdout, or marker failure makes the command return an error and prevents reuse.
 The table maps the frozen gate outcome to `gate_exit_code`. The command normally
 returns that code. If post-freeze publication fails, `command_outcome` becomes
 `error` and the command returns 2 while the gate outcome and gate exit code remain
-unchanged; the incomplete publication is not reusable.
+unchanged; the incomplete publication is not reusable. Signal exits, a zero exit without a
+terminal frame, and any worker/controller exit that contradicts the frozen gate exit are
+protocol errors and return 2. Each normal v4 report carries the frozen decision object and its
+digest, which the worker verifies after the controller exits.
+
+When the supervisor must return a static v4 result instead, it reports elapsed time from the
+same invocation clock when that measurement remains available; otherwise the value is null. It
+also records whether a worker started and whether process-group and ownership-token cleanup were
+attempted, their observed results, and whether token discovery was complete, best-effort, or
+unavailable. A post-start timeout never reports zero duration or claims that no process started.
 
 Full-suite pass receipts are stored only in ignored
 `tmp/test-gate-receipts/`. A receipt can be reused only when its exact candidate
 and candidate-view fingerprints, base-pinned revision, immutable floor/support records,
 supplemental records, overlay algorithm and floor-view digest, full manifests, policy digest,
 controller closure, disposable-index identity, and controller/child Python and Git environment
-identity all match. Version 5 receipts require the matching terminal v3 pass report and the
+identity all match. Version 6 receipts bind the v2 handoff protocol, both configured lane budgets,
+base and candidate config digests, normalized policy, launcher, separate trusted and candidate
+parser closures, the authoritative candidate-index identity, controller
+closure, and execution inputs. They deliberately do not bind an invocation's absolute clock values,
+so otherwise exact evidence remains reusable across different start times. A v6 receipt requires
+the matching terminal v4 pass report and the
 matching v1 publication commit marker written last. The marker binds both file digests, their
 paths, publication id, candidate identity, and authority. A missing or mismatched member makes
 the evidence ineligible; older receipts and earlier overlay plans are invalid. A selected routine
@@ -267,15 +305,17 @@ not create a provider enforcement boundary.
 
 When elapsed time is above the target, the runner tries to file or refresh one
 non-blocking investigation task and pickup request with timing components and
-sanitized environment evidence. Filing is best-effort: it never changes the
-functional outcome, stages nothing, and does not require the tests to run a
-second time. New records are rendered from the repository's canonical task and
-request templates. The task body remains stable after filing; later occurrences
-are bounded JSON records in task-local `timing-evidence.jsonl`, appended without
-replacing actor-written task bytes. In a read-only checkout, the report records
-the filing disposition instead of failing a successful gate. If the report path
-itself is unwritable, the human summary says the machine report is unavailable
-and preserves the gate's functional exit status.
+sanitized environment evidence. This happens only after the terminal claim has been
+frozen and sent. Filing is bounded and best-effort: it never changes the functional
+outcome, stages nothing, and does not require the tests to run a second time. New
+records are rendered from the repository's canonical task and request templates. The
+task body remains stable after filing; later occurrences are bounded JSON records in
+task-local `timing-evidence.jsonl`, appended without replacing actor-written task
+bytes. In a read-only checkout, the report records the filing disposition instead of
+failing a successful gate. A filing timeout records an unknown mutation state because
+the helper may have started a write. If the report path itself is unwritable, the human
+summary says the machine report is unavailable and preserves the gate's functional
+exit status.
 
 ## Compatibility
 

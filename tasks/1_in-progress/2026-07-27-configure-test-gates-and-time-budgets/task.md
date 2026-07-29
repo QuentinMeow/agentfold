@@ -36,10 +36,10 @@ The system will have two plainly named lanes:
 
 - **Routine gate:** automatically runs the smallest safe checks for the candidate change.
   Its default decision budget is 60 seconds from invocation through bootstrap, admission,
-  reconciliation, test selection, selected tests, cleanup, filing, validation, and terminal
-  outcome freeze. It decides and freezes the result first. It then publishes the receipt, report,
-  stdout, and commit marker in that order; the marker is last. Publication can delay process
-  return without changing the frozen decision, but publication failure still makes the command
+  reconciliation, test selection, selected tests, cleanup, final validation, and the terminal
+  outcome claim. It freezes and sends that claim first. Bounded budget-task filing and evidence
+  publication happen afterward and cannot change the decision, measured duration, or gate exit
+  code. Publication can delay process return, and publication failure still makes the command
   fail and prevents cache reuse. Reversible coverage that cannot finish in the decision budget
   is reported as deferred, never mislabeled as complete.
 - **Final gate:** runs complete verification only when explicitly requested. The starter is
@@ -53,21 +53,38 @@ blocked in this task; cooperative manual evidence must not be promoted into enfo
 
 ## Current state
 
-The manual-only product implementation is committed as
-`3a342013063f37516b8f65e707e26e4f0c655e0a`. Before that commit, exact candidate
-`843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53` passed the
-explicit final gate. The normal commit hook then reused the matching full-test receipt instead
-of running the suite again. The surviving timing journal, receipt, publication marker, and
-routine report identify that result; the byte-exact final report and terminal output were later
-overwritten or not retained, so their complete original text cannot be recovered.
+The earlier manual-only product implementation is committed as `3a342013`. Its blocking review
+led to the absolute-deadline supervisor/worker repair, which is now integrated on this task
+branch together with the old/new generation test bridge. Exact staged candidate
+`44963ec447ee095dcdedd6fb7eacc903526b2eaddcc6ae54356c670f654a28cb` passed the explicit
+final gate in 552.679782 seconds. Its ignored v6 full-test receipt has binding
+`08dbee980350296d54930c01f51d2d7ba3e917820a63d6502a48a6a74f86f2fa`; the matching v4
+report and v1 publication marker remain present and the receipt still validates.
 
-The task is not ready to merge. A five-reviewer panel at the committed revision returned three
-approvals and two blocks. The P1 finding is that potentially unbounded Git discovery, candidate
-materialization, and controller planning can happen before the configured absolute deadline
-exists. The second block found these task records stale and noted the missing original final
-report/output. This update repairs the stale descriptions, but it cannot recreate overwritten
-evidence. The P1 needs a product repair, followed by a new exact final run, a commit, and a fresh
-revision-bound panel. The live retry therefore continues to block the merge operation.
+The following real routine commit hook did not reuse that evidence. Because every changed path
+was reversible, routine planning chose the repository-tests/selected component. The cache lookup
+accepts only repository-tests/full, so it was never asked to read the valid full receipt. The hook started
+the deadline-protocol, gate-runner, and configuration tests instead, then failed to freeze a
+terminal decision before the absolute deadline; the supervisor observed 60.26752 seconds and no
+commit was created.
+
+That focused repair is now implemented. A bounded lookup through the fixed latest-final
+projection lets an exact, fully validated full receipt satisfy a reversible routine candidate
+before selected tests start. The fallback now has separate limits for execution, cleanup, final
+validation, and terminal delivery. Final validation runs in a killable helper, and terminal
+delivery uses a nonblocking deadline-bounded channel. The claim freezes first; bounded
+budget-task filing and all result projection happen afterward and cannot rewrite it.
+
+The seven new deadline and receipt regressions pass. The no-receipt fallback deferred truthfully
+in 6.608 seconds under a 10-second maximum, and the exact prewarmed receipt was reused in 5.587
+seconds without starting selected tests. The full focused modules also pass: 34 protocol tests,
+103 gate tests with one skip, 28 configuration tests, and 6 generation tests. Reconciliation
+reported zero findings, and an independent focused rereview returned `APPROVE`.
+
+This is not yet the final evidence for the complete candidate. The remaining sequence is one new
+exact final run, no staged changes afterward, one normal commit attempt proving receipt reuse,
+and a fresh five-reviewer revision-bound panel. The live retry continues to block merge until
+that sequence succeeds.
 
 ## Acceptance criteria
 
@@ -89,8 +106,9 @@ revision-bound panel. The live retry therefore continues to block the merge oper
       suite back into an every-commit gate.
 - [ ] Final evidence and cached evidence bind to the exact tested bytes, test manifest,
       policy configuration, runner version, and relevant toolchain identity. Reuse also requires
-      one matching v5 receipt, terminal pass report, and last-written publication marker. A
-      changed or missing input invalidates reuse.
+      one matching v6 receipt, terminal v4 pass report, and last-written publication marker. A
+      changed or missing input invalidates reuse. An exact full receipt may satisfy either a
+      critical or reversible routine candidate before narrower selected work starts.
 - [ ] Complete results from the included same-interpreter runner are labeled cooperative and
       `enforcement_eligible: false`; they can support a maintainer's manual judgment but cannot
       authorize an automatic transition.

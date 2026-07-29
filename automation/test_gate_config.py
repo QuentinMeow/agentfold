@@ -218,6 +218,8 @@ def _budget(table, location):
     table = _closed_table(table, location, ("target_seconds", "maximum_seconds"))
     target = _positive_number(table["target_seconds"], location + ".target_seconds")
     maximum = _positive_number(table["maximum_seconds"], location + ".maximum_seconds")
+    if maximum < 5.0:
+        raise ConfigError("{}.maximum_seconds must be at least 5 seconds".format(location))
     if target > maximum:
         raise ConfigError("{}.target_seconds must not exceed maximum_seconds".format(location))
     return GateBudget(target, maximum)

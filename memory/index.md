@@ -40,7 +40,9 @@
 - [Use a trusted preparer and credential-free runner for hard pull-request tests](decisions/2026-07-27-trusted-pull-request-gate-boundary.md) **[superseded]** — Hard pull-request tests use trusted base code to prepare the exact candidate, then run candidate tests in a fresh job with no repository permissions or secrets
 
 ## lessons
+- [Give execution, cleanup, validation, and terminal delivery separate deadlines](lessons/automation/deadline-reserves-must-protect-terminal-delivery.md) — A single end-of-run reserve is not a deadline when cleanup, validation, filing, or a blocking control write can consume it
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
+- [Look up stronger cached evidence before narrowing the requested test set](lessons/automation/full-evidence-cache-lookup-must-precede-narrow-planning.md) — An exact complete-test receipt can satisfy a smaller routine test request only when lookup happens before narrow component identity hides it
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 
 ## known-issues

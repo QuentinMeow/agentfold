@@ -9,7 +9,8 @@ Use one repository-owned `agentfold.toml` to define two test lanes.
 
 - The routine lane runs automatically for staged work. Its default target and maximum are both
   60 seconds for the decision interval: invocation and bootstrap, discovery, admission, tests,
-  cleanup, budget-task filing, final validation, and terminal outcome freeze.
+  cleanup, final validation, and the terminal outcome claim. Bounded budget-task filing and
+  evidence projection happen only after that claim is frozen and sent.
 - The final lane runs the complete suite only when a maintainer asks for it explicitly. Its
   starter mode is manual.
 - Work that is ordinary and reversible may be deferred from the routine lane to the final lane.
@@ -48,27 +49,34 @@ change does.
 ## One captured candidate
 
 The canonical direct command is `python3 -I -S automation/run_test_gate.py …`. The small
-bootstrap uses only the standard library. It checks raw arguments first, so reserved automatic
+supervisor uses only the standard library. It checks raw arguments first, so reserved automatic
 modes are rejected before Git discovery, configuration reads, candidate imports, report or
 receipt access, and budget-task state.
 
 The supported runtime is CPython 3.7 or newer on POSIX. Windows is not supported: the gate's
-process containment and its cross-process budget clock require POSIX primitives. The bootstrap
-prefers `clock_gettime(CLOCK_MONOTONIC)` and passes that identified source and start value across
-`exec`; when that API is unavailable on POSIX, it uses `os.times().elapsed`. The controller
-rejects a changed source, an invalid or reversed value, or total clock unavailability.
+process containment and its cross-process budget clock require POSIX primitives. The supervisor
+prefers `clock_gettime(CLOCK_MONOTONIC)` and passes that identified source, start value, and
+deadline across `exec`; when that API is unavailable on POSIX, it uses `os.times().elapsed`.
+The worker and controller reject a changed source, invalid or reversed values, or total clock
+unavailability.
 
-For an allowed run, the bootstrap copies and seals the selected Git index, materializes the gate
-controller and its dependency closure from those exact staged objects, and dispatches that
-snapshot. The controller keeps the authoritative index immutable. Each component receives a
+For an allowed run, the worker captures one authoritative Git index during bounded discovery.
+It materializes the exact base parser closure separately from the candidate parser closure and
+runs only the base parser to read both configurations and compute their strict union. It then
+reuses the same index—without recapture—to seal and dispatch the gate controller and its
+dependency closure. The controller reproduces the policy with the candidate parser or blocks.
+Each component receives a
 disposable index copy and a sanitized environment. The execution identity records the controller
 interpreter separately from the isolated, no-site child interpreter. Any source, index,
 controller-closure, interpreter, or admitted-environment drift blocks the result and receipt.
-Scratch state and child processes are cleaned on every exit path.
+The supervisor kills the worker group and exact-token same-user escapees on a missed deadline.
+Portable discovery can be incomplete outside Linux `/proc`; this is an explicit POSIX limitation,
+not a kernel-isolation claim. Forced termination can leave system-temporary snapshot files for
+the operating system to reap, but it writes no reusable receipt before a terminal decision.
 
 This structure addresses the central authority question: the candidate may supply code for an
 explicit cooperative run, but it cannot turn reserved hard syntax into an execution path before
-the bootstrap has rejected it.
+the supervisor has rejected it.
 
 ## Complete coverage
 
@@ -96,36 +104,74 @@ job. The code, selected tests, policy, runner, tools, admitted environment, and 
 evidence must all match. If any part changed or is missing, the suite runs again. This saves a
 duplicate run; it does not turn cooperative local evidence into permission to merge or deploy.
 
-The current formats are report schema v3, receipt schema v5, publication-commit schema v1,
+Routine risk classification does not narrow already-complete evidence. Before starting selected
+tests for a reversible candidate, the gate may inspect only the fixed latest-final projection.
+If that projection names the same candidate and closure, the gate validates its complete v6
+receipt, v4 report, and v1 marker and compares the stored full binding with the current tested
+view, policy, both lane budgets, protocol, runner and controller closure, admitted environment,
+and composite test plan. An exact match records the repository-tests/full component as reused, clears
+deferred coverage, and does not start selected tests. A missing or mismatched artifact falls back
+to ordinary selected planning. The lookup never scans an unbounded receipt directory and never
+treats a selected receipt as full evidence.
+
+The repaired formats are report schema v4, receipt schema v6, handoff schema v2,
+publication-commit schema v1,
 composite-plan schema v2, and overlay algorithm
 candidate-product-with-exact-union-test-namespaces/v3. The version bumps
 invalidate older evidence that did not bind the repaired execution closure and candidate-only
 namespace behavior.
 
-The decision clock starts at invocation, so bootstrap freezing, materialization, sealing, and
-controller startup consume the same configured maximum as tests and cleanup. All fallible gate
-work, budget filing, publication preparation, and final accounting finish before one gate outcome
-is frozen. Publication has a separate command outcome. The receipt and pass report are projected
-afterward, followed by stdout. Only after those projections succeed is the atomic commit marker
-that attests them written last. A self-report cannot include its own completed projection. That
-external I/O may delay
-wall-clock return beyond the maximum, without a gate-supplied bound, but it cannot change the
-frozen gate decision. Receipt, report, stdout, or marker failure returns a command error and
-leaves no reusable evidence.
+The decision clock starts in a small POSIX supervisor before filesystem or Git discovery. One
+owned worker has exactly five seconds to capture the authoritative index, materialize the exact
+base/candidate configuration and their separate parser closures, execute the base parser, and
+return a bounded policy frame. The supervisor validates that frame, requires a maximum of at
+least five seconds, derives the absolute deadline, and lets the same worker continue freezing and
+controller execution. Bootstrap freezing, materialization, sealing, and controller startup
+consume the same configured maximum as tests and cleanup.
 
-A reusable evidence set consists of a matching v5 receipt, terminal v3 pass report, and v1
+The controller uses separate cutoffs for component execution, cleanup, final validation, and
+terminal delivery. Final validation runs in a killable bounded helper; a timeout blocks rather
+than being deferred. The worker owns the supervisor socket, the controller gets a separate inner
+socket, and components get neither. The controller sends an immutable decision claim through a
+nonblocking, deadline-bounded channel. The worker validates that claim and brokers a distinct
+terminal frame to the supervisor before the absolute deadline.
+
+Only after the claim is frozen and sent does bounded budget-task filing begin. Filing may create
+or refresh the investigation records, so a timeout records its mutation state as unknown rather
+than falsely claiming that nothing changed. The report can describe that post-claim attempt, but
+the decision digest excludes it. Receipt, report, stdout, and final commit-marker projection also
+happen after the claim. This work may delay wall-clock return beyond the maximum, but it cannot
+change the frozen decision, measured duration, or gate exit code. Publication failure can still
+turn the command outcome into an error and leaves no reusable evidence. Missing frames, signals,
+and contradictory exits are protocol errors. The normal v4 report includes the immutable
+decision object and digest checked by the worker after controller exit.
+
+Supervisor-static v4 reports use the same identified invocation clock for real elapsed time.
+When timing or process facts cannot be observed, they are null or explicitly unavailable rather
+than fabricated. Post-start failures include the worker-started fact plus process-group and
+ownership-token cleanup attempts, results, and discovery completeness.
+
+A reusable evidence set consists of a matching v6 receipt, terminal v4 pass report, and v1
 publication commit marker. The marker binds both file digests, paths, publication id, candidate,
 and evidence authority, and is written last. The receipt also binds the candidate closure,
 policies, manifests, trusted floor and supplemental
 records, overlay algorithm and view digests, controller closure, disposable-index identity,
-controller and child interpreters, Git identity, and sanitized component environment. It is an
+controller and child interpreters, Git identity, sanitized component environment, both lane
+budgets, exact configuration, both parser closures, authoritative index, launcher, immutable
+decision, and supervised protocol.
+Invocation start and absolute-deadline values are intentionally excluded so the same job can be
+reused at a later start time. It is an
 exact cooperative cache entry, not an authorization artifact. Different bytes, topology, tools,
 or admitted environment require another complete run.
 
 The whole decision interval is measured. Reversible routine work that cannot finish is reported
-as deferred. Incomplete final or critical work blocks. A target breach creates or refreshes one
-non-blocking investigation task from canonical templates, appends bounded timing evidence, and
-never stages or commits the result. Post-freeze projection latency is not gate decision time.
+as deferred. Selected execution ends early enough to leave explicit bounded intervals for
+process cleanup, final validation, and worker-to-supervisor terminal brokering; the old
+half-second reserve was not enough in the observed 60.26752-second hook failure. Incomplete final
+or critical work blocks. After the claim freezes, a target breach starts a bounded attempt to
+create or refresh one non-blocking investigation task from canonical templates and append timing
+evidence. The filer never stages or commits the result, and its outcome cannot alter the frozen
+gate result. Post-claim filing and projection latency are not gate decision time.
 
 ## Provider boundary
 
@@ -144,8 +190,10 @@ replay state. Until both exist and are verified, the final lane stays manual.
 Security review changed the endpoint from an automatic hard gate to manual final verification.
 A later five-reviewer merge panel blocked the first manual implementation, and focused repair
 reviews found more execution, cleanup, and publication problems. The current candidate contains
-those repairs and a test-only bridge for the old and new contracts, but it still needs a complete
-final run and a fresh merge review. See `worklog.md` for the chronology and `verification.md` for
+those repairs and a test-only bridge for the old and new contracts. The focused deadline and
+receipt repair passed its regression set, and an independent rereview approved it. The complete
+candidate still needs one exact final run, an unchanged normal commit attempt, and a fresh
+five-reviewer revision-bound panel. See `worklog.md` for the chronology and `verification.md` for
 the exact commands, timings, failures, and review verdicts.
 
 ## Core fit

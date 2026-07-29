@@ -30,3 +30,14 @@ the fixed report path was overwritten. The records now state the surviving evide
 plainly, but the P1 requires a product repair, another exact final run, a commit, and another
 fresh revision-bound panel. This retry continues to block only
 `operation:merge-configurable-test-gates`; the task remains in progress while repair proceeds.
+
+The absolute-deadline repair, exact full-receipt reuse for reversible routine work, and separate
+execution, cleanup, validation, and terminal-delivery cutoffs are now implemented in the task
+worktree. Independent focused verification passed 34 deadline-protocol tests, 103 gate tests
+with one existing skip, 28 configuration tests, 6 generation tests, compilation, diff checks,
+and reconciliation with zero findings. A focused adversarial rereview returned `APPROVE`.
+These results are not the final merge review. The complete intended candidate is now staged; the
+two generated timing journals remain deliberately unstaged. The next agent should verify that
+split without changing staged bytes, run one exact explicit final gate, and commit normally so
+the routine hook proves receipt reuse. A fresh five-reviewer panel over that committed revision
+is still required before this retry can be resolved.
