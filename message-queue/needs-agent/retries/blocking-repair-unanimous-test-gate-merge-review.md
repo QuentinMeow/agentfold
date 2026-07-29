@@ -66,3 +66,11 @@ final invocation reproduced Git's author-only hook environment, the normal hook 
 receipt in 13.78 seconds and created product commit `962cca3`. No hook was bypassed. A fresh
 five-reviewer revision-bound panel with no valid blocker is now the sole remaining requirement
 before this retry can be deleted and the task moved to review.
+
+The first post-product panel approved correctness/cache but found valid blockers in canonical
+journal inode safety and mutation truth, root-contract risk classification, configured dependency
+validation, and the new-project baseline/install sequence. Its restricted-process-table result
+was expected fail-closed behavior and did not authorize weaker cleanup claims. The valid blockers
+are repaired; exact dual-generation bridge `63b12b7` passed candidate `477ebfb0…` and reused its
+receipt normally. The combined product repair, its exact final gate and commit, and a completely
+fresh no-blocker panel remain required.

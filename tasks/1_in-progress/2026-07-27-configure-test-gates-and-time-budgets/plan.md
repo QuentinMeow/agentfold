@@ -77,3 +77,10 @@
       normal hook reused its identity-aligned receipt before product commit `962cca3`. Obtain a
       new five-reviewer panel with no valid blocker before resolving the retry, moving the task,
       or publishing the PR stack.
+- [x] 23. Run the first post-product five-reviewer panel. Repair its valid journal inode/mutation,
+      root-contract classification, service-dependency, and adoption-order blockers. Preserve
+      fail-closed cleanup when process observation is unavailable. Land closed old/new bridge
+      `63b12b7` through exact final evidence and normal hook reuse.
+- [ ] 24. Run the exact final gate for the combined panel repair, commit unchanged bytes through
+      normal receipt reuse, and obtain a new five-reviewer range-bound panel with no valid blocker
+      before resolving the retry, moving the task, or publishing the PR stack.

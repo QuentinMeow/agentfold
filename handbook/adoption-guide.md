@@ -6,13 +6,22 @@ folders that exist.
 
 ## Starting a new project
 
-1. Copy this repo, delete `services/` contents, and write your own first service under
-   `services/<name>/` with an `AGENTS.md` from `templates/service/AGENTS.md`.
-2. Edit the root `AGENTS.md`: one-paragraph purpose, your repo map rows, pick a
-   collaboration mode. Delete example content in `memory/` and `roadmap/`; write your
-   own `roadmap/desired-state.md` first — it seeds the backlog.
-3. Run `python3 automation/install.py`, then `reconcile.py --check` until clean.
-4. Open the repo in your agent and give it a task; the structure does the rest.
+1. Copy this working tree without its `.git/` directory. Delete the example `services/`
+   contents, write your own first service under `services/<name>/` with an `AGENTS.md`
+   from `templates/service/AGENTS.md`, and replace the example `memory/` and `roadmap/`
+   content. Write your own `roadmap/desired-state.md` first — it seeds the backlog.
+2. Edit the root `AGENTS.md`: add the one-paragraph purpose and your repo map rows, then
+   choose a collaboration mode. Configure the routine and final lanes in `agentfold.toml`,
+   including service-test dependencies and risk paths for the adopted repository. Adapt the
+   example automation tests and byte-exact migration fixtures to that configured baseline.
+3. Before installing any hook, run `git init`, stage the fully configured working tree, and create
+   the adopter repository's first commit. That commit is the adopter-owned verification
+   baseline, so later base-pinned final tests never inherit AgentFold's quote-service
+   history. Do not retain the source repository's `.git/` directory.
+4. Run `python3 automation/reconcile/reconcile.py --check` until clean, then run
+   `python3 automation/install.py`. The hook is installed only after the baseline exists;
+   no commit needs to bypass an installed hook.
+5. Open the repo in your agent and give it a task; the structure does the rest.
 
 ## Retrofitting an existing repo
 

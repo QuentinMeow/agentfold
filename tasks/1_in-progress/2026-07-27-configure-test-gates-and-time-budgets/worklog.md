@@ -746,3 +746,23 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   producing the hook's `d95f9678…` environment digest. The next ordinary hook reused the exact
   full receipt in 13.78 seconds and created product commit `962cca3`; no hook was bypassed. The
   fresh revision-bound panel is now the only live merge blocker.
+
+## 2026-07-29 — first post-product panel and repair (codex and Sol reviewers)
+
+- The five independent lenses reviewed `e530c428…d63e230`. Correctness/cache approved. Four
+  accepted issues remained: descriptor-unbound journal append with symlink escape and false
+  mutation reporting, reversible classification of root `AGENTS.md`, silent unknown dependency
+  targets, and an unusable first-project hook-install order. The evidence lens's restricted-`ps`
+  result was adjudicated as intentional fail-closed behavior; cleanup completeness is not claimed
+  when the platform denies observation.
+- Journal access now pins a no-follow regular descriptor, validates the exact prior inode and
+  bytes before append, and truthfully reports every post-write uncertainty as mutated without
+  deleting canonical paths. Focused coverage passes 34 cases with one historical-endpoint skip.
+- Root `AGENTS.md` is authorization-critical. Routine service dependencies must resolve to
+  discovered test namespaces. The adoption guide configures and adapts a history-free copy before
+  creating its baseline and installing the hook. Configuration, controller, adoption, syntax,
+  diff, and reconciliation checks pass.
+- A six-file closed bridge admits only the old review tuple and combined panel-repair tuple.
+  Exact candidate `477ebfb0…` passed all 18 files in 346.56 seconds; its ordinary hook reused the
+  full receipt in 10.81 seconds and created `63b12b7`. The restored combined product repair is
+  staged except for the two generated timing journals.

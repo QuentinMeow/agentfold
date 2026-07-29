@@ -1165,11 +1165,47 @@ def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root)
     }
 
 
-def _service_dependency_closure(service, policy):
+def _validated_service_dependencies(all_tests, policy):
+    """Bind configured dependency names to discovered service test namespaces."""
     dependencies = {
         owner: tuple(downstream)
         for owner, downstream in getattr(policy, "service_dependencies", ())
     }
+    discovered = {
+        parts[1]
+        for test in all_tests
+        for parts in (Path(test).parts,)
+        if len(parts) >= 4 and parts[0] == "services" and parts[2] == "tests"
+    }
+    unknown_owners = tuple(sorted(set(dependencies).difference(discovered)))
+    unknown_targets = tuple(
+        sorted(
+            {
+                downstream
+                for targets in dependencies.values()
+                for downstream in targets
+            }.difference(discovered)
+        )
+    )
+    if unknown_owners or unknown_targets:
+        details = []
+        if unknown_owners:
+            details.append("unknown owner(s): " + ", ".join(unknown_owners))
+        if unknown_targets:
+            details.append(
+                "unknown downstream target(s): " + ", ".join(unknown_targets)
+            )
+        raise GateError(
+            "routine test planning configuration is invalid ({}); each configured "
+            "service must have a discovered test under services/<name>/tests/, or "
+            "the name must be corrected in testing.routine.service_dependencies".format(
+                "; ".join(details)
+            )
+        )
+    return dependencies
+
+
+def _service_dependency_closure(service, dependencies):
     selected = set()
     pending = [service]
     while pending:
@@ -1184,11 +1220,12 @@ def _service_dependency_closure(service, policy):
 def routine_test_manifest(changed_paths, all_tests, policy):
     """Map generic service ownership and configured dependencies to routine tests."""
     all_set = set(all_tests)
+    dependencies = _validated_service_dependencies(all_tests, policy)
     selected = set()
     for changed in changed_paths:
         parts = Path(changed).parts
         if len(parts) >= 2 and parts[0] == "services":
-            for service in _service_dependency_closure(parts[1], policy):
+            for service in _service_dependency_closure(parts[1], dependencies):
                 prefix = f"services/{service}/tests/"
                 selected.update(test for test in all_set if test.startswith(prefix))
         elif len(parts) == 2 and parts[0] == "automation" and parts[1].endswith(".py"):

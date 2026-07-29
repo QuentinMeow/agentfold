@@ -41,6 +41,7 @@ required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
 [[testing.risk.critical]]
 category = "authorization"
 path_globs = [
+  "AGENTS.md",
   "agentfold.toml",
   "automation/_vendor/**",
   "automation/file_test_budget_task.py",
@@ -87,7 +88,6 @@ required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
 [[testing.risk.reversible]]
 id = "ordinary-repository-work"
 path_globs = [
-  "AGENTS.md",
   "README.md",
   "CONTRIBUTING.md",
   "automation/cochange-ledger.txt",

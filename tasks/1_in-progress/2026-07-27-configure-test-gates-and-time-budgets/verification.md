@@ -2011,3 +2011,66 @@ pre-commit: OK
 
 No hook was bypassed. A fresh five-reviewer revision-bound panel remains the only condition for
 resolving the retry and moving the task to review.
+
+## First post-product panel and panel-repair bridge
+
+A fresh five-reviewer panel inspected exact committed range
+`e530c428387766537f971cd5c8ce47ada9e2c19a..d63e23047cb71cf581fbd5d1762266373c8aa358`
+without the verification record, worklog, retry narrative, handovers, or prior verdicts. The
+correctness/cache lens approved. Concurrency and security independently blocked descriptor-
+unbound timing-journal append and symlink following. Security also found the root `AGENTS.md`
+authority contract classified reversible. Portability reproduced false `mutated=False` after an
+`fsync` failure, found the new-project guide installing a hook before an adopter-owned baseline,
+and showed unknown service-dependency names silently selecting no downstream tests.
+
+The evidence lens reported that a restricted macOS sandbox cannot observe `ps` and therefore
+receives fail-closed cleanup results. That is an expected capability restriction rather than an
+accepted product blocker: the gate must not claim complete descendant cleanup when observation is
+denied, and the unchanged commands pass when read-only process-table access is available. No
+cleanup assertion was weakened.
+
+The accepted repairs are implemented as follows:
+
+- Journal reads and appends require `O_NOFOLLOW`, pin and validate a regular descriptor, parse
+  identity/schema from the descriptor bytes, and compare the exact prior inode and content before
+  writing. Every uncertain outcome after a write attempt reports `mutated=True`; canonical paths
+  are never deleted or replaced.
+- Root `AGENTS.md` is authorization-critical and no longer ordinary reversible work.
+- Routine planning rejects configured service owners or downstream targets without a discovered
+  `services/<name>/tests/` namespace while preserving transitive closure.
+- New-project adoption now removes source Git history, configures and adapts its tests first,
+  creates an adopter-owned baseline before hook installation, then reconciles and installs.
+
+Focused generation-shim verification passed 34 journal tests with one old-endpoint skip, 36
+configuration tests, five controller dependency/selection tests, and the adoption regression.
+Reconciliation reported zero findings. A closed six-file bridge admits only the exact committed
+review-repair tuple and combined panel-repair tuple; deliberate hybrids reject. The exact bridge
+candidate passed and committed through normal receipt reuse:
+
+```
+$ env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    GIT_AUTHOR_NAME='Quentin Miao' \
+    GIT_AUTHOR_EMAIL='quentinmiao98@gmail.com' \
+    python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: 477ebfb0bf363e655d4adb948370a2faf25763ab5b227db035433fd19b10e1db
+component timings:
+  core-scope: pass (executed, 0.31s)
+  reconcile: pass (executed, 7.35s)
+  repository-tests/base-pinned-floor: pass (executed, 289.19s)
+  repository-tests/candidate-supplemental: pass (executed, 45.76s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 346.56s
+gate exit: 0
+
+$ git commit -m "test: bridge panel review repair" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 10.81s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 63b12b7] test: bridge panel review repair
+```
+
+The combined product repair still requires its exact final gate, normal commit, and a new panel.

@@ -114,6 +114,14 @@ class _Record:
         return self.task_dir.name
 
 
+@dataclasses.dataclass(frozen=True)
+class _JournalSnapshot:
+    device: int
+    inode: int
+    data: bytes
+    records: tuple
+
+
 class _PublicationFailure(Exception):
     """Canonical publication failed, possibly after creating durable paths."""
 
@@ -542,11 +550,7 @@ def _journal_line(identity, state):
     return encoded
 
 
-def _read_journal(path, identity):
-    try:
-        data = path.read_bytes()
-    except FileNotFoundError:
-        return ()
+def _parse_journal_bytes(data, identity):
     records = []
     for number, raw_line in enumerate(data.splitlines(), 1):
         if not raw_line:
@@ -566,35 +570,150 @@ def _read_journal(path, identity):
     return tuple(records)
 
 
-def _same_file(left, right):
-    return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
-
-
-def _append_journal_record(path, identity, state):
-    """Append one bounded record without ever replacing actor-owned task bytes.
-
-    The open descriptor pins the journal inode. If another process replaces the path,
-    this write lands only on the displaced inode and verification requests a retry.
-    In-place writers are preserved because O_APPEND adds one complete record.
-    """
-    line = _journal_line(identity, state)
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND)
+def _open_pinned_journal(path, flags):
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if not nofollow:
+        raise OSError(
+            getattr(errno, "ENOTSUP", errno.EPERM),
+            "safe timing evidence access requires O_NOFOLLOW",
+        )
+    flags |= nofollow | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(str(path), flags)
     try:
-        opened = os.fstat(descriptor)
-        written = os.write(descriptor, line)
-        if written != len(line):
-            raise OSError("short atomic append to timing evidence journal")
-        os.fsync(descriptor)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(errno.EINVAL, "timing evidence journal is not a regular file")
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+        raise
+    return descriptor, metadata
+
+
+def _journal_stat_signature(metadata):
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _read_descriptor_bytes(descriptor):
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks = []
+    while True:
+        chunk = os.read(descriptor, 64 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _snapshot_open_journal(descriptor, identity):
+    before = os.fstat(descriptor)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError(errno.EINVAL, "timing evidence journal is not a regular file")
+    data = _read_descriptor_bytes(descriptor)
+    after = os.fstat(descriptor)
+    if (
+        _journal_stat_signature(before) != _journal_stat_signature(after)
+        or after.st_size != len(data)
+    ):
+        raise ValueError("timing evidence journal changed while it was being read")
+    return _JournalSnapshot(
+        after.st_dev,
+        after.st_ino,
+        data,
+        _parse_journal_bytes(data, identity),
+    )
+
+
+def _read_journal_snapshot(path, identity):
+    try:
+        descriptor, _metadata = _open_pinned_journal(path, os.O_RDONLY)
+    except FileNotFoundError:
+        return None
+    try:
+        return _snapshot_open_journal(descriptor, identity)
     finally:
         os.close(descriptor)
+
+
+def _read_journal(path, identity):
+    snapshot = _read_journal_snapshot(path, identity)
+    return () if snapshot is None else snapshot.records
+
+
+def _same_journal(left, right):
+    return (
+        left.device == right.device
+        and left.inode == right.inode
+        and left.data == right.data
+    )
+
+
+def _append_journal_record(path, identity, state, expected):
+    """Append one bounded record without ever replacing actor-owned task bytes.
+
+    The append descriptor is validated against the exact snapshot used to prepare
+    ``state`` before any write. Once a write is attempted, every uncertain outcome is
+    reported as a mutation and no canonical pathname is removed or replaced.
+    """
+    if not isinstance(expected, _JournalSnapshot):
+        raise ValueError("timing evidence append requires a validated journal snapshot")
+    line = _journal_line(identity, state)
+    descriptor, _opened = _open_pinned_journal(path, os.O_RDWR | os.O_APPEND)
+    write_attempted = False
+    result = None
+    observed = None
+    body_error = None
     try:
-        current = path.stat()
-    except OSError:
+        current = _snapshot_open_journal(descriptor, identity)
+        if not _same_journal(current, expected):
+            result = False
+        else:
+            write_attempted = True
+            written = os.write(descriptor, line)
+            if written != len(line):
+                raise OSError("short atomic append to timing evidence journal")
+            os.fsync(descriptor)
+            observed = _snapshot_open_journal(descriptor, identity)
+            if (
+                observed.device != expected.device
+                or observed.inode != expected.inode
+                or observed.data != expected.data + line
+                or not observed.records
+                or observed.records[-1] != state
+            ):
+                raise ValueError("timing evidence append could not be verified exactly")
+            result = True
+    except Exception as error:
+        body_error = error
+    close_error = None
+    try:
+        os.close(descriptor)
+    except OSError as error:
+        close_error = error
+
+    if body_error is not None:
+        if write_attempted and not isinstance(body_error, _PublicationFailure):
+            raise _PublicationFailure(body_error, True) from body_error
+        raise body_error
+    if close_error is not None:
+        if write_attempted:
+            raise _PublicationFailure(close_error, True) from close_error
+        raise close_error
+    if result is False:
         return False
-    if not _same_file(opened, current):
-        return False
-    records = _read_journal(path, identity)
-    return bool(records and records[-1].get("receipt") == state.get("receipt"))
+
+    try:
+        current = _read_journal_snapshot(path, identity)
+        if current is None or observed is None or not _same_journal(current, observed):
+            raise ValueError("timing evidence journal path changed after append")
+    except Exception as error:
+        raise _PublicationFailure(error, True) from error
+    return True
 
 
 def _publish_exclusive_file(source, destination):
@@ -802,11 +921,11 @@ def _file_locked(repo, occurrence, today, key):
                 )
             journal = record.task_dir / JOURNAL_NAME
             try:
-                history = _read_journal(journal, identity)
-                if not history:
+                snapshot = _read_journal_snapshot(journal, identity)
+                if snapshot is None or not snapshot.records:
                     raise ValueError("timing evidence journal is empty")
-                prior = history[-1]
-            except ValueError as error:
+                prior = snapshot.records[-1]
+            except (OSError, ValueError) as error:
                 return _result("conflict", key, str(error), task_file, request, False, repo)
             if prior.get("receipt") == occurrence.receipt:
                 return _result(
@@ -815,7 +934,38 @@ def _file_locked(repo, occurrence, today, key):
                     task_file, request, False, repo,
                 )
             state = _state_for(occurrence, prior)
-            if _append_journal_record(journal, identity, state):
+            try:
+                appended = _append_journal_record(
+                    journal, identity, state, snapshot
+                )
+            except _PublicationFailure as error:
+                cause = error.cause
+                disposition = (
+                    _classify_os_error(cause)
+                    if isinstance(cause, OSError)
+                    else "error"
+                )
+                return _result(
+                    disposition,
+                    key,
+                    "timing evidence append stopped without deleting canonical paths: "
+                    + str(cause),
+                    task_file,
+                    request,
+                    error.mutated,
+                    repo,
+                )
+            except (OSError, ValueError) as error:
+                return _result(
+                    "conflict",
+                    key,
+                    str(error),
+                    task_file,
+                    request,
+                    False,
+                    repo,
+                )
+            if appended:
                 return _result(
                     "updated", key,
                     f"appended generated evidence in task {record.task_id}",
