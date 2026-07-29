@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 ABSENT = "absent"
 LEGACY_GENERATION = "legacy-manual-v3"
 SPLIT_GENERATION = "split-controller-v5"
+DEADLINE_GENERATION = "deadline-handoff-v2"
 
 COMMON_RECORDS = (
     ("agentfold.toml", "100644", "f23f32fa5e399bea12dd49871cd9154e0922164083876c717db96ffe7427f16c"),
@@ -46,6 +47,23 @@ SPLIT_RECORDS = tuple(sorted(COMMON_RECORDS + (
     ("automation/run_test_gate.py", "100644", "89f4ac3c421d888c316159336863d8ce8150aba90991e9530a0e09ed32f81e74"),
     ("automation/run_tests.py", "100644", "fadefe0bb6ca063c6fbbf03a2c3fc010287d4466161ab2b564501ff4aeaf5cda"),
     ("automation/test_gate_controller.py", "100644", "de1f88d1a3529cf7f98969de5a309fe8e99b2b735ae3917049bc3fe958dcedea"),
+)))
+
+DEADLINE_RECORDS = tuple(sorted((
+    ("agentfold.toml", "100644", "f23f32fa5e399bea12dd49871cd9154e0922164083876c717db96ffe7427f16c"),
+    ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
+    ("automation/_vendor/tomli/__init__.py", "100644", "26153057ae830758381efb7551009531d7c2bbe220015f055e6bc353da27c5de"),
+    ("automation/_vendor/tomli/_parser.py", "100644", "83df8435a00b4be07c768918a42bb35056a55a5a20ed3f922183232d9496aed3"),
+    ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
+    ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
+    ("automation/file_test_budget_task.py", "100644", "5ea2e7afda7194f51e78cdb431f8088307a12d9258793d1c35afdcde03473239"),
+    ("automation/test_gate_config.py", "100644", "e0aaedbadfb06675ab9bb3a6179a925db0cc6adf0f5f52ec1d963440a44255a7"),
+    ("automation/test_manifest.py", "100644", "d20b545f9db9566f74be26cb3ce5518b6893544d377e389f577925b0eba5679e"),
+    (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
+    ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
+    ("automation/run_test_gate.py", "100644", "f11b9ca71684b18b9dd3be913f95a5b27662b8f6f0ccece304945a06540a8a88"),
+    ("automation/run_tests.py", "100644", "fadefe0bb6ca063c6fbbf03a2c3fc010287d4466161ab2b564501ff4aeaf5cda"),
+    ("automation/test_gate_controller.py", "100644", "c74be39d8e275157c0e820b28251593369b843846554594e06ac22e3d963c611"),
 )))
 
 CLASSIFIED_PATHS = tuple(record[0] for record in LEGACY_RECORDS)
@@ -76,6 +94,8 @@ def classify_gate_generation_records(records):
         return LEGACY_GENERATION
     if records == SPLIT_RECORDS:
         return SPLIT_GENERATION
+    if records == DEADLINE_RECORDS:
+        return DEADLINE_GENERATION
     return "invalid"
 
 
@@ -95,7 +115,7 @@ class GateMigrationGenerationTests(unittest.TestCase):
     def test_current_tested_view_is_one_exact_generation(self):
         self.assertIn(
             gate_generation(),
-            (LEGACY_GENERATION, SPLIT_GENERATION),
+            (LEGACY_GENERATION, SPLIT_GENERATION, DEADLINE_GENERATION),
             gate_generation_records(),
         )
 
@@ -106,13 +126,18 @@ class GateMigrationGenerationTests(unittest.TestCase):
         self.assertEqual(
             SPLIT_GENERATION, classify_gate_generation_records(SPLIT_RECORDS)
         )
+        self.assertEqual(
+            DEADLINE_GENERATION, classify_gate_generation_records(DEADLINE_RECORDS)
+        )
 
     def test_sealed_regular_modes_preserve_exact_generation_admission(self):
         generation = gate_generation()
         expected_records = (
-            SPLIT_RECORDS
-            if generation == SPLIT_GENERATION
-            else LEGACY_RECORDS
+            {
+                LEGACY_GENERATION: LEGACY_RECORDS,
+                SPLIT_GENERATION: SPLIT_RECORDS,
+                DEADLINE_GENERATION: DEADLINE_RECORDS,
+            }[generation]
         )
         observed_modes = set()
         with tempfile.TemporaryDirectory() as scratch:
@@ -154,59 +179,65 @@ class GateMigrationGenerationTests(unittest.TestCase):
             executable_path.chmod(0o500)
             self.assertEqual(generation, gate_generation(sealed_root))
 
-    def test_one_path_from_the_other_generation_always_rejects_the_tuple(self):
-        old = dict((record[0], record) for record in LEGACY_RECORDS)
-        new = dict((record[0], record) for record in SPLIT_RECORDS)
-        differing = tuple(path for path in CLASSIFIED_PATHS if old[path] != new[path])
-        self.assertEqual(
-            (
-                ".github/workflows/harness.yml",
-                "automation/hooks/pre-commit",
-                "automation/run_test_gate.py",
-                "automation/run_tests.py",
-                "automation/test_gate_controller.py",
-            ),
-            differing,
+    def test_one_path_from_every_other_generation_always_rejects_the_tuple(self):
+        generations = (
+            (LEGACY_GENERATION, LEGACY_RECORDS),
+            (SPLIT_GENERATION, SPLIT_RECORDS),
+            (DEADLINE_GENERATION, DEADLINE_RECORDS),
         )
-        for path in differing:
-            with self.subTest(path=path, base=LEGACY_GENERATION):
-                mixed = dict(old)
-                mixed[path] = new[path]
-                self.assertEqual(
-                    "invalid",
-                    classify_gate_generation_records(
-                        tuple(mixed[name] for name in CLASSIFIED_PATHS)
-                    ),
+        for base_name, base_records in generations:
+            base = dict((record[0], record) for record in base_records)
+            for donor_name, donor_records in generations:
+                if donor_name == base_name:
+                    continue
+                donor = dict((record[0], record) for record in donor_records)
+                differing = tuple(
+                    path for path in CLASSIFIED_PATHS if base[path] != donor[path]
                 )
-            with self.subTest(path=path, base=SPLIT_GENERATION):
-                mixed = dict(new)
-                mixed[path] = old[path]
-                self.assertEqual(
-                    "invalid",
-                    classify_gate_generation_records(
-                        tuple(mixed[name] for name in CLASSIFIED_PATHS)
-                    ),
-                )
+                self.assertTrue(differing)
+                for path in differing:
+                    with self.subTest(
+                        path=path, base=base_name, donor=donor_name
+                    ):
+                        mixed = dict(base)
+                        mixed[path] = donor[path]
+                        self.assertEqual(
+                            "invalid",
+                            classify_gate_generation_records(
+                                tuple(mixed[name] for name in CLASSIFIED_PATHS)
+                            ),
+                        )
 
     def test_mode_hash_missing_and_common_dependency_mutations_reject(self):
-        cases = []
-        for index, record in enumerate(SPLIT_RECORDS):
-            relative, mode, digest = record
-            changed_mode = "100755" if mode == "100644" else "100644"
-            changed = list(SPLIT_RECORDS)
-            changed[index] = (relative, changed_mode, digest)
-            cases.append((relative + ":mode", tuple(changed)))
-            changed = list(SPLIT_RECORDS)
-            changed[index] = (relative, mode, "0" * 64)
-            cases.append((relative + ":hash", tuple(changed)))
-            changed = list(SPLIT_RECORDS)
-            changed[index] = (relative, ABSENT, ABSENT)
-            cases.append((relative + ":missing", tuple(changed)))
-        for name, records in cases:
-            with self.subTest(mutation=name):
-                self.assertEqual(
-                    "invalid", classify_gate_generation_records(records)
-                )
+        for generation, admitted in (
+            (LEGACY_GENERATION, LEGACY_RECORDS),
+            (SPLIT_GENERATION, SPLIT_RECORDS),
+            (DEADLINE_GENERATION, DEADLINE_RECORDS),
+        ):
+            for index, record in enumerate(admitted):
+                relative, mode, digest = record
+                mutations = []
+                changed_mode = "100755" if mode != "100755" else "100644"
+                changed = list(admitted)
+                changed[index] = (relative, changed_mode, digest)
+                mutations.append(("mode", tuple(changed)))
+                changed = list(admitted)
+                changed[index] = (relative, mode, "0" * 64)
+                mutations.append(("hash", tuple(changed)))
+                changed = list(admitted)
+                changed[index] = (relative, ABSENT, ABSENT)
+                mutations.append(("missing", tuple(changed)))
+                for mutation, records in mutations:
+                    if records == admitted:
+                        continue
+                    with self.subTest(
+                        generation=generation,
+                        path=relative,
+                        mutation=mutation,
+                    ):
+                        self.assertEqual(
+                            "invalid", classify_gate_generation_records(records)
+                        )
 
     def test_repository_classifier_raises_instead_of_branching_on_unknown_view(self):
         with self.assertRaisesRegex(

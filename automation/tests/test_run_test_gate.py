@@ -17,6 +17,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+if __package__:
+    from .test_gate_generations import DEADLINE_GENERATION, gate_generation
+else:
+    from test_gate_generations import DEADLINE_GENERATION, gate_generation
+
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
 SPEC = importlib.util.spec_from_file_location("run_test_gate", MODULE_PATH)
@@ -24,6 +29,9 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
+GATE_GENERATION = gate_generation()
+
+
 def final_policy(mode):
     """Build an explicit final-mode fixture independent of the starter mode."""
     policy = CONFIG.load_policy(GATE.REPO / "agentfold.toml")
@@ -41,6 +49,46 @@ def final_policy(mode):
         policy.unmatched_is_critical,
     )
 class TestGateTests(unittest.TestCase):
+    @staticmethod
+    def _freeze_for_generation(repo, arguments, capture, started, source):
+        if GATE_GENERATION == DEADLINE_GENERATION:
+            # Discovery belongs to the supervisor process.  Restore this test
+            # process's module table before exercising the separately loaded
+            # controller, exactly mirroring that process boundary.
+            prior_modules = dict(sys.modules)
+            try:
+                policy_frame, authoritative_index = GATE._discover_policy_frame(
+                    repo, arguments, capture
+                )
+            finally:
+                for name in tuple(sys.modules):
+                    if name not in prior_modules:
+                        sys.modules.pop(name, None)
+                sys.modules.update(prior_modules)
+            return GATE._freeze(
+                repo,
+                arguments,
+                capture,
+                started,
+                source,
+                policy_frame=policy_frame,
+                absolute_deadline=(
+                    started + float(policy_frame["maximum_seconds"])
+                ),
+                authoritative_index=authoritative_index,
+            )
+        return GATE._freeze(repo, arguments, capture, started, source)
+
+    @staticmethod
+    def _clock_handoff(started, source, deadline):
+        handoff = {
+            "started_monotonic": started,
+            "started_monotonic_source": source,
+        }
+        if GATE_GENERATION == DEADLINE_GENERATION:
+            handoff["absolute_deadline_monotonic"] = deadline
+        return handoff
+
     @staticmethod
     def _publish_receipt_pair(binding):
         report = GATE._base_report("final", 0.0)
@@ -62,8 +110,14 @@ class TestGateTests(unittest.TestCase):
                 "exit_code": 0,
                 "publication_id": "d" * 64,
                 "report_write": {"disposition": "written"},
+                "duration_seconds": 0.0,
             }
         )
+        if GATE_GENERATION == DEADLINE_GENERATION:
+            report["decision"] = GATE._decision_value(report)
+            report["decision_digest"] = MANIFEST.canonical_digest(
+                report["decision"]
+            )
         report_directory = GATE._safe_local_directory(
             Path("tmp/test-gate-reports")
         )
@@ -1838,7 +1892,7 @@ class TestGateTests(unittest.TestCase):
                 "100755", modes["automation/tests/nested/tests/test_nested.py"]
             )
 
-    def test_composite_plan_identity_invalidates_v1_through_v4_and_changed_floor_receipts(self):
+    def test_composite_plan_identity_invalidates_prior_schema_and_changed_floor_receipts(self):
         candidate = MANIFEST.CandidateManifest(
             "revision-range", "candidate", "closure", (), (), "index", "base", "head"
         )
@@ -1873,7 +1927,12 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        self.assertEqual("agentfold.test-component-receipt/v5", GATE.RECEIPT_SCHEMA)
+        expected_schema = (
+            "agentfold.test-component-receipt/v6"
+            if GATE_GENERATION == DEADLINE_GENERATION
+            else "agentfold.test-component-receipt/v5"
+        )
+        self.assertEqual(expected_schema, GATE.RECEIPT_SCHEMA)
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")
@@ -1881,7 +1940,12 @@ class TestGateTests(unittest.TestCase):
             receipt_dir = repo / "tmp/test-gate-receipts"
             receipt_dir.mkdir(parents=True)
             with mock.patch.object(GATE, "REPO", repo):
-                for version in (1, 2, 3, 4):
+                rejected_versions = (
+                    (1, 2, 3, 4, 5)
+                    if GATE_GENERATION == DEADLINE_GENERATION
+                    else (1, 2, 3, 4)
+                )
+                for version in rejected_versions:
                     (receipt_dir / f"{first['binding_digest']}.json").write_text(
                         json.dumps(
                             {
@@ -2617,10 +2681,7 @@ class TestGateTests(unittest.TestCase):
         with mock.patch.object(
             GATE,
             "_HANDOFF",
-            {
-                "started_monotonic": now - 2.0,
-                "started_monotonic_source": source,
-            },
+            self._clock_handoff(now - 2.0, source, now + 60.0),
         ):
             translated = GATE.gate_interval_started()
             self.assertGreaterEqual(time.monotonic() - translated, 2.0)
@@ -2631,17 +2692,19 @@ class TestGateTests(unittest.TestCase):
             with self.subTest(value=value), mock.patch.object(
                 GATE,
                 "_HANDOFF",
-                {
-                    "started_monotonic": value,
-                    "started_monotonic_source": source,
-                },
+                self._clock_handoff(value, source, now + 60.0),
             ), mock.patch.object(GATE, "emit_report", return_value=2) as emit, mock.patch.object(
                 GATE, "capture_candidate"
             ) as capture:
                 self.assertEqual(2, GATE.main(("routine", "--staged")))
                 report = emit.call_args[0][0]
                 self.assertEqual("error", report["outcome"])
-                self.assertIn("monotonic start is invalid", report["reason"])
+                expected_reason = (
+                    "test-gate bootstrap monotonic bounds are invalid"
+                    if GATE_GENERATION == DEADLINE_GENERATION
+                    else "monotonic start is invalid"
+                )
+                self.assertIn(expected_reason, report["reason"])
                 capture.assert_not_called()
 
     def test_cross_process_clock_fallback_survives_different_monotonic_epochs(self):
@@ -2654,10 +2717,7 @@ class TestGateTests(unittest.TestCase):
             with mock.patch.object(
                 GATE,
                 "_HANDOFF",
-                {
-                    "started_monotonic": started,
-                    "started_monotonic_source": source,
-                },
+                self._clock_handoff(started, source, started + 60.0),
             ):
                 self.assertEqual(-302.0, GATE.gate_interval_started())
 
@@ -2716,9 +2776,10 @@ class TestGateTests(unittest.TestCase):
             capture.mkdir()
             bootstrap_source, bootstrap_now = GATE._bootstrap_monotonic_start()
             bootstrap_started = bootstrap_now - 901.0
-            handoff = GATE._freeze(
+            arguments = ("final", "--explicit", "--staged")
+            handoff = self._freeze_for_generation(
                 repo,
-                ("final", "--explicit", "--staged"),
+                arguments,
                 capture,
                 bootstrap_started,
                 bootstrap_source,
@@ -2750,12 +2811,29 @@ class TestGateTests(unittest.TestCase):
             report = json.loads(
                 (repo / "tmp/test-gate-reports/latest-final.json").read_text()
             )
-            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            expected_returncode = (
+                2 if GATE_GENERATION == DEADLINE_GENERATION else 1
+            )
+            self.assertEqual(
+                expected_returncode,
+                result.returncode,
+                result.stdout + result.stderr,
+            )
             self.assertGreaterEqual(report["duration_seconds"], 901.0)
-            self.assertTrue(report["maximum_exceeded"])
-            self.assertEqual("blocked-incomplete", report["outcome"])
-            self.assertEqual("core-scope", report["components"][0]["component_id"])
-            self.assertEqual("none", report["components"][0]["evidence"])
+            if GATE_GENERATION == DEADLINE_GENERATION:
+                self.assertEqual("error", report["outcome"])
+                self.assertEqual(
+                    "configured absolute deadline expired during controller admission",
+                    report["reason"],
+                )
+                self.assertEqual([], report["components"])
+            else:
+                self.assertTrue(report["maximum_exceeded"])
+                self.assertEqual("blocked-incomplete", report["outcome"])
+                self.assertEqual(
+                    "core-scope", report["components"][0]["component_id"]
+                )
+                self.assertEqual("none", report["components"][0]["evidence"])
             self.assertFalse(
                 (repo / "tmp/test-gate-receipts").exists()
                 and any((repo / "tmp/test-gate-receipts").iterdir())
@@ -2769,7 +2847,7 @@ class TestGateTests(unittest.TestCase):
             capture = root / "capture"
             capture.mkdir()
             source, started = GATE._bootstrap_monotonic_start()
-            handoff = GATE._freeze(
+            handoff = self._freeze_for_generation(
                 repo, ("routine", "--staged"), capture, started, source
             )
             snapshot = Path(handoff["execution_root"])
@@ -2814,7 +2892,7 @@ class TestGateTests(unittest.TestCase):
             capture = root / "capture"
             capture.mkdir()
             source, started = GATE._bootstrap_monotonic_start()
-            handoff = GATE._freeze(
+            handoff = self._freeze_for_generation(
                 repo, ("routine", "--staged"), capture, started, source
             )
             snapshot = Path(handoff["execution_root"])

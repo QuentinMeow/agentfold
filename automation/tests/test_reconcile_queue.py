@@ -11,6 +11,7 @@ from unittest import mock
 
 if __package__:
     from .test_gate_generations import (
+        DEADLINE_GENERATION,
         LEGACY_GENERATION,
         SPLIT_GENERATION,
         gate_generation,
@@ -30,6 +31,7 @@ if __package__:
     )
 else:
     from test_gate_generations import (
+        DEADLINE_GENERATION,
         LEGACY_GENERATION,
         SPLIT_GENERATION,
         gate_generation,
@@ -55,6 +57,7 @@ SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
 LEGACY_WORKFLOW_SHA256 = "a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1"
+SPLIT_WORKFLOW_GENERATIONS = (SPLIT_GENERATION, DEADLINE_GENERATION)
 
 
 VALID_DECISION = """# Choose the admission boundary
@@ -197,7 +200,7 @@ class ReconcileQueueTests(unittest.TestCase):
         push = workflow_job(
             workflow,
             "push-repository-diagnostics"
-            if generation == SPLIT_GENERATION
+            if generation in SPLIT_WORKFLOW_GENERATIONS
             else "reconcile-and-test",
         )
         self.assertTrue(push, "push reconciliation step is missing")
@@ -219,7 +222,7 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         self.assertIn("automation/reconcile/reconcile.py --check", push)
         self.assertNotIn("automation/run_test_gate.py", push)
-        if generation == SPLIT_GENERATION:
+        if generation in SPLIT_WORKFLOW_GENERATIONS:
             cooperative = workflow_job(
                 workflow, "cooperative-pr-complete-test-diagnostics"
             )
@@ -254,7 +257,7 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(LEGACY_WORKFLOW_SHA256, workflow_digest(current))
             self.assertNotEqual(manual, current)
         else:
-            self.assertEqual(SPLIT_GENERATION, generation)
+            self.assertIn(generation, SPLIT_WORKFLOW_GENERATIONS)
             self.assertEqual("absent", current_regime)
         if current_regime == "present":
             self.assertEqual(HARD_WORKFLOW_SHA256, workflow_digest(current))
@@ -266,7 +269,7 @@ class ReconcileQueueTests(unittest.TestCase):
                         workflow_job(current_text, missing), "", 1
                     ).encode("utf-8")
                     self.assertEqual("invalid", trusted_gate_regime(partial))
-        elif generation == SPLIT_GENERATION:
+        elif generation in SPLIT_WORKFLOW_GENERATIONS:
             self.assertEqual(manual, current)
         for name, mutation in migration_mutations(manual):
             with self.subTest(manual_mutation=name):

@@ -5,6 +5,7 @@ from pathlib import Path
 
 if __package__:
     from .test_gate_generations import (
+        DEADLINE_GENERATION,
         LEGACY_GENERATION,
         SPLIT_GENERATION,
         gate_generation,
@@ -24,6 +25,7 @@ if __package__:
     )
 else:
     from test_gate_generations import (
+        DEADLINE_GENERATION,
         LEGACY_GENERATION,
         SPLIT_GENERATION,
         gate_generation,
@@ -46,6 +48,7 @@ else:
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/harness.yml"
 LEGACY_WORKFLOW_SHA256 = "a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1"
+SPLIT_WORKFLOW_GENERATIONS = (SPLIT_GENERATION, DEADLINE_GENERATION)
 
 
 class GitHubActionProjectionWorkflowTests(unittest.TestCase):
@@ -53,7 +56,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         cls.gate_generation = gate_generation()
         cls.workflow_bytes = WORKFLOW.read_bytes()
-        if cls.gate_generation == SPLIT_GENERATION and (
+        if cls.gate_generation in SPLIT_WORKFLOW_GENERATIONS and (
             cls.workflow_bytes != manual_workflow_fixture()
         ):
             raise AssertionError(
@@ -98,7 +101,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
         self.assertEqual("absent", trusted_gate_regime(manual))
         self.assertEqual((), manual_fixture_contract_errors(manual))
-        if self.gate_generation == SPLIT_GENERATION:
+        if self.gate_generation in SPLIT_WORKFLOW_GENERATIONS:
             self.assertEqual("absent", trusted_gate_regime(current))
             self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(current))
             self.assertEqual(manual, current)
@@ -228,7 +231,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
                 "trusted-pr-merge-diagnostics",
                 "cooperative-pr-complete-test-diagnostics",
             )
-            if self.gate_generation == SPLIT_GENERATION
+            if self.gate_generation in SPLIT_WORKFLOW_GENERATIONS
             else ("reconcile-and-test",)
         )
         for job_name in diagnostic_jobs:
@@ -550,7 +553,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         on_block = self.workflow.partition("on:\n")[2].partition(
             "\npermissions:"
         )[0]
-        if self.gate_generation == SPLIT_GENERATION:
+        if self.gate_generation in SPLIT_WORKFLOW_GENERATIONS:
             push = self.job("push-repository-diagnostics")
             trusted = self.job("trusted-pr-merge-diagnostics")
             cooperative = self.job(
