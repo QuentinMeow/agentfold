@@ -14,6 +14,7 @@ from pathlib import Path
 SCHEMA_ID = "agentfold.test-manifest/v1"
 REGULAR_INDEX_MODES = frozenset(("100644", "100755"))
 GIT_METADATA_SENTINEL = ".git"
+GIT_NO_REPLACE_ENVIRONMENT = "GIT_NO_REPLACE_OBJECTS"
 
 
 class ManifestError(RuntimeError):
@@ -65,8 +66,10 @@ def file_digest(path):
 
 
 def _git(repository, arguments, environment=None):
+    environment = dict(os.environ if environment is None else environment)
+    environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     result = subprocess.run(
-        ["git", *arguments],
+        ["git", "--no-replace-objects", *arguments],
         cwd=repository,
         env=environment,
         stdout=subprocess.PIPE,
@@ -163,6 +166,7 @@ def staged_candidate(
 ):
     """Describe the exact full-index candidate represented by ``frozen_index``."""
     environment = os.environ.copy()
+    environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     environment["GIT_INDEX_FILE"] = str(Path(frozen_index).resolve())
     records = _parse_index(
         _git(repository, ["ls-files", "--stage", "-z"], environment)
@@ -212,6 +216,7 @@ def materialize_staged_candidate(repository, frozen_index, destination):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=False)
     environment = os.environ.copy()
+    environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     environment["GIT_INDEX_FILE"] = str(Path(frozen_index).resolve())
     _git(
         repository,

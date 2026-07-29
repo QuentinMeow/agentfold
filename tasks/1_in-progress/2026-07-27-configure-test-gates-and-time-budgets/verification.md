@@ -2109,3 +2109,56 @@ pre-commit: OK
 No hook was bypassed. Product commit
 `d513a70d0d18538fc0e5fd32946f2efd0a59945f` is now ready for the required fresh
 five-reviewer revision-bound panel.
+
+## Second post-product panel
+
+A fresh five-reviewer panel inspected exact committed range
+`e530c428387766537f971cd5c8ce47ada9e2c19a..e87cef8ba32c6a2401aa7cd7e5134a571d91588b`
+without the verification record, worklog, retry narrative, handovers, or prior verdicts. All five
+lenses blocked. The reproduced merge blockers are:
+
+- final-component `O_NOFOLLOW` still permits an intermediate task, queue, or scratch directory
+  to redirect journal append or initial publication outside the canonical repository topology;
+- receipt environment identity omits the inherited process umask even though components and
+  tests inherit it, allowing incompatible file-mode behavior to reuse one binding;
+- nested `AGENTS.md` authority contracts still overlap the ordinary reversible record policy;
+- trusted Git identity, content, and tree queries do not consistently disable replacement
+  objects, so a local replacement ref can substitute base policy or candidate bytes;
+- successful final-to-final full-receipt reuse emits a latest-final report with a null binding,
+  invalidating the otherwise valid receipt for a following routine gate;
+- interrupting the outer supervisor does not run bounded worker-session cleanup, so descendants
+  can survive and publish stale reports or timing tasks; and
+- worker and controller relaunches use literal `python3` instead of the invoking interpreter,
+  violating the declared CPython 3.7+ invocation contract when PATH differs.
+
+This is a review record, not passing evidence. A combined repair, closed compatibility bridge,
+exact final gate, normal receipt-reusing commit, and completely new panel remain required.
+
+## Second-panel repair and closed bridge
+
+The accepted repair pins and revalidates the complete repository directory chain for all timing
+task reads and writes; captures inherited umask once in a disposable child and binds it to every
+receipt use; treats every nested `AGENTS.md` as authorization-critical; disables Git replacement
+objects in both argv and environment; retains a reused full binding in repeated final reports;
+cleans worker and token-owned descendants across SIGINT/SIGTERM including the launch window; and
+uses the invoking interpreter for worker and controller relaunches.
+
+Focused and combined evidence before staging:
+
+- descriptor publication: 39 tests passed with one historical-endpoint skip;
+- deadline/supervisor: 49 tests passed with three platform skips;
+- runner isolation: 53 tests passed;
+- policy/configuration: 38 tests passed;
+- manifest: five tests passed;
+- exact repaired endpoint: 304 tests passed with five intentional skips in 38.259 seconds;
+- exact committed and repaired tuples admitted; single-file and mixed hybrids rejected; and
+- compilation, diff checks, and reconciliation passed with zero findings.
+
+The first isolated bridge candidate `70ad59c7…` failed honestly after its base-pinned floor
+because the new repeated-final assertion was not restricted to the repaired endpoint. No commit
+was attempted. The corrected old-endpoint integration passed in 5.578 seconds, then exact bridge
+candidate `0135d142be34629194c72ecfc9b7265d3193bd96177af3376e88d1b3f72fa06d`
+passed all 19 files in 353.14 seconds with none deferred or incomplete. The unchanged normal hook
+reused that full receipt in 11.17 seconds and created test-only bridge commit `40500b9` without
+bypassing the hook. The exact repaired product tuple is restored and remains to receive its own
+final gate and normal commit.

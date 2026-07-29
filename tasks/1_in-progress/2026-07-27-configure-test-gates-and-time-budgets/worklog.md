@@ -777,3 +777,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   bypassing the hook. Both generated timing journals remain deliberately unstaged.
 - A fresh five-reviewer revision-bound panel is the only remaining repair boundary before the
   retry can be resolved and the task can move to review.
+
+## 2026-07-29 — second post-product panel (codex and Sol reviewers)
+
+- Five independent lenses reviewed exact range `e530c428…e87cef8` without task evidence or prior
+  opinions. All five blocked. Reproductions exposed intermediate-directory publication
+  redirection, unbound process umask, reversible nested instruction contracts, active Git
+  replacement objects, broken final-to-final receipt projection, unclean supervisor interruption,
+  and literal-`python3` relaunches.
+- The main agent accepted all seven findings. Three bounded Sol-high implementation owners are
+  repairing descriptor-relative publication, cache/policy identity, and supervisor/Git behavior
+  in non-overlapping files. No new task or feature has been started.
+
+## 2026-07-29 — second-panel repair bridge (codex and Sol implementers)
+
+- Implemented all seven accepted repairs and passed a process-enabled 304-test combined matrix
+  with five intentional skips. The closed classifier admits exact old and repaired tuples and
+  rejects single-file and mixed hybrids.
+- The first bridge final failed one candidate-supplemental test after the 294.82-second base
+  floor because a repaired-only assertion still ran on the old endpoint. Restricting that block
+  to the repaired tuple made the focused old integration pass in 5.578 seconds.
+- Corrected bridge candidate `0135d142…` passed the exact final gate in 353.14 seconds with all
+  19 files complete. Normal receipt reuse passed in 11.17 seconds and created `40500b9`; no hook
+  was bypassed. The exact product/records snapshot is restored for its own final boundary.

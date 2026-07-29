@@ -103,10 +103,26 @@ OUTCOME_EXIT = {
     "error": 2,
 }
 _STRONG_PROCESS_CONTAINMENT = None
+GIT_NO_REPLACE_OBJECTS = "GIT_NO_REPLACE_OBJECTS"
 
 
 class GateError(RuntimeError):
     """An operational gate failure that must not be mistaken for a test failure."""
+
+
+def _git_environment(source=None):
+    """Return a Git environment that cannot honor repository replacement refs."""
+    environment = dict(os.environ if source is None else source)
+    environment[GIT_NO_REPLACE_OBJECTS] = "1"
+    return environment
+
+
+def _git_command(*arguments, **keywords):
+    """Build one Git argv with replacement-object handling disabled explicitly."""
+    executable = keywords.pop("executable", "git")
+    if keywords:
+        raise TypeError("unsupported Git command keyword")
+    return [executable, "--no-replace-objects"] + list(arguments)
 
 
 def _controller_monotonic_sample():
@@ -583,15 +599,17 @@ def load_candidate_policy(candidate_root, relative_config, scratch_root, base_re
         raise GateError(f"candidate policy is unavailable: {relative_config}")
     base_path = scratch_root / "base-agentfold.toml"
     base = subprocess.run(
-        ["git", "show", f"{base_revision}:{CANONICAL_CONFIG.as_posix()}"],
+        _git_command("show", f"{base_revision}:{CANONICAL_CONFIG.as_posix()}"),
         cwd=REPO,
+        env=_git_environment(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     if base.returncode != 0:
         presence = subprocess.run(
-            ["git", "ls-tree", "-z", "--name-only", base_revision, "--", CANONICAL_CONFIG.as_posix()],
+            _git_command("ls-tree", "-z", "--name-only", base_revision, "--", CANONICAL_CONFIG.as_posix()),
             cwd=REPO,
+            env=_git_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -638,8 +656,9 @@ def validate_policy_frame(policy, policy_digest, candidate_root, base_revision, 
     if candidate_path.is_symlink() or not candidate_path.is_file():
         raise GateError("candidate policy is unavailable: agentfold.toml")
     base = subprocess.run(
-        ["git", "show", "{}:{}".format(base_revision, CANONICAL_CONFIG.as_posix())],
+        _git_command("show", "{}:{}".format(base_revision, CANONICAL_CONFIG.as_posix())),
         cwd=REPO,
+        env=_git_environment(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -711,8 +730,9 @@ def validate_policy_frame(policy, policy_digest, candidate_root, base_revision, 
 
 def _resolve_commit(revision):
     result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        _git_command("rev-parse", "--verify", f"{revision}^{{commit}}"),
         cwd=REPO,
+        env=_git_environment(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -729,8 +749,9 @@ def capture_revision_candidate(options, scratch_root):
         raise GateError("final --base-revision and --candidate-revision are required together")
     if not options.base_revision:
         status = subprocess.run(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            _git_command("status", "--porcelain=v1", "--untracked-files=all"),
             cwd=REPO,
+            env=_git_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -746,8 +767,9 @@ def capture_revision_candidate(options, scratch_root):
     )
     if head_revision is not None:
         parents = subprocess.run(
-            ["git", "rev-list", "--parents", "-n", "1", candidate_revision],
+            _git_command("rev-list", "--parents", "-n", "1", candidate_revision),
             cwd=REPO,
+            env=_git_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -758,10 +780,10 @@ def capture_revision_candidate(options, scratch_root):
                 "final pull-request candidate is not the declared base/head synthetic merge"
             )
     frozen_index = scratch_root / "candidate.index"
-    environment = os.environ.copy()
+    environment = _git_environment()
     environment["GIT_INDEX_FILE"] = str(frozen_index)
     result = subprocess.run(
-        ["git", "read-tree", candidate_revision],
+        _git_command("read-tree", candidate_revision),
         cwd=REPO,
         env=environment,
         stdout=subprocess.PIPE,
@@ -897,8 +919,9 @@ def admission_commands(options, candidate, candidate_root=REPO):
     branch = options.branch
     if not branch:
         branch_result = subprocess.run(
-            ["git", "branch", "--show-current"],
+            _git_command("branch", "--show-current"),
             cwd=REPO,
+            env=_git_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -937,8 +960,9 @@ def admission_commands(options, candidate, candidate_root=REPO):
 def candidate_git_environment(candidate_root, frozen_index):
     """Expose original history to checks while freezing all candidate-visible bytes."""
     result = subprocess.run(
-        ["git", "rev-parse", "--absolute-git-dir"],
+        _git_command("rev-parse", "--absolute-git-dir"),
         cwd=REPO,
+        env=_git_environment(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -952,6 +976,7 @@ def candidate_git_environment(candidate_root, frozen_index):
         "GIT_DIR": git_directory,
         "GIT_WORK_TREE": str(Path(candidate_root).resolve()),
         "GIT_INDEX_FILE": str(Path(frozen_index).resolve()),
+        GIT_NO_REPLACE_OBJECTS: "1",
     }
 
 
@@ -990,10 +1015,10 @@ def _semantic_tree_manifest(value):
 def _materialize_revision(revision, scratch_root, name):
     """Materialize exact regular-file bytes for one trusted Git revision."""
     index = scratch_root / f"{name}.index"
-    environment = os.environ.copy()
+    environment = _git_environment()
     environment["GIT_INDEX_FILE"] = str(index)
     result = subprocess.run(
-        ["git", "read-tree", revision],
+        _git_command("read-tree", revision),
         cwd=REPO,
         env=environment,
         stdout=subprocess.PIPE,
@@ -1393,6 +1418,7 @@ INTERNAL_COMPONENT_ENVIRONMENT_NAMES = frozenset(
         "GIT_DIR",
         "GIT_INDEX_FILE",
         "GIT_WORK_TREE",
+        GIT_NO_REPLACE_OBJECTS,
     )
 )
 
@@ -1423,9 +1449,10 @@ def _canonical_git_hook_path(source, path):
     probe_environment["PATH"] = remaining
     probe_environment["GIT_CONFIG_GLOBAL"] = os.devnull
     probe_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    probe_environment[GIT_NO_REPLACE_OBJECTS] = "1"
     try:
         configured = subprocess.run(
-            [git_binary, "--exec-path"],
+            _git_command("--exec-path", executable=git_binary),
             env=probe_environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -1433,7 +1460,7 @@ def _canonical_git_hook_path(source, path):
             timeout=1.0,
         )
         canonical_index = subprocess.run(
-            [git_binary, "rev-parse", "--git-path", "index"],
+            _git_command("rev-parse", "--git-path", "index", executable=git_binary),
             cwd=REPO,
             env=probe_environment,
             stdout=subprocess.PIPE,
@@ -1469,6 +1496,7 @@ def safe_process_environment(source=None):
         if name in SAFE_ENVIRONMENT_NAMES
     }
     environment.update(FIXED_PYTHON_ENVIRONMENT)
+    environment[GIT_NO_REPLACE_OBJECTS] = "1"
     if "PATH" in environment:
         environment["PATH"] = _canonical_git_hook_path(source, environment["PATH"])
     return environment
@@ -1958,7 +1986,38 @@ def runner_revision(candidate_root=REPO):
     return controller_closure()["digest"]
 
 
-def environment_identity(source=None):
+def inherited_process_umask(deadline=None):
+    """Capture the inherited umask in a disposable child, never in this process."""
+    timeout = None
+    if deadline is not None:
+        timeout = deadline - time.monotonic()
+        if timeout <= 0:
+            raise GateError("configured absolute deadline expired during umask capture")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                "import os; print(format(os.umask(0), '04o'))",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GateError("configured absolute deadline expired during umask capture") from error
+    except OSError as error:
+        raise GateError("could not capture inherited process umask") from error
+    value = result.stdout.strip()
+    if result.returncode or len(value) != 4 or any(character not in "01234567" for character in value):
+        raise GateError("inherited process umask capture was invalid")
+    return value
+
+
+def environment_identity(source=None, inherited_umask=None, deadline=None):
     if source is not None and {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"}.issubset(
         source
     ):
@@ -1969,21 +2028,39 @@ def environment_identity(source=None):
         effective.update(FIXED_PYTHON_ENVIRONMENT)
     else:
         effective = safe_process_environment(source)
+    effective = _git_environment(effective)
     normalized = dict(effective)
     for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
         if name in normalized:
             normalized[name] = "<" + name.lower().replace("_", "-") + ">"
     if _OWNER_ENV in normalized:
         normalized[_OWNER_ENV] = "<gate-owner-token>"
-    git = subprocess.run(
-        ["git", "--version"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    git_timeout = None
+    if deadline is not None:
+        git_timeout = deadline - time.monotonic()
+        if git_timeout <= 0:
+            raise GateError("configured absolute deadline expired during Git identity capture")
+    try:
+        git = subprocess.run(
+            _git_command("--version"),
+            env=effective,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=git_timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GateError("configured absolute deadline expired during Git identity capture") from error
+    except OSError as error:
+        raise GateError("Git identity capture could not start") from error
     return {
         "interpreter_identity": interpreter_identity(),
         "git_version": git.stdout.strip() if git.returncode == 0 else "unavailable",
+        "inherited_umask": (
+            inherited_process_umask(deadline)
+            if inherited_umask is None
+            else inherited_umask
+        ),
         "component_environment_digest": test_manifest.canonical_digest(
             normalized
         ),
@@ -1999,6 +2076,7 @@ def receipt_binding(
     candidate_root=REPO,
     environment=None,
     composite_identity=None,
+    execution_environment=None,
 ):
     protocol = None
     if _HANDOFF is not None:
@@ -2056,7 +2134,11 @@ def receipt_binding(
         "gate_protocol": protocol,
         "runner_revision": runner_revision(candidate_root),
         "controller_closure": controller_closure(),
-        "environment": environment_identity(environment),
+        "environment": (
+            environment_identity(environment)
+            if execution_environment is None
+            else execution_environment
+        ),
         "component_id": component_id,
         "composite_test_plan": composite_identity,
         "evidence_authority": EVIDENCE_AUTHORITY,
@@ -2085,8 +2167,9 @@ def _safe_local_directory(relative):
         raise GateError("repository root for gate state is unsafe")
     directory = root / relative
     ignored = subprocess.run(
-        ["git", "check-ignore", "-q", str(directory)],
+        _git_command("check-ignore", "-q", str(directory)),
         cwd=REPO,
+        env=_git_environment(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -2314,6 +2397,18 @@ def reusable_full_receipt(binding, component_id, options):
     return reusable_receipt(binding)
 
 
+def pending_full_receipt_binding(receipt, binding, component_id, options):
+    """Keep reused full evidence attached to the next report projection."""
+    if (
+        receipt is not None
+        and component_id == "repository-tests/full"
+        and binding.get("composite_test_plan") is not None
+        and local_receipts_allowed(options)
+    ):
+        return binding
+    return None
+
+
 def latest_reusable_full_receipt_binding(candidate, options):
     """Use the fixed final report only as a pointer to exact full evidence."""
     if not local_receipts_allowed(options):
@@ -2413,7 +2508,8 @@ def _write_report(report):
 
 
 def file_target_breach(
-    report, target, policy_digest, options, actual_seconds=None, environment=None
+    report, target, policy_digest, options, actual_seconds=None, environment=None,
+    execution_environment=None,
 ):
     """Best-effort durable performance work; its disposition never changes the gate."""
     if file_test_budget_task is None:
@@ -2444,7 +2540,11 @@ def file_target_breach(
         ),
         "command": "automation/run_test_gate.py " + " ".join(sys.argv[1:]),
         "trigger": options.at_transition or ("explicit" if options.explicit else "pre-commit"),
-        "environment": environment_identity(environment),
+        "environment": (
+            environment_identity(environment)
+            if execution_environment is None
+            else execution_environment
+        ),
     }
     return file_test_budget_task.file_budget_task(REPO, occurrence).as_dict()
 
@@ -2766,6 +2866,7 @@ def emit_report(
     receipt_binding_value=None,
     receipt_stable=None,
     component_environment=None,
+    execution_environment=None,
     terminal_decision_deadline=None,
 ):
     """Terminalize once, then project the frozen report and one optional receipt.
@@ -2820,6 +2921,7 @@ def emit_report(
                 options,
                 actual_seconds=elapsed,
                 environment=component_environment,
+                execution_environment=execution_environment,
             ),
             filing_deadline,
         )
@@ -3188,10 +3290,13 @@ def main(arguments=(), started=None):
             )
             component_environment = safe_process_environment()
             component_environment.update(internal_component_environment)
+            execution_environment = environment_identity(
+                component_environment, deadline=execution_deadline
+            )
             report["execution_identity"] = {
                 "runner_revision": validated_closure["digest"],
                 "controller_closure": validated_closure,
-                "environment": environment_identity(component_environment),
+                "environment": execution_environment,
                 "frozen_index_semantic_sha256": authoritative_index_identity[
                     "semantic_sha256"
                 ],
@@ -3327,6 +3432,7 @@ def main(arguments=(), started=None):
                         component_id,
                         REPO if options.provider_hard else candidate_root,
                         environment=component_environment,
+                        execution_environment=execution_environment,
                         composite_identity=(
                             composite["identity"] if composite is not None else None
                         ),
@@ -3344,6 +3450,7 @@ def main(arguments=(), started=None):
                             "repository-tests/full",
                             candidate_root,
                             environment=component_environment,
+                            execution_environment=execution_environment,
                             composite_identity=None,
                         )
                         if cached_binding is not None and (
@@ -3374,6 +3481,7 @@ def main(arguments=(), started=None):
                                 "repository-tests/full",
                                 candidate_root,
                                 environment=component_environment,
+                                execution_environment=execution_environment,
                                 composite_identity=receipt_composite["identity"],
                             )
                             if cached_binding == expected_full_binding:
@@ -3393,6 +3501,9 @@ def main(arguments=(), started=None):
                                         "identity"
                                     ]
                     if receipt is not None:
+                        pending_receipt_binding = pending_full_receipt_binding(
+                            receipt, binding, component_id, options
+                        )
                         components.append(
                             ComponentResult(
                                 component_id,
@@ -3564,6 +3675,7 @@ def main(arguments=(), started=None):
                 ),
                 receipt_stable=final_candidate_stable,
                 component_environment=component_environment,
+                execution_environment=execution_environment,
                 terminal_decision_deadline=terminal_decision_deadline,
             )
     except getattr(test_gate_config, "ConfigError", ()) as error:

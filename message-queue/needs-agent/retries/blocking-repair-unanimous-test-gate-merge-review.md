@@ -81,3 +81,17 @@ unchanged normal hook reused the full receipt in 13.94 seconds and created produ
 `d513a70d0d18538fc0e5fd32946f2efd0a59945f`; no hook was bypassed. A completely fresh
 five-reviewer revision-bound panel with no valid blocker is now the sole condition for resolving
 this retry and moving the task to review.
+
+That fresh panel reviewed exact range `e530c428…e87cef8` and returned 0 approvals / 5 blocks.
+The accepted blockers are intermediate-directory publication redirection, unbound process umask,
+reversible nested instruction contracts, active Git replacement objects, a null latest-final
+binding after final-to-final reuse, unclean outer-supervisor interruption, and literal-`python3`
+relaunches. The retry remains live while those seven issues receive one combined repair, closed
+compatibility bridge, exact final gate, normal commit, and completely new no-blocker panel.
+
+All seven repairs are implemented. A process-enabled combined matrix passed 304 tests with five
+intentional skips; the closed bridge admits only exact old and repaired tuples and rejects
+hybrids. The first bridge final exposed one old-endpoint assertion leak and failed without a
+commit. Corrected bridge candidate `0135d142…` then passed all 19 files in 353.14 seconds, and the
+normal hook reused its receipt in 11.17 seconds to create `40500b9`. The repaired product's exact
+final gate, normal commit, and a completely new no-blocker panel remain required.

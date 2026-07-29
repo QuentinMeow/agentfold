@@ -45,6 +45,7 @@ _WORKER_ENV = "AGENTFOLD_GATE_INTERNAL_WORKER"
 _OWNER_ENV = "AGENTFOLD_GATE_OWNER"
 _BOOTSTRAP_CLOCK_GETTIME_SOURCE = "clock_gettime:CLOCK_MONOTONIC"
 _BOOTSTRAP_OS_TIMES_SOURCE = "os.times:elapsed"
+_GIT_NO_REPLACE_ENV = "GIT_NO_REPLACE_OBJECTS"
 _CONTROLLER_CLOSURE_PATHS = (
     "automation/run_test_gate.py",
     "automation/test_gate_controller.py",
@@ -470,6 +471,8 @@ def _file_static_target_breach(report, policy_frame, arguments):
         "environment": {},
     }
     filer = Path(__file__).resolve().parent / "file_test_budget_task.py"
+    environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     try:
         result = subprocess.run(
             [
@@ -484,6 +487,7 @@ def _file_static_target_breach(report, policy_frame, arguments):
                 "--lock-timeout",
                 "0.5",
             ],
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
@@ -504,8 +508,10 @@ def _file_static_target_breach(report, policy_frame, arguments):
 
 
 def _git(repository, arguments, environment=None):
+    environment = dict(os.environ if environment is None else environment)
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     result = subprocess.run(
-        ["git", *arguments],
+        ["git", "--no-replace-objects", *arguments],
         cwd=str(repository),
         env=environment,
         stdout=subprocess.PIPE,
@@ -589,16 +595,29 @@ def _policy_closure_records(root):
 
 
 def _revision_file(repository, revision, relative):
+    environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     result = subprocess.run(
-        ["git", "show", "{}:{}".format(revision, relative)],
+        ["git", "--no-replace-objects", "show", "{}:{}".format(revision, relative)],
         cwd=str(repository),
+        env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     if result.returncode:
         presence = subprocess.run(
-            ["git", "ls-tree", "-z", "--name-only", revision, "--", relative],
+            [
+                "git",
+                "--no-replace-objects",
+                "ls-tree",
+                "-z",
+                "--name-only",
+                revision,
+                "--",
+                relative,
+            ],
             cwd=str(repository),
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -606,8 +625,9 @@ def _revision_file(repository, revision, relative):
             raise RuntimeError("policy discovery could not read an exact Git object")
         return None
     mode_result = subprocess.run(
-        ["git", "ls-tree", revision, "--", relative],
+        ["git", "--no-replace-objects", "ls-tree", revision, "--", relative],
         cwd=str(repository),
+        env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -627,17 +647,20 @@ def _materialize_policy_inputs(repository, arguments, root):
         _copy_index(_selected_index(repository), index)
     else:
         environment = os.environ.copy()
+        environment[_GIT_NO_REPLACE_ENV] = "1"
         environment["GIT_INDEX_FILE"] = str(index)
         _git(repository, ["read-tree", coordinates["candidate_revision"]], environment)
 
     candidate_root = root / "candidate-policy"
     candidate_root.mkdir(mode=0o700)
     environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     environment["GIT_INDEX_FILE"] = str(index)
     for relative in ("agentfold.toml",) + _POLICY_CLOSURE_PATHS:
         result = subprocess.run(
             [
                 "git",
+                "--no-replace-objects",
                 "checkout-index",
                 "--prefix=" + str(candidate_root) + os.sep,
                 "--",
@@ -936,6 +959,7 @@ def _copy_index(source, destination):
 
 def _index_records(repository, frozen_index):
     environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     environment["GIT_INDEX_FILE"] = str(frozen_index)
     output = _git(repository, ["ls-files", "--stage", "-z"], environment)
     records = []
@@ -1043,6 +1067,7 @@ def _freeze(
         base_revision = coordinates["base_revision"]
         if authoritative_index is None:
             environment = os.environ.copy()
+            environment[_GIT_NO_REPLACE_ENV] = "1"
             environment["GIT_INDEX_FILE"] = str(frozen_index)
             _git(repository, ["read-tree", candidate_revision], environment)
         kind = "revision-range"
@@ -1057,6 +1082,7 @@ def _freeze(
     snapshot = temporary_root / "snapshot"
     snapshot.mkdir(mode=0o700)
     environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
     environment["GIT_INDEX_FILE"] = str(frozen_index)
     _git(
         repository,
@@ -1272,6 +1298,7 @@ def _worker_dispatch(arguments):
                 os.fsync(stream.fileno())
             handoff_path.chmod(0o400)
             environment = os.environ.copy()
+            environment[_GIT_NO_REPLACE_ENV] = "1"
             environment.pop(_OUTER_CONTROL_FD_ENV, None)
             environment.pop(_WORKER_ENV, None)
             environment[_HANDOFF_ENV] = str(handoff_path)
@@ -1285,7 +1312,7 @@ def _worker_dispatch(arguments):
             environment[_INNER_CONTROL_FD_ENV] = str(controller_control.fileno())
             try:
                 process = subprocess.Popen(
-                    ["python3", "-I", "-S", str(controller), *arguments],
+                    [sys.executable, "-I", "-S", str(controller), *arguments],
                     cwd=handoff["execution_root"],
                     env=environment,
                     pass_fds=(controller_control.fileno(),),
@@ -1477,80 +1504,97 @@ def _validate_terminal_frame(frame):
         raise RuntimeError("test-gate terminal decision contradicts its outcome")
 
 
-def _dispatch(arguments):
-    started_source, started = _bootstrap_monotonic_start()
-    gate = _raw_gate(arguments)
-    if _reserved_boundary_requested(arguments):
-        return _static_result(
-            gate,
-            "blocked-incomplete",
-            "automatic final transitions are unavailable: the repository has no "
-            "controlled external completion oracle and independently controlled publisher",
-            (
-                "controlled-external-completion-oracle",
-                "independently-controlled-publisher",
-            ),
-            started_source,
-            started,
-            False,
-            _not_run_cleanup(False, "not-needed-before-worker"),
-        )
-    if os.name != "posix":
-        return _static_result(
-            gate,
-            "error",
-            "test-gate supervision requires POSIX process semantics",
-            (),
-            started_source,
-            started,
-            False,
-            _not_run_cleanup(False, "not-needed-before-worker"),
-        )
-    owner = secrets.token_hex(32)
+class _SupervisorTermination(Exception):
+    """A termination request handled by the outer supervisor cleanup path."""
+
+    def __init__(self, signal_number):
+        super().__init__("test-gate supervisor was interrupted")
+        self.signal_number = signal_number
+
+
+def _raise_supervisor_termination(signal_number, _frame):
+    raise _SupervisorTermination(signal_number)
+
+
+@contextlib.contextmanager
+def _ignore_cleanup_interrupts():
+    """Keep repeated terminal signals from interrupting bounded descendant cleanup."""
+    previous = {}
+    for signal_number in (signal.SIGINT, signal.SIGTERM):
+        previous[signal_number] = signal.signal(signal_number, signal.SIG_IGN)
     try:
-        parent_control, child_control = socket.socketpair()
-    except OSError as error:
-        return _static_result(
-            gate,
-            "error",
-            "test-gate control channel could not start: " + str(error),
-            (),
-            started_source,
-            started,
-            False,
-            _not_run_cleanup(False, "not-needed-worker-not-started"),
-        )
-    environment = os.environ.copy()
-    environment[_WORKER_ENV] = "1"
-    environment[_OUTER_CONTROL_FD_ENV] = str(child_control.fileno())
-    environment[_OWNER_ENV] = owner
-    worker_path = Path(__file__).resolve()
+        yield
+    finally:
+        for signal_number, handler in previous.items():
+            signal.signal(signal_number, handler)
+
+
+@contextlib.contextmanager
+def _supervisor_termination_scope():
+    """Install and reliably restore the outer supervisor's SIGTERM handler."""
+    previous = None
     try:
-        process = subprocess.Popen(
-            ["python3", "-I", "-S", str(worker_path), *arguments],
-            cwd=str(worker_path.parents[1]),
-            env=environment,
-            pass_fds=(child_control.fileno(),),
-            start_new_session=True,
-        )
-    except (OSError, ValueError) as error:
-        child_control.close()
-        parent_control.close()
-        return _static_result(
-            gate,
-            "error",
-            "test-gate worker could not start: " + str(error),
-            (),
-            started_source,
-            started,
-            False,
-            _not_run_cleanup(False, "not-needed-worker-not-started"),
-        )
-    child_control.close()
+        previous = signal.signal(signal.SIGTERM, _raise_supervisor_termination)
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+
+
+def _kill_worker_token(token):
+    """Bound cleanup when launch was interrupted before Popen returned a handle."""
+    for _attempt in range(3):
+        try:
+            owned = _owned_worker_pids(token)
+        except (OSError, RuntimeError, ValueError):
+            return
+        owned.discard(os.getpid())
+        for pid in owned:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        if not owned:
+            return
+        time.sleep(0.01)
+
+
+def _supervise_worker(
+    arguments,
+    gate,
+    started_source,
+    started,
+    owner,
+    parent_control,
+    child_control,
+    environment,
+    worker_path,
+):
+    process = None
     policy_frame = None
     maximum = None
     absolute_deadline = None
     try:
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-I", "-S", str(worker_path), *arguments],
+                cwd=str(worker_path.parents[1]),
+                env=environment,
+                pass_fds=(child_control.fileno(),),
+                start_new_session=True,
+            )
+        except (OSError, ValueError) as error:
+            return _static_result(
+                gate,
+                "error",
+                "test-gate worker could not start: " + str(error),
+                (),
+                started_source,
+                started,
+                False,
+                _not_run_cleanup(False, "not-needed-worker-not-started"),
+            )
+        child_control.close()
         discovery_deadline = started + DISCOVERY_CEILING_SECONDS
         policy_frame = _receive_control_frame(parent_control, discovery_deadline)
         maximum = _validate_policy_frame(policy_frame, gate)
@@ -1592,6 +1636,18 @@ def _dispatch(arguments):
             True,
             _not_run_cleanup(True, "not-needed-worker-exited"),
         )
+    except (KeyboardInterrupt, _SupervisorTermination) as error:
+        signal_number = (
+            signal.SIGINT
+            if isinstance(error, KeyboardInterrupt)
+            else error.signal_number
+        )
+        with _ignore_cleanup_interrupts():
+            if process is None:
+                _kill_worker_token(owner)
+            else:
+                _kill_worker_group(process, owner)
+        return 128 + signal_number
     except TimeoutError as error:
         if policy_frame is not None and absolute_deadline is not None:
             return _static_result(
@@ -1653,7 +1709,83 @@ def _dispatch(arguments):
             cleanup,
         )
     finally:
+        child_control.close()
         parent_control.close()
+
+
+def _dispatch(arguments):
+    started_source, started = _bootstrap_monotonic_start()
+    gate = _raw_gate(arguments)
+    if _reserved_boundary_requested(arguments):
+        return _static_result(
+            gate,
+            "blocked-incomplete",
+            "automatic final transitions are unavailable: the repository has no "
+            "controlled external completion oracle and independently controlled publisher",
+            (
+                "controlled-external-completion-oracle",
+                "independently-controlled-publisher",
+            ),
+            started_source,
+            started,
+            False,
+            _not_run_cleanup(False, "not-needed-before-worker"),
+        )
+    if os.name != "posix":
+        return _static_result(
+            gate,
+            "error",
+            "test-gate supervision requires POSIX process semantics",
+            (),
+            started_source,
+            started,
+            False,
+            _not_run_cleanup(False, "not-needed-before-worker"),
+        )
+    owner = secrets.token_hex(32)
+    try:
+        parent_control, child_control = socket.socketpair()
+    except OSError as error:
+        return _static_result(
+            gate,
+            "error",
+            "test-gate control channel could not start: " + str(error),
+            (),
+            started_source,
+            started,
+            False,
+            _not_run_cleanup(False, "not-needed-worker-not-started"),
+        )
+    environment = os.environ.copy()
+    environment[_GIT_NO_REPLACE_ENV] = "1"
+    environment[_WORKER_ENV] = "1"
+    environment[_OUTER_CONTROL_FD_ENV] = str(child_control.fileno())
+    environment[_OWNER_ENV] = owner
+    worker_path = Path(__file__).resolve()
+    try:
+        with _supervisor_termination_scope():
+            return _supervise_worker(
+                arguments,
+                gate,
+                started_source,
+                started,
+                owner,
+                parent_control,
+                child_control,
+                environment,
+                worker_path,
+            )
+    except (KeyboardInterrupt, _SupervisorTermination) as error:
+        signal_number = (
+            signal.SIGINT
+            if isinstance(error, KeyboardInterrupt)
+            else error.signal_number
+        )
+        with _ignore_cleanup_interrupts():
+            _kill_worker_token(owner)
+        child_control.close()
+        parent_control.close()
+        return 128 + signal_number
 
 
 if __name__ == "__main__":

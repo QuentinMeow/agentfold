@@ -42,6 +42,7 @@ required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
 category = "authorization"
 path_globs = [
   "AGENTS.md",
+  "**/AGENTS.md",
   "agentfold.toml",
   "automation/_vendor/**",
   "automation/file_test_budget_task.py",

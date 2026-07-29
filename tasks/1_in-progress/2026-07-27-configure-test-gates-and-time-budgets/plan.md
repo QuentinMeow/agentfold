@@ -86,3 +86,10 @@
       before resolving the retry, moving the task, or publishing the PR stack. The exact final
       candidate `6b159196…` passed with 19/19 files complete, and normal receipt reuse created
       product commit `d513a70`; only the new panel remains.
+- [ ] 25. Repair the second panel's seven blockers: pin the full publication directory chain,
+      bind inherited umask, protect every nested instruction contract, disable Git replacement
+      objects, preserve reused final receipt bindings, clean interrupted supervisor descendants,
+      and relaunch with the invoking interpreter. Land a closed bridge, exact final evidence,
+      normal commit, and a completely fresh five-reviewer panel before publication. All repairs
+      and the closed bridge are implemented; bridge `40500b9` passed exact final evidence and
+      normal receipt reuse. The repaired product final, commit, and new panel remain.

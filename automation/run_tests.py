@@ -45,6 +45,7 @@ SAFE_GIT_BEHAVIOR_VARIABLES = frozenset(
         "GIT_COMMITTER_NAME",
         "GIT_CONFIG_GLOBAL",
         "GIT_CONFIG_NOSYSTEM",
+        "GIT_NO_REPLACE_OBJECTS",
         "GIT_TERMINAL_PROMPT",
     )
 )
@@ -56,6 +57,8 @@ DEFAULT_GIT_IDENTITY = {
 }
 REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
 PROJECTED_REPOSITORY_ENVIRONMENT = "AGENTFOLD_TEST_VIEW_ROOT"
+GIT_NO_REPLACE_ENVIRONMENT = "GIT_NO_REPLACE_OBJECTS"
+GATE_OWNER_ENVIRONMENT = "AGENTFOLD_GATE_OWNER"
 PROVIDER_CANDIDATE_UID = 65532
 PROVIDER_CANDIDATE_GID = 65532
 PROVIDER_CAPABILITIES = frozenset((5, 6, 7))  # KILL, SETGID, SETUID
@@ -104,7 +107,10 @@ def child_interpreter_identity():
     )
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-c", probe],
-        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        env={
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=True,
@@ -228,7 +234,7 @@ def full_selection(all_test_files, reason):
 def selected_git_index_path(repository, environment):
     """Resolve the exact index file used by selector Git commands."""
     result = subprocess.run(
-        ["git", "rev-parse", "--git-path", "index"],
+        ["git", "--no-replace-objects", "rev-parse", "--git-path", "index"],
         cwd=repository,
         env=environment,
         stdout=subprocess.PIPE,
@@ -277,11 +283,20 @@ def staged_test_selection(all_test_files, repository=None):
     """Map a wholly known staged service diff to its conservative test closure."""
     repository = REPO if repository is None else Path(repository)
     selector_environment = dict(os.environ)
+    selector_environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     try:
         index_path = selected_git_index_path(repository, selector_environment)
         initial_index_fingerprint = index_fingerprint(index_path)
         diff = subprocess.run(
-            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            [
+                "git",
+                "--no-replace-objects",
+                "diff",
+                "--cached",
+                "--name-status",
+                "-z",
+                "-M",
+            ],
             cwd=repository,
             env=selector_environment,
             stdout=subprocess.PIPE,
@@ -320,7 +335,7 @@ def staged_test_selection(all_test_files, repository=None):
 
     try:
         index_result = subprocess.run(
-            ["git", "ls-files", "--stage", "-z"],
+            ["git", "--no-replace-objects", "ls-files", "--stage", "-z"],
             cwd=repository,
             env=selector_environment,
             stdout=subprocess.PIPE,
@@ -420,7 +435,7 @@ def git_local_environment_names():
     """Return every environment variable Git treats as repository-local."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--local-env-vars"],
+            ["git", "--no-replace-objects", "rev-parse", "--local-env-vars"],
             cwd=REPO,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -460,6 +475,7 @@ def isolated_test_environment(parent_environment=None):
         if name.startswith("PYTHON"):
             child_environment.pop(name)
     child_environment.update(safe_behavior)
+    child_environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     child_environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return child_environment
 
@@ -481,7 +497,7 @@ def validate_scratch_root(scratch_root, child_environment):
     check_environment = dict(child_environment)
     check_environment["LC_ALL"] = "C"
     result = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        ["git", "--no-replace-objects", "rev-parse", "--git-dir"],
         cwd=scratch_root,
         env=check_environment,
         stdout=subprocess.PIPE,
@@ -500,6 +516,7 @@ def repository_view_paths(child_environment, repository=None):
     result = subprocess.run(
         [
             "git",
+            "--no-replace-objects",
             "-c",
             f"core.excludesFile={os.devnull}",
             "ls-files",
@@ -647,7 +664,8 @@ def install_isolated_git_wrapper(scratch_root, child_environment):
         f"HOME={shlex.quote(str(isolated_home))} "
         f"XDG_CONFIG_HOME={shlex.quote(str(isolated_xdg_config))} "
         "GIT_CONFIG_NOSYSTEM=1 "
-        f"exec {shlex.quote(git_executable)} \"$@\"\n"
+        "GIT_NO_REPLACE_OBJECTS=1 "
+        f"exec {shlex.quote(git_executable)} --no-replace-objects \"$@\"\n"
     )
     wrapper.chmod(0o700)
     original_path = child_environment.get("PATH", "")
@@ -658,6 +676,7 @@ def install_isolated_git_wrapper(scratch_root, child_environment):
     )
     child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
     child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    child_environment[GIT_NO_REPLACE_ENVIRONMENT] = "1"
     child_environment[REAL_GIT_ENVIRONMENT] = git_executable
 
 
@@ -666,7 +685,13 @@ def seal_bare_repository_view(destination, child_environment):
     check_environment = dict(child_environment)
     check_environment["LC_ALL"] = "C"
     result = subprocess.run(
-        ["git", "--git-dir=.", "rev-parse", "--git-dir"],
+        [
+            "git",
+            "--no-replace-objects",
+            "--git-dir=.",
+            "rev-parse",
+            "--git-dir",
+        ],
         cwd=destination,
         env=check_environment,
         stdout=subprocess.PIPE,
@@ -974,6 +999,7 @@ def provider_candidate_environment(child_environment, view, home, temporary):
     allowed = {
         "CI",
         "GITHUB_ACTIONS",
+        GATE_OWNER_ENVIRONMENT,
         "LANG",
         "LC_ALL",
         "PATH",
@@ -994,6 +1020,7 @@ def provider_candidate_environment(child_environment, view, home, temporary):
             PROJECTED_REPOSITORY_ENVIRONMENT: str(view),
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
+            GIT_NO_REPLACE_ENVIRONMENT: "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONHASHSEED": "0",
         }

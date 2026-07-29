@@ -16,10 +16,8 @@ import json
 import os
 import re
 import shlex
-import shutil
 import stat
 import sys
-import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -120,6 +118,7 @@ class _JournalSnapshot:
     inode: int
     data: bytes
     records: tuple
+    directory_signature: tuple
 
 
 class _PublicationFailure(Exception):
@@ -131,6 +130,206 @@ class _PublicationFailure(Exception):
         self.mutated = bool(mutated)
         self.task_path = task_path
         self.request_path = request_path
+
+
+def _descriptor_signature(descriptor):
+    metadata = os.fstat(descriptor)
+    return metadata.st_dev, metadata.st_ino
+
+
+def _require_descriptor_topology():
+    required = (
+        os.name == "posix",
+        bool(getattr(os, "O_NOFOLLOW", 0)),
+        bool(getattr(os, "O_DIRECTORY", 0)),
+        os.open in getattr(os, "supports_dir_fd", ()),
+        os.mkdir in getattr(os, "supports_dir_fd", ()),
+        os.rmdir in getattr(os, "supports_dir_fd", ()),
+        os.listdir in getattr(os, "supports_fd", ()),
+    )
+    if not all(required):
+        raise OSError(
+            getattr(errno, "ENOTSUP", errno.EPERM),
+            "safe repository access requires POSIX descriptor-relative no-follow support",
+        )
+
+
+def _relative_parts(relative):
+    relative = Path(relative)
+    if relative.is_absolute():
+        raise ValueError("repository path must be relative")
+    parts = relative.parts
+    if any(part in ("", ".", "..") or "/" in part for part in parts):
+        raise ValueError("repository path contains an unsafe component")
+    return parts
+
+
+class _PinnedDirectory:
+    """One repository directory reached through a pinned no-follow chain."""
+
+    def __init__(self, repository, relative, descriptor, signatures):
+        self.repository = repository
+        self.relative = Path(relative)
+        self.descriptor = descriptor
+        self.signatures = tuple(signatures)
+
+    def close(self):
+        if self.descriptor is not None:
+            descriptor, self.descriptor = self.descriptor, None
+            os.close(descriptor)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, _value, _traceback):
+        self.close()
+
+    def verify(self):
+        _verify_pinned_directory(self)
+
+
+class _PinnedRepository:
+    """Repository root and all durable mutation state for one filing attempt."""
+
+    def __init__(self, root):
+        _require_descriptor_topology()
+        self.root = Path(root)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        self.descriptor = os.open(str(self.root), flags)
+        self.signature = _descriptor_signature(self.descriptor)
+        self.mutated = False
+
+    def close(self):
+        if self.descriptor is not None:
+            descriptor, self.descriptor = self.descriptor, None
+            os.close(descriptor)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, _value, _traceback):
+        self.close()
+
+    def verify(self):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(str(self.root), flags)
+        try:
+            if _descriptor_signature(descriptor) != self.signature:
+                raise OSError(
+                    getattr(errno, "ESTALE", errno.EIO),
+                    "repository root changed after it was pinned",
+                )
+        finally:
+            os.close(descriptor)
+
+    def open_dir(self, relative=Path(), *, create=False):
+        parts = _relative_parts(relative)
+        self.verify()
+        descriptor = os.dup(self.descriptor)
+        signatures = []
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        try:
+            for part in parts:
+                try:
+                    child = os.open(part, flags, dir_fd=descriptor)
+                except FileNotFoundError:
+                    if not create:
+                        raise
+                    os.mkdir(part, mode=0o755, dir_fd=descriptor)
+                    self.mutated = True
+                    child = os.open(part, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = child
+                signatures.append(_descriptor_signature(descriptor))
+            pinned = _PinnedDirectory(self, Path(*parts), descriptor, signatures)
+            pinned.verify()
+            return pinned
+        except Exception:
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
+            raise
+
+    def listdir(self, relative, *, missing_ok=False):
+        try:
+            directory = self.open_dir(relative)
+        except FileNotFoundError:
+            if missing_ok:
+                return ()
+            raise
+        with directory:
+            names = tuple(sorted(os.listdir(directory.descriptor)))
+            directory.verify()
+            return names
+
+    def read_bytes(self, relative):
+        relative = Path(relative)
+        with self.open_dir(relative.parent) as directory:
+            descriptor, _metadata = _open_regular_at(
+                directory, relative.name, os.O_RDONLY
+            )
+            try:
+                before = os.fstat(descriptor)
+                data = _read_descriptor_bytes(descriptor)
+                after = os.fstat(descriptor)
+                if (
+                    _journal_stat_signature(before) != _journal_stat_signature(after)
+                    or after.st_size != len(data)
+                ):
+                    raise ValueError("repository file changed while it was being read")
+                directory.verify()
+                return data
+            finally:
+                os.close(descriptor)
+
+    def read_text(self, relative):
+        return self.read_bytes(relative).decode("utf-8")
+
+
+def _verify_pinned_directory(directory):
+    repository = directory.repository
+    repository.verify()
+    descriptor = os.dup(repository.descriptor)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    observed = []
+    try:
+        for part in _relative_parts(directory.relative):
+            child = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+            observed.append(_descriptor_signature(descriptor))
+        if (
+            tuple(observed) != directory.signatures
+            or _descriptor_signature(directory.descriptor)
+            != (observed[-1] if observed else repository.signature)
+        ):
+            raise OSError(
+                getattr(errno, "ESTALE", errno.EIO),
+                "repository directory chain changed after it was pinned",
+            )
+    finally:
+        os.close(descriptor)
+
+
+def _open_regular_at(directory, name, flags, mode=0o644, mutation_owner=None):
+    if tuple(Path(name).parts) != (name,) or name in ("", ".", ".."):
+        raise ValueError("repository filename contains an unsafe component")
+    flags |= os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(name, flags, mode, dir_fd=directory.descriptor)
+    if mutation_owner is not None and flags & os.O_CREAT:
+        mutation_owner.mutated = True
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(errno.EINVAL, "repository file is not a regular file")
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+        raise
+    return descriptor, metadata
 
 
 def _value(source, *names, default=None):
@@ -347,12 +546,12 @@ def _generated_record(record, identity):
     )
 
 
-def _generated_backlog_request(repo, record, request):
-    if request is None or not request.is_file() or request.is_symlink():
+def _generated_backlog_request(repository, record, request_relative):
+    if request_relative is None:
         return False
     try:
-        text = request.read_text(encoding="utf-8")
-        task_rel = record.task_dir.relative_to(repo).as_posix()
+        text = repository.read_text(request_relative)
+        task_rel = record.task_dir.relative_to(repository.root).as_posix()
     except (OSError, UnicodeError, ValueError):
         return False
     return (
@@ -364,23 +563,22 @@ def _generated_backlog_request(repo, record, request):
     )
 
 
-def _scan(repo, identity, include_done=True):
+def _scan(repository, identity, include_done=True):
     records = []
     statuses = TASK_STATUSES + (("4_done",) if include_done else ())
     for status in statuses:
-        folder = repo / "tasks" / status
-        if not folder.is_dir():
-            continue
-        for task_dir in sorted(folder.iterdir()):
-            path = task_dir / "task.md"
-            if not task_dir.is_dir() or task_dir.is_symlink() or not path.is_file() or path.is_symlink():
-                continue
+        folder_relative = Path("tasks") / status
+        for task_id in repository.listdir(folder_relative, missing_ok=True):
+            task_relative = folder_relative / task_id / "task.md"
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
+                text = repository.read_text(task_relative)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except UnicodeError:
                 continue
             if _field(text, "Finding identity") != f"sha256:{identity}":
                 continue
+            task_dir = repository.root / folder_relative / task_id
             records.append(
                 _Record(
                     status,
@@ -396,9 +594,9 @@ def _records_signature(records):
     return tuple((record.status, str(record.task_dir), record.digest) for record in records)
 
 
-def _validate_templates(repo):
-    task = (repo / "templates/task/task.md").read_text(encoding="utf-8")
-    request = (repo / "templates/queue/request.md").read_text(encoding="utf-8")
+def _validate_templates(repository):
+    task = repository.read_text("templates/task/task.md")
+    request = repository.read_text("templates/queue/request.md")
     for token in ("**Claimed-by:**", "**Filed:**", "**Repository scope:**", "**Queue actions:**"):
         if token not in task:
             raise ValueError(f"task template lacks {token}")
@@ -516,14 +714,12 @@ def _render_request(template, occurrence, task_id, task_rel):
     return rendered
 
 
-def _task_id(repo, occurrence, today, done):
+def _task_id(repository, occurrence, today, done):
     base = f"{today}-investigate-{_slug(occurrence.gate_id, 24)}-test-budget-{finding_identity(occurrence)[:10]}"
     used = {record.task_id for record in done}
     all_statuses = TASK_STATUSES + ("4_done",)
     for status in all_statuses:
-        folder = repo / "tasks" / status
-        if folder.is_dir():
-            used.update(path.name for path in folder.iterdir())
+        used.update(repository.listdir(Path("tasks") / status, missing_ok=True))
     if base not in used:
         return base
     suffix = 1
@@ -570,24 +766,16 @@ def _parse_journal_bytes(data, identity):
     return tuple(records)
 
 
-def _open_pinned_journal(path, flags):
-    nofollow = getattr(os, "O_NOFOLLOW", None)
-    if not nofollow:
-        raise OSError(
-            getattr(errno, "ENOTSUP", errno.EPERM),
-            "safe timing evidence access requires O_NOFOLLOW",
-        )
-    flags |= nofollow | getattr(os, "O_NONBLOCK", 0)
-    descriptor = os.open(str(path), flags)
+def _open_pinned_journal(repository, relative, flags):
+    relative = Path(relative)
+    directory = repository.open_dir(relative.parent)
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise OSError(errno.EINVAL, "timing evidence journal is not a regular file")
+        descriptor, metadata = _open_regular_at(directory, relative.name, flags)
+        directory.verify()
+        return descriptor, metadata, directory
     except Exception:
-        with contextlib.suppress(OSError):
-            os.close(descriptor)
+        directory.close()
         raise
-    return descriptor, metadata
 
 
 def _journal_stat_signature(metadata):
@@ -610,7 +798,7 @@ def _read_descriptor_bytes(descriptor):
         chunks.append(chunk)
 
 
-def _snapshot_open_journal(descriptor, identity):
+def _snapshot_open_journal(descriptor, identity, directory_signature=()):
     before = os.fstat(descriptor)
     if not stat.S_ISREG(before.st_mode):
         raise OSError(errno.EINVAL, "timing evidence journal is not a regular file")
@@ -626,22 +814,30 @@ def _snapshot_open_journal(descriptor, identity):
         after.st_ino,
         data,
         _parse_journal_bytes(data, identity),
+        tuple(directory_signature),
     )
 
 
-def _read_journal_snapshot(path, identity):
+def _read_journal_snapshot(repository, relative, identity):
     try:
-        descriptor, _metadata = _open_pinned_journal(path, os.O_RDONLY)
+        descriptor, _metadata, directory = _open_pinned_journal(
+            repository, relative, os.O_RDONLY
+        )
     except FileNotFoundError:
         return None
     try:
-        return _snapshot_open_journal(descriptor, identity)
+        snapshot = _snapshot_open_journal(
+            descriptor, identity, directory.signatures
+        )
+        directory.verify()
+        return snapshot
     finally:
         os.close(descriptor)
+        directory.close()
 
 
-def _read_journal(path, identity):
-    snapshot = _read_journal_snapshot(path, identity)
+def _read_journal(repository, relative, identity):
+    snapshot = _read_journal_snapshot(repository, relative, identity)
     return () if snapshot is None else snapshot.records
 
 
@@ -650,10 +846,11 @@ def _same_journal(left, right):
         left.device == right.device
         and left.inode == right.inode
         and left.data == right.data
+        and left.directory_signature == right.directory_signature
     )
 
 
-def _append_journal_record(path, identity, state, expected):
+def _append_journal_record(repository, relative, identity, state, expected):
     """Append one bounded record without ever replacing actor-owned task bytes.
 
     The append descriptor is validated against the exact snapshot used to prepare
@@ -663,22 +860,30 @@ def _append_journal_record(path, identity, state, expected):
     if not isinstance(expected, _JournalSnapshot):
         raise ValueError("timing evidence append requires a validated journal snapshot")
     line = _journal_line(identity, state)
-    descriptor, _opened = _open_pinned_journal(path, os.O_RDWR | os.O_APPEND)
+    descriptor, _opened, directory = _open_pinned_journal(
+        repository, relative, os.O_RDWR | os.O_APPEND
+    )
     write_attempted = False
     result = None
     observed = None
     body_error = None
     try:
-        current = _snapshot_open_journal(descriptor, identity)
+        current = _snapshot_open_journal(
+            descriptor, identity, directory.signatures
+        )
         if not _same_journal(current, expected):
             result = False
         else:
+            directory.verify()
             write_attempted = True
+            repository.mutated = True
             written = os.write(descriptor, line)
             if written != len(line):
                 raise OSError("short atomic append to timing evidence journal")
             os.fsync(descriptor)
-            observed = _snapshot_open_journal(descriptor, identity)
+            observed = _snapshot_open_journal(
+                descriptor, identity, directory.signatures
+            )
             if (
                 observed.device != expected.device
                 or observed.inode != expected.inode
@@ -695,6 +900,11 @@ def _append_journal_record(path, identity, state, expected):
         os.close(descriptor)
     except OSError as error:
         close_error = error
+    try:
+        directory.close()
+    except OSError as error:
+        if close_error is None:
+            close_error = error
 
     if body_error is not None:
         if write_attempted and not isinstance(body_error, _PublicationFailure):
@@ -708,7 +918,7 @@ def _append_journal_record(path, identity, state, expected):
         return False
 
     try:
-        current = _read_journal_snapshot(path, identity)
+        current = _read_journal_snapshot(repository, relative, identity)
         if current is None or observed is None or not _same_journal(current, observed):
             raise ValueError("timing evidence journal path changed after append")
     except Exception as error:
@@ -716,139 +926,143 @@ def _append_journal_record(path, identity, state, expected):
     return True
 
 
-def _publish_exclusive_file(source, destination):
-    """Publish one complete file without replacing an actor-owned destination."""
+def _publish_exclusive_file(repository, parent_relative, name, payload, mode=0o644):
+    """Publish bytes exclusively beneath one pinned canonical directory."""
+    directory = repository.open_dir(parent_relative)
+    descriptor = None
     try:
-        os.link(str(source), str(destination))
-        return
-    except OSError as error:
-        unsupported = {
-            errno.EXDEV,
-            errno.EPERM,
-            getattr(errno, "ENOTSUP", errno.EPERM),
-            getattr(errno, "EOPNOTSUPP", errno.EPERM),
-            getattr(errno, "ENOSYS", errno.EPERM),
-        }
-        if error.errno not in unsupported:
-            raise _PublicationFailure(error, False) from error
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
-        mode = stat.S_IMODE(source.stat().st_mode)
-        descriptor = os.open(str(destination), flags, mode)
-    except OSError as error:
-        raise _PublicationFailure(error, False) from error
-    try:
-        with source.open("rb") as stream:
-            while True:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    break
-                offset = 0
-                while offset < len(chunk):
-                    written = os.write(descriptor, chunk[offset:])
-                    if written <= 0:
-                        raise OSError("short exclusive write")
-                    offset += written
+        directory.verify()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        descriptor, _metadata = _open_regular_at(
+            directory, name, flags, mode, repository
+        )
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset : offset + 64 * 1024])
+            if written <= 0:
+                raise OSError("short exclusive write")
+            offset += written
         os.fsync(descriptor)
+        directory.verify()
     except Exception as error:
-        with contextlib.suppress(OSError):
-            os.close(descriptor)
+        mutated = descriptor is not None or repository.mutated
+        if descriptor is not None:
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
+            descriptor = None
+        directory.close()
+        if isinstance(error, _PublicationFailure):
+            raise
+        raise _PublicationFailure(error, mutated) from error
+    try:
+        os.close(descriptor)
+    except OSError as error:
+        directory.close()
         raise _PublicationFailure(error, True) from error
-    os.close(descriptor)
+    directory.close()
 
 
-def _create_pair(repo, occurrence, key, task_id, prior_task_id):
+def _create_pair(repository, occurrence, key, task_id, prior_task_id):
     task_rel = Path("tasks/0_backlog") / task_id
     request_rel = (
         Path("message-queue/needs-agent/requests")
         / f"non-blocking-pick-up-{task_id[11:]}.md"
     )
-    task_path = repo / task_rel
-    request_path = repo / request_rel
-    scratch = repo / "tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
-    transaction = Path(tempfile.mkdtemp(prefix="test-budget-file-", dir=scratch))
-    staged_task = transaction / "task"
-    staged_task.mkdir()
-    staged_request = transaction / "request.md"
-    task_template, request_template = _validate_templates(repo)
+    task_path = repository.root / task_rel
+    request_path = repository.root / request_rel
+    task_template, request_template = _validate_templates(repository)
     initial_state = _state_for(occurrence)
-    (staged_task / "task.md").write_text(
-        _render_task(
-            task_template,
-            occurrence,
-            key,
-            task_id,
-            request_rel.as_posix(),
-            prior_task_id,
-        ),
-        encoding="utf-8",
-    )
-    (staged_task / JOURNAL_NAME).write_bytes(
-        _journal_line(finding_identity(occurrence), initial_state)
-    )
-    staged_request.write_text(
-        _render_request(request_template, occurrence, task_id, task_rel.as_posix()), encoding="utf-8"
-    )
-    task_path.parent.mkdir(parents=True, exist_ok=True)
-    request_path.parent.mkdir(parents=True, exist_ok=True)
+    task_payload = _render_task(
+        task_template,
+        occurrence,
+        key,
+        task_id,
+        request_rel.as_posix(),
+        prior_task_id,
+    ).encode("utf-8")
+    journal_payload = _journal_line(finding_identity(occurrence), initial_state)
+    request_payload = _render_request(
+        request_template, occurrence, task_id, task_rel.as_posix()
+    ).encode("utf-8")
+    task_parent = repository.open_dir(task_rel.parent, create=True)
+    task_parent.close()
+    request_parent = repository.open_dir(request_rel.parent, create=True)
+    request_parent.close()
     mutated = False
     try:
-        task_path.mkdir()
-        mutated = True
-        for name in ("task.md", JOURNAL_NAME):
-            destination = task_path / name
-            _publish_exclusive_file(staged_task / name, destination)
-        _publish_exclusive_file(staged_request, request_path)
+        with repository.open_dir(task_rel.parent) as parent:
+            parent.verify()
+            os.mkdir(task_id, mode=0o755, dir_fd=parent.descriptor)
+            repository.mutated = True
+            mutated = True
+            parent.verify()
+        _publish_exclusive_file(
+            repository, task_rel, "task.md", task_payload
+        )
+        _publish_exclusive_file(
+            repository, task_rel, JOURNAL_NAME, journal_payload
+        )
+        _publish_exclusive_file(
+            repository,
+            request_rel.parent,
+            request_rel.name,
+            request_payload,
+        )
     except _PublicationFailure as error:
         raise _PublicationFailure(
             error.cause,
-            mutated or error.mutated,
+            mutated or error.mutated or repository.mutated,
             task_path,
             request_path,
         ) from error
     except Exception as error:
         raise _PublicationFailure(
             error,
-            mutated,
+            mutated or repository.mutated,
             task_path,
             request_path,
         ) from error
-    finally:
-        with contextlib.suppress(OSError):
-            shutil.rmtree(transaction)
     return task_path, request_path
 
 
 @contextlib.contextmanager
-def _lock(repo, timeout):
-    scratch = repo / "tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
-    path = scratch / ".file-test-budget-task.lock"
-    stream = None
-    directory_lock = path.with_name(path.name + ".d")
+def _lock(repository, timeout):
+    scratch = repository.open_dir("tmp", create=True)
+    path_name = ".file-test-budget-task.lock"
+    descriptor = None
+    directory_lock_name = path_name + ".d"
     owns_directory = False
     deadline = time.monotonic() + max(0.0, timeout)
-    if _fcntl is not None:
-        stream = path.open("a+b")
-    elif _msvcrt is not None:
-        stream = path.open("a+b")
-        stream.seek(0, os.SEEK_END)
-        if stream.tell() == 0:
-            stream.write(b"\0")
-            stream.flush()
-        stream.seek(0)
     try:
+        if _fcntl is not None or _msvcrt is not None:
+            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+            try:
+                descriptor, _metadata = _open_regular_at(
+                    scratch, path_name, flags, mutation_owner=repository
+                )
+            except FileExistsError:
+                descriptor, _metadata = _open_regular_at(
+                    scratch, path_name, os.O_RDWR
+                )
+            scratch.verify()
+            if _fcntl is None and _msvcrt is not None:
+                if os.fstat(descriptor).st_size == 0:
+                    repository.mutated = True
+                    os.write(descriptor, b"\0")
+                    os.fsync(descriptor)
+                os.lseek(descriptor, 0, os.SEEK_SET)
         while True:
             try:
                 if _fcntl is not None:
-                    _fcntl.flock(stream.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                    _fcntl.flock(descriptor, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
                 elif _msvcrt is not None:
-                    _msvcrt.locking(stream.fileno(), _msvcrt.LK_NBLCK, 1)
+                    _msvcrt.locking(descriptor, _msvcrt.LK_NBLCK, 1)
                 else:
-                    directory_lock.mkdir()
+                    scratch.verify()
+                    os.mkdir(directory_lock_name, mode=0o700, dir_fd=scratch.descriptor)
+                    repository.mutated = True
                     owns_directory = True
+                    scratch.verify()
                 break
             except (BlockingIOError, FileExistsError, OSError) as error:
                 if isinstance(error, OSError) and getattr(error, "errno", None) not in (
@@ -858,19 +1072,30 @@ def _lock(repo, timeout):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("test-budget filer lock timed out")
                 time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+        scratch.verify()
         yield
     finally:
-        if stream is not None:
+        topology_error = None
+        try:
+            scratch.verify()
+        except OSError as error:
+            topology_error = error
+        with contextlib.suppress(OSError):
+            if descriptor is not None and _fcntl is not None:
+                _fcntl.flock(descriptor, _fcntl.LOCK_UN)
+            elif descriptor is not None and _msvcrt is not None:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                _msvcrt.locking(descriptor, _msvcrt.LK_UNLCK, 1)
+        if descriptor is not None:
             with contextlib.suppress(OSError):
-                if _fcntl is not None:
-                    _fcntl.flock(stream.fileno(), _fcntl.LOCK_UN)
-                elif _msvcrt is not None:
-                    stream.seek(0)
-                    _msvcrt.locking(stream.fileno(), _msvcrt.LK_UNLCK, 1)
-            stream.close()
+                os.close(descriptor)
         if owns_directory:
-            with contextlib.suppress(OSError):
-                directory_lock.rmdir()
+            if topology_error is None:
+                with contextlib.suppress(OSError):
+                    os.rmdir(directory_lock_name, dir_fd=scratch.descriptor)
+        scratch.close()
+        if topology_error is not None:
+            raise topology_error
 
 
 def _classify_os_error(error):
@@ -883,11 +1108,25 @@ def _classify_os_error(error):
     return "error"
 
 
-def _file_locked(repo, occurrence, today, key):
+def _request_relative(queue_value):
+    match = re.search(r"`([^`]+)`", queue_value)
+    if not match:
+        return None
+    relative = Path(match.group(1))
+    parts = _relative_parts(relative)
+    if parts[:3] != ("message-queue", "needs-agent", "requests"):
+        raise ValueError("generated pickup request path is outside its canonical queue")
+    return Path(*parts)
+
+
+def _file_locked(repository, occurrence, today, key):
+    repo = repository.root
     identity = finding_identity(occurrence)
     for _attempt in range(3):
-        records = _scan(repo, identity)
-        if _records_signature(records) != _records_signature(_scan(repo, identity)):
+        records = _scan(repository, identity)
+        if _records_signature(records) != _records_signature(
+            _scan(repository, identity)
+        ):
             continue
         open_records = tuple(record for record in records if record.status in TASK_STATUSES)
         done = tuple(record for record in records if record.status == "4_done")
@@ -901,10 +1140,15 @@ def _file_locked(repo, occurrence, today, key):
             record = open_records[0]
             task_file = record.task_dir / "task.md"
             queue_value = _field(record.text, "Queue actions")
-            request = None
-            match = re.search(r"`([^`]+)`", queue_value)
-            if match:
-                request = repo / match.group(1)
+            try:
+                request_relative = _request_relative(queue_value)
+            except ValueError as error:
+                return _result(
+                    "conflict", key, str(error), task_file, None, False, repo
+                )
+            request = (
+                repo / request_relative if request_relative is not None else None
+            )
             if not _generated_record(record, identity):
                 return _result(
                     "conflict", key,
@@ -912,16 +1156,19 @@ def _file_locked(repo, occurrence, today, key):
                     task_file, request, False, repo,
                 )
             if record.status == "0_backlog" and not _generated_backlog_request(
-                repo, record, request
+                repository, record, request_relative
             ):
                 return _result(
                     "conflict", key,
                     f"backlog task {record.task_id} lacks its generated pickup request",
                     task_file, request, False, repo,
                 )
-            journal = record.task_dir / JOURNAL_NAME
+            journal_relative = record.task_dir.relative_to(repo) / JOURNAL_NAME
+            journal = repo / journal_relative
             try:
-                snapshot = _read_journal_snapshot(journal, identity)
+                snapshot = _read_journal_snapshot(
+                    repository, journal_relative, identity
+                )
                 if snapshot is None or not snapshot.records:
                     raise ValueError("timing evidence journal is empty")
                 prior = snapshot.records[-1]
@@ -936,7 +1183,7 @@ def _file_locked(repo, occurrence, today, key):
             state = _state_for(occurrence, prior)
             try:
                 appended = _append_journal_record(
-                    journal, identity, state, snapshot
+                    repository, journal_relative, identity, state, snapshot
                 )
             except _PublicationFailure as error:
                 cause = error.cause
@@ -973,12 +1220,16 @@ def _file_locked(repo, occurrence, today, key):
                 )
             continue
 
-        _validate_templates(repo)
+        _validate_templates(repository)
         prior = max(done, key=_recurrence_order, default=None)
-        task_id = _task_id(repo, occurrence, today, done)
+        task_id = _task_id(repository, occurrence, today, done)
         try:
             task_path, request_path = _create_pair(
-                repo, occurrence, key, task_id, prior.task_id if prior else None
+                repository,
+                occurrence,
+                key,
+                task_id,
+                prior.task_id if prior else None,
             )
         except _PublicationFailure as error:
             cause = error.cause
@@ -1021,8 +1272,10 @@ def _file_locked(repo, occurrence, today, key):
 
 def file_budget_task(repo, occurrence, *, today=None, lock_timeout=1.0):
     """Best-effort filing entry point; never changes the gate's functional outcome."""
-    root = Path(repo).resolve()
+    supplied_root = Path(repo).absolute()
+    root = supplied_root.parent.resolve() / supplied_root.name
     fallback_key = "test-budget-invalid-occurrence"
+    repository = None
     try:
         normalized = _normalize_occurrence(occurrence, root)
         key = finding_key(normalized)
@@ -1033,20 +1286,31 @@ def file_budget_task(repo, occurrence, *, today=None, lock_timeout=1.0):
         else:
             filed_date = str(today)
             dt.date.fromisoformat(filed_date)
-        with _lock(root, float(lock_timeout)):
-            return _file_locked(root, normalized, filed_date, key)
+        with _PinnedRepository(root) as repository:
+            with _lock(repository, float(lock_timeout)):
+                return _file_locked(repository, normalized, filed_date, key)
     except TimeoutError as error:
-        return _result("lock-timeout", key, str(error), mutated=False, repo=root)
+        return _result(
+            "lock-timeout",
+            key,
+            str(error),
+            mutated=bool(repository and repository.mutated),
+            repo=root,
+        )
     except OSError as error:
         disposition = _classify_os_error(error)
         return _result(
             disposition, locals().get("key", fallback_key),
-            f"test-budget task filing failed: {error}", mutated=False, repo=root,
+            f"test-budget task filing failed: {error}",
+            mutated=bool(repository and repository.mutated),
+            repo=root,
         )
     except Exception as error:  # the performance side effect may never break the gate
         return _result(
             "error", locals().get("key", fallback_key),
-            f"test-budget task filing failed: {error}", mutated=False, repo=root,
+            f"test-budget task filing failed: {error}",
+            mutated=bool(repository and repository.mutated),
+            repo=root,
         )
 
 
