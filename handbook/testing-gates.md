@@ -44,6 +44,22 @@ do not count), and the target cannot exceed the maximum. A target breach is a
 performance finding; reaching the maximum ends remaining work. The only
 current breach action is `file-task`.
 
+The maximum is a decision deadline. It starts when the gate is invoked, before
+bootstrap discovery, freezing, materialization, sealing, and controller startup.
+It continues through every fallible gate operation, component cleanup, budget-task
+filing, final validation, and the one terminal outcome freeze. Atomic receipt,
+report, publication-marker, and stdout projection follows that freeze and is outside the measured
+decision interval: self-reporting cannot include its own completion in the value
+it reports. Slow or blocked external projection I/O can therefore make wall-clock
+return exceed the maximum, even without a bound supplied by the gate, but cannot
+change the already-frozen outcome.
+
+The bootstrap samples `CLOCK_MONOTONIC` with `clock_gettime` and hands that source
+and start value to the new controller process, so freezing and startup time cannot
+disappear across `exec`. On POSIX systems lacking that Python clock API, it falls
+back to the monotonic elapsed field from `os.times()`. A source mismatch, rollback,
+invalid value, or unavailable source blocks the gate.
+
 There are exactly two final modes. The starter uses `manual`, omits `trigger`,
 and runs only with an explicit command. Schema version 1 reserves `hard` with
 the sole syntax `trigger = "pull-request"` so future installations do not need
@@ -75,8 +91,14 @@ The installed pre-commit hook invokes the routine lane. It needs staged content
 because it tests an immutable copied Git index, not the live working tree:
 
 ```bash
-python3 automation/run_test_gate.py routine --staged
+python3 -I -S automation/run_test_gate.py routine --staged
 ```
+
+Use that isolated, no-site interpreter form for every direct gate invocation. The
+small bootstrap is standard-library-only and checks raw arguments before it imports
+any candidate-controlled module. Reserved automatic transitions and
+`--provider-hard` therefore fail before Git discovery, configuration loading,
+candidate imports, reports, receipts, or budget-task state are read.
 
 The routine gate runs core-scope admission, reconciliation, and the smallest
 known owned test set. It reports selected, deferred, and incomplete coverage.
@@ -88,7 +110,7 @@ maximum, prewarm exact full-suite evidence before committing:
 
 ```bash
 git add <candidate paths>
-python3 automation/run_test_gate.py final --explicit --staged
+python3 -I -S automation/run_test_gate.py final --explicit --staged
 git commit
 ```
 
@@ -109,28 +131,38 @@ another prewarm; there is no override for missing critical evidence.
 Run a complete final gate explicitly from a clean checkout:
 
 ```bash
-python3 automation/run_test_gate.py final --explicit
+python3 -I -S automation/run_test_gate.py final --explicit
 ```
 
-Explicit prewarming and routine testing use an immutable staged index. The
-parser retains exact-range arguments for the reserved future pull-request
-adapter, but this repository blocks every named transition before candidate
-execution.
-In every case, tests run in a separately materialized view and the
-report names both the candidate and tested-view digests. Source/index drift
-during a run blocks reuse rather than treating another view as equivalent.
+Explicit prewarming and routine testing use one immutable snapshot. The bootstrap
+copies and seals the selected index, materializes the controller from those staged
+objects, and hands both to that controller. The report records the bootstrap
+controller identity separately from the isolated child-interpreter identity. Each
+component gets a disposable copy of the sealed index and a sanitized Git/Python
+environment; mutations block the run and receipt rather than changing what a later
+component executes. All snapshot, index, report, receipt, publication-marker, and process-group scratch
+is cleaned on normal, failed, timed-out, interrupted, and bootstrap-error exits.
+
+The parser retains exact-range arguments for a future pull-request adapter, but
+this repository blocks every named transition before candidate execution. In every
+allowed run, tests use separately materialized views and the report names both the
+candidate and tested-view digests. Source, index, controller-closure, interpreter,
+or admitted-environment drift blocks reuse rather than treating another execution
+as equivalent.
 Tracked symlinks are rejected before materialization. Absolute, escaping,
 dangling, and looping links could otherwise introduce bytes outside the Git
 objects bound by the candidate and tested-view digests.
 
 Complete final or critical testing is a two-lane composite, not a test list supplied solely by
-the candidate. The base-pinned revision contributes an immutable anti-deletion floor: every discovered base
-test plus every file in those tests' directories is copied from exact base Git objects over the
-exact candidate product view. Only those reserved test directories are overlaid; a product file
-deleted elsewhere by the candidate stays deleted. Deleting, renaming, emptying, or shadowing a
-base test or helper therefore cannot remove the floor. Candidate-added or byte-changed tests run
-afterward as supplemental evidence from a separate exact candidate view. Each lane still gives
-every test file its own fresh sealed view and cleanup cycle.
+the candidate. The base-pinned revision contributes an immutable anti-deletion floor: every
+discovered base test plus every file in those test namespaces is copied from exact base Git
+objects over the exact candidate product view. Only those reserved namespaces are overlaid; a
+product file deleted elsewhere by the candidate stays deleted. Deleting, renaming, emptying, or
+shadowing a base test or helper therefore cannot remove the floor. Candidate-added or
+byte-changed tests run afterward as supplemental evidence from a separate exact candidate view.
+Candidate-only test namespaces are included in that supplemental lane, so moving new tests under
+a new directory cannot hide them. Each lane still gives every test file its own fresh sealed
+view and cleanup cycle.
 When only test files change, that lane runs exactly the changed or added candidate tests; if any
 non-test helper, fixture, path, mode, or byte changes beneath a base-pinned test namespace, it reruns
 every candidate test in that namespace.
@@ -145,11 +177,13 @@ or admit a protected transition.
 
 ### Automatic enforcement is intentionally unavailable
 
-The included workflow is the exact base-pinned manual snapshot. It keeps
-`pull_request_target` action projection and adds a credential-free
-`pull_request` complete-test diagnostic, but it contains no hard-gate job
-triad, publisher environment, GitHub App credential, status-writing authority,
-or required-check claim.
+The included workflow has three visible, non-enforcing diagnostics: push repository
+diagnostics, trusted pull-request core/merge diagnostics, and cooperative pull-request
+complete tests. It also retains the separate action-projection machinery. None of these
+jobs is a hard-gate publisher: the workflow contains no publisher environment, GitHub App
+credential, status-writing authority, or required-check claim. A candidate workflow file
+also cannot prove which workflow or branch/ruleset policy the provider actually used, so
+provider configuration must be inspected independently at the relevant time.
 
 The base-pinned test floor prevents a candidate from deleting or replacing the
 older test files and directory-local support bytes. It does not establish
@@ -173,16 +207,17 @@ verified, keep final mode manual.
 
 ## Results, receipts, and budget work
 
-Every invocation prints a human summary and writes a machine-readable v2 report
+Every invocation attempts to print a human summary and write a machine-readable v3 report
 under ignored `tmp/test-gate-reports/`. Its outcome has these exit codes:
 
-The measured interval starts before argument/candidate discovery and is
-re-accounted after report persistence, budget-task filing, and summary output.
-If one of those finalization steps crosses the maximum, the runner persists the
-stricter outcome, prints a final-outcome correction, and returns its blocking
-exit code. The duration stored in any atomic report necessarily stops at the
-measurement immediately before that particular persistence; later persistence
-and output are included by the following accounting pass.
+The measured decision interval starts at invocation, includes bootstrap and all
+fallible gate work, and ends when the runner freezes one gate outcome and gate exit
+code. Publication then has its own command outcome. Atomic receipt and pass-report
+projection occurs outside the interval, followed by stdout. The publication commit
+marker is atomically written last and attests that all prior projections succeeded.
+Projection cannot change the frozen gate
+decision, although its I/O may delay return beyond the maximum. A receipt, report,
+stdout, or marker failure makes the command return an error and prevents reuse.
 
 | Outcome | Exit code |
 | --- | ---: |
@@ -190,12 +225,20 @@ and output are included by the following accounting pass.
 | `blocked-failed` or `blocked-incomplete` | 1 |
 | `invalid` or `error` | 2 |
 
+The table maps the frozen gate outcome to `gate_exit_code`. The command normally
+returns that code. If post-freeze publication fails, `command_outcome` becomes
+`error` and the command returns 2 while the gate outcome and gate exit code remain
+unchanged; the incomplete publication is not reusable.
+
 Full-suite pass receipts are stored only in ignored
 `tmp/test-gate-receipts/`. A receipt can be reused only when its exact candidate
 and candidate-view fingerprints, base-pinned revision, immutable floor/support records,
 supplemental records, overlay algorithm and floor-view digest, full manifests, policy digest,
-runner revision, and Python/Git environment identity all match. Version 3 receipts bind the cooperative authority fields and invalidate
-the earlier candidate-only evidence. A selected routine
+controller closure, disposable-index identity, and controller/child Python and Git environment
+identity all match. Version 5 receipts require the matching terminal v3 pass report and the
+matching v1 publication commit marker written last. The marker binds both file digests, their
+paths, publication id, candidate identity, and authority. A missing or mismatched member makes
+the evidence ineligible; older receipts and earlier overlay plans are invalid. A selected routine
 test result is not a reusable full receipt; a different index, working tree, or
 commit is never covered by an earlier receipt.
 
@@ -236,7 +279,9 @@ and preserves the gate's functional exit status.
 
 ## Compatibility
 
-The runner supports CPython 3.7 or newer on POSIX and Windows clones. It uses
+The runner supports CPython 3.7 or newer on POSIX. Windows is unsupported because
+the gate depends on POSIX process-containment and cross-process monotonic-clock
+primitives; no Windows cleanup or budget-boundary claim is made. The runner uses
 the standard library plus the pinned, policy-free Tomli 2.0.1 parser vendored
 with the automation code;
 no package installation is required to parse `agentfold.toml`. Evidence-journal

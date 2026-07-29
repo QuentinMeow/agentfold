@@ -35,9 +35,12 @@ need only focused evidence.
 The system will have two plainly named lanes:
 
 - **Routine gate:** automatically runs the smallest safe checks for the candidate change.
-  Its default end-to-end budget is 60 seconds, including admission, reconciliation, test
-  selection, and selected tests. Reversible coverage that cannot finish in the budget is
-  reported as deferred to the final gate, never mislabeled as complete.
+  Its default decision budget is 60 seconds from invocation through bootstrap, admission,
+  reconciliation, test selection, selected tests, cleanup, filing, validation, and terminal
+  outcome freeze. Atomic report, receipt, publication-marker, and stdout projection follows that
+  boundary and can delay process return without changing the frozen gate decision; publication
+  failure still makes the command fail and prevents cache reuse. Reversible coverage that cannot
+  finish in the decision budget is reported as deferred, never mislabeled as complete.
 - **Final gate:** runs complete verification only when explicitly requested. The starter is
   manual because the included same-interpreter runner cannot independently prove controlled
   completion. An exact matching result may be reused instead of running the same suite twice.
@@ -47,6 +50,19 @@ external publication, production deployment, or other configured one-way-door sc
 reversible deferral is unavailable. Automatic critical transitions remain unavailable and
 blocked in this task; cooperative manual evidence must not be promoted into enforcement proof.
 
+## Current state
+
+The six blockers from the unanimous review of `e530c428..64490ab5` have been repaired in the
+staged candidate and covered by focused checks. Three follow-up repair reviews found and fixed
+additional snapshot, cleanup, terminal-publication, and interpreter-identity edges. Report schema
+v3, receipt schema v5, publication-commit schema v1, composite-plan schema v2, and the
+union-namespace overlay algorithm make
+older local evidence ineligible for reuse.
+
+This is not a completion claim. The repaired production candidate has not yet passed a fresh
+exact final gate or full repository suite, has not been committed, and has not received the
+required fresh revision-bound merge review. The task therefore remains in progress.
+
 ## Acceptance criteria
 
 - [ ] A documented, versioned repository config defines the routine-gate target, final-gate
@@ -54,8 +70,9 @@ blocked in this task; cooperative manual evidence must not be promoted into enfo
       budget breach. The starter routine target is 60 seconds; invalid or unknown safety-
       relevant values fail with a specific explanation.
 - [ ] WHEN a representative small reversible service change or automation change enters the
-      routine gate, THE SYSTEM SHALL report a result within the configured end-to-end budget,
-      including the checks run, the checks deferred, the reason, and wall-clock time.
+      routine gate, THE SYSTEM SHALL freeze a result within the configured decision budget and
+      report the checks run, checks deferred, reason, and measured decision time. Post-freeze
+      projection may delay wall-clock return but may not change that result.
 - [ ] WHEN routine work reaches its budget before all noncritical coverage completes, THE
       SYSTEM SHALL stop or avoid the remaining work, mark that coverage as deferred, and
       require it at the configured final boundary rather than claiming a full pass.
@@ -65,8 +82,9 @@ blocked in this task; cooperative manual evidence must not be promoted into enfo
       are installed by the two follow-up tasks. No supported setting silently turns the complete
       suite back into an every-commit gate.
 - [ ] Final evidence and cached evidence bind to the exact tested bytes, test manifest,
-      policy configuration, runner version, and relevant toolchain identity. A changed input
-      invalidates reuse.
+      policy configuration, runner version, and relevant toolchain identity. Reuse also requires
+      one matching v5 receipt, terminal pass report, and last-written publication marker. A
+      changed or missing input invalidates reuse.
 - [ ] Complete results from the included same-interpreter runner are labeled cooperative and
       `enforcement_eligible: false`; they can support a maintainer's manual judgment but cannot
       authorize an automatic transition.
