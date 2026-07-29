@@ -2196,11 +2196,21 @@ class TestGateTests(unittest.TestCase):
             repo = Path(scratch) / "repo"
             self._make_gate_bootstrap_repository(repo)
             policy = repo / "agentfold.toml"
-            policy.write_text(
+            policy_text = (
                 policy.read_text()
                 .replace("target_seconds = 60", "target_seconds = 10", 1)
                 .replace("maximum_seconds = 60", "maximum_seconds = 10", 1)
             )
+            reversible = policy_text.index("[[testing.risk.reversible]]")
+            globs = policy_text.index("path_globs = [", reversible)
+            insertion = globs + len("path_globs = [")
+            policy_text = (
+                policy_text[:insertion]
+                + '\n  "automation/tests/test_smoke.py",'
+                + '\n  "automation/tests/test_stable.py",'
+                + policy_text[insertion:]
+            )
+            policy.write_text(policy_text)
             for relative in (
                 "automation/check_core_scope.py",
                 "automation/reconcile/reconcile.py",
