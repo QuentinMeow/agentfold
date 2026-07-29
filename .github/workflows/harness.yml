@@ -16,18 +16,19 @@ on:
 permissions: {}
 
 jobs:
-  reconcile-and-test:
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+  push-repository-diagnostics:
+    name: Push repository diagnostics (not a merge gate)
+    if: ${{ github.event_name == 'push' }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Checkout pushed repository revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Reconciler — every harness invariant holds
-        if: github.event_name == 'push'
         env:
           QUEUE_PUSH_BEFORE: ${{ github.event.before }}
           QUEUE_PUSH_HEAD: ${{ github.sha }}
@@ -55,8 +56,115 @@ jobs:
             --branch "$QUEUE_PUSH_BRANCH" \
             --range "$QUEUE_CHANGE_RANGE" \
             "${QUEUE_DISPLACED_ARGS[@]}"
+
+  trusted-pr-merge-diagnostics:
+    name: PR core and merge diagnostics (non-enforcing)
+    if: ${{ github.event_name == 'pull_request_target' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted pull-request base diagnostics
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch and verify exact pull-request merge candidate
+        id: trusted-pr-merge
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_DIAGNOSTIC_ACTION: ${{ github.event.action }}
+          MERGE_DIAGNOSTIC_BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE_DIAGNOSTIC_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_DIAGNOSTIC_CANDIDATE: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGE_DIAGNOSTIC_PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_DIAGNOSTIC_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
+          test -n "$MERGE_DIAGNOSTIC_BASE"
+          test -n "$MERGE_DIAGNOSTIC_HEAD"
+          test -n "$MERGE_DIAGNOSTIC_CANDIDATE"
+          test "$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )" = "$MERGE_DIAGNOSTIC_BASE"
+          AUTH_HEADER="$(
+            printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n'
+          )"
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            fetch --no-tags origin \
+            "+refs/pull/$MERGE_DIAGNOSTIC_PR_NUMBER/merge:refs/agentfold/diagnostics/pr-merge"
+          MERGE_DIAGNOSTIC_FETCHED="$(
+            git --no-replace-objects rev-parse --verify \
+              "refs/agentfold/diagnostics/pr-merge^{commit}"
+          )"
+          test "$MERGE_DIAGNOSTIC_FETCHED" = "$MERGE_DIAGNOSTIC_CANDIDATE"
+          test "$(
+            git --no-replace-objects rev-parse --verify \
+              "$MERGE_DIAGNOSTIC_CANDIDATE^1"
+          )" = "$MERGE_DIAGNOSTIC_BASE"
+          test "$(
+            git --no-replace-objects rev-parse --verify \
+              "$MERGE_DIAGNOSTIC_CANDIDATE^2"
+          )" = "$MERGE_DIAGNOSTIC_HEAD"
+          test "$(
+            git --no-replace-objects rev-list --parents -n 1 \
+              "$MERGE_DIAGNOSTIC_CANDIDATE" | wc -w | tr -d ' '
+          )" = 3
+          if [ "$MERGE_DIAGNOSTIC_ACTION" = synchronize ]; then
+            test -n "$MERGE_DIAGNOSTIC_DISPLACED_TIP"
+            test "$MERGE_DIAGNOSTIC_DISPLACED_TIP" != \
+              "0000000000000000000000000000000000000000"
+            if ! git cat-file -e \
+                "$MERGE_DIAGNOSTIC_DISPLACED_TIP^{commit}" 2>/dev/null; then
+              git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+                fetch --no-tags origin "$MERGE_DIAGNOSTIC_DISPLACED_TIP"
+            fi
+            git cat-file -e "$MERGE_DIAGNOSTIC_DISPLACED_TIP^{commit}"
+          else
+            test -z "$MERGE_DIAGNOSTIC_DISPLACED_TIP"
+          fi
+          unset AUTH_HEADER GITHUB_TOKEN
+          printf 'candidate=%s\n' "$MERGE_DIAGNOSTIC_CANDIDATE" \
+            >> "$GITHUB_OUTPUT"
+      - name: Run trusted core and merge diagnostics
+        env:
+          MERGE_DIAGNOSTIC_ACTION: ${{ github.event.action }}
+          MERGE_DIAGNOSTIC_BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE_DIAGNOSTIC_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGE_DIAGNOSTIC_CANDIDATE: ${{ steps.trusted-pr-merge.outputs.candidate }}
+          MERGE_DIAGNOSTIC_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
+          test "$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )" = "$MERGE_DIAGNOSTIC_BASE"
+          python3 automation/check_core_scope.py \
+            --range "$MERGE_DIAGNOSTIC_BASE...$MERGE_DIAGNOSTIC_CANDIDATE" \
+            --branch "$MERGE_DIAGNOSTIC_BRANCH"
+          MERGE_DIAGNOSTIC_DISPLACED_ARGS=()
+          if [ "$MERGE_DIAGNOSTIC_ACTION" = synchronize ]; then
+            MERGE_DIAGNOSTIC_DISPLACED_ARGS=(
+              --displaced-tip "$MERGE_DIAGNOSTIC_DISPLACED_TIP"
+            )
+          fi
+          python3 automation/reconcile/reconcile.py --check \
+            --at-transition merge \
+            --range "$MERGE_DIAGNOSTIC_BASE...$MERGE_DIAGNOSTIC_CANDIDATE" \
+            --branch "$MERGE_DIAGNOSTIC_BRANCH" \
+            "${MERGE_DIAGNOSTIC_DISPLACED_ARGS[@]}"
+
+  cooperative-pr-complete-test-diagnostics:
+    name: Cooperative PR complete tests (not a merge gate)
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cooperative pull-request candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Complete test diagnostics — pull requests
-        if: github.event_name == 'pull_request'
         run: python3 automation/run_tests.py
 
   authoritative-external-action-projection:
