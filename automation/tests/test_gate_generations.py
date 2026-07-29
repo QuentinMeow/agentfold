@@ -63,7 +63,7 @@ DEADLINE_RECORDS = tuple(sorted((
     ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
     ("automation/run_test_gate.py", "100644", "f11b9ca71684b18b9dd3be913f95a5b27662b8f6f0ccece304945a06540a8a88"),
     ("automation/run_tests.py", "100644", "fadefe0bb6ca063c6fbbf03a2c3fc010287d4466161ab2b564501ff4aeaf5cda"),
-    ("automation/test_gate_controller.py", "100644", "c74be39d8e275157c0e820b28251593369b843846554594e06ac22e3d963c611"),
+    ("automation/test_gate_controller.py", "100644", "d52f5ce066d0415250678d9d2a8e5c32b0a6deeb1a8dcf7f988483fba6f5772c"),
 )))
 
 CLASSIFIED_PATHS = tuple(record[0] for record in LEGACY_RECORDS)
