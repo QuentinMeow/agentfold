@@ -41,5 +41,21 @@ two generated timing journals remained deliberately unstaged. Test-only bridge c
 `8cd250c` and `84c4a90` admitted the exact repaired generation across the trusted base floor.
 Candidate `d9d630b3…` then passed the explicit final gate with 18 selected files and no deferred
 or incomplete coverage, and the unchanged normal hook reused its full receipt before creating
-product commit `d966c19`. A fresh five-reviewer panel over the committed records tip is the only
-remaining requirement before this retry can be resolved.
+product commit `d966c19`.
+
+The following five-reviewer panel found five more valid blockers: overly broad reversible path
+ownership, repository-local Git identity outside receipt inputs, lost policy facts on a static
+post-policy timeout, overwrite-prone concurrent budget-task filing, and quote-specific service
+ownership. The current repair narrows the policy, fixes and binds isolated Git identity, retains
+validated policy and candidate facts in static timeout claims, publishes canonical pairs
+exclusively without later pathname deletion, and configures generic service dependencies.
+
+Three pre-final rereviews found and repaired five more defects: the dependency key needed a
+trusted parser floor; safe Git identity variables were filtered before the bound component
+environment; rollback still had pathname races; static duration used the maximum rather than an
+observation; and static stdout could block. Exact dual-generation bridges `5397fc5` and
+`68af0e4` landed first. Two exact parser-floor attempts failed honestly on the bridge gaps; the
+third passed candidate `c122a31f…` in 442.08 seconds, and normal hook reuse created `236b90d`
+in 17.29 seconds. The remaining repair passes 28 filer tests, 41 deadline tests, and 42 exact
+configuration/generation tests. Its expanded focused set, exact final gate, normal commit, and a
+fresh no-blocker panel remain required before this retry can be resolved.

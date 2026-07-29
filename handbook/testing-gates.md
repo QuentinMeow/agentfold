@@ -17,6 +17,7 @@ schema_version = 1
 [testing.routine]
 target_seconds = 60
 maximum_seconds = 60
+service_dependencies = { quote-api = ["quote-cli"] }
 
 [testing.final]
 mode = "manual"
@@ -36,7 +37,7 @@ required_check_ids = ["core-scope", "reconcile", "repository-tests/full"]
 
 [[testing.risk.reversible]]
 id = "ordinary-repository-work"
-path_globs = ["services/**"]
+path_globs = ["services/quote-api/quote_api.py"]
 ```
 
 `target_seconds` and `maximum_seconds` are positive, finite numbers (booleans
@@ -75,6 +76,17 @@ duration, or its gate exit code. Publication failure can still make the overall 
 error and prevents receipt reuse. Slow external projection I/O may therefore make wall-clock
 return exceed the maximum without changing the already-frozen gate result.
 
+If the worker itself misses the absolute boundary, the supervisor freezes and flushes a static
+blocked decision with the already-validated policy digest, target, maximum, candidate-index
+identity, and elapsed time sampled from the invocation clock at the freeze boundary. If that
+measurement is unavailable or contradicts the proven deadline crossing, duration is null rather
+than replaced by the configured maximum. A killable writer gives the static claim a separate
+bounded delivery attempt; failure returns command error 2, always cleans the worker, and does not
+file because the claim was not sent. After successful delivery, cleanup, timing-task filing, and
+human telemetry have separate bounds and cannot rewrite the frozen decision. A timeout before a
+valid policy frame has no authoritative budget or candidate identity, so it does not guess either
+value or invoke the filer.
+
 The supervisor samples `CLOCK_MONOTONIC` with `clock_gettime` and hands that source,
 start value, and absolute deadline to the worker and controller, so freezing and startup time cannot
 disappear across `exec`. On POSIX systems lacking that Python clock API, it falls
@@ -102,6 +114,22 @@ critical category exactly once: `credentials-and-secrets`, `pii`,
 ids: `core-scope`, `reconcile`, and/or **repository-tests/full**. Reversible
 bindings have a unique kebab-case `id` and nonempty globs. A critical match
 wins over a reversible match; unmatched paths are always critical.
+
+Risk classification is path-based ownership, not semantic analysis. A reversible glob is an
+affirmative claim that changes to every matched path are eligible for deferred coverage. Avoid
+broad executable-root globs such as `services/**` or `automation/**`; enumerate known-reversible
+files or narrow subtrees so newly introduced paths fail closed. If an ordinary file gains
+credential, authorization, destructive, publication, deployment, or PII responsibility, add its
+critical binding in the same candidate. The base/candidate policy union then applies the stricter
+classification to that change. The starter treats `agentfold.toml` and the complete test-gate
+execution, parser, hook, filing, and manifest closure as authorization-sensitive control-plane
+paths.
+
+`testing.routine.service_dependencies` is a closed map from a lowercase kebab-case service name
+to downstream services whose tests must also run. Any path under `services/<name>/` owns tests
+under `services/<name>/tests/` without an automation-code change; dependencies are followed
+transitively. Base and candidate dependency edges are unioned, so a policy edit cannot remove
+coverage from the candidate that edits it.
 
 The gate validates the policy before it runs. For a candidate that changes the
 policy, it classifies paths against both the base-pinned and candidate policy;
@@ -148,7 +176,12 @@ subsequent routine gate still runs admission and reconciliation inside its own
 ids, modes, paths, base, tested view, test manifest, policy, runner bytes, and
 the sanitized component-environment identity are unchanged. Inherited `PYTHON*`
 settings are removed; fixed isolated/no-site interpreter flags and the remaining admitted
-environment are bound instead.
+environment are bound instead. Caller-supplied `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values pass through the component boundary and
+remain bound.
+When they are absent, the test runner supplies a fixed `AgentFold Tests` identity rather than
+reading repository-local or user-global Git configuration, so those untracked settings cannot
+silently change a cached test execution.
 Restaging changed content or topology invalidates that binding and requires
 another prewarm; there is no override for missing critical evidence.
 
@@ -261,6 +294,7 @@ When the supervisor must return a static v4 result instead, it reports elapsed t
 same invocation clock when that measurement remains available; otherwise the value is null. It
 also records whether a worker started and whether process-group and ownership-token cleanup were
 attempted, their observed results, and whether token discovery was complete, best-effort, or
+unavailable. Deadline crossing still proves the target and maximum were exceeded when duration is
 unavailable. A post-start timeout never reports zero duration or claims that no process started.
 
 Full-suite pass receipts are stored only in ignored
@@ -311,7 +345,11 @@ outcome, stages nothing, and does not require the tests to run a second time. Ne
 records are rendered from the repository's canonical task and request templates. The
 task body remains stable after filing; later occurrences are bounded JSON records in
 task-local `timing-evidence.jsonl`, appended without replacing actor-written task
-bytes. In a read-only checkout, the report records the filing disposition instead of
+bytes. Initial task and request publication uses no-replace creation. Once any canonical path is
+created, a later failure never deletes or rolls it back by pathname: the filer reports the real
+mutation and leaves the partial pair visible rather than risking another actor's replacement.
+An open backlog task is refreshed only while its reciprocal generated pickup request is still
+present and valid. In a read-only checkout, the report records the filing disposition instead of
 failing a successful gate. A filing timeout records an unknown mutation state because
 the helper may have started a write. If the report path itself is unwritable, the human
 summary says the machine report is unavailable and preserves the gate's functional

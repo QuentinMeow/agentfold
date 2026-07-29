@@ -4,6 +4,7 @@ schema_version = 1
 [testing.routine]
 target_seconds = 60
 maximum_seconds = 60
+service_dependencies = { quote-api = ["quote-cli"] }
 
 [testing.final]
 mode = "manual"

@@ -86,8 +86,31 @@ intended deadline generation without weakening its one-generation admission rule
 candidate `d9d630b39a883946fa8b07e9c444a889a0144cfcf90fd1302385f50b0829c9d1` passed the explicit
 final gate in 657.548652 seconds with 18 selected files and no deferred or incomplete work. The
 unchanged normal hook reused that full receipt and created product commit `d966c19` in 24.56
-seconds. The only remaining merge boundary is a fresh five-reviewer revision-bound panel. The
-live retry continues to block merge until that review succeeds.
+seconds.
+
+The following five-reviewer panel found five further merge blockers: broad reversible path
+patterns could defer authorization changes; repository-local Git identity was an unbound test
+input; a post-policy supervisor timeout discarded known policy and target facts; concurrent
+budget-task filing could overwrite another actor's files; and routine service ownership was
+hard-coded to the example quote services. The current candidate repairs all five with narrow
+path bindings, a fixed isolated fallback identity, policy-preserving static timeout reports,
+exclusive no-delete publication, and configured generic service dependencies.
+
+Three focused Sol rereviews then found five pre-final defects: the trusted base parser could not
+read the new dependency key; caller Git identity was filtered before the receipt-bound component
+environment; pathname rollback still had check/use deletion races; static timeout duration was
+substituted with the configured maximum; and a full stdout pipe could block static claim delivery.
+The parser and hardened risk policy landed first through exact dual-generation test bridges
+`5397fc5` and `68af0e4`. Two exact runs exposed those bridge needs and failed honestly; the
+third passed candidate `c122a31f…` in 442.08 seconds, and the normal hook reused its receipt
+before creating compatibility-floor commit `236b90d` in 17.29 seconds.
+
+The remaining candidate now passes 42 exact configuration/generation tests, 28 publication
+tests, and 41 static-deadline tests. It admits the four safe Git identity variables, never deletes
+a published canonical path on failure, records real freeze-time duration, and uses a killable
+bounded writer for supervisor-static output. A new exact final gate, normal receipt-reusing
+commit, and fresh five-reviewer panel remain required. The live retry continues to block merge
+until those boundaries succeed.
 
 ## Acceptance criteria
 

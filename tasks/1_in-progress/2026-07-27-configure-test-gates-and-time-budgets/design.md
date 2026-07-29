@@ -41,10 +41,23 @@ Critical rules contain path globs and required checks. Reversible rules name ord
 A critical match wins, and an unmatched path is critical. These are explicit path bindings, not
 a claim that filenames can discover every security-sensitive semantic change.
 
+Reversible bindings are deliberately narrow. Configuration, hooks, gate launchers, policy
+parsing, selection, manifests, and budget-task publication are critical authorization paths;
+ordinary reversible entries name the exact known support and example-service files. New paths
+are therefore critical until the policy change that classifies them is present in the same
+candidate and survives the base/candidate policy union. The gate performs no semantic inference
+from source text.
+
 When the candidate changes `agentfold.toml`, the gate evaluates both the trusted base policy and
 the candidate policy. The stricter classification and smaller time limits win. Policy identity
 is the SHA-256 of normalized policy data, so formatting does not change identity but a semantic
 change does.
+
+Routine service selection follows the portable `services/<name>/tests` convention. The closed
+routine policy may declare downstream service dependencies; the base/candidate union retains
+every edge from either policy, and selection takes their transitive closure. The starter policy
+states that `quote-cli` depends on `quote-api`, but the controller contains no quote-specific
+ownership rule.
 
 ## One captured candidate
 
@@ -151,6 +164,21 @@ When timing or process facts cannot be observed, they are null or explicitly una
 than fabricated. Post-start failures include the worker-started fact plus process-group and
 ownership-token cleanup attempts, results, and discovery completeness.
 
+Once the supervisor has validated a policy frame, a later static timeout retains the candidate,
+lane, target, maximum, policy, and semantic index facts already known. It freezes and flushes the
+decision before cleanup and before a separately bounded budget-task filing attempt. A filing
+timeout reports unknown mutation and cannot rewrite the claim. Pre-policy failures do not invent
+those facts or file a policy-directed task.
+
+Static duration is sampled once from the invocation clock at freeze time; the configured maximum
+is never substituted for an observation. Reaching the validated absolute deadline proves the
+target and maximum were exceeded even if the clock becomes unavailable, but unavailable or
+contradictory elapsed time remains null and is not sent to the filer. Static stdout uses a
+killable bounded writer child. Failed claim delivery returns a command error, still cleans the
+worker, and skips filing; post-claim telemetry uses the same bounded mechanism. Timeout cleanup
+sends `SIGKILL` and performs only nonblocking reap observation, so an uninterruptible writer
+cannot recreate an unbounded wait after the delivery deadline.
+
 A reusable evidence set consists of a matching v6 receipt, terminal v4 pass report, and v1
 publication commit marker. The marker binds both file digests, paths, publication id, candidate,
 and evidence authority, and is written last. The receipt also binds the candidate closure,
@@ -164,6 +192,12 @@ reused at a later start time. It is an
 exact cooperative cache entry, not an authorization artifact. Different bytes, topology, tools,
 or admitted environment require another complete run.
 
+Isolated test execution uses a fixed repository-independent fallback Git author and committer.
+Exactly `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and
+`GIT_COMMITTER_EMAIL` may be supplied by the caller; they survive the component allowlist and
+remain part of the bound environment. Local or global Git configuration is never consulted as a
+hidden execution input.
+
 The whole decision interval is measured. Reversible routine work that cannot finish is reported
 as deferred. Selected execution ends early enough to leave explicit bounded intervals for
 process cleanup, final validation, and worker-to-supervisor terminal brokering; the old
@@ -172,6 +206,12 @@ or critical work blocks. After the claim freezes, a target breach starts a bound
 create or refresh one non-blocking investigation task from canonical templates and append timing
 evidence. The filer never stages or commits the result, and its outcome cannot alter the frozen
 gate result. Post-claim filing and projection latency are not gate decision time.
+
+Budget-task creation publishes every canonical file exclusively. It first claims a new task
+directory, then uses hard-link or exclusive-create publication without replacement. Once any
+canonical path exists, error handling never unlinks, removes, replaces, or recursively deletes
+it: a partial state is reported truthfully as mutated and later scans require a valid reciprocal
+request before treating the task as deduplicated evidence. Private scratch remains removable.
 
 ## Provider boundary
 

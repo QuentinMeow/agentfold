@@ -1770,3 +1770,201 @@ pre-commit: OK
 
 Still pending: the fresh five-reviewer revision-bound panel. The merge retry remains live until
 that committed revision receives no valid blocker.
+
+## Five-panel blocker repair — focused evidence
+
+The first fresh panel over `e530c428..8fcebbe` returned five blocking findings. The repaired
+candidate narrows reversible path ownership, uses a fixed repository-independent Git identity,
+retains validated policy facts on post-policy supervisor timeouts, publishes task/request pairs
+exclusively with inode-owned rollback, and derives service test ownership from the generic
+directory convention plus configured dependencies.
+
+```
+$ python3 -m unittest automation.tests.test_test_gate_config
+Ran 32 tests — OK
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 53 tests — OK
+
+$ python3 -m unittest automation.tests.test_file_test_budget_task
+Ran 25 tests — OK
+
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol
+Ran 36 tests — OK
+
+$ python3 -m unittest automation.tests.test_gate_generations
+Ran 6 tests — OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 104 tests in 31.12s — OK (skipped=1)
+
+$ python3 -m unittest -v \
+    automation.tests.test_run_test_gate.TestGateTests.test_routine_without_receipt_brokers_deferred_before_deadline
+Ran 1 test in 6.620s — OK
+
+$ python3 -m py_compile automation/file_test_budget_task.py automation/run_test_gate.py \
+    automation/run_tests.py automation/test_gate_config.py automation/test_gate_controller.py
+<no output; exit 0>
+```
+
+The complete gate-module and named integration commands required read-only process-table access
+on macOS. Their restricted-sandbox attempts failed only in the existing fail-closed descendant-
+cleanup observability path; the unchanged commands passed when that access was available. These
+focused results are not the new exact final candidate evidence. The explicit final gate, normal
+receipt-reusing product commit, and a fresh revision-bound panel remain pending.
+
+## Pre-final rereview, bridge failures, and parser-floor pass
+
+Three independent Sol rereviews found five blockers before the remaining repair reached its final
+gate: trusted-parser schema migration, real Git-identity propagation, canonical rollback races,
+fabricated static duration, and unbounded static stdout. The repaired focused modules report:
+
+```
+$ python3 -m unittest automation.tests.test_file_test_budget_task
+Ran 28 tests — OK
+
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol
+Ran 40 tests — OK
+
+$ python3 -m unittest automation.tests.test_test_gate_config automation.tests.test_gate_generations
+Ran 42 tests in 0.253s — OK
+```
+
+The first exact parser-floor candidate failed honestly after 339.073960 seconds because the
+base-pinned generation and old risk tests did not know that endpoint. Bridge `5397fc5` passed
+its normal hook. The second exact candidate failed honestly after 384.722009 seconds because the
+base-pinned no-receipt timeout fixture inherited the newly narrow policy and became critical.
+Bridge `68af0e4` made that synthetic policy explicit; its focused integration passed in 6.741
+seconds and its normal hook returned a permitted deferred result in 56.67 seconds.
+
+The exact parser floor then passed and was committed without changing staged bytes:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: c122a31f489246377123e2f343a38d4629f790ce4c03f5cfbd0d562a8de4714b
+component timings:
+  core-scope: pass (executed, 0.41s)
+  reconcile: pass (executed, 8.43s)
+  repository-tests/base-pinned-floor: pass (executed, 429.08s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 442.08s
+gate exit: 0
+
+$ git commit -m "fix: establish policy parser compatibility floor" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 17.29s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 236b90d] fix: establish policy parser compatibility floor
+```
+
+These results verify the compatibility base only. The restored remaining review repair still
+requires its expanded focused set, exact final gate, normal commit, and fresh panel.
+
+## Expanded focused verification for the remaining repair
+
+```
+$ python3 -m unittest automation.tests.test_test_gate_config automation.tests.test_gate_generations
+Ran 42 tests in 0.331s — OK
+
+$ python3 -m unittest automation.tests.test_file_test_budget_task
+Ran 28 tests in 1.196s — OK
+
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol
+Ran 40 tests in 0.544s — OK
+
+$ python3 -m unittest automation.tests.test_run_tests
+Ran 53 tests in 3.181s — OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 105 tests in 36.752s — OK (skipped=1)
+```
+
+The first 105-test run failed one assertion and errored twice in test fixtures: two positional
+policy constructors put dependencies in the final-policy slot, and the real prewarm fixture did
+not hold its newly admitted Git identity constant across the direct final command and the Git
+hook. Keyword construction, explicit synthetic-path policy, and one shared four-variable identity
+environment repaired the fixtures. The three named regressions then passed in 6.913 seconds and
+the complete 105-test module passed as recorded above. The exact final candidate gate is still
+pending.
+
+## Final blocker-only focused rereview
+
+Security and correctness/cache reviewers approved exact staged tree `683e0138…`. The
+concurrency reviewer found one blocker: after a bounded static writer timed out and received
+`SIGKILL`, the supervisor still used blocking `waitpid(..., 0)`. The repair performs only a
+nonblocking reap observation and returns immediately if the child remains unavailable.
+
+```
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol \
+    automation.tests.test_gate_generations automation.tests.test_test_gate_config
+Ran 83 tests in 0.621s — OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+Ran 105 tests in 30.231s — OK (skipped=1)
+```
+
+The exact final candidate gate remains pending after this last staged runtime change.
+
+## Base-pinned final-repair bridge and committed compatibility floor
+
+The first explicit final run for the complete remaining repair blocked after 267.99 seconds.
+The focused candidate tests were already passing, but the committed base-pinned tests still
+asserted the parser-compatible endpoint: rollback after a failed pair write, direct static
+stdout, repository-configured Git identity, quote-specific ownership, and the earlier admitted
+runtime hashes. Those failures were a migration-order defect, so no product commit was made.
+
+Six test files now admit exactly the parser-compatible product tuple or the review-repair tuple
+and reject every mixed tuple before importing product code. At the parser-compatible endpoint
+they retain the historical assertions; at the review-repair endpoint they exercise exclusive
+no-delete publication, bounded forked output, fixed and caller-supplied Git identity, generic
+service ownership, configured dependency closure, and receipt-bound safe environment values.
+Independent endpoint checks passed 73 publication/deadline tests at the parser-compatible
+endpoint and 73 at the review-repair endpoint with endpoint-specific skips. Runner checks passed
+53/53 at both endpoints, and a deliberate hybrid was rejected. The combined review-repair
+focused command passed when macOS process-table observation was available:
+
+```
+$ python3 -m unittest automation.tests.test_gate_generations \
+    automation.tests.test_test_gate_config \
+    automation.tests.test_file_test_budget_task \
+    automation.tests.test_gate_deadline_protocol \
+    automation.tests.test_run_tests \
+    automation.tests.test_run_test_gate
+Ran 274 tests in 34.959s — OK (skipped=5)
+```
+
+The first exact bridge candidate `2d3e00c9…` passed the 290.71-second base floor but failed one
+candidate-supplemental integration because its copied `agentfold.toml` retained the immutable
+candidate view's read-only mode. Making that temporary copy owner-writable matched the fixture's
+existing bootstrap helper; the named integration then passed in 5.490 seconds. The new immutable
+bridge candidate passed and its normal hook reused the exact receipt:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: bb4a6cefdd800aa7704e11756631c03f0687898cc1ed0ed2b294b22f4d129a9b
+component timings:
+  core-scope: pass (executed, 0.30s)
+  reconcile: pass (executed, 7.20s)
+  repository-tests/base-pinned-floor: pass (executed, 293.90s)
+  repository-tests/candidate-supplemental: pass (executed, 44.43s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 349.75s
+gate exit: 0
+
+$ git commit -m "test: bridge final review repair" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 18 selected, 0 deferred, 0 incomplete
+duration: 10.81s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets 01a58fd] test: bridge final review repair
+```
+
+The restored final product and records remain staged. Their own exact final gate, unchanged
+normal commit, and fresh revision-bound panel are still pending.

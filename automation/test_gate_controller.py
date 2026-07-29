@@ -1165,18 +1165,30 @@ def composite_test_plan(candidate, candidate_root, candidate_view, scratch_root)
     }
 
 
-def routine_test_manifest(changed_paths, all_tests):
-    """Map explicit known ownership to a small routine set; defer the remainder."""
+def _service_dependency_closure(service, policy):
+    dependencies = {
+        owner: tuple(downstream)
+        for owner, downstream in getattr(policy, "service_dependencies", ())
+    }
+    selected = set()
+    pending = [service]
+    while pending:
+        current = pending.pop()
+        if current in selected:
+            continue
+        selected.add(current)
+        pending.extend(dependencies.get(current, ()))
+    return tuple(sorted(selected))
+
+
+def routine_test_manifest(changed_paths, all_tests, policy):
+    """Map generic service ownership and configured dependencies to routine tests."""
     all_set = set(all_tests)
     selected = set()
-    service_dependencies = {
-        "quote-api": ("quote-api", "quote-cli"),
-        "quote-cli": ("quote-cli",),
-    }
     for changed in changed_paths:
         parts = Path(changed).parts
         if len(parts) >= 2 and parts[0] == "services":
-            for service in service_dependencies.get(parts[1], ()):
+            for service in _service_dependency_closure(parts[1], policy):
                 prefix = f"services/{service}/tests/"
                 selected.update(test for test in all_set if test.startswith(prefix))
         elif len(parts) == 2 and parts[0] == "automation" and parts[1].endswith(".py"):
@@ -1320,6 +1332,10 @@ SAFE_ENVIRONMENT_NAMES = frozenset(
     (
         "CI",
         "GITHUB_ACTIONS",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_AUTHOR_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_COMMITTER_NAME",
         "LANG",
         "LC_ALL",
         "PATH",
@@ -3080,7 +3096,7 @@ def main(arguments=(), started=None):
                 deferred = ()
             else:
                 selected, deferred = routine_test_manifest(
-                    candidate.changed_paths, all_tests
+                    candidate.changed_paths, all_tests, policy
                 )
             _require_work_time(absolute_deadline, "test planning")
             report["selected"] = list(selected)

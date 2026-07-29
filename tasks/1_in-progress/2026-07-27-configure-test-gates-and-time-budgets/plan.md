@@ -58,3 +58,21 @@
       normal commit hook reused that receipt before creating product commit `d966c19`. Obtain a
       fresh revision-bound panel with no valid blocker. Keep the retry live and merge blocked
       until that review succeeds.
+- [x] 19. Repair the next panel's five blockers: narrow reversible path ownership, remove
+      repository-local Git identity as a hidden input, retain validated policy facts on static
+      timeouts, publish budget-task pairs without overwriting concurrent actors, and replace
+      quote-specific test ownership with configured generic service dependencies. Land the
+      exact-generation test bridge first and pass the 152-test focused set plus the complete
+      104-case gate module.
+- [ ] 20. Freeze the repaired staged candidate, run one new exact explicit final gate, commit
+      through the normal receipt-reusing hook, and obtain a fresh five-reviewer revision-bound
+      panel with no valid blocker before resolving the retry or moving the task to review.
+- [x] 21. Repair the three pre-final rereviews: land a trusted parser compatibility floor before
+      the nonempty dependency policy, propagate and bind the four safe Git identity variables,
+      remove every canonical-path rollback deletion, record only observed static duration, and
+      bound static stdout delivery. Land dual-generation test bridges `5397fc5` and `68af0e4`;
+      pass exact parser-floor candidate `c122a31f…`; and commit it as `236b90d` through a
+      receipt-reusing normal hook.
+- [ ] 22. Run the expanded focused set and exact final gate for the remaining review repair,
+      commit unchanged bytes through the normal hook, and obtain a new five-reviewer panel with
+      no valid blocker before resolving the retry, moving the task, or publishing the PR stack.

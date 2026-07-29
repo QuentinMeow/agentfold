@@ -648,3 +648,83 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Committed the unchanged candidate as `d966c19`. The ordinary routine hook matched the same
   digest, reused the full receipt, passed core scope and reconciliation, and completed in 24.56
   seconds. A fresh five-reviewer revision-bound panel remains the only merge blocker.
+
+## 2026-07-29 — five-panel blocker repair (codex and delegated review)
+
+- The fresh revision-bound panel did not approve `e530c428..8fcebbe`. Its five valid blockers
+  were broad reversible authorization paths, an unbound repository-local Git identity, lost
+  policy facts on a post-policy static timeout, destructive check-then-replace budget-task
+  publication, and quote-specific service ownership that failed repository substitution.
+- Repaired the policy with critical gate-authority paths and an exact ordinary-file allowlist.
+  Unmatched and new paths remain critical, and a candidate policy change is unioned with the
+  trusted base policy before it can classify the same candidate.
+- Replaced repository-config Git identity reads with a fixed isolated fallback while preserving
+  and binding caller-supplied safe identity variables. Preserved validated lane, target, maximum,
+  policy, candidate, and semantic-index facts on post-policy supervisor timeouts; the immutable
+  claim now flushes before cleanup and a one-second post-claim filing attempt.
+- Replaced budget-task check-and-replace writes with exclusive publication and inode-owned
+  rollback, so a losing writer cannot overwrite or recursively remove another actor's data.
+  Replaced quote-specific selection with the generic `services/<name>/tests` convention and a
+  closed, strict-union `service_dependencies` policy.
+- Landed test-only generation bridge `aba7e38` through the normal hook before production bytes.
+  The focused configuration, runner, filer, deadline, and generation modules passed 152/152;
+  the complete gate module passed 103 tests with one platform skip; the real reversible timeout
+  integration passed in 6.620 seconds; and runtime compilation passed. A new exact final gate,
+  normal commit, and fresh panel remain pending.
+
+## 2026-07-29 — pre-final rereview and parser compatibility floor (codex and Sol reviewers)
+
+- Three exact-staged rereviews blocked the first five-finding repair before its final gate. The
+  trusted base parser rejected the new dependency key; caller Git identity never crossed the
+  real safe-environment filter; canonical rollback still had pathname check/use races; static
+  timeout duration was fabricated as exactly the maximum; and static stdout could block forever
+  behind worker output.
+- Repaired publication to use exclusive no-replace creation with no canonical deletion after any
+  write, truthful partial mutation reporting, and reciprocal-request validation before append.
+  Static timeouts now bind one real freeze-time sample and use killable bounded writer children
+  for the claim and telemetry. Failed claim delivery still cleans the worker, skips filing, and
+  returns command error 2. Focused filer and deadline modules passed 28/28 and 40/40.
+- Added the four safe Git author/committer variables to the actual component allowlist; their
+  values are receipt-bound and local Git config remains irrelevant.
+- The first parser-floor final attempt failed in 339.07 seconds because the committed generation
+  and risk tests did not recognize the compatibility endpoint. Test bridge `5397fc5` made both
+  files exact-endpoint aware. The next attempt failed in 384.72 seconds because one synthetic
+  timeout fixture inherited repository-wide path risk; bridge `68af0e4` gave its smoke files
+  an explicit reversible policy.
+- The third unchanged parser-floor candidate `c122a31f…` passed all 18 files in 442.08 seconds.
+  Its ordinary hook reused the exact receipt in 17.29 seconds and created production commit
+  `236b90d`. The restored remaining repair passes 42/42 exact config/generation tests. Its own
+  expanded focused set, exact final gate, normal commit, and fresh panel remain pending.
+- The expanded remaining-repair set now passes 42 configuration/generation, 28 filer, 40
+  deadline, 53 runner, and 105 gate tests with one platform skip. The first full gate-module run
+  exposed three stale fixture assumptions; keyword policy construction, explicit synthetic risk
+  bindings, and one shared caller Git identity fixed them. No product contract was weakened.
+- Final blocker-only rereview approved the security and correctness/cache boundaries. The
+  concurrency lens found one unbounded `waitpid(..., 0)` after the bounded writer's `SIGKILL`.
+  Replacing it with one nonblocking reap observation and adding a never-reaps regression raised
+  the deadline module to 41 passing tests; all 105 gate tests then passed again in 30.231 seconds
+  with one platform skip.
+
+## 2026-07-29 — dual-generation final-repair bridge (codex and delegated verification)
+
+- The first exact final run of the remaining product repair blocked after 267.99 seconds because
+  the committed base-pinned tests described the parser-compatible product while the candidate
+  supplied the review-repair product. The candidate's focused tests were already passing; no
+  product bytes were weakened and no product commit was attempted.
+- Two Sol-high compatibility passes split the bridge by boundary. Publication/deadline tests now
+  retain rollback and direct-output coverage at the parser-compatible endpoint and no-delete,
+  reciprocal-request, bounded-writer coverage at the review endpoint. Runner/controller tests
+  retain repository-config identity and old ownership at the former endpoint and fixed/caller
+  identity, generic ownership, dependency closure, and receipt binding at the latter. Exact
+  product tuples are required before product import, so hybrids fail closed.
+- A Terra read-only combined run exposed only the documented restricted-process-table failures;
+  the unchanged command passed 274 tests with five skips once macOS process observation was
+  available. Independent detached checks also passed both exact endpoints and rejected a
+  deliberate hybrid.
+- Exact bridge candidate `2d3e00c9…` passed its 290.71-second base floor but failed one copied-
+  policy fixture because immutable candidate permissions were preserved. The fixture now makes
+  only its temporary copy owner-writable, and its named integration passes in 5.490 seconds.
+- Exact bridge candidate `bb4a6cef…` passed all 18 files in 349.75 seconds with no deferred or
+  incomplete coverage. Its normal hook reused the exact receipt in 10.81 seconds and created
+  test commit `01a58fd`. The full repair snapshot is restored, both timing journals remain
+  unstaged, and the next boundary is the product candidate's exact final gate.

@@ -6,6 +6,7 @@ automatic-boundary syntax is rejected from raw argv before this file reads Git,
 configuration, candidate bytes, local reports, receipts, or budget state.
 """
 
+import contextlib
 import hashlib
 import json
 import math
@@ -31,7 +32,10 @@ DEADLINE_FRAME_SCHEMA = "agentfold.test-gate-deadline-frame/v1"
 TERMINAL_FRAME_SCHEMA = "agentfold.test-gate-broker-decision/v1"
 CONTROLLER_CLAIM_SCHEMA = "agentfold.test-gate-controller-claim/v1"
 DISCOVERY_CEILING_SECONDS = 5.0
+POST_CLAIM_FILING_TIMEOUT_SECONDS = 1.0
+STATIC_OUTPUT_TIMEOUT_SECONDS = 0.25
 CONTROL_FRAME_MAX_BYTES = 65536
+_UNSET = object()
 _HANDOFF_ENV = "AGENTFOLD_GATE_HANDOFF"
 _SOURCE_REPO_ENV = "AGENTFOLD_GATE_SOURCE_REPO"
 _EXECUTION_ROOT_ENV = "AGENTFOLD_GATE_EXECUTION_ROOT"
@@ -225,6 +229,67 @@ def _not_run_cleanup(worker_started, reason):
     }
 
 
+def _deliver_static_output(payload, descriptor=None, timeout=STATIC_OUTPUT_TIMEOUT_SECONDS):
+    """Keep the supervisor responsive when its stdout sink stops reading."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8", "backslashreplace")
+    if not isinstance(payload, bytes) or len(payload) > CONTROL_FRAME_MAX_BYTES:
+        return {"disposition": "oversized", "written": False}
+    try:
+        output = sys.stdout.fileno() if descriptor is None else int(descriptor)
+        writer = os.fork()
+    except (AttributeError, OSError, TypeError, ValueError) as error:
+        return {
+            "disposition": "unavailable",
+            "written": False,
+            "reason": str(error),
+        }
+    if writer == 0:  # pragma: no branch - child exits through os._exit only
+        try:
+            offset = 0
+            while offset < len(payload):
+                try:
+                    written = os.write(output, payload[offset:])
+                except InterruptedError:
+                    continue
+                if written <= 0:
+                    os._exit(1)
+                offset += written
+        except BaseException:
+            os._exit(1)
+        os._exit(0)
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            waited, status = os.waitpid(writer, os.WNOHANG)
+        except InterruptedError:
+            continue
+        except OSError as error:
+            return {
+                "disposition": "wait-failed",
+                "written": False,
+                "reason": str(error),
+            }
+        if waited == writer:
+            written = os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+            return {
+                "disposition": "written" if written else "write-failed",
+                "written": written,
+            }
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.kill(writer, signal.SIGKILL)
+            # Reaping must not turn a bounded delivery failure into another
+            # unbounded wait.  A still-running child is inherited and reaped by
+            # the OS when this short-lived supervisor exits.
+            with contextlib.suppress(ChildProcessError, OSError):
+                os.waitpid(writer, os.WNOHANG)
+            return {"disposition": "timed-out", "written": False}
+        time.sleep(min(0.005, remaining))
+
+
 def _static_result(
     gate,
     outcome,
@@ -234,11 +299,45 @@ def _static_result(
     started=None,
     worker_started=None,
     cleanup=None,
+    policy_frame=None,
+    duration=_UNSET,
+    deadline_reached=False,
+    post_claim_cleanup=None,
+    arguments=(),
 ):
     gate_exit = 1 if outcome in ("blocked-failed", "blocked-incomplete") else 2
-    duration = _static_elapsed(started_source, started)
+    if duration is _UNSET:
+        duration = _static_elapsed(started_source, started)
+    target = policy_frame.get("target_seconds") if isinstance(policy_frame, dict) else None
+    maximum = (
+        policy_frame.get("maximum_seconds") if isinstance(policy_frame, dict) else None
+    )
+    policy_digest = (
+        policy_frame.get("policy_digest") if isinstance(policy_frame, dict) else None
+    )
+    candidate_digest = None
+    if isinstance(policy_frame, dict):
+        candidate_digest = policy_frame.get("authoritative_index", {}).get(
+            "semantic_sha256"
+        )
+    if (
+        deadline_reached
+        and duration is not None
+        and maximum is not None
+        and duration < maximum
+    ):
+        duration = None
+    target_exceeded = target is not None and (
+        deadline_reached or (duration is not None and duration >= target)
+    )
+    maximum_exceeded = maximum is not None and (
+        deadline_reached or (duration is not None and duration >= maximum)
+    )
     if not isinstance(cleanup, dict):
-        cleanup = _not_run_cleanup(worker_started, "not-needed")
+        cleanup = _not_run_cleanup(
+            worker_started,
+            "pending-after-claim" if post_claim_cleanup is not None else "not-needed",
+        )
     containment = {"mode": "supervisor-static"}
     containment.update(cleanup)
     report = {
@@ -261,16 +360,16 @@ def _static_result(
         "test_plan": None,
         "execution_identity": None,
         "decision_protocol": None,
-        "policy_digest": None,
+        "policy_digest": policy_digest,
         "critical": {},
         "selected": [],
         "deferred": [],
         "components": [],
         "process_containment": containment,
-        "target_exceeded": False,
-        "maximum_exceeded": False,
-        "target_seconds": None,
-        "maximum_seconds": None,
+        "target_exceeded": target_exceeded,
+        "maximum_exceeded": maximum_exceeded,
+        "target_seconds": target,
+        "maximum_seconds": maximum,
         "invocation": {
             "kind": "supervisor-static",
             "started_monotonic_source": started_source,
@@ -292,10 +391,10 @@ def _static_result(
         "terminalized_pass": False,
         "reason": reason,
         "duration_seconds": duration,
-        "target_seconds": None,
-        "maximum_seconds": None,
-        "policy_digest": None,
-        "candidate_digest": None,
+        "target_seconds": target,
+        "maximum_seconds": maximum,
+        "policy_digest": policy_digest,
+        "candidate_digest": candidate_digest,
         "incomplete": list(incomplete),
         "evidence_authority": "cooperative-same-interpreter",
         "controlled_completion": False,
@@ -304,8 +403,29 @@ def _static_result(
     }
     report["decision"] = decision
     report["decision_digest"] = _sha256_bytes(_canonical_json(decision))
-    sys.stdout.write(json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n")
-    sys.stdout.write(
+    claim = json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
+    claim_delivery = _deliver_static_output(claim)
+    claim_sent = claim_delivery.get("written") is True
+    observed_cleanup = None
+    filing = None
+    if post_claim_cleanup is not None:
+        observed_cleanup = post_claim_cleanup()
+        if claim_sent and target_exceeded and duration is not None:
+            filing = _file_static_target_breach(
+                report,
+                policy_frame,
+                arguments,
+            )
+        elif claim_sent and target_exceeded:
+            filing = {
+                "disposition": "not-filed",
+                "mutated": False,
+                "reason": "measured elapsed time is unavailable",
+            }
+    if not claim_sent:
+        return 2
+
+    telemetry = (
         "test gate: {gate}\n"
         "outcome: {outcome}\n"
         "reason: {reason}\n"
@@ -313,8 +433,74 @@ def _static_result(
             gate=gate, outcome=outcome, reason=reason
         )
     )
-    sys.stdout.flush()
+    if observed_cleanup is not None:
+        telemetry += (
+            "post-claim cleanup: "
+            + json.dumps(observed_cleanup, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        )
+        if filing is not None:
+            telemetry += (
+                "budget filing: "
+                + json.dumps(filing, sort_keys=True, separators=(",", ":"))
+                + "\n"
+            )
+    telemetry_delivery = _deliver_static_output(telemetry)
+    if telemetry_delivery.get("written") is not True:
+        return 2
     return report["exit_code"]
+
+
+def _file_static_target_breach(report, policy_frame, arguments):
+    """File a post-claim timeout occurrence without importing candidate modules."""
+    occurrence = {
+        "schema_id": REPORT_SCHEMA,
+        "gate_id": report["gate_id"],
+        "config_slot": "testing.{}.target_seconds".format(report["gate_id"]),
+        "actual_seconds": report["duration_seconds"],
+        "target_seconds": report["target_seconds"],
+        "components": {},
+        "candidate": policy_frame["authoritative_index"]["semantic_sha256"],
+        "receipt": report["decision_digest"],
+        "command": "automation/run_test_gate.py " + " ".join(arguments),
+        "trigger": (
+            _option(arguments, "--at-transition")
+            or ("explicit" if "--explicit" in arguments else "pre-commit")
+        ),
+        "environment": {},
+    }
+    filer = Path(__file__).resolve().parent / "file_test_budget_task.py"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                str(filer),
+                "--repo",
+                str(Path(__file__).resolve().parents[1]),
+                "--occurrence-json",
+                json.dumps(occurrence, sort_keys=True, separators=(",", ":")),
+                "--lock-timeout",
+                "0.5",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=POST_CLAIM_FILING_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {"disposition": "timed-out", "mutated": None}
+    except OSError as error:
+        return {"disposition": "unavailable", "mutated": False, "reason": str(error)}
+    try:
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        filing = json.loads(lines[-1])
+    except (IndexError, TypeError, ValueError):
+        return {"disposition": "invalid-result", "mutated": None}
+    if result.returncode != 0 or not isinstance(filing, dict):
+        return {"disposition": "failed", "mutated": None}
+    return filing
 
 
 def _git(repository, arguments, environment=None):
@@ -1361,6 +1547,9 @@ def _dispatch(arguments):
             _not_run_cleanup(False, "not-needed-worker-not-started"),
         )
     child_control.close()
+    policy_frame = None
+    maximum = None
+    absolute_deadline = None
     try:
         discovery_deadline = started + DISCOVERY_CEILING_SECONDS
         policy_frame = _receive_control_frame(parent_control, discovery_deadline)
@@ -1404,6 +1593,20 @@ def _dispatch(arguments):
             _not_run_cleanup(True, "not-needed-worker-exited"),
         )
     except TimeoutError as error:
+        if policy_frame is not None and absolute_deadline is not None:
+            return _static_result(
+                gate,
+                "blocked-incomplete",
+                str(error),
+                ("gate-interval",),
+                started_source,
+                started,
+                True,
+                policy_frame=policy_frame,
+                deadline_reached=True,
+                post_claim_cleanup=lambda: _kill_worker_group(process, owner),
+                arguments=arguments,
+            )
         cleanup = _kill_worker_group(process, owner)
         return _static_result(
             gate,

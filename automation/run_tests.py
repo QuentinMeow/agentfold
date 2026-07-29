@@ -48,10 +48,12 @@ SAFE_GIT_BEHAVIOR_VARIABLES = frozenset(
         "GIT_TERMINAL_PROMPT",
     )
 )
-GIT_IDENTITY_CONFIG = (
-    ("user.name", "GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"),
-    ("user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"),
-)
+DEFAULT_GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "AgentFold Tests",
+    "GIT_AUTHOR_EMAIL": "agentfold-tests@example.invalid",
+    "GIT_COMMITTER_NAME": "AgentFold Tests",
+    "GIT_COMMITTER_EMAIL": "agentfold-tests@example.invalid",
+}
 REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
 PROJECTED_REPOSITORY_ENVIRONMENT = "AGENTFOLD_TEST_VIEW_ROOT"
 PROVIDER_CANDIDATE_UID = 65532
@@ -463,31 +465,9 @@ def isolated_test_environment(parent_environment=None):
 
 
 def configured_git_identity(parent_environment=None):
-    """Resolve safe identity values before removing caller Git configuration."""
-    parent_environment = (
-        os.environ if parent_environment is None else parent_environment
-    )
-    identity = {}
-    for key, author_name, committer_name in GIT_IDENTITY_CONFIG:
-        result = subprocess.run(
-            ["git", "config", "--get", key],
-            cwd=REPO,
-            env=parent_environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        if result.returncode == 1:
-            continue
-        if result.returncode:
-            detail = result.stderr.strip()
-            suffix = f": {detail}" if detail else ""
-            raise RuntimeError(f"could not resolve Git identity {key}{suffix}")
-        value = result.stdout.rstrip("\n")
-        if value:
-            identity[author_name] = value
-            identity[committer_name] = value
-    return identity
+    """Return deterministic fallback identity without reading repository Git config."""
+    del parent_environment
+    return dict(DEFAULT_GIT_IDENTITY)
 
 
 def validate_scratch_root(scratch_root, child_environment):
