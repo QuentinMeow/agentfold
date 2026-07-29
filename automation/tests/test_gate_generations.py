@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Closed, byte-exact classifier for the test-gate migration floor.
 
-The compatibility floor may describe either side of one planned two-commit
+The compatibility floor may describe either side of a planned two-commit
 migration.  It must never infer a generation from an API shape or from one
 headline file: every executable and dependency in the controller closure is
 read from the repository view being tested and matched as one exact tuple.
@@ -66,6 +66,23 @@ DEADLINE_RECORDS = tuple(sorted((
     ("automation/test_gate_controller.py", "100644", "d52f5ce066d0415250678d9d2a8e5c32b0a6deeb1a8dcf7f988483fba6f5772c"),
 )))
 
+REVIEW_REPAIR_RECORDS = tuple(sorted((
+    ("agentfold.toml", "100644", "b126e7224c1236bfd6f7bbe2f2bd61cd759d42c282aaf59433fdbc93d8ca5e6f"),
+    ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
+    ("automation/_vendor/tomli/__init__.py", "100644", "26153057ae830758381efb7551009531d7c2bbe220015f055e6bc353da27c5de"),
+    ("automation/_vendor/tomli/_parser.py", "100644", "83df8435a00b4be07c768918a42bb35056a55a5a20ed3f922183232d9496aed3"),
+    ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
+    ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
+    ("automation/file_test_budget_task.py", "100644", "bbd756ba55ebafb25b76992d36bc81de396641295532dd15f7462494903990de"),
+    ("automation/test_gate_config.py", "100644", "537cc42b8bcff4f41ebcdd5507e78ede698925edba64058426beee800880f104"),
+    ("automation/test_manifest.py", "100644", "d20b545f9db9566f74be26cb3ce5518b6893544d377e389f577925b0eba5679e"),
+    (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
+    ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
+    ("automation/run_test_gate.py", "100644", "834c4d1b917228c87ed881ef48915313483a1b234a1d0612c5d30e7220c35c8a"),
+    ("automation/run_tests.py", "100644", "18cd241b5616ab91e996dd3e5b88331d490ccefabebb00cb10da982448d26fd7"),
+    ("automation/test_gate_controller.py", "100644", "0feaffbd70c014d9a0b44082042512fc77ff3c42d962ae830443947da76dcab2"),
+)))
+
 CLASSIFIED_PATHS = tuple(record[0] for record in LEGACY_RECORDS)
 
 
@@ -95,6 +112,8 @@ def classify_gate_generation_records(records):
     if records == SPLIT_RECORDS:
         return SPLIT_GENERATION
     if records == DEADLINE_RECORDS:
+        return DEADLINE_GENERATION
+    if records == REVIEW_REPAIR_RECORDS:
         return DEADLINE_GENERATION
     return "invalid"
 
@@ -129,16 +148,14 @@ class GateMigrationGenerationTests(unittest.TestCase):
         self.assertEqual(
             DEADLINE_GENERATION, classify_gate_generation_records(DEADLINE_RECORDS)
         )
+        self.assertEqual(
+            DEADLINE_GENERATION,
+            classify_gate_generation_records(REVIEW_REPAIR_RECORDS),
+        )
 
     def test_sealed_regular_modes_preserve_exact_generation_admission(self):
         generation = gate_generation()
-        expected_records = (
-            {
-                LEGACY_GENERATION: LEGACY_RECORDS,
-                SPLIT_GENERATION: SPLIT_RECORDS,
-                DEADLINE_GENERATION: DEADLINE_RECORDS,
-            }[generation]
-        )
+        expected_records = gate_generation_records()
         observed_modes = set()
         with tempfile.TemporaryDirectory() as scratch:
             sealed_root = Path(scratch) / "sealed-view"
@@ -183,7 +200,8 @@ class GateMigrationGenerationTests(unittest.TestCase):
         generations = (
             (LEGACY_GENERATION, LEGACY_RECORDS),
             (SPLIT_GENERATION, SPLIT_RECORDS),
-            (DEADLINE_GENERATION, DEADLINE_RECORDS),
+            (DEADLINE_GENERATION + "-before-review", DEADLINE_RECORDS),
+            (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
         )
         for base_name, base_records in generations:
             base = dict((record[0], record) for record in base_records)
@@ -213,6 +231,7 @@ class GateMigrationGenerationTests(unittest.TestCase):
             (LEGACY_GENERATION, LEGACY_RECORDS),
             (SPLIT_GENERATION, SPLIT_RECORDS),
             (DEADLINE_GENERATION, DEADLINE_RECORDS),
+            (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
         ):
             for index, record in enumerate(admitted):
                 relative, mode, digest = record
