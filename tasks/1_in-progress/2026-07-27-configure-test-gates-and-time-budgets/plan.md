@@ -37,15 +37,17 @@
       admission diagnostics, freeze terminal publication, include candidate-only namespaces,
       and retire obsolete human asks. Complete the three follow-up focused repair reviews.
 - [x] 14. Narrow runtime support to CPython 3.7+ on POSIX, carry the bootstrap monotonic source
-      across controller startup, and require the v5 receipt/pass-report/v1 commit-marker set for
-      reuse while keeping publication failure separate from the immutable gate decision.
+      across controller startup, and require the then-current v5 receipt/pass-report/v1 marker
+      set. Step 16 supersedes that receipt and handoff generation for the absolute-deadline repair.
 - [x] 15. Run the explicit final gate for product candidate
       `843a44a38f328ebde40d34f759d8592847175bd4e9d65f27301f5c6d9b710b53`, reuse its
       exact full-test receipt in the normal hook, and commit the product as `3a342013`. Record
       the surviving evidence honestly after the original final report and stdout were lost.
-- [ ] 16. Repair the P1 deadline gap so the configured absolute deadline exists before any
-      potentially unbounded Git discovery, candidate materialization, or controller planning.
-      Add focused regressions for delay in each pre-controller phase.
+- [ ] 16. Integrate and review the isolated P1 supervisor/worker repair so the configured
+      absolute deadline exists before potentially unbounded Git discovery, candidate
+      materialization, or controller planning. Its hardened focused protocol tests pass in the
+      isolated worktree; the task branch must also migrate the listed old-generation tests and
+      receipt helper before this step can close.
 - [ ] 17. Run a new exact final gate after the P1 repair, commit the repaired revision, and
       obtain a fresh revision-bound panel with no valid blocker. Keep the retry live and the
       merge blocked until all three steps succeed.

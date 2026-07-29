@@ -62,12 +62,15 @@ routine report identify that result; the byte-exact final report and terminal ou
 overwritten or not retained, so their complete original text cannot be recovered.
 
 The task is not ready to merge. A five-reviewer panel at the committed revision returned three
-approvals and two blocks. The P1 finding is that potentially unbounded Git discovery, candidate
-materialization, and controller planning can happen before the configured absolute deadline
-exists. The second block found these task records stale and noted the missing original final
-report/output. This update repairs the stale descriptions, but it cannot recreate overwritten
-evidence. The P1 needs a product repair, followed by a new exact final run, a commit, and a fresh
-revision-bound panel. The live retry therefore continues to block the merge operation.
+approvals and two blocks. The P1 finding was that potentially unbounded Git discovery, candidate
+materialization, and controller planning could happen before the configured absolute deadline
+existed. An isolated, uncommitted supervisor/worker repair now has a second hardening pass: the
+trusted base parser owns discovery, discovery and execution share one captured index, the worker
+brokers a controller claim over two isolated control channels, and reports carry a verifiable
+immutable decision. Focused evidence is green, apart from one explicitly identified legacy test
+helper that still builds a pre-v4 report. The repair still needs integration onto the task branch,
+that compatibility bridge, a new exact final run, a commit, and a fresh revision-bound panel. The
+live retry continues to block the merge operation.
 
 ## Acceptance criteria
 
@@ -89,7 +92,7 @@ revision-bound panel. The live retry therefore continues to block the merge oper
       suite back into an every-commit gate.
 - [ ] Final evidence and cached evidence bind to the exact tested bytes, test manifest,
       policy configuration, runner version, and relevant toolchain identity. Reuse also requires
-      one matching v5 receipt, terminal pass report, and last-written publication marker. A
+      one matching v6 receipt, terminal v4 pass report, and last-written publication marker. A
       changed or missing input invalidates reuse.
 - [ ] Complete results from the included same-interpreter runner are labeled cooperative and
       `enforcement_eligible: false`; they can support a maintainer's manual judgment but cannot
