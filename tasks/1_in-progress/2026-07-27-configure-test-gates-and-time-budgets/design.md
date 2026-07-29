@@ -48,27 +48,34 @@ change does.
 ## One captured candidate
 
 The canonical direct command is `python3 -I -S automation/run_test_gate.py …`. The small
-bootstrap uses only the standard library. It checks raw arguments first, so reserved automatic
+supervisor uses only the standard library. It checks raw arguments first, so reserved automatic
 modes are rejected before Git discovery, configuration reads, candidate imports, report or
 receipt access, and budget-task state.
 
 The supported runtime is CPython 3.7 or newer on POSIX. Windows is not supported: the gate's
-process containment and its cross-process budget clock require POSIX primitives. The bootstrap
-prefers `clock_gettime(CLOCK_MONOTONIC)` and passes that identified source and start value across
-`exec`; when that API is unavailable on POSIX, it uses `os.times().elapsed`. The controller
-rejects a changed source, an invalid or reversed value, or total clock unavailability.
+process containment and its cross-process budget clock require POSIX primitives. The supervisor
+prefers `clock_gettime(CLOCK_MONOTONIC)` and passes that identified source, start value, and
+deadline across `exec`; when that API is unavailable on POSIX, it uses `os.times().elapsed`.
+The worker and controller reject a changed source, invalid or reversed values, or total clock
+unavailability.
 
-For an allowed run, the bootstrap copies and seals the selected Git index, materializes the gate
-controller and its dependency closure from those exact staged objects, and dispatches that
-snapshot. The controller keeps the authoritative index immutable. Each component receives a
+For an allowed run, the worker captures one authoritative Git index during bounded discovery.
+It materializes the exact base parser closure separately from the candidate parser closure and
+runs only the base parser to read both configurations and compute their strict union. It then
+reuses the same index—without recapture—to seal and dispatch the gate controller and its
+dependency closure. The controller reproduces the policy with the candidate parser or blocks.
+Each component receives a
 disposable index copy and a sanitized environment. The execution identity records the controller
 interpreter separately from the isolated, no-site child interpreter. Any source, index,
 controller-closure, interpreter, or admitted-environment drift blocks the result and receipt.
-Scratch state and child processes are cleaned on every exit path.
+The supervisor kills the worker group and exact-token same-user escapees on a missed deadline.
+Portable discovery can be incomplete outside Linux `/proc`; this is an explicit POSIX limitation,
+not a kernel-isolation claim. Forced termination can leave system-temporary snapshot files for
+the operating system to reap, but it writes no reusable receipt before a terminal decision.
 
 This structure addresses the central authority question: the candidate may supply code for an
 explicit cooperative run, but it cannot turn reserved hard syntax into an execution path before
-the bootstrap has rejected it.
+the supervisor has rejected it.
 
 ## Complete coverage
 
@@ -96,29 +103,50 @@ job. The code, selected tests, policy, runner, tools, admitted environment, and 
 evidence must all match. If any part changed or is missing, the suite runs again. This saves a
 duplicate run; it does not turn cooperative local evidence into permission to merge or deploy.
 
-The current formats are report schema v3, receipt schema v5, publication-commit schema v1,
+The repaired formats are report schema v4, receipt schema v6, handoff schema v2,
+publication-commit schema v1,
 composite-plan schema v2, and overlay algorithm
 candidate-product-with-exact-union-test-namespaces/v3. The version bumps
 invalidate older evidence that did not bind the repaired execution closure and candidate-only
 namespace behavior.
 
-The decision clock starts at invocation, so bootstrap freezing, materialization, sealing, and
-controller startup consume the same configured maximum as tests and cleanup. All fallible gate
+The decision clock starts in a small POSIX supervisor before filesystem or Git discovery. One
+owned worker has exactly five seconds to capture the authoritative index, materialize the exact
+base/candidate configuration and their separate parser closures, execute the base parser, and
+return a bounded policy frame. The supervisor validates that frame,
+requires a maximum of at least five seconds, derives the absolute deadline, and lets the same
+worker continue freezing and controller execution. Bootstrap freezing, materialization, sealing,
+and controller startup consume the same configured maximum as tests and cleanup. All fallible gate
 work, budget filing, publication preparation, and final accounting finish before one gate outcome
-is frozen. Publication has a separate command outcome. The receipt and pass report are projected
+is frozen. The worker owns the supervisor socket; the controller gets a separate inner socket;
+components get neither. The controller submits an immutable decision claim, and the worker
+validates and brokers a distinct terminal frame. Publication has a separate command outcome. The
+receipt and pass report are projected
 afterward, followed by stdout. Only after those projections succeed is the atomic commit marker
 that attests them written last. A self-report cannot include its own completed projection. That
 external I/O may delay
 wall-clock return beyond the maximum, without a gate-supplied bound, but it cannot change the
 frozen gate decision. Receipt, report, stdout, or marker failure returns a command error and
-leaves no reusable evidence.
+leaves no reusable evidence. Normal exits equal the frozen gate exit; publication alone may turn
+a frozen 0 or 1 into command exit 2. Missing frames, signals, and contradictory exits are protocol
+errors. The normal v4 report includes the immutable decision object and digest checked by the
+worker after controller exit.
 
-A reusable evidence set consists of a matching v5 receipt, terminal v3 pass report, and v1
+Supervisor-static v4 reports use the same identified invocation clock for real elapsed time.
+When timing or process facts cannot be observed, they are null or explicitly unavailable rather
+than fabricated. Post-start failures include the worker-started fact plus process-group and
+ownership-token cleanup attempts, results, and discovery completeness.
+
+A reusable evidence set consists of a matching v6 receipt, terminal v4 pass report, and v1
 publication commit marker. The marker binds both file digests, paths, publication id, candidate,
 and evidence authority, and is written last. The receipt also binds the candidate closure,
 policies, manifests, trusted floor and supplemental
 records, overlay algorithm and view digests, controller closure, disposable-index identity,
-controller and child interpreters, Git identity, and sanitized component environment. It is an
+controller and child interpreters, Git identity, sanitized component environment, both lane
+budgets, exact configuration, both parser closures, authoritative index, launcher, immutable
+decision, and supervised protocol.
+Invocation start and absolute-deadline values are intentionally excluded so the same job can be
+reused at a later start time. It is an
 exact cooperative cache entry, not an authorization artifact. Different bytes, topology, tools,
 or admitted environment require another complete run.
 

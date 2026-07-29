@@ -520,3 +520,61 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   This repairs the stale description but not the P1 product flaw or the lost report. The merge
   retry remains `in-repair`; a P1 repair, new exact final run, new commit, and fresh panel remain
   mandatory before merge.
+
+## 2026-07-28 — isolated absolute-deadline repair (delegated implementation)
+
+- Built an uncommitted repair from clean revision `19ca430` in an isolated worktree. The shared
+  task worktree was not changed.
+- Replaced the pre-deadline bootstrap gap with a small standard-library supervisor and one owned
+  POSIX worker. Policy discovery now has a five-second ceiling, uses exact base/candidate config
+  and the canonical parser closure, and returns a bounded frame from which the supervisor derives
+  the absolute deadline. A maximum of exactly five seconds is valid; a smaller one is rejected.
+- The same worker continues snapshot and controller execution. The controller rechecks the policy
+  frame against its frozen inputs and sends one bounded terminal-decision frame before publication.
+  The supervisor accepts it only strictly before the deadline. A late, absent, contradictory, or
+  oversized frame blocks and triggers process-group plus exact-token same-user cleanup.
+- Advanced reports to v4, receipts to v6, and handoffs to v2. Receipt identity binds both lane
+  budgets, config and policy identities, parser and launcher identities, and the controller
+  closure. It deliberately excludes invocation clock values, preserving exact final-prewarm reuse
+  by a later routine hook.
+- Focused protocol tests, canonical config tests, the exact prewarm/reuse integration, nine
+  existing safety regressions, compilation, whitespace checks, and reconciliation passed. One
+  broader ten-test batch hit the existing macOS descendant-cleanup flake; the same prewarm/reuse
+  test passed alone before and after that batch. No full repository suite, exact final gate,
+  commit, or fresh panel ran, so plan step 16 and the merge retry remain open.
+
+## 2026-07-28 — isolated deadline-protocol hardening (delegated implementation)
+
+- Reworked authoritative discovery after two blocking reviews. Discovery now materializes the
+  exact base parser/Tomli closure and base configuration from the base revision, materializes the
+  candidate configuration and parser closure from one captured candidate index, and executes
+  only the trusted base parser. Missing base inputs, malformed candidate configuration, or a
+  closure mutation blocks; there is no fallback to live or candidate-controlled parser bytes.
+- Reused that exact authoritative index for the later sealed controller snapshot. The candidate
+  parser must reproduce the signed policy in the frozen controller or the run blocks.
+- Split control authority into two sockets. The worker alone keeps the outer supervisor socket;
+  the controller receives a new inner socket; components receive neither. The worker validates
+  the controller claim and sends a distinct broker decision to the supervisor.
+- Added an immutable decision object and digest to normal v4 reports and bound v6 receipts to the
+  hardened protocol identity. The worker verifies the fixed-lane report after controller exit.
+  Normal process exit must equal the gate exit; only post-freeze publication may turn gate exit
+  0 or 1 into command exit 2. Missing frames, signals, and contradictory exits are errors.
+- The focused protocol suite passed 26/26, the policy suite passed 28/28, and the real final
+  prewarm-to-routine-hook integration passed in 8.991 seconds. Compilation, diff checks, the
+  60-line automation contract, and reconciliation also passed. No broad suite or final gate ran.
+- An existing nine-test safety subset passed eight tests. Its receipt-marker test exposed one
+  additional compatibility-bridge item: `_publish_receipt_pair` still constructs a legacy report
+  without the now-required `decision_digest`. This is added to the explicit task-branch migration
+  list; the isolated product contract was not weakened to accept that legacy report.
+
+## 2026-07-28 — honest supervisor-static telemetry (delegated implementation)
+
+- Removed the static report's fabricated zero duration and `none-started` containment claim.
+  Static results now retain the supervisor clock source/start, measure current elapsed time when
+  possible, and use null when it is not. They record the real worker-started state and structured
+  process-group and ownership-token cleanup attempts, results, and discovery completeness.
+- Timeout, EOF, protocol-error, unsupported-host, control-channel, and worker-start failures now
+  pass the facts available at their exact boundary. The fixed-lane v4 shape and immutable
+  decision digest remain intact.
+- The focused protocol suite passed 27/27, configuration passed 28/28, compilation passed, and
+  the real prewarm-to-hook reuse test passed in 5.898 seconds. No broad suite or final gate ran.

@@ -3,6 +3,7 @@
 
 import argparse
 import ctypes
+import hashlib
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import secrets
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -41,9 +43,16 @@ except ImportError:  # pragma: no cover - the report remains complete without mu
     file_test_budget_task = None
 
 
-REPORT_SCHEMA = "agentfold.test-gate-report/v3"
-RECEIPT_SCHEMA = "agentfold.test-component-receipt/v5"
+REPORT_SCHEMA = "agentfold.test-gate-report/v4"
+RECEIPT_SCHEMA = "agentfold.test-component-receipt/v6"
 PUBLICATION_COMMIT_SCHEMA = "agentfold.test-publication-commit/v1"
+HANDOFF_SCHEMA = "agentfold.test-gate-bootstrap/v2"
+POLICY_FRAME_SCHEMA = "agentfold.test-gate-policy-frame/v1"
+TERMINAL_FRAME_SCHEMA = "agentfold.test-gate-broker-decision/v1"
+CONTROLLER_CLAIM_SCHEMA = "agentfold.test-gate-controller-claim/v1"
+DECISION_SCHEMA = "agentfold.test-gate-decision/v1"
+CONTROL_FRAME_MAX_BYTES = 65536
+DISCOVERY_CEILING_SECONDS = 5.0
 COMPOSITE_TEST_PLAN_SCHEMA = "agentfold.composite-test-plan/v2"
 TRUSTED_TEST_OVERLAY_ALGORITHM = "candidate-product-with-exact-union-test-namespaces/v3"
 EVIDENCE_AUTHORITY = "cooperative-same-interpreter"
@@ -80,6 +89,8 @@ REPORT_PROJECTIONS = frozenset(
 )
 _HANDOFF_CLOCK_GETTIME_SOURCE = "clock_gettime:CLOCK_MONOTONIC"
 _HANDOFF_OS_TIMES_SOURCE = "os.times:elapsed"
+_CONTROL_FD_ENV = "AGENTFOLD_GATE_INNER_CONTROL_FD"
+_OWNER_ENV = "AGENTFOLD_GATE_OWNER"
 OUTCOME_EXIT = {
     "pass": 0,
     "deferred": 0,
@@ -285,7 +296,7 @@ def validate_bootstrap_handoff():
     if _HANDOFF is None:
         return controller_closure()
     if (
-        _HANDOFF.get("schema") != "agentfold.test-gate-bootstrap/v1"
+        _HANDOFF.get("schema") != HANDOFF_SCHEMA
         or Path(_HANDOFF.get("source_repository", "")).resolve() != REPO
         or Path(_HANDOFF.get("execution_root", "")).resolve() != EXECUTION_ROOT
     ):
@@ -307,12 +318,13 @@ def validate_bootstrap_handoff():
     return controller_closure()
 
 
-def gate_interval_started():
-    """Use the same-OS monotonic bootstrap boundary for the whole gate interval."""
+def gate_interval_bounds():
+    """Map supervisor clock values into this process's monotonic epoch."""
     if _HANDOFF is None:
-        return PROCESS_STARTED
+        return PROCESS_STARTED, None
     source = _HANDOFF.get("started_monotonic_source")
     value = _HANDOFF.get("started_monotonic")
+    deadline = _HANDOFF.get("absolute_deadline_monotonic")
     selected_source, now = _controller_monotonic_sample()
     if source != selected_source:
         raise GateError("test-gate bootstrap monotonic source mismatch")
@@ -322,10 +334,27 @@ def gate_interval_started():
         or not math.isfinite(value)
         or value < 0
         or value > now
+        or isinstance(deadline, bool)
+        or not isinstance(deadline, (int, float))
+        or not math.isfinite(deadline)
+        or deadline <= value
     ):
-        raise GateError("test-gate bootstrap monotonic start is invalid")
+        raise GateError("test-gate bootstrap monotonic bounds are invalid")
     bootstrap_elapsed = now - float(value)
-    return time.monotonic() - bootstrap_elapsed
+    local_now = time.monotonic()
+    return (
+        local_now - bootstrap_elapsed,
+        local_now + (float(deadline) - now),
+    )
+
+
+def gate_interval_started():
+    return gate_interval_bounds()[0]
+
+
+def _require_work_time(deadline, phase):
+    if deadline is not None and time.monotonic() >= deadline:
+        raise GateError("configured absolute deadline expired during " + phase)
 
 
 @dataclass
@@ -472,6 +501,108 @@ def load_candidate_policy(candidate_root, relative_config, scratch_root, base_re
         raise GateError("downgrade-resistant policy union support is unavailable")
     policy = union_loader(base_path, candidate_path)
     return policy, _policy_digest(policy)
+
+
+def _protocol_parser_records(closure):
+    wanted = {
+        "automation/test_gate_config.py",
+        "automation/_vendor/__init__.py",
+        "automation/_vendor/tomli/__init__.py",
+        "automation/_vendor/tomli/_parser.py",
+        "automation/_vendor/tomli/_re.py",
+        "automation/_vendor/tomli/_types.py",
+    }
+    return [
+        {"path": record["path"], "mode": record["mode"], "sha256": record["sha256"]}
+        for record in closure
+        if record["path"] in wanted
+    ]
+
+
+def validate_policy_frame(policy, policy_digest, candidate_root, base_revision, gate):
+    """Recompute discovery claims from the same frozen candidate and parser bytes."""
+    if _HANDOFF is None:
+        return None
+    frame = _HANDOFF.get("policy_frame")
+    if not isinstance(frame, dict) or frame.get("schema") != POLICY_FRAME_SCHEMA:
+        raise GateError("test-gate policy frame is unavailable")
+    unsigned = dict(frame)
+    frame_digest = unsigned.pop("frame_digest", None)
+    if frame_digest != test_manifest.canonical_digest(unsigned):
+        raise GateError("test-gate policy frame digest is invalid")
+    candidate_path = candidate_root / CANONICAL_CONFIG
+    if candidate_path.is_symlink() or not candidate_path.is_file():
+        raise GateError("candidate policy is unavailable: agentfold.toml")
+    base = subprocess.run(
+        ["git", "show", "{}:{}".format(base_revision, CANONICAL_CONFIG.as_posix())],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if base.returncode:
+        raise GateError("base-pinned policy could not be revalidated")
+    base_digest = hashlib.sha256(base.stdout).hexdigest()
+    closure = _HANDOFF.get("controller_closure", ())
+    parser_records = _protocol_parser_records(closure)
+    budget = _budget_for(gate, policy)
+    routine_budget = _budget_for("routine", policy)
+    final_budget = _budget_for("final", policy)
+    expected = {
+        "gate_id": gate,
+        "target_seconds": float(budget.target_seconds),
+        "maximum_seconds": float(budget.maximum_seconds),
+        "budgets": {
+            "routine": {
+                "target_seconds": float(routine_budget.target_seconds),
+                "maximum_seconds": float(routine_budget.maximum_seconds),
+            },
+            "final": {
+                "target_seconds": float(final_budget.target_seconds),
+                "maximum_seconds": float(final_budget.maximum_seconds),
+            },
+        },
+        "discovery_ceiling_seconds": DISCOVERY_CEILING_SECONDS,
+        "policy_digest": policy_digest,
+        "base_config_sha256": base_digest,
+        "candidate_config_sha256": test_manifest.file_digest(candidate_path),
+        "candidate_parser_closure_digest": test_manifest.canonical_digest(parser_records),
+        "authoritative_index": {
+            "file_sha256": _HANDOFF.get("frozen_index_sha256"),
+            "semantic_sha256": _HANDOFF.get("index_semantic_sha256"),
+        },
+        "launcher": {
+            "path": "automation/run_test_gate.py",
+            "sha256": next(
+                (
+                    record["sha256"]
+                    for record in closure
+                    if record["path"] == "automation/run_test_gate.py"
+                ),
+                None,
+            ),
+        },
+        "candidate_kind": _HANDOFF.get("candidate_kind"),
+        "base_revision": _HANDOFF.get("base_revision"),
+        "candidate_revision": _HANDOFF.get("candidate_revision"),
+    }
+    for name, value in expected.items():
+        if frame.get(name) != value:
+            raise GateError("test-gate policy frame disagrees with frozen " + name)
+    return {
+        "policy_frame_schema": frame["schema"],
+        "policy_frame_digest": frame_digest,
+        "discovery_ceiling_seconds": frame["discovery_ceiling_seconds"],
+        "target_seconds": frame["target_seconds"],
+        "maximum_seconds": frame["maximum_seconds"],
+        "budgets": frame["budgets"],
+        "policy_digest": frame["policy_digest"],
+        "base_config_sha256": frame["base_config_sha256"],
+        "candidate_config_sha256": frame["candidate_config_sha256"],
+        "trusted_parser_closure_digest": frame["trusted_parser_closure_digest"],
+        "candidate_parser_closure_digest": frame["candidate_parser_closure_digest"],
+        "authoritative_index": frame["authoritative_index"],
+        "launcher": frame["launcher"],
+    }
 
 
 def _resolve_commit(revision):
@@ -1094,6 +1225,7 @@ SAFE_ENVIRONMENT_NAMES = frozenset(
         "TMP",
         "TMPDIR",
         "TZ",
+        _OWNER_ENV,
     )
 )
 FIXED_PYTHON_ENVIRONMENT = {"PYTHONDONTWRITEBYTECODE": "1"}
@@ -1663,6 +1795,8 @@ def environment_identity(source=None):
     for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
         if name in normalized:
             normalized[name] = "<" + name.lower().replace("_", "-") + ">"
+    if _OWNER_ENV in normalized:
+        normalized[_OWNER_ENV] = "<gate-owner-token>"
     git = subprocess.run(
         ["git", "--version"],
         stdout=subprocess.PIPE,
@@ -1688,12 +1822,60 @@ def receipt_binding(
     environment=None,
     composite_identity=None,
 ):
+    protocol = None
+    if _HANDOFF is not None:
+        frame = _HANDOFF.get("policy_frame")
+        if isinstance(frame, dict):
+            protocol = {
+                "handoff_schema": HANDOFF_SCHEMA,
+                "policy_frame_schema": frame.get("schema"),
+                "controller_claim_schema": CONTROLLER_CLAIM_SCHEMA,
+                "terminal_frame_schema": TERMINAL_FRAME_SCHEMA,
+                "discovery_ceiling_seconds": frame.get("discovery_ceiling_seconds"),
+                "budgets": frame.get("budgets"),
+                "base_config_sha256": frame.get("base_config_sha256"),
+                "candidate_config_sha256": frame.get("candidate_config_sha256"),
+                "trusted_parser_closure_digest": frame.get("trusted_parser_closure_digest"),
+                "candidate_parser_closure_digest": frame.get("candidate_parser_closure_digest"),
+                "authoritative_index_semantic_sha256": (
+                    frame.get("authoritative_index") or {}
+                ).get("semantic_sha256"),
+                "launcher": frame.get("launcher"),
+            }
+    if protocol is None:
+        launcher = next(
+            (
+                record
+                for record in controller_closure()["records"]
+                if record["path"] == "automation/run_test_gate.py"
+            ),
+            None,
+        )
+        protocol = {
+            "handoff_schema": HANDOFF_SCHEMA,
+            "policy_frame_schema": POLICY_FRAME_SCHEMA,
+            "controller_claim_schema": CONTROLLER_CLAIM_SCHEMA,
+            "terminal_frame_schema": TERMINAL_FRAME_SCHEMA,
+            "discovery_ceiling_seconds": DISCOVERY_CEILING_SECONDS,
+            "budgets": None,
+            "base_config_sha256": None,
+            "candidate_config_sha256": None,
+            "trusted_parser_closure_digest": None,
+            "candidate_parser_closure_digest": None,
+            "authoritative_index_semantic_sha256": None,
+            "launcher": (
+                {"path": launcher["path"], "sha256": launcher["sha256"]}
+                if launcher is not None
+                else None
+            ),
+        }
     value = {
         "candidate_digest": candidate.digest,
         "candidate_closure_digest": candidate.closure_digest,
         "tested_view_digest": tested_view["digest"],
         "test_manifest_digest": test_manifest.canonical_digest(selected_tests),
         "policy_digest": policy_digest,
+        "gate_protocol": protocol,
         "runner_revision": runner_revision(candidate_root),
         "controller_closure": controller_closure(),
         "environment": environment_identity(environment),
@@ -1901,6 +2083,9 @@ def reusable_receipt(binding):
         or report.get("evidence_authority") != EVIDENCE_AUTHORITY
         or report.get("controlled_completion") is not False
         or report.get("enforcement_eligible") is not False
+        or report.get("decision_digest")
+        != test_manifest.canonical_digest(report.get("decision"))
+        or value.get("decision_digest") != report.get("decision_digest")
         or not isinstance(candidate, dict)
         or candidate.get("digest") != binding.get("candidate_digest")
         or candidate.get("closure_digest")
@@ -2167,6 +2352,7 @@ def _receipt_value(binding, terminal_report, report_path, marker_path=None):
         "controlled_completion": False,
         "enforcement_eligible": False,
         "binding": binding,
+        "decision_digest": terminal_report["decision_digest"],
         "publication": {
             "id": publication_id,
             "status": "success",
@@ -2232,6 +2418,66 @@ def _remove_projection(path):
     except OSError:
         return False
     return True
+
+
+def _decision_value(report):
+    value = {
+        "schema": DECISION_SCHEMA,
+        "gate_id": report["gate_id"],
+        "outcome": report["outcome"],
+        "gate_exit_code": report["gate_exit_code"],
+        "terminalized_pass": report["terminalized_pass"],
+        "reason": report["reason"],
+        "duration_seconds": report["duration_seconds"],
+        "target_seconds": report.get("target_seconds"),
+        "maximum_seconds": report.get("maximum_seconds"),
+        "policy_digest": report.get("policy_digest"),
+        "candidate_digest": (report.get("candidate") or {}).get("digest"),
+        "incomplete": list(report.get("incomplete", ())),
+        "evidence_authority": report["evidence_authority"],
+        "controlled_completion": report["controlled_completion"],
+        "enforcement_eligible": report["enforcement_eligible"],
+        "enforcement": report["enforcement"],
+    }
+    return value
+
+
+def _send_terminal_decision(report):
+    raw_fd = os.environ.get(_CONTROL_FD_ENV)
+    if raw_fd is None:
+        return
+    if not raw_fd.isdigit():
+        raise GateError("test-gate control descriptor is invalid")
+    frame = {
+        "schema": CONTROLLER_CLAIM_SCHEMA,
+        "gate_id": report["gate_id"],
+        "outcome": report["outcome"],
+        "gate_exit_code": report["gate_exit_code"],
+        "terminalized_pass": report["terminalized_pass"],
+        "policy_digest": report.get("policy_digest"),
+        "decision_digest": report["decision_digest"],
+        "receipt_binding_digest": report.get("receipt_binding_digest"),
+        "evidence_authority": report["evidence_authority"],
+        "controlled_completion": report["controlled_completion"],
+        "enforcement_eligible": report["enforcement_eligible"],
+    }
+    frame["claim_digest"] = test_manifest.canonical_digest(frame)
+    payload = json.dumps(
+        frame,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(payload) > CONTROL_FRAME_MAX_BYTES:
+        raise GateError("test-gate terminal decision is oversized")
+    data = memoryview(struct.pack("!I", len(payload)) + payload)
+    descriptor = int(raw_fd)
+    while data:
+        written = os.write(descriptor, data)
+        if written <= 0:
+            raise GateError("test-gate terminal decision could not be sent")
+        data = data[written:]
 
 
 def emit_report(
@@ -2308,6 +2554,19 @@ def emit_report(
     report["command_outcome"] = report["outcome"]
     report["exit_code"] = report["gate_exit_code"]
     report["publication_id"] = secrets.token_hex(32)
+    report["receipt_binding_digest"] = (
+        receipt_binding_value.get("binding_digest")
+        if receipt_binding_value is not None
+        else None
+    )
+    report["decision"] = _decision_value(report)
+    report["decision_digest"] = test_manifest.canonical_digest(report["decision"])
+
+    try:
+        _send_terminal_decision(report)
+    except (GateError, OSError, ValueError) as error:
+        _write_publication_error("terminal decision publication failed: " + str(error))
+        return OUTCOME_EXIT["error"]
 
     if not report["terminalized_pass"]:
         receipt_path = None
@@ -2411,6 +2670,7 @@ def _base_report(gate, started):
         "tested_view": None,
         "test_plan": None,
         "execution_identity": None,
+        "decision_protocol": None,
         "policy_digest": None,
         "critical": {},
         "selected": [],
@@ -2422,21 +2682,33 @@ def _base_report(gate, started):
         "maximum_exceeded": False,
         "terminalized_pass": False,
         "invocation": None,
+        "receipt_binding_digest": None,
         "_started": started,
     }
 
 
 def main(arguments=(), started=None):
     options = parse_arguments(arguments)
-    if started is None:
+    absolute_deadline = None
+    if _HANDOFF is not None:
         try:
-            started = gate_interval_started()
+            handoff_started, absolute_deadline = gate_interval_bounds()
         except GateError as error:
             report = _base_report(options.gate, PROCESS_STARTED)
             report["outcome"] = "error"
             report["reason"] = str(error)
             return emit_report(report)
+        if started is None:
+            started = handoff_started
+    elif started is None:
+        started = PROCESS_STARTED
     report = _base_report(options.gate, started)
+    if _HANDOFF is not None:
+        frame = _HANDOFF.get("policy_frame")
+        if isinstance(frame, dict):
+            # The broker accepts only claims bound to its authoritative policy.
+            # Preserve that identity even when candidate-side reproduction fails.
+            report["policy_digest"] = frame.get("policy_digest")
     if options.at_transition or options.provider_hard:
         report["outcome"] = "blocked-incomplete"
         report["reason"] = (
@@ -2458,11 +2730,13 @@ def main(arguments=(), started=None):
         return emit_report(report)
     try:
         validated_closure = validate_bootstrap_handoff()
+        _require_work_time(absolute_deadline, "controller admission")
         with tempfile.TemporaryDirectory(prefix="agentfold-test-gate-") as scratch:
             scratch_root = Path(scratch).resolve()
             candidate, tested_view, candidate_root, unchanged = capture_candidate(
                 options, scratch_root
             )
+            _require_work_time(absolute_deadline, "candidate capture")
             if not unchanged():
                 raise GateError("candidate capture or controller closure drifted before execution")
             report["candidate"] = candidate.as_dict()
@@ -2477,7 +2751,16 @@ def main(arguments=(), started=None):
                 scratch_root,
                 candidate.base_revision,
             )
+            protocol_identity = validate_policy_frame(
+                policy,
+                policy_digest,
+                candidate_root,
+                candidate.base_revision,
+                options.gate,
+            )
+            _require_work_time(absolute_deadline, "policy validation")
             report["policy_digest"] = policy_digest
+            report["decision_protocol"] = protocol_identity
             report["invocation"] = {
                 "kind": (
                     "explicit"
@@ -2498,6 +2781,7 @@ def main(arguments=(), started=None):
                 return emit_report(report)
 
             classification = classify_candidate(candidate.changed_paths, policy)
+            _require_work_time(absolute_deadline, "risk classification")
             required_critical = tuple(classification.required_check_ids)
             critical = bool(
                 classification.critical_bindings
@@ -2536,15 +2820,25 @@ def main(arguments=(), started=None):
                 selected, deferred = routine_test_manifest(
                     candidate.changed_paths, all_tests
                 )
+            _require_work_time(absolute_deadline, "test planning")
             report["selected"] = list(selected)
             report["deferred"] = list(deferred)
 
             budget = _budget_for(options.gate, policy)
             maximum = float(budget.maximum_seconds)
             target = float(budget.target_seconds)
-            hard_deadline = started + maximum
+            hard_deadline = (
+                absolute_deadline
+                if absolute_deadline is not None
+                else started + maximum
+            )
+            if absolute_deadline is not None and abs(
+                (absolute_deadline - started) - maximum
+            ) > 0.001:
+                raise GateError("configured budget disagrees with supervisor deadline")
             reporting_reserve = min(0.5, max(0.05, maximum * 0.05))
             component_deadline = hard_deadline - reporting_reserve
+            _require_work_time(component_deadline, "pre-component planning")
             components = []
             frozen_index = (
                 Path(_HANDOFF["frozen_index"])

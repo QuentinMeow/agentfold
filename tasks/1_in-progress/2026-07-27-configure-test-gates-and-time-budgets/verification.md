@@ -1480,3 +1480,137 @@ Panel result: 3 APPROVE, 2 BLOCK. The valid P1 deadline finding keeps merge bloc
 the numerical majority. This records the surviving historical evidence and corrects the stale
 task descriptions, but cannot recreate the lost report/stdout. A product repair, new exact final
 run, new commit, and fresh revision-bound panel are still required.
+
+## Isolated P1 absolute-deadline repair — focused evidence only
+
+The repair was built without a commit in `/private/tmp/agentfold-deadline-product-impl` from clean
+revision `19ca430426fc9f56334db26a8c3c3b89a9af109a`. These are focused results, not an exact final
+gate or full repository-suite result.
+
+```
+$ /usr/bin/time -p python3 automation/tests/test_gate_deadline_protocol.py
+................
+----------------------------------------------------------------------
+Ran 16 tests in 0.081s
+
+OK
+real 0.52
+user 0.40
+sys 0.10
+
+$ /usr/bin/time -p python3 automation/tests/test_test_gate_config.py
+............................
+----------------------------------------------------------------------
+Ran 28 tests in 0.246s
+
+OK
+real 0.50
+user 0.42
+sys 0.06
+
+$ /usr/bin/time -p python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_final_prewarm_is_reused_by_actual_git_commit_hook
+.
+----------------------------------------------------------------------
+Ran 1 test in 9.276s
+
+OK
+real 9.71
+user 4.86
+sys 3.76
+
+$ /usr/bin/time -p python3 -m unittest <nine named deadline, cleanup, hard-boundary, publication, and receipt tests>
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 2.984s
+
+OK
+real 3.36
+user 2.04
+sys 1.06
+
+$ python3 -m py_compile automation/run_test_gate.py automation/test_gate_controller.py automation/test_gate_config.py automation/tests/test_gate_deadline_protocol.py
+[result summary] exit 0; no output
+
+$ git diff --check
+[result summary] exit 0; no output
+
+$ wc -l automation/AGENTS.md
+60 automation/AGENTS.md
+
+$ /usr/bin/time -p python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+real 14.06
+user 9.15
+sys 4.52
+```
+
+An earlier complete run of `automation/tests/test_run_test_gate.py` ran 102 tests in 35.736
+seconds and failed five assertions with two errors, with one skip. Four failures/errors were
+old-generation handoff-v1 or receipt-v5 expectations that the transition bridge must update. It
+also exposed two real integration mistakes in the first draft: final policy discovery did not
+handle `PolicyUnion`, and active-lane protocol identity prevented final evidence from satisfying
+the routine hook. Both were repaired; the isolated prewarm/reuse test then passed twice.
+
+A later ten-test batch passed nine tests but the prewarm fixture reported incomplete descendant
+cleanup on macOS. That same prewarm/reuse test passed alone immediately before the batch in 9.131
+seconds and again in the final evidence above. The isolated implementation does not relabel the
+batch as a pass and does not claim that the known portable cleanup limitation disappeared.
+
+## Isolated protocol hardening — focused evidence only
+
+The second repair was run in the same isolated worktree. It did not run the broad repository
+suite, an exact final gate, a commit, or a revision-bound panel.
+
+```
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol -v
+Ran 26 tests in 0.860s — OK
+
+$ python3 -m unittest automation.tests.test_test_gate_config -v
+Ran 28 tests in 0.171s — OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_final_prewarm_is_reused_by_actual_git_commit_hook -v
+Ran 1 test in 8.991s — OK
+
+$ python3 -m py_compile automation/run_test_gate.py automation/test_gate_controller.py automation/test_gate_config.py automation/tests/test_gate_deadline_protocol.py
+<no output; exit 0>
+
+$ git diff --check && git diff --cached --check && wc -l automation/AGENTS.md
+60 automation/AGENTS.md
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+```
+
+The protocol cases cover trusted-base parsing of both configurations, invalid candidate input,
+malicious candidate-parser isolation from the outer descriptor, closure drift, one authoritative
+index without recapture, controller/component descriptor isolation, candidate reproduction
+mismatch, the worker exit matrix, immutable decision digests, and lane-correct static reports.
+
+The existing safety subset ran nine named deadline, cleanup, hard-boundary, publication, and
+receipt cases in 1.794 seconds. Eight passed.
+`test_receipt_requires_matching_publication_commit_marker` errored because its legacy
+`_publish_receipt_pair` helper omits the now-required report `decision_digest`. This is an
+explicit compatibility-bridge migration item, not a passing result and not a reason to weaken
+the v4 report contract.
+
+## Honest supervisor-static telemetry — focused evidence only
+
+```
+$ python3 -m unittest automation.tests.test_gate_deadline_protocol -v
+Ran 27 tests in 0.564s — OK
+
+$ python3 -m unittest automation.tests.test_test_gate_config -v
+Ran 28 tests in 0.153s — OK
+
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_final_prewarm_is_reused_by_actual_git_commit_hook -v
+Ran 1 test in 5.898s — OK
+
+$ python3 -m py_compile automation/run_test_gate.py automation/test_gate_controller.py automation/test_gate_config.py automation/tests/test_gate_deadline_protocol.py
+<no output; exit 0>
+```
+
+The added timeout regression starts the supervisor clock at 10.0, observes the post-cleanup
+clock at 15.25, and verifies both the static report and immutable decision record 5.25 seconds.
+It also verifies `worker_started: true`, process-group cleanup attempted with its observed result,
+and explicit ownership-token discovery completeness. Unavailable static timing and cleanup facts
+are null or labeled unavailable rather than replaced with successful-looking values.
