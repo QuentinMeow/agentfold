@@ -6,9 +6,16 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from automation.tests.test_gate_generations import (
+    SECOND_PANEL_REPAIR_RECORDS,
+    gate_generation_records,
+)
 
 
 AUTOMATION = Path(__file__).resolve().parents[1]
+IS_SECOND_PANEL_REPAIR = gate_generation_records() == SECOND_PANEL_REPAIR_RECORDS
 SPEC = importlib.util.spec_from_file_location(
     "test_manifest_under_test", AUTOMATION / "test_manifest.py"
 )
@@ -17,6 +24,30 @@ SPEC.loader.exec_module(MANIFEST)
 
 
 class TestManifestTests(unittest.TestCase):
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
+    def test_git_queries_disable_replacement_objects_in_argv_and_environment(self):
+        completed = mock.Mock(returncode=0, stdout=b"result", stderr=b"")
+        with mock.patch.object(MANIFEST.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(
+                b"result",
+                MANIFEST._git(
+                    Path("/repository"),
+                    ["rev-parse", "HEAD"],
+                    {MANIFEST.GIT_NO_REPLACE_ENVIRONMENT: "hostile"},
+                ),
+            )
+        self.assertEqual(
+            ["git", "--no-replace-objects", "rev-parse", "HEAD"],
+            run.call_args[0][0],
+        )
+        self.assertEqual(
+            "1",
+            run.call_args[1]["env"][MANIFEST.GIT_NO_REPLACE_ENVIRONMENT],
+        )
+
     def test_tracked_symlink_mode_is_not_an_executable_candidate_entry(self):
         oid = b"a" * 40
         for target_kind in ("absolute", "dangling", "loop"):

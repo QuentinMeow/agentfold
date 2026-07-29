@@ -9,6 +9,7 @@ from automation.tests.test_gate_generations import (
     PANEL_REPAIR_RECORDS,
     PARSER_COMPAT_RECORDS,
     REVIEW_REPAIR_RECORDS,
+    SECOND_PANEL_REPAIR_RECORDS,
     gate_generation_records,
 )
 
@@ -33,6 +34,8 @@ elif CURRENT_GATE_RECORDS == REVIEW_REPAIR_RECORDS:
     POLICY_ENDPOINT = "review-repair"
 elif CURRENT_GATE_RECORDS == PANEL_REPAIR_RECORDS:
     POLICY_ENDPOINT = "panel-repair"
+elif CURRENT_GATE_RECORDS == SECOND_PANEL_REPAIR_RECORDS:
+    POLICY_ENDPOINT = "second-panel-repair"
 else:
     raise AssertionError(
         "config tests require one exact admitted policy endpoint: {!r}".format(
@@ -41,8 +44,13 @@ else:
     )
 HAS_SERVICE_DEPENDENCIES = POLICY_ENDPOINT != "deadline-before-parser-compat"
 HAS_HARDENED_RISK_PATHS = POLICY_ENDPOINT != "deadline-before-parser-compat"
-IS_PANEL_REPAIR = POLICY_ENDPOINT == "panel-repair"
-IS_REVIEW_REPAIR = POLICY_ENDPOINT in ("review-repair", "panel-repair")
+IS_SECOND_PANEL_REPAIR = POLICY_ENDPOINT == "second-panel-repair"
+IS_PANEL_REPAIR = POLICY_ENDPOINT in ("panel-repair", "second-panel-repair")
+IS_REVIEW_REPAIR = POLICY_ENDPOINT in (
+    "review-repair",
+    "panel-repair",
+    "second-panel-repair",
+)
 
 
 VALID_TEXT = (REPO / "agentfold.toml").read_text(encoding="utf-8")
@@ -86,6 +94,9 @@ PRE_SERVICE_DEPENDENCY_POLICY_DIGEST = (
 )
 ROOT_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST = (
     "0fa23f695f47e93cf41e953a1ccae35d5c60143524693c7ed067d8367f26f177"
+)
+NESTED_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST = (
+    "aa7bf8ee6c0b3be1eb36233a93a5944f47d9509c922bca4ad93ba0042fdf3fe3"
 )
 PRE_HARDENING_POLICY_DIGEST = (
     "41b2ee7b778f6fe2821179760291fffd8ff9ed85b85d52ebbab5a09f4bc1236e"
@@ -198,9 +209,13 @@ class StarterPolicyTests(unittest.TestCase):
         )
         self.assertEqual(absent.digest, explicit_empty.digest)
         expected_digest = (
-            ROOT_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST
-            if IS_PANEL_REPAIR
-            else PRE_SERVICE_DEPENDENCY_POLICY_DIGEST
+            NESTED_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST
+            if IS_SECOND_PANEL_REPAIR
+            else (
+                ROOT_AGENT_CRITICAL_EMPTY_DEPENDENCY_POLICY_DIGEST
+                if IS_PANEL_REPAIR
+                else PRE_SERVICE_DEPENDENCY_POLICY_DIGEST
+            )
         )
         self.assertEqual(expected_digest, absent.digest)
         self.assertEqual(
@@ -457,13 +472,15 @@ class RiskClassificationTests(unittest.TestCase):
         )
         if IS_PANEL_REPAIR:
             paths = ("AGENTS.md",) + paths
+        if IS_SECOND_PANEL_REPAIR:
+            paths = ("services/example/AGENTS.md",) + paths
         for path in paths:
             with self.subTest(path=path):
                 result = CONFIG.classify_paths((path,), self.policy)
                 if HAS_HARDENED_RISK_PATHS:
                     self.assertTrue(result.is_critical)
                     self.assertIn("repository-tests/full", result.required_check_ids)
-                    if path == "AGENTS.md":
+                    if path.endswith("AGENTS.md"):
                         self.assertEqual(
                             ("authorization",),
                             tuple(
@@ -493,6 +510,36 @@ class RiskClassificationTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertFalse(CONFIG.classify_paths((path,), self.policy).is_critical)
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "nested agent contracts belong to the second-panel endpoint",
+    )
+    def test_nested_agent_contracts_are_critical_but_adjacent_records_are_reversible(self):
+        for path in (
+            "tasks/0_backlog/example/AGENTS.md",
+            "message-queue/needs-agent/AGENTS.md",
+            "history/conversations/example/AGENTS.md",
+            "memory/lessons/example/AGENTS.md",
+        ):
+            with self.subTest(path=path):
+                result = CONFIG.classify_paths((path,), self.policy)
+                self.assertTrue(result.is_critical)
+                self.assertEqual(
+                    ("authorization",),
+                    tuple(binding.category for binding in result.critical_bindings),
+                )
+                self.assertEqual((), result.reversible_ids)
+        for path in (
+            "tasks/0_backlog/example/task.md",
+            "message-queue/needs-agent/example.md",
+            "history/conversations/example/handover.md",
+            "memory/lessons/example/fact.md",
+        ):
+            with self.subTest(path=path):
+                result = CONFIG.classify_paths((path,), self.policy)
+                self.assertFalse(result.is_critical)
+                self.assertEqual(("ordinary-repository-work",), result.reversible_ids)
 
     def test_critical_match_wins_over_reversible_and_unions_checks(self):
         result = CONFIG.classify_paths(
@@ -575,6 +622,25 @@ class PolicyUnionTests(unittest.TestCase):
 
         self.assertTrue(result.is_critical)
         self.assertEqual(("new-top-level/file.py",), result.unmatched_paths)
+        self.assertEqual((), result.reversible_ids)
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "nested agent contracts belong to the second-panel endpoint",
+    )
+    def test_candidate_cannot_weaken_base_nested_agent_contract(self):
+        candidate_text = VALID_TEXT.replace('  "**/AGENTS.md",\n', "", 1)
+        union = CONFIG.union_policies(
+            self.base, CONFIG.parse_policy(candidate_text)
+        )
+
+        result = CONFIG.classify_paths(("tasks/example/AGENTS.md",), union)
+
+        self.assertTrue(result.is_critical)
+        self.assertEqual(
+            ("authorization",),
+            tuple(binding.category for binding in result.critical_bindings),
+        )
         self.assertEqual((), result.reversible_ids)
 
     def test_path_reversible_under_both_policies_stays_reversible(self):

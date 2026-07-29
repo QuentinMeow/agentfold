@@ -117,6 +117,23 @@ PANEL_REPAIR_RECORDS = tuple(sorted((
     ("automation/test_gate_controller.py", "100644", "dfa032fc476fbc8beddeb354285193cb03f138560878eeceea312e31c38e72e5"),
 )))
 
+SECOND_PANEL_REPAIR_RECORDS = tuple(sorted((
+    ("agentfold.toml", "100644", "700a94bd4883f2b0083a1395b70947e7f99131d612927a8970549fbb49812195"),
+    ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
+    ("automation/_vendor/tomli/__init__.py", "100644", "26153057ae830758381efb7551009531d7c2bbe220015f055e6bc353da27c5de"),
+    ("automation/_vendor/tomli/_parser.py", "100644", "83df8435a00b4be07c768918a42bb35056a55a5a20ed3f922183232d9496aed3"),
+    ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
+    ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
+    ("automation/file_test_budget_task.py", "100644", "d1436d3695d38bf0a7e50340020eb6e3d18f04962363f405747c05dbe25e3f2c"),
+    ("automation/test_gate_config.py", "100644", "4b883d081f4472f4dd73465d440f71438637acd65d5c7f6a82b437639a2d9853"),
+    ("automation/test_manifest.py", "100644", "e36b2c4c2107f7102b83f926981a8f89eafc45efea340990dbb9c0c85dffedc5"),
+    (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
+    ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
+    ("automation/run_test_gate.py", "100644", "2cc4cc98ec5d7f285e6dae42c9f685eeeaf365aedc741c9e9fe0841751367c9d"),
+    ("automation/run_tests.py", "100644", "75dbb1cf77b88078c808c94b77f7a2b1747f78f8bfdc2d84cec709ba20b55f55"),
+    ("automation/test_gate_controller.py", "100644", "b4e941a931fcf8370bb121d0669e5408ca0cd53557006d6bd6ee994f138fea72"),
+)))
+
 CLASSIFIED_PATHS = tuple(record[0] for record in LEGACY_RECORDS)
 
 
@@ -152,6 +169,8 @@ def classify_gate_generation_records(records):
     if records == REVIEW_REPAIR_RECORDS:
         return DEADLINE_GENERATION
     if records == PANEL_REPAIR_RECORDS:
+        return DEADLINE_GENERATION
+    if records == SECOND_PANEL_REPAIR_RECORDS:
         return DEADLINE_GENERATION
     return "invalid"
 
@@ -197,6 +216,10 @@ class GateMigrationGenerationTests(unittest.TestCase):
         self.assertEqual(
             DEADLINE_GENERATION,
             classify_gate_generation_records(PANEL_REPAIR_RECORDS),
+        )
+        self.assertEqual(
+            DEADLINE_GENERATION,
+            classify_gate_generation_records(SECOND_PANEL_REPAIR_RECORDS),
         )
 
     def test_sealed_regular_modes_preserve_exact_generation_admission(self):
@@ -250,6 +273,10 @@ class GateMigrationGenerationTests(unittest.TestCase):
             (DEADLINE_GENERATION + "-parser-compat", PARSER_COMPAT_RECORDS),
             (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
             (DEADLINE_GENERATION + "-panel-repair", PANEL_REPAIR_RECORDS),
+            (
+                DEADLINE_GENERATION + "-second-panel-repair",
+                SECOND_PANEL_REPAIR_RECORDS,
+            ),
         )
         for base_name, base_records in generations:
             base = dict((record[0], record) for record in base_records)
@@ -282,6 +309,10 @@ class GateMigrationGenerationTests(unittest.TestCase):
             (DEADLINE_GENERATION + "-parser-compat", PARSER_COMPAT_RECORDS),
             (DEADLINE_GENERATION + "-review-repair", REVIEW_REPAIR_RECORDS),
             (DEADLINE_GENERATION + "-panel-repair", PANEL_REPAIR_RECORDS),
+            (
+                DEADLINE_GENERATION + "-second-panel-repair",
+                SECOND_PANEL_REPAIR_RECORDS,
+            ),
         ):
             for index, record in enumerate(admitted):
                 relative, mode, digest = record

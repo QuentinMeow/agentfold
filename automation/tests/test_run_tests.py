@@ -15,6 +15,7 @@ if __package__:
         PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
+        SECOND_PANEL_REPAIR_RECORDS,
         gate_generation,
         gate_generation_records,
     )
@@ -23,6 +24,7 @@ else:
         PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
+        SECOND_PANEL_REPAIR_RECORDS,
         gate_generation,
         gate_generation_records,
     )
@@ -31,9 +33,11 @@ else:
 GATE_GENERATION = gate_generation()
 GATE_RECORDS = gate_generation_records()
 IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
+IS_SECOND_PANEL_REPAIR = GATE_RECORDS == SECOND_PANEL_REPAIR_RECORDS
 IS_REVIEW_REPAIR = GATE_RECORDS in (
     REVIEW_REPAIR_RECORDS,
     PANEL_REPAIR_RECORDS,
+    SECOND_PANEL_REPAIR_RECORDS,
 )
 if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
     raise AssertionError(
@@ -91,6 +95,10 @@ class StagedTestSelectionTests(unittest.TestCase):
             selection = RUN_TESTS.staged_test_selection(self.all_tests)
         return selection, run
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
     def test_cli_addition_selects_only_the_cli_test(self):
         path = b"services/quote-cli/quote_cli.py"
 
@@ -99,13 +107,26 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertEqual("staged", selection.lane)
         self.assertEqual((self.cli_test,), selection.test_files)
         self.assertEqual(
-            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            [
+                "git",
+                "--no-replace-objects",
+                "diff",
+                "--cached",
+                "--name-status",
+                "-z",
+                "-M",
+            ],
             run.call_args_list[1][0][0],
         )
         self.assertEqual(
-            ["git", "ls-files", "--stage", "-z"],
+            ["git", "--no-replace-objects", "ls-files", "--stage", "-z"],
             run.call_args_list[2][0][0],
         )
+        for call in run.call_args_list:
+            self.assertEqual(
+                "1",
+                call[1]["env"][RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT],
+            )
 
     def test_api_modification_selects_api_and_dependent_cli_tests(self):
         path = b"services/quote-api/quotes.json"
@@ -605,11 +626,17 @@ class RunTestsIsolationTests(unittest.TestCase):
             self.assertEqual(0o777, home.stat().st_mode & 0o777)
             self.assertEqual(0o777, temporary.stat().st_mode & 0o777)
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed candidate environment belongs to the second-panel endpoint",
+    )
     def test_provider_candidate_environment_is_explicitly_allowlisted(self):
         environment = RUN_TESTS.provider_candidate_environment(
             {
                 "PATH": "/untrusted/path",
                 "LANG": "C.UTF-8",
+                RUN_TESTS.GATE_OWNER_ENVIRONMENT: "owner-token",
+                RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT: "hostile",
                 "GITHUB_TOKEN": "secret",
                 "PYTHONWARNINGS": "error",
                 "PYTHON_CREDENTIAL": "also-secret",
@@ -625,6 +652,12 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("/work/state/tmp", environment["TMPDIR"])
         self.assertNotIn("PYTHONWARNINGS", environment)
         self.assertEqual("1", environment["PYTHONDONTWRITEBYTECODE"])
+        self.assertEqual(
+            "owner-token", environment[RUN_TESTS.GATE_OWNER_ENVIRONMENT]
+        )
+        self.assertEqual(
+            "1", environment[RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT]
+        )
         self.assertNotIn("GITHUB_TOKEN", environment)
         self.assertNotIn("PYTHON_CREDENTIAL", environment)
         self.assertNotIn("UNRELATED", environment)
@@ -695,6 +728,10 @@ class RunTestsIsolationTests(unittest.TestCase):
                             source, root / f"{name}-destination", {}
                         )
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
     def test_child_environment_removes_every_git_local_variable(self):
         factory = getattr(RUN_TESTS, "isolated_test_environment", None)
         self.assertIsNotNone(
@@ -703,7 +740,7 @@ class RunTestsIsolationTests(unittest.TestCase):
         )
 
         names = subprocess.check_output(
-            ["git", "rev-parse", "--local-env-vars"],
+            ["git", "--no-replace-objects", "rev-parse", "--local-env-vars"],
             cwd=RUN_TESTS.REPO,
             text=True,
         ).splitlines()
@@ -713,11 +750,13 @@ class RunTestsIsolationTests(unittest.TestCase):
         contaminated["GIT_PAGER"] = "sentinel-pager"
         contaminated["GIT_QUARANTINE_PATH"] = "sentinel-quarantine"
         contaminated["GIT_UNKNOWN_FUTURE_LOCAL"] = "sentinel-future"
+        contaminated[RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT] = "hostile"
         contaminated["AGENTFOLD_KEEP"] = "present"
 
         child = factory(contaminated)
 
         self.assertEqual("present", child["AGENTFOLD_KEEP"])
+        self.assertEqual("1", child[RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT])
         self.assertTrue(names)
         self.assertFalse(
             any(
@@ -761,13 +800,25 @@ class RunTestsIsolationTests(unittest.TestCase):
         if IS_PARSER_COMPAT:
             responses = (
                 subprocess.CompletedProcess(
-                    ["git", "config", "--get", "user.name"],
+                    [
+                        "git",
+                        "--no-replace-objects",
+                        "config",
+                        "--get",
+                        "user.name",
+                    ],
                     0,
                     stdout="Test Author\n",
                     stderr="",
                 ),
                 subprocess.CompletedProcess(
-                    ["git", "config", "--get", "user.email"],
+                    [
+                        "git",
+                        "--no-replace-objects",
+                        "config",
+                        "--get",
+                        "user.email",
+                    ],
                     0,
                     stdout="test@example.invalid\n",
                     stderr="",
@@ -821,7 +872,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             "run_tests must expose fail-closed Git environment discovery",
         )
         failed = subprocess.CompletedProcess(
-            ["git", "rev-parse", "--local-env-vars"],
+            ["git", "--no-replace-objects", "rev-parse", "--local-env-vars"],
             128,
             stdout="",
             stderr="fatal: not a git repository",
@@ -833,7 +884,7 @@ class RunTestsIsolationTests(unittest.TestCase):
 
     def test_empty_git_local_variable_discovery_stops_the_runner(self):
         empty = subprocess.CompletedProcess(
-            ["git", "rev-parse", "--local-env-vars"],
+            ["git", "--no-replace-objects", "rev-parse", "--local-env-vars"],
             0,
             stdout="",
             stderr="",
@@ -843,9 +894,13 @@ class RunTestsIsolationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "discovery was empty"):
                 RUN_TESTS.git_local_environment_names()
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
     def test_truncated_discovery_cannot_leak_unknown_git_variables(self):
         truncated = subprocess.CompletedProcess(
-            ["git", "rev-parse", "--local-env-vars"],
+            ["git", "--no-replace-objects", "rev-parse", "--local-env-vars"],
             0,
             stdout="GIT_DIR\n",
             stderr="",
@@ -861,7 +916,12 @@ class RunTestsIsolationTests(unittest.TestCase):
             child = RUN_TESTS.isolated_test_environment(contaminated)
 
         self.assertEqual(
-            {"KEEP": "present", "PYTHONDONTWRITEBYTECODE": "1"}, child
+            {
+                "KEEP": "present",
+                RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT: "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            child,
         )
 
     def test_scratch_root_rejects_a_path_separator(self):
@@ -877,7 +937,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             repository.mkdir()
             child.mkdir()
             subprocess.run(
-                ["git", "init", "-q", str(repository)],
+                ["git", "--no-replace-objects", "init", "-q", str(repository)],
                 check=True,
                 env={
                     name: value
@@ -898,7 +958,7 @@ class RunTestsIsolationTests(unittest.TestCase):
 
     def test_scratch_root_fails_closed_on_an_unexpected_git_error(self):
         failed = subprocess.CompletedProcess(
-            ["git", "rev-parse", "--git-dir"],
+            ["git", "--no-replace-objects", "rev-parse", "--git-dir"],
             1,
             stdout="",
             stderr="wrapper failure",
@@ -960,7 +1020,14 @@ class RunTestsIsolationTests(unittest.TestCase):
             (ignored_bare / "HEAD").write_text("ref: refs/heads/main\n")
             common_repository = Path(scratch) / "common-repository.git"
             subprocess.run(
-                ["git", "init", "--bare", "-q", str(common_repository)],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "init",
+                    "--bare",
+                    "-q",
+                    str(common_repository),
+                ],
                 check=True,
                 env={
                     name: value
@@ -988,17 +1055,30 @@ class RunTestsIsolationTests(unittest.TestCase):
             }
             clean_environment["HOME"] = str(global_home)
             subprocess.run(
-                ["git", "init", "-q", str(repository)],
+                ["git", "--no-replace-objects", "init", "-q", str(repository)],
                 check=True,
                 env=clean_environment,
             )
             subprocess.run(
-                ["git", "init", "-q", str(nested_repository)],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "init",
+                    "-q",
+                    str(nested_repository),
+                ],
                 check=True,
                 env=clean_environment,
             )
             subprocess.run(
-                ["git", "-C", str(nested_repository), "add", "tracked.txt"],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "-C",
+                    str(nested_repository),
+                    "add",
+                    "tracked.txt",
+                ],
                 check=True,
                 env=clean_environment,
             )
@@ -1013,7 +1093,14 @@ class RunTestsIsolationTests(unittest.TestCase):
             if symlinks_supported:
                 tracked_paths.extend(("broken-link", "loop"))
             subprocess.run(
-                ["git", "-C", str(repository), "add", *tracked_paths],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "-C",
+                    str(repository),
+                    "add",
+                    *tracked_paths,
+                ],
                 check=True,
                 env=clean_environment,
             )
@@ -1057,7 +1144,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             nested_view = destination / "vendor" / "nested \n"
             self.assertFalse((nested_view / ".git").exists())
             subprocess.run(
-                ["git", "init", "-q", str(nested_view)],
+                ["git", "--no-replace-objects", "init", "-q", str(nested_view)],
                 check=True,
                 env=clean_environment,
             )
@@ -1088,6 +1175,7 @@ class RunTestsIsolationTests(unittest.TestCase):
             nested_bare_git = subprocess.run(
                 [
                     "git",
+                    "--no-replace-objects",
                     "-C",
                     str(destination / "generated/tests/bare-fixture"),
                     "rev-parse",
@@ -1110,7 +1198,14 @@ class RunTestsIsolationTests(unittest.TestCase):
                 (destination / ".git").read_text(),
             )
             projected_git = subprocess.run(
-                ["git", "-C", str(destination), "rev-parse", "--git-dir"],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "-C",
+                    str(destination),
+                    "rev-parse",
+                    "--git-dir",
+                ],
                 env=clean_environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1197,6 +1292,10 @@ class RunTestsIsolationTests(unittest.TestCase):
                     support,
                 )
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
     def test_nested_runner_wrapper_reuses_the_original_git_executable(self):
         with tempfile.TemporaryDirectory() as scratch:
             scratch_root = Path(scratch)
@@ -1224,7 +1323,18 @@ class RunTestsIsolationTests(unittest.TestCase):
                 original_git,
                 (Path(second_wrapper) / "git").read_text(),
             )
+            wrapper_text = (Path(second_wrapper) / "git").read_text()
+            self.assertIn("GIT_NO_REPLACE_OBJECTS=1", wrapper_text)
+            self.assertIn("--no-replace-objects", wrapper_text)
+            self.assertEqual(
+                "1",
+                second_environment[RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT],
+            )
 
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
     def test_main_passes_the_isolated_environment_to_each_test(self):
         RUN_TESTS.child_interpreter_identity()
         child_environment = {
@@ -1285,6 +1395,9 @@ class RunTestsIsolationTests(unittest.TestCase):
         )
         self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
+        self.assertEqual(
+            "1", child_environment[RUN_TESTS.GIT_NO_REPLACE_ENVIRONMENT]
+        )
         self.assertEqual("/caller/home", child_environment["HOME"])
         self.assertEqual("/caller/xdg", child_environment["XDG_CONFIG_HOME"])
 
@@ -1389,18 +1502,33 @@ class RunTestsIsolationTests(unittest.TestCase):
             }
             config_environment["HOME"] = str(caller_home)
             subprocess.run(
-                ["git", "config", "--global", "core.hooksPath", str(hooks)],
-                check=True,
-                env=config_environment,
-            )
-            subprocess.run(
-                ["git", "config", "--global", "user.name", "Caller Identity"],
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "config",
+                    "--global",
+                    "core.hooksPath",
+                    str(hooks),
+                ],
                 check=True,
                 env=config_environment,
             )
             subprocess.run(
                 [
                     "git",
+                    "--no-replace-objects",
+                    "config",
+                    "--global",
+                    "user.name",
+                    "Caller Identity",
+                ],
+                check=True,
+                env=config_environment,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "--no-replace-objects",
                     "config",
                     "--global",
                     "user.email",
@@ -1421,9 +1549,9 @@ class RunTestsIsolationTests(unittest.TestCase):
                     "import subprocess\n"
                     "from pathlib import Path\n"
                     "repository = Path('child-repository')\n"
-                    "subprocess.run(['git', 'init', '-q', str(repository)], check=True)\n"
+                    "subprocess.run(['git', '--no-replace-objects', 'init', '-q', str(repository)], check=True)\n"
                     "subprocess.run([\n"
-                    "    'git', '-C', str(repository),\n"
+                    "    'git', '--no-replace-objects', '-C', str(repository),\n"
                     "    'commit', '--allow-empty', '-qm', 'probe',\n"
                     "], check=True)\n"
                 )

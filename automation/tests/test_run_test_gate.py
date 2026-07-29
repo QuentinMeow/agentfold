@@ -23,6 +23,7 @@ if __package__:
         PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
+        SECOND_PANEL_REPAIR_RECORDS,
         gate_generation,
         gate_generation_records,
     )
@@ -32,6 +33,7 @@ else:
         PANEL_REPAIR_RECORDS,
         PARSER_COMPAT_RECORDS,
         REVIEW_REPAIR_RECORDS,
+        SECOND_PANEL_REPAIR_RECORDS,
         gate_generation,
         gate_generation_records,
     )
@@ -39,10 +41,15 @@ else:
 GATE_GENERATION = gate_generation()
 GATE_RECORDS = gate_generation_records()
 IS_PARSER_COMPAT = GATE_RECORDS == PARSER_COMPAT_RECORDS
-IS_PANEL_REPAIR = GATE_RECORDS == PANEL_REPAIR_RECORDS
+IS_SECOND_PANEL_REPAIR = GATE_RECORDS == SECOND_PANEL_REPAIR_RECORDS
+IS_PANEL_REPAIR = GATE_RECORDS in (
+    PANEL_REPAIR_RECORDS,
+    SECOND_PANEL_REPAIR_RECORDS,
+)
 IS_REVIEW_REPAIR = GATE_RECORDS in (
     REVIEW_REPAIR_RECORDS,
     PANEL_REPAIR_RECORDS,
+    SECOND_PANEL_REPAIR_RECORDS,
 )
 if not (IS_PARSER_COMPAT or IS_REVIEW_REPAIR):
     raise AssertionError(
@@ -2155,7 +2162,10 @@ class TestGateTests(unittest.TestCase):
                 ("test.py",),
                 "policy",
                 "repository-tests/full",
-                environment={"PATH": "/bin", "PYTHONPATH": "/first"},
+                environment={
+                    "PATH": os.environ.get("PATH", ""),
+                    "PYTHONPATH": "/first",
+                },
             )
             self._publish_receipt_pair(first)
             changed = GATE.receipt_binding(
@@ -2164,7 +2174,10 @@ class TestGateTests(unittest.TestCase):
                 ("test.py",),
                 "policy",
                 "repository-tests/full",
-                environment={"PATH": "/bin", "PYTHONPATH": "/second"},
+                environment={
+                    "PATH": os.environ.get("PATH", ""),
+                    "PYTHONPATH": "/second",
+                },
             )
 
             self.assertEqual(first["binding_digest"], changed["binding_digest"])
@@ -2308,6 +2321,38 @@ class TestGateTests(unittest.TestCase):
                 GATE.PUBLICATION_COMMIT_SCHEMA,
                 json.loads(markers[0].read_text())["schema"],
             )
+
+            if IS_SECOND_PANEL_REPAIR:
+                repeated_final = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-S",
+                        str(repo / "automation/run_test_gate.py"),
+                        "final",
+                        "--explicit",
+                        "--staged",
+                    ],
+                    cwd=repo,
+                    env=identity_environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                self.assertEqual(0, repeated_final.returncode, repeated_final.stdout)
+                repeated_final_report = json.loads(
+                    (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+                )
+                repeated_full = next(
+                    component
+                    for component in repeated_final_report["components"]
+                    if component["component_id"] == "repository-tests/full"
+                )
+                self.assertEqual("reused", repeated_full["evidence"])
+                self.assertEqual(
+                    final_report["receipt_binding_digest"],
+                    repeated_final_report["receipt_binding_digest"],
+                )
 
             committed = subprocess.run(
                 ["git", "commit", "-m", "exercise canonical routine hook"],
@@ -3291,7 +3336,7 @@ class TestGateTests(unittest.TestCase):
 
     def test_environment_identity_strips_pythonpath_and_snapshot_paths(self):
         first = {
-            "PATH": "/bin",
+            "PATH": os.environ.get("PATH", ""),
             "PYTHONPATH": "/one",
             "GIT_DIR": "/source/.git",
             "GIT_INDEX_FILE": "/private/random-one/index",
@@ -3320,9 +3365,241 @@ class TestGateTests(unittest.TestCase):
             identity, GATE.controller_closure()["interpreter_identity"]
         )
 
+    @unittest.skipUnless(os.name == "posix", "umask inheritance is POSIX-only")
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed environment identity belongs to the second-panel endpoint",
+    )
+    def test_umask_capture_uses_child_and_leaves_parent_untouched(self):
+        original = os.umask(0o022)
+        try:
+            self.assertEqual("0022", GATE.inherited_process_umask())
+            observed = os.umask(0o077)
+            os.umask(observed)
+            self.assertEqual(0o022, observed)
+        finally:
+            os.umask(original)
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed environment identity belongs to the second-panel endpoint",
+    )
+    def test_precomputed_environment_identity_probes_once_and_binds_umask(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        closure = {
+            "digest": "closure",
+            "records": [
+                {
+                    "path": "automation/run_test_gate.py",
+                    "sha256": "launcher",
+                }
+            ],
+        }
+        with mock.patch.object(
+            GATE, "inherited_process_umask", return_value="0022"
+        ) as probe, mock.patch.object(
+            GATE, "runner_revision", return_value="runner"
+        ), mock.patch.object(
+            GATE, "controller_closure", return_value=closure
+        ):
+            identity_022 = GATE.environment_identity(
+                {"PATH": os.environ.get("PATH", "")}
+            )
+            first = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+                execution_environment=identity_022,
+            )
+            second = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+                execution_environment=identity_022,
+            )
+            identity_077 = GATE.environment_identity(
+                {"PATH": os.environ.get("PATH", "")}, inherited_umask="0077"
+            )
+            changed = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+                execution_environment=identity_077,
+            )
+        probe.assert_called_once_with(None)
+        self.assertEqual(first, second)
+        self.assertNotEqual(first["binding_digest"], changed["binding_digest"])
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
+    def test_git_environments_force_replacement_objects_off(self):
+        self.assertEqual(
+            ["git", "--no-replace-objects", "show", "HEAD:file"],
+            GATE._git_command("show", "HEAD:file"),
+        )
+        self.assertEqual(
+            ["/trusted/git", "--no-replace-objects", "--version"],
+            GATE._git_command("--version", executable="/trusted/git"),
+        )
+        self.assertEqual(
+            "1",
+            GATE._git_environment({"GIT_NO_REPLACE_OBJECTS": "0"})[
+                "GIT_NO_REPLACE_OBJECTS"
+            ],
+        )
+        source = {"PATH": "/bin", "GIT_NO_REPLACE_OBJECTS": "0"}
+        self.assertEqual(
+            "1", GATE.safe_process_environment(source)["GIT_NO_REPLACE_OBJECTS"]
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            frozen = Path(scratch) / "candidate.index"
+            frozen.touch()
+            with mock.patch.object(GATE, "REPO", repo):
+                candidate = GATE.candidate_git_environment(repo, frozen)
+            self.assertEqual("1", candidate["GIT_NO_REPLACE_OBJECTS"])
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed Git identity belongs to the second-panel endpoint",
+    )
+    def test_git_identity_uses_sanitized_environment_and_absolute_deadline(self):
+        source = {
+            "PATH": "/trusted/bin",
+            "SECRET_VALUE": "not-admitted",
+            "PYTHONPATH": "/attacker",
+            "GIT_NO_REPLACE_OBJECTS": "0",
+        }
+        completed = mock.Mock(returncode=0, stdout="git version test\n")
+        with mock.patch.object(
+            GATE.subprocess, "run", return_value=completed
+        ) as run, mock.patch.object(
+            GATE.time, "monotonic", return_value=40.0
+        ), mock.patch.object(
+            GATE, "interpreter_identity", return_value={"interpreter": "fixed"}
+        ):
+            identity = GATE.environment_identity(
+                source, inherited_umask="0022", deadline=100.0
+            )
+
+        run.assert_called_once_with(
+            ["git", "--no-replace-objects", "--version"],
+            env={
+                "PATH": "/trusted/bin",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "GIT_NO_REPLACE_OBJECTS": "1",
+            },
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60.0,
+        )
+        self.assertEqual("git version test", identity["git_version"])
+        self.assertNotIn("SECRET_VALUE", run.call_args[1]["env"])
+        self.assertNotIn("PYTHONPATH", run.call_args[1]["env"])
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed Git identity belongs to the second-panel endpoint",
+    )
+    def test_git_identity_timeout_and_start_failure_fail_closed(self):
+        with mock.patch.object(
+            GATE.time, "monotonic", return_value=10.0
+        ), mock.patch.object(GATE.subprocess, "run") as run:
+            with self.assertRaisesRegex(GATE.GateError, "Git identity capture"):
+                GATE.environment_identity(
+                    {"PATH": "/trusted/bin"},
+                    inherited_umask="0022",
+                    deadline=10.0,
+                )
+            run.assert_not_called()
+
+        failures = (
+            subprocess.TimeoutExpired(["git"], 1.0),
+            OSError("could not exec"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__), mock.patch.object(
+                GATE.time, "monotonic", return_value=10.0
+            ), mock.patch.object(
+                GATE.subprocess, "run", side_effect=failure
+            ) as run:
+                with self.assertRaisesRegex(GATE.GateError, "Git identity capture"):
+                    GATE.environment_identity(
+                        {"PATH": "/trusted/bin"},
+                        inherited_umask="0022",
+                        deadline=11.0,
+                    )
+                self.assertEqual(
+                    ["git", "--no-replace-objects", "--version"],
+                    run.call_args[0][0],
+                )
+                self.assertEqual(1.0, run.call_args[1]["timeout"])
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
+    def test_base_policy_read_ignores_git_replace_substitution(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            original_text = (GATE.REPO / "agentfold.toml").read_text()
+            (repo / "agentfold.toml").write_text(original_text)
+            subprocess.run(["git", "add", "agentfold.toml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            replacement_text = original_text.replace(
+                "target_seconds = 60\nmaximum_seconds = 60",
+                "target_seconds = 5\nmaximum_seconds = 5",
+                1,
+            )
+            (repo / "agentfold.toml").write_text(replacement_text)
+            subprocess.run(["git", "add", "agentfold.toml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "replacement"], cwd=repo, check=True)
+            replacement = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "replace", base, replacement], cwd=repo, check=True)
+            candidate_root = Path(scratch) / "candidate"
+            candidate_root.mkdir()
+            (candidate_root / "agentfold.toml").write_text(original_text)
+            policy_scratch = Path(scratch) / "policy"
+            policy_scratch.mkdir()
+            with mock.patch.object(GATE, "REPO", repo):
+                policy, _digest = GATE.load_candidate_policy(
+                    candidate_root,
+                    Path("agentfold.toml"),
+                    policy_scratch,
+                    base,
+                )
+            self.assertEqual(60.0, policy.routine.maximum_seconds)
+
     def test_safe_component_environment_preserves_and_binds_git_identity(self):
         source = {
-            "PATH": "/bin",
+            "PATH": os.environ.get("PATH", ""),
             "GIT_AUTHOR_NAME": "Caller Author",
             "GIT_AUTHOR_EMAIL": "caller-author@example.invalid",
             "GIT_COMMITTER_NAME": "Caller Committer",
@@ -3332,6 +3609,9 @@ class TestGateTests(unittest.TestCase):
         }
 
         admitted = GATE.safe_process_environment(source)
+
+        if IS_SECOND_PANEL_REPAIR:
+            self.assertEqual("1", admitted["GIT_NO_REPLACE_OBJECTS"])
 
         identity_names = (
             "GIT_AUTHOR_NAME",
@@ -3465,6 +3745,82 @@ class TestGateTests(unittest.TestCase):
             MANIFEST.canonical_digest(persisted[1][1]),
             persisted[2][1]["report"]["digest"],
         )
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "receipt replacement hardening belongs to the second-panel endpoint",
+    )
+    def test_repeated_final_projection_preserves_full_receipt_for_routine_lookup(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            candidate = MANIFEST.CandidateManifest(
+                "staged-index",
+                "candidate",
+                "closure",
+                (),
+                (),
+                "index",
+                "base",
+                "candidate-revision",
+            )
+            binding = {
+                "binding_digest": "9" * 64,
+                "candidate_digest": candidate.digest,
+                "candidate_closure_digest": candidate.closure_digest,
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+                "component_id": "repository-tests/full",
+            }
+            options = mock.Mock(provider_hard=False)
+
+            def passing_report(evidence):
+                report = GATE._base_report("final", 0.0)
+                report.update(
+                    {
+                        "outcome": "pass",
+                        "evidence": evidence,
+                        "reason": "passed",
+                        "candidate": candidate.as_dict(),
+                    }
+                )
+                return report
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.1
+            ), mock.patch.object(GATE, "_write_summary"):
+                self.assertEqual(
+                    0,
+                    GATE.emit_report(
+                        passing_report("executed"),
+                        receipt_binding_value=binding,
+                        receipt_stable=True,
+                    ),
+                )
+                receipt = GATE.reusable_full_receipt(
+                    binding, "repository-tests/full", options
+                )
+                pending = GATE.pending_full_receipt_binding(
+                    receipt, binding, "repository-tests/full", options
+                )
+                self.assertIs(binding, pending)
+                self.assertEqual(
+                    0,
+                    GATE.emit_report(
+                        passing_report("reused"),
+                        receipt_binding_value=pending,
+                        receipt_stable=True,
+                    ),
+                )
+                repeated = json.loads(
+                    (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+                )
+                self.assertEqual(binding["binding_digest"], repeated["receipt_binding_digest"])
+                self.assertEqual(
+                    binding,
+                    GATE.latest_reusable_full_receipt_binding(candidate, options),
+                )
 
     def test_broken_stdout_never_commits_receipt_even_if_cleanup_and_rewrite_fail(self):
         with tempfile.TemporaryDirectory() as scratch:

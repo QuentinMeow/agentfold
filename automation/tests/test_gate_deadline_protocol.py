@@ -4,11 +4,13 @@
 import importlib.util
 import json
 import os
+import signal
 import shutil
 import socket
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -25,6 +27,9 @@ GATE_GENERATIONS = importlib.util.module_from_spec(GENERATION_SPEC)
 GENERATION_SPEC.loader.exec_module(GATE_GENERATIONS)
 GATE_GENERATIONS.gate_generation(AUTOMATION.parent)
 PRODUCT_RECORDS = GATE_GENERATIONS.gate_generation_records(AUTOMATION.parent)
+IS_SECOND_PANEL_REPAIR = (
+    PRODUCT_RECORDS == GATE_GENERATIONS.SECOND_PANEL_REPAIR_RECORDS
+)
 PARSER_COMPAT_ENDPOINT = "parser-compat"
 REVIEW_REPAIR_ENDPOINT = "review-repair"
 if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
@@ -32,6 +37,8 @@ if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
 elif PRODUCT_RECORDS == GATE_GENERATIONS.REVIEW_REPAIR_RECORDS:
     PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
 elif PRODUCT_RECORDS == GATE_GENERATIONS.PANEL_REPAIR_RECORDS:
+    PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
+elif PRODUCT_RECORDS == GATE_GENERATIONS.SECOND_PANEL_REPAIR_RECORDS:
     PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
 else:
     raise AssertionError(
@@ -436,20 +443,47 @@ class DeadlineProtocolTests(unittest.TestCase):
                 destination.chmod(
                     stat.S_IMODE(destination.stat().st_mode) | stat.S_IWUSR
                 )
-            subprocess.run(("git", "init", "-q"), cwd=str(repo), check=True)
             subprocess.run(
-                ("git", "config", "user.email", "gate-test@example.invalid"),
+                ("git", "--no-replace-objects", "init", "-q"),
                 cwd=str(repo),
                 check=True,
             )
             subprocess.run(
-                ("git", "config", "user.name", "Gate Test"),
+                (
+                    "git",
+                    "--no-replace-objects",
+                    "config",
+                    "user.email",
+                    "gate-test@example.invalid",
+                ),
                 cwd=str(repo),
                 check=True,
             )
-            subprocess.run(("git", "add", "."), cwd=str(repo), check=True)
             subprocess.run(
-                ("git", "commit", "-q", "-m", "fixture"),
+                (
+                    "git",
+                    "--no-replace-objects",
+                    "config",
+                    "user.name",
+                    "Gate Test",
+                ),
+                cwd=str(repo),
+                check=True,
+            )
+            subprocess.run(
+                ("git", "--no-replace-objects", "add", "."),
+                cwd=str(repo),
+                check=True,
+            )
+            subprocess.run(
+                (
+                    "git",
+                    "--no-replace-objects",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "fixture",
+                ),
                 cwd=str(repo),
                 check=True,
             )
@@ -557,6 +591,288 @@ class DeadlineProtocolTests(unittest.TestCase):
             self.assertEqual(0, ExitedWorker.wait())
         finally:
             first.close()
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "Git replacement hardening belongs to the second-panel endpoint",
+    )
+    def test_gate_git_queries_disable_replacements_in_argv_and_environment(self):
+        completed = mock.Mock(returncode=0, stdout=b"result", stderr=b"")
+        with mock.patch.object(GATE.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(
+                b"result",
+                GATE._git(
+                    GATE.REPO,
+                    ["rev-parse", "HEAD"],
+                    {GATE._GIT_NO_REPLACE_ENV: "hostile"},
+                ),
+            )
+        self.assertEqual(
+            ["git", "--no-replace-objects", "rev-parse", "HEAD"],
+            run.call_args[0][0],
+        )
+        self.assertEqual(
+            "1", run.call_args[1]["env"][GATE._GIT_NO_REPLACE_ENV]
+        )
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed relaunch belongs to the second-panel endpoint",
+    )
+    def test_outer_relaunch_uses_invoking_interpreter_and_forces_no_replace(self):
+        process = mock.Mock(pid=12345)
+        process.poll.return_value = None
+        with mock.patch.dict(
+            os.environ,
+            {"PATH": "/path-without-python", GATE._GIT_NO_REPLACE_ENV: "hostile"},
+            clear=False,
+        ), mock.patch.object(
+            GATE.sys, "executable", "/invoking/interpreter-outer"
+        ), mock.patch.object(
+            GATE.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            GATE,
+            "_receive_control_frame",
+            side_effect=TimeoutError("stop after launch"),
+        ), mock.patch.object(GATE, "_kill_worker_group"), mock.patch.object(
+            GATE, "_static_result", return_value=1
+        ):
+            self.assertEqual(1, GATE._dispatch(("routine", "--staged")))
+
+        command = popen.call_args[0][0]
+        self.assertEqual(
+            ["/invoking/interpreter-outer", "-I", "-S"], command[:3]
+        )
+        self.assertEqual("/path-without-python", popen.call_args[1]["env"]["PATH"])
+        self.assertEqual(
+            "1", popen.call_args[1]["env"][GATE._GIT_NO_REPLACE_ENV]
+        )
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "interrupt supervision belongs to the second-panel endpoint",
+    )
+    def test_interrupt_at_popen_boundary_uses_token_cleanup_and_restores_handler(self):
+        previous_handler = signal.getsignal(signal.SIGTERM)
+
+        def prior_handler(_signal_number, _frame):
+            raise AssertionError("prior handler must be restored, not invoked")
+
+        signal.signal(signal.SIGTERM, prior_handler)
+        try:
+            for interruption, expected_exit, owned_sequence in (
+                (KeyboardInterrupt(), 130, ({111, 222}, set())),
+                (GATE._SupervisorTermination(signal.SIGTERM), 143, (set(),)),
+            ):
+                with self.subTest(interruption=type(interruption).__name__):
+                    def interrupted_launch(*_arguments, **_keywords):
+                        self.assertIs(
+                            GATE._raise_supervisor_termination,
+                            signal.getsignal(signal.SIGTERM),
+                        )
+                        raise interruption
+
+                    with mock.patch.object(
+                        GATE.subprocess, "Popen", side_effect=interrupted_launch
+                    ), mock.patch.object(
+                        GATE,
+                        "_owned_worker_pids",
+                        side_effect=owned_sequence,
+                    ) as owned, mock.patch.object(
+                        GATE.os, "kill"
+                    ) as kill, mock.patch.object(
+                        GATE.time, "sleep"
+                    ), mock.patch.object(
+                        GATE, "_kill_worker_group"
+                    ) as group_cleanup, mock.patch.object(
+                        GATE,
+                        "_static_result",
+                        side_effect=AssertionError("interrupt must not publish"),
+                    ):
+                        self.assertEqual(
+                            expected_exit,
+                            GATE._dispatch(("routine", "--staged")),
+                        )
+
+                    self.assertIs(prior_handler, signal.getsignal(signal.SIGTERM))
+                    group_cleanup.assert_not_called()
+                    if owned_sequence[0]:
+                        self.assertEqual(2, kill.call_count)
+                        kill.assert_any_call(111, signal.SIGKILL)
+                        kill.assert_any_call(222, signal.SIGKILL)
+                        self.assertEqual(2, owned.call_count)
+                    else:
+                        kill.assert_not_called()
+                        self.assertEqual(1, owned.call_count)
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "sealed relaunch belongs to the second-panel endpoint",
+    )
+    def test_controller_relaunch_uses_invoking_interpreter_with_unusable_path(self):
+        outer_control, worker_control = socket.socketpair()
+        old_environment = os.environ.copy()
+        process = mock.Mock()
+        process.wait.return_value = 0
+        frame = signed_policy_frame()
+        acknowledgment = {
+            "schema": GATE.DEADLINE_FRAME_SCHEMA,
+            "policy_frame_digest": frame["frame_digest"],
+            "started_monotonic": 10.0,
+            "started_monotonic_source": GATE._BOOTSTRAP_CLOCK_GETTIME_SOURCE,
+            "absolute_deadline_monotonic": 15.0,
+        }
+        claim = {
+            "gate_id": "routine",
+            "outcome": "deferred",
+            "gate_exit_code": 0,
+            "terminalized_pass": False,
+            "policy_digest": frame["policy_digest"],
+            "decision_digest": "a" * 64,
+            "receipt_binding_digest": None,
+            "evidence_authority": "cooperative-same-interpreter",
+            "controlled_completion": False,
+            "enforcement_eligible": False,
+            "claim_digest": "b" * 64,
+        }
+        try:
+            os.environ.clear()
+            os.environ.update(
+                {
+                    "PATH": "/path-without-python",
+                    GATE._OUTER_CONTROL_FD_ENV: str(worker_control.fileno()),
+                    GATE._OWNER_ENV: "c" * 64,
+                    GATE._GIT_NO_REPLACE_ENV: "hostile",
+                }
+            )
+            with mock.patch.object(
+                GATE,
+                "_discover_policy_frame",
+                return_value=(frame, Path("/frozen-index")),
+            ), mock.patch.object(
+                GATE,
+                "_receive_control_frame",
+                side_effect=(acknowledgment, claim),
+            ), mock.patch.object(
+                GATE,
+                "_freeze",
+                return_value={
+                    "source_repository": str(GATE.REPO),
+                    "execution_root": str(GATE.REPO),
+                },
+            ), mock.patch.object(
+                GATE, "_validate_controller_claim"
+            ), mock.patch.object(
+                GATE, "_verify_controller_report"
+            ), mock.patch.object(
+                GATE, "_unseal_snapshot"
+            ), mock.patch.object(
+                GATE.sys, "executable", "/invoking/interpreter-controller"
+            ), mock.patch.object(
+                GATE.subprocess, "Popen", return_value=process
+            ) as popen:
+                self.assertEqual(0, GATE._worker_dispatch(("routine", "--staged")))
+        finally:
+            os.environ.clear()
+            os.environ.update(old_environment)
+            outer_control.close()
+            try:
+                worker_control.close()
+            except OSError:
+                pass
+
+        command = popen.call_args[0][0]
+        self.assertEqual(
+            ["/invoking/interpreter-controller", "-I", "-S"], command[:3]
+        )
+        self.assertEqual("/path-without-python", popen.call_args[1]["env"]["PATH"])
+        self.assertEqual(
+            "1", popen.call_args[1]["env"][GATE._GIT_NO_REPLACE_ENV]
+        )
+
+    @unittest.skipUnless(os.name == "posix", "real signal supervision requires POSIX")
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "interrupt supervision belongs to the second-panel endpoint",
+    )
+    def test_real_sigint_and_sigterm_reap_descendants_without_stale_publication(self):
+        for signal_number, expected_exit in (
+            (signal.SIGINT, 130),
+            (signal.SIGTERM, 143),
+        ):
+            with self.subTest(signal_number=signal_number), tempfile.TemporaryDirectory() as scratch:
+                root = Path(scratch)
+                ready = root / "ready"
+                pids = root / "pids"
+                stale = root / "stale-publication"
+                worker_script = root / "worker.py"
+                worker_script.write_text(
+                    "import os,subprocess,sys,time\n"
+                    "from pathlib import Path\n"
+                    "root=Path(sys.argv[1])\n"
+                    "child=subprocess.Popen([sys.executable, '-I', '-S', '-c', 'import time; time.sleep(30)'], start_new_session=True)\n"
+                    "(root/'pids').write_text(str(os.getpid())+' '+str(child.pid))\n"
+                    "(root/'ready').write_text('ready')\n"
+                    "time.sleep(30)\n"
+                    "(root/'stale-publication').write_text('stale')\n"
+                )
+                supervisor = os.fork()
+                if supervisor == 0:
+                    signal.signal(signal.SIGINT, signal.default_int_handler)
+                    original_popen = subprocess.Popen
+
+                    def launch_worker(_command, **kwargs):
+                        return original_popen(
+                            [sys.executable, "-I", "-S", str(worker_script), str(root)],
+                            **kwargs
+                        )
+
+                    def exact_owned_processes(_token):
+                        try:
+                            values = pids.read_text().split()
+                        except OSError:
+                            return set()
+                        return {int(value) for value in values}
+
+                    try:
+                        with mock.patch.object(
+                            GATE.subprocess, "Popen", side_effect=launch_worker
+                        ), mock.patch.object(
+                            GATE,
+                            "_owned_worker_pids",
+                            side_effect=exact_owned_processes,
+                        ):
+                            result = GATE._dispatch(("routine", "--staged"))
+                    except BaseException:
+                        os._exit(255)
+                    os._exit(result)
+
+                deadline = time.monotonic() + 3.0
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "fake worker did not start")
+                worker_pid, descendant_pid = (
+                    int(value) for value in pids.read_text().split()
+                )
+                os.kill(supervisor, signal_number)
+                waited, status = os.waitpid(supervisor, 0)
+                self.assertEqual(supervisor, waited)
+                self.assertTrue(os.WIFEXITED(status))
+                self.assertEqual(expected_exit, os.WEXITSTATUS(status))
+                for pid in (worker_pid, descendant_pid):
+                    process_deadline = time.monotonic() + 1.0
+                    while time.monotonic() < process_deadline:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        self.fail("signal cleanup left descendant {} alive".format(pid))
+                time.sleep(0.05)
+                self.assertFalse(stale.exists())
 
     def test_pre_policy_hang_blocks_and_triggers_owned_cleanup(self):
         process = mock.Mock(pid=12345)

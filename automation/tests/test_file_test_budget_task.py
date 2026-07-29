@@ -30,10 +30,18 @@ GATE_GENERATIONS.gate_generation(AUTOMATION.parent)
 PRODUCT_RECORDS = GATE_GENERATIONS.gate_generation_records(AUTOMATION.parent)
 PARSER_COMPAT_ENDPOINT = "parser-compat"
 REVIEW_REPAIR_ENDPOINT = "review-repair"
-IS_PANEL_REPAIR = PRODUCT_RECORDS == GATE_GENERATIONS.PANEL_REPAIR_RECORDS
+IS_SECOND_PANEL_REPAIR = (
+    PRODUCT_RECORDS == GATE_GENERATIONS.SECOND_PANEL_REPAIR_RECORDS
+)
+IS_PANEL_REPAIR = PRODUCT_RECORDS in (
+    GATE_GENERATIONS.PANEL_REPAIR_RECORDS,
+    GATE_GENERATIONS.SECOND_PANEL_REPAIR_RECORDS,
+)
 if PRODUCT_RECORDS == GATE_GENERATIONS.PARSER_COMPAT_RECORDS:
     PRODUCT_ENDPOINT = PARSER_COMPAT_ENDPOINT
 elif PRODUCT_RECORDS == GATE_GENERATIONS.REVIEW_REPAIR_RECORDS:
+    PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
+elif IS_SECOND_PANEL_REPAIR:
     PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
 elif IS_PANEL_REPAIR:
     PRODUCT_ENDPOINT = REVIEW_REPAIR_ENDPOINT
@@ -117,7 +125,23 @@ class FileTestBudgetTaskTests(unittest.TestCase):
     @staticmethod
     def state(task):
         identity = FILER._field(task.read_text(encoding="utf-8"), "Finding identity").split(":", 1)[1]
-        return FILER._read_journal(task.parent / FILER.JOURNAL_NAME, identity)[-1]
+        if not IS_SECOND_PANEL_REPAIR:
+            return FILER._read_journal(
+                task.parent / FILER.JOURNAL_NAME, identity
+            )[-1]
+        root = task.parents[3]
+        relative = task.parent.relative_to(root) / FILER.JOURNAL_NAME
+        with FILER._PinnedRepository(root) as repository:
+            return FILER._read_journal(repository, relative, identity)[-1]
+
+    @staticmethod
+    def _journal_states(root, journal, identity):
+        if not IS_SECOND_PANEL_REPAIR:
+            return FILER._read_journal(journal, identity)
+        with FILER._PinnedRepository(root) as repository:
+            return FILER._read_journal(
+                repository, journal.relative_to(root), identity
+            )
 
     @staticmethod
     def actor_owned_bytes(text):
@@ -293,7 +317,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_append = FILER._append_journal_record
             attempts = 0
 
-            def actor_wins_first_append(path, identity, state, *append_context):
+            def actor_wins_first_append(*arguments):
                 nonlocal attempts
                 attempts += 1
                 if attempts == 1:
@@ -306,7 +330,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     return False
-                return real_append(path, identity, state, *append_context)
+                return real_append(*arguments)
 
             with mock.patch.object(
                 FILER, "_append_journal_record", side_effect=actor_wins_first_append
@@ -324,8 +348,21 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             task = self.task_file(root, created)
             journal = task.parent / FILER.JOURNAL_NAME
             identity = FILER._field(task.read_text(encoding="utf-8"), "Finding identity").split(":", 1)[1]
-            append_context = ()
-            if IS_PANEL_REPAIR:
+            if IS_SECOND_PANEL_REPAIR:
+                repository = FILER._PinnedRepository(root)
+                append_arguments = (
+                    repository,
+                    journal.relative_to(root),
+                    identity,
+                )
+                append_context = (
+                    FILER._read_journal_snapshot(
+                        repository, journal.relative_to(root), identity
+                    ),
+                )
+            else:
+                repository = None
+                append_arguments = (journal, identity)
                 append_context = (
                     FILER._read_journal_snapshot(journal, identity),
                 )
@@ -348,19 +385,23 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                 if IS_PANEL_REPAIR:
                     with self.assertRaises(FILER._PublicationFailure) as raised:
                         FILER._append_journal_record(
-                            journal, identity, state, *append_context
+                            *append_arguments,
+                            state,
+                            *append_context,
                         )
                     self.assertTrue(raised.exception.mutated)
                 else:
                     appended = FILER._append_journal_record(
-                        journal, identity, state, *append_context
+                        *append_arguments, state, *append_context
                     )
                     self.assertFalse(appended)
+            if repository is not None:
+                repository.close()
             self.assertEqual(replacement, journal.read_bytes())
 
     @unittest.skipUnless(
-        IS_PANEL_REPAIR,
-        "pre-open journal validation belongs to the panel-repair endpoint",
+        IS_SECOND_PANEL_REPAIR,
+        "updated journal API belongs to the second-panel endpoint",
     )
     def test_preopen_actor_replacement_is_validated_before_append(self):
         with self.repo() as root:
@@ -371,7 +412,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_open = FILER._open_pinned_journal
             append_opens = 0
 
-            def replace_before_append(path, flags):
+            def replace_before_append(repository, relative, flags):
                 nonlocal append_opens
                 if flags & os.O_RDWR == os.O_RDWR:
                     append_opens += 1
@@ -379,7 +420,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                         replacement = journal.with_name("actor-journal")
                         replacement.write_bytes(actor_bytes)
                         os.replace(replacement, journal)
-                return real_open(path, flags)
+                return real_open(repository, relative, flags)
 
             with mock.patch.object(
                 FILER, "_open_pinned_journal", side_effect=replace_before_append
@@ -392,8 +433,8 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual(actor_bytes, journal.read_bytes())
 
     @unittest.skipUnless(
-        IS_PANEL_REPAIR,
-        "pre-open journal validation belongs to the panel-repair endpoint",
+        IS_SECOND_PANEL_REPAIR,
+        "updated journal API belongs to the second-panel endpoint",
     )
     def test_preopen_valid_replacement_retries_before_writing(self):
         with self.repo() as root:
@@ -403,7 +444,10 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             identity = FILER._field(
                 task.read_text(encoding="utf-8"), "Finding identity"
             ).split(":", 1)[1]
-            original = FILER._read_journal_snapshot(journal, identity)
+            with FILER._PinnedRepository(root) as repository:
+                original = FILER._read_journal_snapshot(
+                    repository, journal.relative_to(root), identity
+                )
             actor_state = FILER._state_for(
                 FILER._normalize_occurrence(
                     self.occurrence(receipt=RECEIPT_C), root
@@ -414,7 +458,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_open = FILER._open_pinned_journal
             append_opens = 0
 
-            def replace_before_append(path, flags):
+            def replace_before_append(repository, relative, flags):
                 nonlocal append_opens
                 if flags & os.O_RDWR == os.O_RDWR:
                     append_opens += 1
@@ -422,7 +466,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                         replacement = journal.with_name("actor-journal")
                         replacement.write_bytes(actor_bytes)
                         os.replace(replacement, journal)
-                return real_open(path, flags)
+                return real_open(repository, relative, flags)
 
             with mock.patch.object(
                 FILER, "_open_pinned_journal", side_effect=replace_before_append
@@ -437,7 +481,7 @@ class FileTestBudgetTaskTests(unittest.TestCase):
                 (RECEIPT_A, RECEIPT_C, RECEIPT_B),
                 tuple(
                     state["receipt"]
-                    for state in FILER._read_journal(journal, identity)
+                    for state in self._journal_states(root, journal, identity)
                 ),
             )
 
@@ -480,9 +524,116 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             with mock.patch.object(FILER.os, "O_NOFOLLOW", 0, create=True):
                 result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
 
-            self.assertEqual("conflict", result.disposition)
+            self.assertEqual(
+                "error" if IS_SECOND_PANEL_REPAIR else "conflict",
+                result.disposition,
+            )
             self.assertFalse(result.mutated)
             self.assertEqual(before, journal.read_bytes())
+
+    @unittest.skipUnless(
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "ancestor no-follow coverage requires POSIX O_NOFOLLOW",
+    )
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "ancestor pinning belongs to the second-panel endpoint",
+    )
+    def test_intermediate_symlink_ancestors_fail_closed_without_outside_writes(self):
+        for ancestor in ("tmp", "templates", "tasks", "message-queue"):
+            with self.subTest(ancestor=ancestor), self.repo() as root, tempfile.TemporaryDirectory() as external:
+                outside = Path(external)
+                marker = outside / "marker"
+                marker.write_bytes(b"outside-owned\n")
+                if ancestor in ("templates", "tasks", "message-queue"):
+                    (root / "tmp").mkdir()
+                    (root / "tmp/.file-test-budget-task.lock").write_bytes(b"")
+                original = root / ancestor
+                if original.exists():
+                    shutil.rmtree(str(original))
+                original.symlink_to(outside, target_is_directory=True)
+
+                result, _ = self.file(root)
+
+                self.assertNotIn(result.disposition, ("created", "updated", "unchanged"))
+                self.assertEqual(ancestor == "message-queue", result.mutated)
+                self.assertEqual(b"outside-owned\n", marker.read_bytes())
+                self.assertEqual([marker], list(outside.iterdir()))
+
+    @unittest.skipUnless(
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "ancestor no-follow coverage requires POSIX O_NOFOLLOW",
+    )
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "ancestor pinning belongs to the second-panel endpoint",
+    )
+    def test_symlinked_request_ancestor_never_reads_or_changes_outside_request(self):
+        with self.repo() as root, tempfile.TemporaryDirectory() as external:
+            created, _ = self.file(root)
+            needs_agent = root / "message-queue/needs-agent"
+            saved = root / "message-queue/needs-agent-saved"
+            needs_agent.rename(saved)
+            outside = Path(external)
+            shutil.copytree(str(saved), str(outside / "needs-agent"))
+            needs_agent.symlink_to(outside / "needs-agent", target_is_directory=True)
+            outside_request = outside / "needs-agent/requests" / Path(
+                created.request_path
+            ).name
+            before = outside_request.read_bytes()
+
+            result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertEqual("conflict", result.disposition)
+            self.assertFalse(result.mutated)
+            self.assertEqual(before, outside_request.read_bytes())
+
+    @unittest.skipUnless(
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "ancestor no-follow coverage requires POSIX O_NOFOLLOW",
+    )
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "ancestor pinning belongs to the second-panel endpoint",
+    )
+    def test_journal_ancestor_replaced_after_pinning_stops_before_write(self):
+        with self.repo() as root, tempfile.TemporaryDirectory() as external:
+            created, _ = self.file(root)
+            task = self.task_file(root, created)
+            journal = task.parent / FILER.JOURNAL_NAME
+            outside_status = Path(external) / "0_backlog"
+            shutil.copytree(str(root / "tasks/0_backlog"), str(outside_status))
+            outside_journal = outside_status / task.parent.name / FILER.JOURNAL_NAME
+            outside_before = outside_journal.read_bytes()
+            original_before = journal.read_bytes()
+            real_open = FILER._open_pinned_journal
+            replaced = False
+
+            def replace_ancestor_after_open(repository, relative, flags):
+                nonlocal replaced
+                opened = real_open(repository, relative, flags)
+                if not replaced and flags & os.O_RDWR == os.O_RDWR:
+                    replaced = True
+                    status = root / "tasks/0_backlog"
+                    status.rename(root / "tasks/original-backlog")
+                    status.symlink_to(outside_status, target_is_directory=True)
+                return opened
+
+            with mock.patch.object(
+                FILER,
+                "_open_pinned_journal",
+                side_effect=replace_ancestor_after_open,
+            ):
+                result, _ = self.file(root, self.occurrence(receipt=RECEIPT_B))
+
+            self.assertTrue(replaced)
+            self.assertEqual("conflict", result.disposition)
+            self.assertFalse(result.mutated)
+            self.assertEqual(outside_before, outside_journal.read_bytes())
+            self.assertEqual(
+                original_before,
+                (root / "tasks/original-backlog" / task.parent.name / FILER.JOURNAL_NAME).read_bytes(),
+            )
 
     @unittest.skipUnless(
         IS_PANEL_REPAIR,
@@ -506,7 +657,8 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertTrue(result.mutated)
             self.assertTrue(journal.is_file())
             self.assertEqual(
-                RECEIPT_B, FILER._read_journal(journal, identity)[-1]["receipt"]
+                RECEIPT_B,
+                self._journal_states(root, journal, identity)[-1]["receipt"],
             )
 
     def test_nonowned_lookalike_is_a_conflict(self):
@@ -683,6 +835,45 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual("lock-timeout", result.disposition)
             self.assertFalse(result.mutated)
 
+    @unittest.skipUnless(
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "ancestor no-follow coverage requires POSIX O_NOFOLLOW",
+    )
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "ancestor pinning belongs to the second-panel endpoint",
+    )
+    def test_lock_ancestor_replaced_after_pinning_never_writes_outside(self):
+        with self.repo() as root, tempfile.TemporaryDirectory() as external:
+            outside = Path(external)
+            marker = outside / "actor-marker"
+            marker.write_bytes(b"outside-owned\n")
+            real_open = FILER._open_regular_at
+            replaced = False
+
+            def replace_tmp_after_pin(
+                directory, name, flags, mode=0o644, mutation_owner=None
+            ):
+                nonlocal replaced
+                if not replaced and name == ".file-test-budget-task.lock":
+                    replaced = True
+                    (root / "tmp").rename(root / "original-tmp")
+                    (root / "tmp").symlink_to(outside, target_is_directory=True)
+                return real_open(
+                    directory, name, flags, mode, mutation_owner
+                )
+
+            with mock.patch.object(
+                FILER, "_open_regular_at", side_effect=replace_tmp_after_pin
+            ):
+                result, _ = self.file(root)
+
+            self.assertTrue(replaced)
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            self.assertEqual(b"outside-owned\n", marker.read_bytes())
+            self.assertEqual([marker], list(outside.iterdir()))
+
     def test_windows_lock_backend_is_used_when_fcntl_is_unavailable(self):
         calls = []
 
@@ -697,8 +888,13 @@ class FileTestBudgetTaskTests(unittest.TestCase):
         with self.repo() as root, mock.patch.object(FILER, "_fcntl", None), mock.patch.object(
             FILER, "_msvcrt", FakeMsvcrt
         ):
-            with FILER._lock(root, 0):
-                pass
+            if IS_SECOND_PANEL_REPAIR:
+                with FILER._PinnedRepository(root) as repository:
+                    with FILER._lock(repository, 0):
+                        pass
+            else:
+                with FILER._lock(root, 0):
+                    pass
         self.assertEqual([(FakeMsvcrt.LK_NBLCK, 1), (FakeMsvcrt.LK_UNLCK, 1)], calls)
 
     def test_read_only_and_invalid_input_are_nonraising_machine_findings(self):
@@ -749,12 +945,12 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_publish = FILER._publish_exclusive_file
             calls = 0
 
-            def fail_request(source, destination):
+            def fail_request(*arguments, **keywords):
                 nonlocal calls
                 calls += 1
                 if calls == 3:
                     raise OSError("simulated pickup write failure")
-                return real_publish(source, destination)
+                return real_publish(*arguments, **keywords)
 
             with mock.patch.object(
                 FILER, "_publish_exclusive_file", side_effect=fail_request
@@ -772,18 +968,21 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(
-        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
-        "exclusive publication belongs to the review-repair endpoint",
+        IS_SECOND_PANEL_REPAIR,
+        "updated exclusive publication belongs to the second-panel endpoint",
     )
     def test_concurrent_actor_request_is_never_replaced(self):
         with self.repo() as root:
             real_publish = FILER._publish_exclusive_file
             actor_bytes = b"actor-owned request\n"
 
-            def create_actor_request(source, destination):
-                if destination.parent.name == "requests":
+            def create_actor_request(repository, parent, name, payload, **keywords):
+                destination = repository.root / parent / name
+                if Path(parent).name == "requests":
                     destination.write_bytes(actor_bytes)
-                return real_publish(source, destination)
+                return real_publish(
+                    repository, parent, name, payload, **keywords
+                )
 
             with mock.patch.object(
                 FILER,
@@ -802,21 +1001,25 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual(1, len(list((root / "tasks/0_backlog").glob("*"))))
 
     @unittest.skipUnless(
-        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
-        "no-delete publication belongs to the review-repair endpoint",
+        IS_SECOND_PANEL_REPAIR,
+        "updated rollback belongs to the second-panel endpoint",
     )
     def test_rollback_preserves_actor_file_added_to_owned_task_directory(self):
         with self.repo() as root:
             real_publish = FILER._publish_exclusive_file
             actor_name = "actor-note.txt"
 
-            def add_actor_file_then_fail(source, destination):
-                if destination.parent.name == "requests":
+            def add_actor_file_then_fail(
+                repository, parent, name, payload, **keywords
+            ):
+                if Path(parent).name == "requests":
                     task_directories = list((root / "tasks/0_backlog").glob("*"))
                     self.assertEqual(1, len(task_directories))
                     (task_directories[0] / actor_name).write_text("preserve me\n")
                     raise OSError("simulated request race")
-                return real_publish(source, destination)
+                return real_publish(
+                    repository, parent, name, payload, **keywords
+                )
 
             with mock.patch.object(
                 FILER,
@@ -834,8 +1037,8 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertTrue((task_directories[0] / FILER.JOURNAL_NAME).exists())
 
     @unittest.skipUnless(
-        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
-        "no-delete publication belongs to the review-repair endpoint",
+        IS_SECOND_PANEL_REPAIR,
+        "updated rollback belongs to the second-panel endpoint",
     )
     def test_actor_replacement_after_publish_survives_later_failure(self):
         with self.repo() as root:
@@ -843,17 +1046,22 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             actor_bytes = b"actor replacement\n"
             calls = 0
 
-            def replace_then_fail(source, destination):
+            def replace_then_fail(repository, parent, name, payload, **keywords):
                 nonlocal calls
                 calls += 1
+                destination = repository.root / parent / name
                 if calls == 1:
-                    real_publish(source, destination)
+                    real_publish(
+                        repository, parent, name, payload, **keywords
+                    )
                     destination.unlink()
                     destination.write_bytes(actor_bytes)
                     return
                 if calls == 3:
                     raise OSError("simulated request failure")
-                return real_publish(source, destination)
+                return real_publish(
+                    repository, parent, name, payload, **keywords
+                )
 
             with mock.patch.object(
                 FILER, "_publish_exclusive_file", side_effect=replace_then_fail
@@ -867,21 +1075,69 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             self.assertEqual(actor_bytes, (task_directories[0] / "task.md").read_bytes())
 
     @unittest.skipUnless(
-        PRODUCT_ENDPOINT == REVIEW_REPAIR_ENDPOINT,
-        "exclusive fallback belongs to the review-repair endpoint",
+        os.name == "posix" and bool(getattr(os, "O_NOFOLLOW", 0)),
+        "ancestor no-follow coverage requires POSIX O_NOFOLLOW",
     )
-    def test_exclusive_fallback_failure_never_unlinks_partial_destination(self):
-        with self.repo() as root:
-            source = root / "source.txt"
-            destination = root / "destination.txt"
-            source.write_text("complete source\n")
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "ancestor pinning belongs to the second-panel endpoint",
+    )
+    def test_publication_ancestor_replaced_after_pinning_has_no_false_success(self):
+        with self.repo() as root, tempfile.TemporaryDirectory() as external:
+            outside = Path(external)
+            outside_requests = outside / "needs-agent/requests"
+            outside_requests.mkdir(parents=True)
+            marker = outside_requests / "actor-marker"
+            marker.write_bytes(b"outside-owned\n")
+            real_open = FILER._open_regular_at
+            replaced = False
+
+            def replace_request_ancestor(
+                directory, name, flags, mode=0o644, mutation_owner=None
+            ):
+                nonlocal replaced
+                if (
+                    not replaced
+                    and directory.relative
+                    == Path("message-queue/needs-agent/requests")
+                ):
+                    replaced = True
+                    needs_agent = root / "message-queue/needs-agent"
+                    needs_agent.rename(root / "message-queue/original-needs-agent")
+                    needs_agent.symlink_to(
+                        outside / "needs-agent", target_is_directory=True
+                    )
+                return real_open(
+                    directory, name, flags, mode, mutation_owner
+                )
+
             with mock.patch.object(
-                FILER.os, "link", side_effect=OSError(errno.EPERM, "unsupported")
-            ), mock.patch.object(
+                FILER, "_open_regular_at", side_effect=replace_request_ancestor
+            ):
+                result, _ = self.file(root)
+
+            self.assertTrue(replaced)
+            self.assertEqual("error", result.disposition)
+            self.assertTrue(result.mutated)
+            self.assertNotEqual("created", result.disposition)
+            self.assertEqual(b"outside-owned\n", marker.read_bytes())
+            self.assertEqual([marker], list(outside_requests.iterdir()))
+
+    @unittest.skipUnless(
+        IS_SECOND_PANEL_REPAIR,
+        "updated exclusive write belongs to the second-panel endpoint",
+    )
+    def test_exclusive_write_failure_never_unlinks_partial_destination(self):
+        with self.repo() as root:
+            destination = root / "destination.txt"
+            with mock.patch.object(
                 FILER.os, "write", side_effect=OSError("simulated write failure")
             ):
                 with self.assertRaises(FILER._PublicationFailure) as raised:
-                    FILER._publish_exclusive_file(source, destination)
+                    with FILER._PinnedRepository(root) as repository:
+                        FILER._publish_exclusive_file(
+                            repository, Path(), destination.name, b"complete source\n"
+                        )
             self.assertTrue(raised.exception.mutated)
             self.assertTrue(destination.exists())
 
@@ -894,12 +1150,12 @@ class FileTestBudgetTaskTests(unittest.TestCase):
             real_publish = FILER._publish_exclusive_file
             calls = 0
 
-            def fail_request(source, destination):
+            def fail_request(*arguments, **keywords):
                 nonlocal calls
                 calls += 1
                 if calls == 3:
                     raise OSError("simulated request failure")
-                return real_publish(source, destination)
+                return real_publish(*arguments, **keywords)
 
             with mock.patch.object(
                 FILER, "_publish_exclusive_file", side_effect=fail_request
