@@ -101,6 +101,7 @@ class TestGatePolicy:
     critical_bindings: Tuple[CriticalBinding, ...]
     reversible_bindings: Tuple[ReversibleBinding, ...]
     unmatched_is_critical: bool
+    service_dependencies: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
 
     @property
     def digest(self):
@@ -119,6 +120,17 @@ class PolicyUnion:
         return GateBudget(
             min(self.base.routine.target_seconds, self.candidate.routine.target_seconds),
             min(self.base.routine.maximum_seconds, self.candidate.routine.maximum_seconds),
+        )
+
+    @property
+    def service_dependencies(self):
+        dependencies = {}
+        for policy in (self.base, self.candidate):
+            for service, downstream in policy.service_dependencies:
+                dependencies.setdefault(service, set()).update(downstream)
+        return tuple(
+            (service, tuple(sorted(dependencies[service])))
+            for service in sorted(dependencies)
         )
 
     @property
@@ -311,6 +323,27 @@ def _binding_globs(value, location):
     return tuple(sorted(_validate_glob(item, location) for item in globs))
 
 
+def _service_dependencies(value, location):
+    table = _expect_table(value, location)
+    dependencies = []
+    for raw_service in sorted(table):
+        service = _string(raw_service, location + " key")
+        if not IDENTIFIER_RE.match(service):
+            raise ConfigError("{} key '{}' must be lowercase kebab-case".format(location, service))
+        downstream = _string_list(table[raw_service], "{}.{}".format(location, service))
+        for dependency in downstream:
+            if not IDENTIFIER_RE.match(dependency):
+                raise ConfigError(
+                    "{}.{} value '{}' must be lowercase kebab-case".format(
+                        location, service, dependency
+                    )
+                )
+            if dependency == service:
+                raise ConfigError("{}.{} must not depend on itself".format(location, service))
+        dependencies.append((service, tuple(sorted(downstream))))
+    return tuple(dependencies)
+
+
 def _critical_bindings(value):
     if not isinstance(value, list) or not value:
         raise ConfigError("testing.risk.critical must be a non-empty array of tables")
@@ -399,7 +432,23 @@ def parse_policy(document, source="<memory>"):
         "testing",
         ("routine", "final", "performance", "risk"),
     )
-    routine = _budget(testing["routine"], "testing.routine")
+    routine_table = _closed_table(
+        testing["routine"],
+        "testing.routine",
+        ("target_seconds", "maximum_seconds"),
+        ("service_dependencies",),
+    )
+    routine = _budget(
+        {
+            "target_seconds": routine_table["target_seconds"],
+            "maximum_seconds": routine_table["maximum_seconds"],
+        },
+        "testing.routine",
+    )
+    service_dependencies = _service_dependencies(
+        routine_table.get("service_dependencies", {}),
+        "testing.routine.service_dependencies",
+    )
 
     final_table = _closed_table(
         testing["final"],
@@ -466,6 +515,7 @@ def parse_policy(document, source="<memory>"):
         _critical_bindings(risk["critical"]),
         _reversible_bindings(risk["reversible"]),
         True,
+        service_dependencies,
     )
 
 
@@ -594,7 +644,7 @@ def required_critical_checks(paths, policy):
 
 
 def _policy_payload(policy):
-    return {
+    payload = {
         "schema_version": policy.schema_version,
         "testing": {
             "final": {
@@ -625,6 +675,12 @@ def _policy_payload(policy):
             },
         },
     }
+    if policy.service_dependencies:
+        payload["testing"]["routine"]["service_dependencies"] = {
+            service: list(dependencies)
+            for service, dependencies in policy.service_dependencies
+        }
+    return payload
 
 
 def canonical_policy_json(policy):
