@@ -2162,3 +2162,37 @@ passed all 19 files in 353.14 seconds with none deferred or incomplete. The unch
 reused that full receipt in 11.17 seconds and created test-only bridge commit `40500b9` without
 bypassing the hook. The exact repaired product tuple is restored and remains to receive its own
 final gate and normal commit.
+
+## Second-panel repaired product final gate
+
+Immutable staged tree `d0ea4b17cf89ca1017e2363a40bed78a45034598` passed its exact
+final gate with the author-only hook environment:
+
+```
+$ env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    GIT_AUTHOR_NAME='Quentin Miao' \
+    GIT_AUTHOR_EMAIL='quentinmiao98@gmail.com' \
+    python3 -I -S automation/run_test_gate.py final --explicit --staged
+test gate: final
+outcome: pass
+candidate: 2b2b2eec4ab5331040950e5e02c540b107d08cd77a00306782fd9b89408138e3
+component timings:
+  core-scope: pass (executed, 0.45s)
+  reconcile: pass (executed, 10.30s)
+  repository-tests/base-pinned-floor: pass (executed, 298.99s)
+  repository-tests/full: pass (executed, 0.00s)
+coverage: 19 selected, 0 deferred, 0 incomplete
+duration: 313.32s
+gate exit: 0
+
+$ git commit -m "fix: close second panel blockers" ...
+repository-tests/full: pass (reused, 0.00s)
+coverage: 19 selected, 0 deferred, 0 incomplete
+duration: 13.77s
+pre-commit: OK
+[task/2026-07-27-configure-test-gates-and-time-budgets f748887] fix: close second panel blockers
+```
+
+No hook was bypassed. Product commit
+`f748887bc0458c941d642dabea0aaeb560119d4d` now requires a completely fresh
+five-reviewer revision-bound panel before the retry can resolve or the task can move to review.

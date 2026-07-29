@@ -95,3 +95,9 @@ hybrids. The first bridge final exposed one old-endpoint assertion leak and fail
 commit. Corrected bridge candidate `0135d142…` then passed all 19 files in 353.14 seconds, and the
 normal hook reused its receipt in 11.17 seconds to create `40500b9`. The repaired product's exact
 final gate, normal commit, and a completely new no-blocker panel remain required.
+
+Repaired product tree `d0ea4b17…` passed exact final candidate `2b2b2eec…` in 313.32 seconds
+with all 19 files complete. The unchanged normal hook reused that receipt in 13.77 seconds and
+created `f748887bc0458c941d642dabea0aaeb560119d4d`; no hook was bypassed. A completely
+fresh five-reviewer revision-bound panel with no valid blocker is now the sole condition for
+resolving this retry and moving the task to review.

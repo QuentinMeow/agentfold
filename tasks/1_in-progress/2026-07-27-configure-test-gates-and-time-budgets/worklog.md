@@ -800,3 +800,12 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Corrected bridge candidate `0135d142…` passed the exact final gate in 353.14 seconds with all
   19 files complete. Normal receipt reuse passed in 11.17 seconds and created `40500b9`; no hook
   was bypassed. The exact product/records snapshot is restored for its own final boundary.
+
+## 2026-07-29 — second-panel repaired product committed (codex)
+
+- Immutable product-and-records tree `d0ea4b17…` passed exact final candidate `2b2b2eec…` in
+  313.32 seconds with all 19 files complete and none deferred or incomplete.
+- The unchanged normal hook reused the exact full receipt in 13.77 seconds and created product
+  commit `f748887`; no hook was bypassed. The temporary repair stash was removed only after HEAD
+  hashes matched the closed product tuple. Both generated timing journals remain unstaged.
+- A completely fresh five-reviewer panel is the sole remaining merge-review boundary.

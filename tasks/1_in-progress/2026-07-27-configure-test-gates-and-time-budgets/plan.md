@@ -92,4 +92,5 @@
       and relaunch with the invoking interpreter. Land a closed bridge, exact final evidence,
       normal commit, and a completely fresh five-reviewer panel before publication. All repairs
       and the closed bridge are implemented; bridge `40500b9` passed exact final evidence and
-      normal receipt reuse. The repaired product final, commit, and new panel remain.
+      normal receipt reuse. Product candidate `2b2b2eec…` passed exact final evidence and normal
+      receipt reuse created `f748887`; only the completely fresh panel remains.
