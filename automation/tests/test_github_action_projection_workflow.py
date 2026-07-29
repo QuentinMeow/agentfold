@@ -4,6 +4,11 @@ import unittest
 from pathlib import Path
 
 if __package__:
+    from .test_gate_generations import (
+        LEGACY_GENERATION,
+        SPLIT_GENERATION,
+        gate_generation,
+    )
     from .trusted_gate_snapshots import (
         HARD_WORKFLOW_SHA256,
         MANUAL_WORKFLOW_SHA256,
@@ -18,6 +23,11 @@ if __package__:
         workflow_job,
     )
 else:
+    from test_gate_generations import (
+        LEGACY_GENERATION,
+        SPLIT_GENERATION,
+        gate_generation,
+    )
     from trusted_gate_snapshots import (
         HARD_WORKFLOW_SHA256,
         MANUAL_WORKFLOW_SHA256,
@@ -35,17 +45,26 @@ else:
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/harness.yml"
+LEGACY_WORKFLOW_SHA256 = "a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1"
 
 
 class GitHubActionProjectionWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.gate_generation = gate_generation()
         cls.workflow_bytes = WORKFLOW.read_bytes()
-        if cls.workflow_bytes != manual_workflow_fixture():
+        if cls.gate_generation == SPLIT_GENERATION and (
+            cls.workflow_bytes != manual_workflow_fixture()
+        ):
             raise AssertionError(
-                "current workflow must exactly equal the base-pinned manual fixture"
+                "split workflow must exactly equal the base-pinned manual fixture"
             )
-        cls.trusted_gate_regime = trusted_gate_regime(cls.workflow_bytes)
+        if cls.gate_generation == LEGACY_GENERATION:
+            if workflow_digest(cls.workflow_bytes) != LEGACY_WORKFLOW_SHA256:
+                raise AssertionError("legacy workflow bytes changed")
+            cls.trusted_gate_regime = "absent"
+        else:
+            cls.trusted_gate_regime = trusted_gate_regime(cls.workflow_bytes)
         if cls.trusted_gate_regime not in ("present", "absent"):
             raise AssertionError("workflow is outside both admitted byte snapshots")
         cls.workflow = decode_workflow(cls.workflow_bytes)
@@ -72,16 +91,22 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         if self.trusted_gate_regime == "absent":
             self.skipTest("the complete hard-gate triad is intentionally absent")
 
-    def test_current_workflow_is_exact_base_pinned_manual_snapshot(self):
+    def test_current_workflow_is_one_exact_admitted_migration_snapshot(self):
         current = self.workflow_bytes
         manual = manual_workflow_fixture()
         self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(manual))
         self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
         self.assertEqual("absent", trusted_gate_regime(manual))
         self.assertEqual((), manual_fixture_contract_errors(manual))
-        self.assertEqual("absent", trusted_gate_regime(current))
-        self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(current))
-        self.assertEqual(manual, current)
+        if self.gate_generation == SPLIT_GENERATION:
+            self.assertEqual("absent", trusted_gate_regime(current))
+            self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(current))
+            self.assertEqual(manual, current)
+        else:
+            self.assertEqual(LEGACY_GENERATION, self.gate_generation)
+            self.assertEqual(LEGACY_WORKFLOW_SHA256, workflow_digest(current))
+            self.assertEqual("invalid", trusted_gate_regime(current))
+            self.assertNotEqual(manual, current)
         for name, mutation in migration_mutations(manual):
             with self.subTest(manual_mutation=name):
                 self.assertEqual("invalid", trusted_gate_regime(mutation))
@@ -197,9 +222,20 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertNotIn(
             "--allow-missing-action-section-if-no-action", projection
         )
-        self.assertNotIn(
-            "check_action_projection.py", self.job("reconcile-and-test")
+        diagnostic_jobs = (
+            (
+                "push-repository-diagnostics",
+                "trusted-pr-merge-diagnostics",
+                "cooperative-pr-complete-test-diagnostics",
+            )
+            if self.gate_generation == SPLIT_GENERATION
+            else ("reconcile-and-test",)
         )
+        for job_name in diagnostic_jobs:
+            with self.subTest(diagnostic_job=job_name):
+                self.assertNotIn(
+                    "check_action_projection.py", self.job(job_name)
+                )
 
     def test_trusted_preparer_uses_base_code_and_binds_every_candidate_identity(self):
         self.require_hard_gate()
@@ -510,10 +546,31 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             "statuses/$TEST_GATE_CANDIDATE",
         ))
 
-    def test_candidate_controlled_pull_request_job_cannot_replace_hard_gate(self):
+    def test_candidate_controlled_pr_diagnostics_never_gain_gate_authority(self):
         on_block = self.workflow.partition("on:\n")[2].partition(
             "\npermissions:"
         )[0]
+        if self.gate_generation == SPLIT_GENERATION:
+            push = self.job("push-repository-diagnostics")
+            trusted = self.job("trusted-pr-merge-diagnostics")
+            cooperative = self.job(
+                "cooperative-pr-complete-test-diagnostics"
+            )
+            for job in (push, trusted, cooperative):
+                self.assertNotIn("run_test_gate.py", job)
+                self.assertNotIn("Final test gate", job)
+            self.assertIn("pull_request:\n", on_block)
+            self.assertIn("if: ${{ github.event_name == 'push' }}", push)
+            self.assertNotIn("automation/run_tests.py", push)
+            self.assertIn(
+                "github.event_name == 'pull_request_target'", trusted
+            )
+            self.assertNotIn("automation/run_tests.py", trusted)
+            self.assertIn(
+                "github.event_name == 'pull_request'", cooperative
+            )
+            self.assertIn("automation/run_tests.py", cooperative)
+            return
         push = self.job("reconcile-and-test")
         self.assertNotIn("run_test_gate.py", push)
         self.assertNotIn("Final test gate", push)

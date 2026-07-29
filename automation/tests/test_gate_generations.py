@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Closed, byte-exact classifier for the test-gate migration floor.
+
+The compatibility floor may describe either side of one planned two-commit
+migration.  It must never infer a generation from an API shape or from one
+headline file: every executable and dependency in the controller closure is
+read from the repository view being tested and matched as one exact tuple.
+"""
+
+import hashlib
+import stat
+import unittest
+from pathlib import Path
+
+
+REPO = Path(__file__).resolve().parents[2]
+ABSENT = "absent"
+LEGACY_GENERATION = "legacy-manual-v3"
+SPLIT_GENERATION = "split-controller-v5"
+
+COMMON_RECORDS = (
+    ("agentfold.toml", "100644", "f23f32fa5e399bea12dd49871cd9154e0922164083876c717db96ffe7427f16c"),
+    ("automation/_vendor/__init__.py", "100644", "1fe7106b30c3366c8110e291d1aa0c5a5e095f691ebc712d37a2ab5c6493128b"),
+    ("automation/_vendor/tomli/__init__.py", "100644", "26153057ae830758381efb7551009531d7c2bbe220015f055e6bc353da27c5de"),
+    ("automation/_vendor/tomli/_parser.py", "100644", "83df8435a00b4be07c768918a42bb35056a55a5a20ed3f922183232d9496aed3"),
+    ("automation/_vendor/tomli/_re.py", "100644", "75b8e0e428594f6dca6bdcfd0c73977ddb52a4fc147dd80c5e78fc34ea25cbec"),
+    ("automation/_vendor/tomli/_types.py", "100644", "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74"),
+    ("automation/file_test_budget_task.py", "100644", "5ea2e7afda7194f51e78cdb431f8088307a12d9258793d1c35afdcde03473239"),
+    ("automation/test_gate_config.py", "100644", "d23d684c38d265899fedd4f9c9a1adc90f3e0b0f02097e41839dd3166de380cc"),
+    ("automation/test_manifest.py", "100644", "d20b545f9db9566f74be26cb3ce5518b6893544d377e389f577925b0eba5679e"),
+)
+
+LEGACY_RECORDS = tuple(sorted(COMMON_RECORDS + (
+    (".github/workflows/harness.yml", "100644", "a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1"),
+    ("automation/hooks/pre-commit", "100755", "0ceac7e5f0f793f043ff7f8895ac0737f7a1ba61b1c1991e20a466df6c37eb3e"),
+    ("automation/run_test_gate.py", "100644", "a27b85db53896db9c81861e9e293464b3f49e014dbefc7ad4410fee30069498e"),
+    ("automation/run_tests.py", "100644", "dbdc4cfeb4020551480c797944c203378ea26e9e2d2efea4d1dd5758b5b71c89"),
+    ("automation/test_gate_controller.py", ABSENT, ABSENT),
+)))
+
+SPLIT_RECORDS = tuple(sorted(COMMON_RECORDS + (
+    (".github/workflows/harness.yml", "100644", "d7f5dfdb98eb3d34ef46c577eb1e99ba04a42c58ccff52b718fa63d2e3f69ab0"),
+    ("automation/hooks/pre-commit", "100755", "e5817b089fb2f173c0f9fd7ad998ea27bd56dee2514a54da64c99f7c3a3fb42d"),
+    ("automation/run_test_gate.py", "100644", "89f4ac3c421d888c316159336863d8ce8150aba90991e9530a0e09ed32f81e74"),
+    ("automation/run_tests.py", "100644", "fadefe0bb6ca063c6fbbf03a2c3fc010287d4466161ab2b564501ff4aeaf5cda"),
+    ("automation/test_gate_controller.py", "100644", "de1f88d1a3529cf7f98969de5a309fe8e99b2b735ae3917049bc3fe958dcedea"),
+)))
+
+CLASSIFIED_PATHS = tuple(record[0] for record in LEGACY_RECORDS)
+
+
+def _file_record(root, relative):
+    path = root / relative
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return relative, ABSENT, ABSENT
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        return relative, "unsupported", ABSENT
+    executable = metadata.st_mode & 0o111
+    if executable not in (0, 0o111):
+        return relative, "unsupported", ABSENT
+    mode = "100755" if executable else "100644"
+    return relative, mode, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def gate_generation_records(root=REPO):
+    """Read the exact generation tuple from the repository view under test."""
+    root = Path(root)
+    return tuple(_file_record(root, relative) for relative in CLASSIFIED_PATHS)
+
+
+def classify_gate_generation_records(records):
+    """Classify only either complete admitted tuple; reject every hybrid."""
+    records = tuple(records)
+    if records == LEGACY_RECORDS:
+        return LEGACY_GENERATION
+    if records == SPLIT_RECORDS:
+        return SPLIT_GENERATION
+    return "invalid"
+
+
+def gate_generation(root=REPO):
+    records = gate_generation_records(root)
+    generation = classify_gate_generation_records(records)
+    if generation == "invalid":
+        raise AssertionError(
+            "tested repository view is outside both admitted gate generations: {!r}".format(
+                records
+            )
+        )
+    return generation
+
+
+class GateMigrationGenerationTests(unittest.TestCase):
+    def test_current_tested_view_is_one_exact_generation(self):
+        self.assertIn(
+            gate_generation(),
+            (LEGACY_GENERATION, SPLIT_GENERATION),
+            gate_generation_records(),
+        )
+
+    def test_both_closed_tuples_are_admitted(self):
+        self.assertEqual(
+            LEGACY_GENERATION, classify_gate_generation_records(LEGACY_RECORDS)
+        )
+        self.assertEqual(
+            SPLIT_GENERATION, classify_gate_generation_records(SPLIT_RECORDS)
+        )
+
+    def test_one_path_from_the_other_generation_always_rejects_the_tuple(self):
+        old = dict((record[0], record) for record in LEGACY_RECORDS)
+        new = dict((record[0], record) for record in SPLIT_RECORDS)
+        differing = tuple(path for path in CLASSIFIED_PATHS if old[path] != new[path])
+        self.assertEqual(
+            (
+                ".github/workflows/harness.yml",
+                "automation/hooks/pre-commit",
+                "automation/run_test_gate.py",
+                "automation/run_tests.py",
+                "automation/test_gate_controller.py",
+            ),
+            differing,
+        )
+        for path in differing:
+            with self.subTest(path=path, base=LEGACY_GENERATION):
+                mixed = dict(old)
+                mixed[path] = new[path]
+                self.assertEqual(
+                    "invalid",
+                    classify_gate_generation_records(
+                        tuple(mixed[name] for name in CLASSIFIED_PATHS)
+                    ),
+                )
+            with self.subTest(path=path, base=SPLIT_GENERATION):
+                mixed = dict(new)
+                mixed[path] = old[path]
+                self.assertEqual(
+                    "invalid",
+                    classify_gate_generation_records(
+                        tuple(mixed[name] for name in CLASSIFIED_PATHS)
+                    ),
+                )
+
+    def test_mode_hash_missing_and_common_dependency_mutations_reject(self):
+        cases = []
+        for index, record in enumerate(SPLIT_RECORDS):
+            relative, mode, digest = record
+            changed_mode = "100755" if mode == "100644" else "100644"
+            changed = list(SPLIT_RECORDS)
+            changed[index] = (relative, changed_mode, digest)
+            cases.append((relative + ":mode", tuple(changed)))
+            changed = list(SPLIT_RECORDS)
+            changed[index] = (relative, mode, "0" * 64)
+            cases.append((relative + ":hash", tuple(changed)))
+            changed = list(SPLIT_RECORDS)
+            changed[index] = (relative, ABSENT, ABSENT)
+            cases.append((relative + ":missing", tuple(changed)))
+        for name, records in cases:
+            with self.subTest(mutation=name):
+                self.assertEqual(
+                    "invalid", classify_gate_generation_records(records)
+                )
+
+    def test_repository_classifier_raises_instead_of_branching_on_unknown_view(self):
+        with self.assertRaisesRegex(
+            AssertionError, "outside both admitted gate generations"
+        ):
+            gate_generation(Path(__file__).resolve().parents[2] / "missing-view")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,6 +10,11 @@ from pathlib import Path
 from unittest import mock
 
 if __package__:
+    from .test_gate_generations import (
+        LEGACY_GENERATION,
+        SPLIT_GENERATION,
+        gate_generation,
+    )
     from .trusted_gate_snapshots import (
         HARD_WORKFLOW_SHA256,
         MANUAL_WORKFLOW_SHA256,
@@ -24,6 +29,11 @@ if __package__:
         workflow_job,
     )
 else:
+    from test_gate_generations import (
+        LEGACY_GENERATION,
+        SPLIT_GENERATION,
+        gate_generation,
+    )
     from trusted_gate_snapshots import (
         HARD_WORKFLOW_SHA256,
         MANUAL_WORKFLOW_SHA256,
@@ -44,6 +54,7 @@ WORKFLOW = MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
 SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
+LEGACY_WORKFLOW_SHA256 = "a07b4751a93e11534586ffebe33e5a34af47f4900568493eea57bcd350a66cf1"
 
 
 VALID_DECISION = """# Choose the admission boundary
@@ -129,7 +140,12 @@ class ReconcileQueueTests(unittest.TestCase):
 
     def test_github_adapter_binds_event_merge_and_limits_push_to_reconciliation(self):
         workflow_bytes = WORKFLOW.read_bytes()
-        regime = trusted_gate_regime(workflow_bytes)
+        generation = gate_generation()
+        regime = (
+            "absent"
+            if generation == LEGACY_GENERATION
+            else trusted_gate_regime(workflow_bytes)
+        )
         self.assertIn(regime, ("present", "absent"))
         workflow = decode_workflow(workflow_bytes)
         on_block = workflow.partition("on:\n")[2].partition(
@@ -178,7 +194,12 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertIn("pull_request:\n", on_block)
             self.assertNotIn("merge_group:\n", on_block)
 
-        push = workflow_job(workflow, "reconcile-and-test")
+        push = workflow_job(
+            workflow,
+            "push-repository-diagnostics"
+            if generation == SPLIT_GENERATION
+            else "reconcile-and-test",
+        )
         self.assertTrue(push, "push reconciliation step is missing")
         self.assertIn("github.event_name == 'push'", push)
         self.assertIn(
@@ -198,7 +219,20 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         self.assertIn("automation/reconcile/reconcile.py --check", push)
         self.assertNotIn("automation/run_test_gate.py", push)
-        if regime == "present":
+        if generation == SPLIT_GENERATION:
+            cooperative = workflow_job(
+                workflow, "cooperative-pr-complete-test-diagnostics"
+            )
+            trusted = workflow_job(workflow, "trusted-pr-merge-diagnostics")
+            self.assertTrue(cooperative)
+            self.assertTrue(trusted)
+            self.assertNotIn("automation/run_tests.py", push)
+            self.assertNotIn("pull_request", push)
+            self.assertIn("github.event_name == 'pull_request'", cooperative)
+            self.assertIn("automation/run_tests.py", cooperative)
+            self.assertIn("github.event_name == 'pull_request_target'", trusted)
+            self.assertNotIn("automation/run_tests.py", trusted)
+        elif regime == "present":
             self.assertNotIn("automation/run_tests.py", push)
             self.assertNotIn("pull_request", push)
         else:
@@ -208,13 +242,21 @@ class ReconcileQueueTests(unittest.TestCase):
 
     def test_trusted_gate_migration_never_mixes_provider_regimes(self):
         current = WORKFLOW.read_bytes()
+        generation = gate_generation()
         manual = manual_workflow_fixture()
         self.assertEqual(MANUAL_WORKFLOW_SHA256, workflow_digest(manual))
         self.assertNotEqual(HARD_WORKFLOW_SHA256, MANUAL_WORKFLOW_SHA256)
         self.assertEqual("absent", trusted_gate_regime(manual))
         self.assertEqual((), manual_fixture_contract_errors(manual))
-        self.assertIn(trusted_gate_regime(current), ("present", "absent"))
-        if trusted_gate_regime(current) == "present":
+        current_regime = trusted_gate_regime(current)
+        if generation == LEGACY_GENERATION:
+            self.assertEqual("invalid", current_regime)
+            self.assertEqual(LEGACY_WORKFLOW_SHA256, workflow_digest(current))
+            self.assertNotEqual(manual, current)
+        else:
+            self.assertEqual(SPLIT_GENERATION, generation)
+            self.assertEqual("absent", current_regime)
+        if current_regime == "present":
             self.assertEqual(HARD_WORKFLOW_SHA256, workflow_digest(current))
             self.assertEqual(manual, manualize_hard_workflow(current))
             current_text = decode_workflow(current)
@@ -224,7 +266,7 @@ class ReconcileQueueTests(unittest.TestCase):
                         workflow_job(current_text, missing), "", 1
                     ).encode("utf-8")
                     self.assertEqual("invalid", trusted_gate_regime(partial))
-        else:
+        elif generation == SPLIT_GENERATION:
             self.assertEqual(manual, current)
         for name, mutation in migration_mutations(manual):
             with self.subTest(manual_mutation=name):

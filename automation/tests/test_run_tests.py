@@ -3,16 +3,29 @@ import importlib.util
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+if __package__:
+    from .test_gate_generations import (
+        SPLIT_GENERATION,
+        gate_generation,
+    )
+else:
+    from test_gate_generations import (
+        SPLIT_GENERATION,
+        gate_generation,
+    )
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "run_tests.py"
 SPEC = importlib.util.spec_from_file_location("run_tests", MODULE_PATH)
 RUN_TESTS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUN_TESTS)
+GATE_GENERATION = gate_generation()
 
 
 class StagedTestSelectionTests(unittest.TestCase):
@@ -486,7 +499,11 @@ class RunTestsIsolationTests(unittest.TestCase):
         self.assertEqual("/usr/local/bin:/usr/bin:/bin", environment["PATH"])
         self.assertEqual("/work/state/home", environment["HOME"])
         self.assertEqual("/work/state/tmp", environment["TMPDIR"])
-        self.assertEqual("error", environment["PYTHONWARNINGS"])
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertNotIn("PYTHONWARNINGS", environment)
+            self.assertEqual("1", environment["PYTHONDONTWRITEBYTECODE"])
+        else:
+            self.assertEqual("error", environment["PYTHONWARNINGS"])
         self.assertNotIn("GITHUB_TOKEN", environment)
         self.assertNotIn("PYTHON_CREDENTIAL", environment)
         self.assertNotIn("UNRELATED", environment)
@@ -696,7 +713,10 @@ class RunTestsIsolationTests(unittest.TestCase):
         with mock.patch.object(RUN_TESTS.subprocess, "run", return_value=truncated):
             child = RUN_TESTS.isolated_test_environment(contaminated)
 
-        self.assertEqual({"KEEP": "present"}, child)
+        expected = {"KEEP": "present"}
+        if GATE_GENERATION == SPLIT_GENERATION:
+            expected["PYTHONDONTWRITEBYTECODE"] = "1"
+        self.assertEqual(expected, child)
 
     def test_scratch_root_rejects_a_path_separator(self):
         unsafe = Path(tempfile.gettempdir()) / f"agentfold{os.pathsep}unsafe"
@@ -1060,6 +1080,8 @@ class RunTestsIsolationTests(unittest.TestCase):
             )
 
     def test_main_passes_the_isolated_environment_to_each_test(self):
+        if GATE_GENERATION == SPLIT_GENERATION:
+            RUN_TESTS.child_interpreter_identity()
         child_environment = {
             "PATH": os.environ.get("PATH", ""),
             "HOME": "/caller/home",
@@ -1107,13 +1129,19 @@ class RunTestsIsolationTests(unittest.TestCase):
             str(test_cwd.parent),
             child_environment["GIT_CEILING_DIRECTORIES"],
         )
-        self.assertEqual(
-            str(test_cwd / relative_test),
-            run.call_args[0][0][1],
-        )
+        command = run.call_args[0][0]
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual([sys.executable, "-I", "-S", "-c"], command[:4])
+            self.assertEqual(RUN_TESTS.TEST_LAUNCHER, command[4])
+            self.assertEqual(str(test_cwd), command[-2])
+            self.assertEqual(str(test_cwd / relative_test), command[-1])
+            executed_test = command[-1]
+        else:
+            self.assertEqual(str(test_cwd / relative_test), command[1])
+            executed_test = command[1]
         self.assertNotEqual(
             str(RUN_TESTS.REPO / relative_test),
-            run.call_args[0][0][1],
+            executed_test,
         )
         self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])

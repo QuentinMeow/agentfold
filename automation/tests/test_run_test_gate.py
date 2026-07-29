@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused regression tests for exact, budgeted test-gate orchestration."""
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -15,11 +16,23 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+if __package__:
+    from .test_gate_generations import (
+        SPLIT_GENERATION,
+        gate_generation,
+    )
+else:
+    from test_gate_generations import (
+        SPLIT_GENERATION,
+        gate_generation,
+    )
+
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
 SPEC = importlib.util.spec_from_file_location("run_test_gate", MODULE_PATH)
 GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
+GATE_GENERATION = gate_generation()
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
 def final_policy(mode):
@@ -39,6 +52,49 @@ def final_policy(mode):
         policy.unmatched_is_critical,
     )
 class TestGateTests(unittest.TestCase):
+    @staticmethod
+    def _publish_split_receipt_pair(binding):
+        """Publish the v5 receipt, v3 report, and last-commit marker as one pair."""
+        report = GATE._base_report("final", 0.0)
+        report.pop("_started")
+        report.update(
+            {
+                "outcome": "pass",
+                "evidence": "executed",
+                "reason": "passed",
+                "candidate": {
+                    "digest": binding["candidate_digest"],
+                    "closure_digest": binding["candidate_closure_digest"],
+                },
+                "terminalized_pass": True,
+                "gate_exit_code": 0,
+                "publication_status": "success",
+                "publication_reason": "required projections persisted",
+                "command_outcome": "pass",
+                "exit_code": 0,
+                "publication_id": "d" * 64,
+                "report_write": {"disposition": "written"},
+            }
+        )
+        report_directory = GATE._safe_local_directory(Path("tmp/test-gate-reports"))
+        report_path = report_directory / "latest-final.json"
+        receipt_path = GATE.write_receipt(binding, report, report_path)
+        GATE._atomic_json(report_path, report)
+        marker_path = GATE._receipt_cache_paths(binding)[1]
+        receipt = json.loads(receipt_path.read_text())
+        GATE._atomic_json(
+            marker_path,
+            GATE._publication_marker_value(
+                binding,
+                receipt,
+                report,
+                receipt_path,
+                report_path,
+                marker_path,
+            ),
+        )
+        return report
+
     @staticmethod
     def _kill_exact_marked_fixture_pid(pid_file, marker):
         """Best-effort finalizer that can kill only the fixture's recorded process."""
@@ -449,16 +505,20 @@ class TestGateTests(unittest.TestCase):
                 f"{os.getpid()} 999 {os.getuid()} self {marker}",
             )
         )
-        result = mock.Mock(stdout=output)
+        result = mock.Mock(stdout=output, returncode=0)
         process = mock.Mock(pid=101)
         with mock.patch.object(GATE.sys, "platform", "darwin"), mock.patch.object(
             GATE.subprocess, "run", return_value=result
         ) as run:
-            owned = GATE._contained_process_pids(
+            discovered = GATE._contained_process_pids(
                 process, token, time.monotonic() + 1.0
             )
 
-        self.assertEqual({202, 505}, owned)
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(frozenset((202, 505)), discovered.pids)
+            self.assertTrue(discovered.complete)
+        else:
+            self.assertEqual({202, 505}, discovered)
         run.assert_called_once()
         self.assertEqual(
             ["ps", "eww", "-axo", "pid=,ppid=,uid=,command="],
@@ -473,7 +533,9 @@ class TestGateTests(unittest.TestCase):
         self.assertEqual(0.3, run.call_args[1]["timeout"])
 
     def test_portable_snapshot_accepts_delayed_completion_within_budget(self):
-        result = mock.Mock(stdout=f"202 101 {os.getuid()} delayed\n")
+        result = mock.Mock(
+            stdout=f"202 101 {os.getuid()} delayed\n", returncode=0
+        )
 
         def delayed_run(*_args, **_kwargs):
             time.sleep(0.16)
@@ -481,9 +543,15 @@ class TestGateTests(unittest.TestCase):
 
         started = time.monotonic()
         with mock.patch.object(GATE.subprocess, "run", side_effect=delayed_run):
-            rows = GATE._portable_process_snapshot(started + 0.4)
+            snapshot = GATE._portable_process_snapshot(started + 0.4)
 
-        self.assertEqual(((202, 101, os.getuid(), "delayed"),), rows)
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(
+                ((202, 101, os.getuid(), "delayed"),), snapshot.rows
+            )
+            self.assertTrue(snapshot.complete)
+        else:
+            self.assertEqual(((202, 101, os.getuid(), "delayed"),), snapshot)
         self.assertGreaterEqual(time.monotonic() - started, 0.15)
 
     def test_portable_snapshot_timeout_returns_no_unbounded_discovery(self):
@@ -492,7 +560,12 @@ class TestGateTests(unittest.TestCase):
             "run",
             side_effect=subprocess.TimeoutExpired(("ps",), 0.2),
         ):
-            self.assertEqual((), GATE._portable_process_snapshot(time.monotonic() + 0.2))
+            snapshot = GATE._portable_process_snapshot(time.monotonic() + 0.2)
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual((), snapshot.rows)
+            self.assertFalse(snapshot.complete)
+        else:
+            self.assertEqual((), snapshot)
 
     def test_completed_portable_snapshot_is_consumed_at_exact_deadline(self):
         token = "deadline-token"
@@ -505,6 +578,8 @@ class TestGateTests(unittest.TestCase):
 
         def complete_at_deadline(_deadline):
             clock[0] = 1.0
+            if GATE_GENERATION == SPLIT_GENERATION:
+                return GATE.ProcessSnapshot(snapshot, True)
             return snapshot
 
         process = mock.Mock(pid=101)
@@ -513,9 +588,15 @@ class TestGateTests(unittest.TestCase):
         ), mock.patch.object(
             GATE, "_portable_process_snapshot", side_effect=complete_at_deadline
         ):
-            owned = GATE._contained_process_pids(process, token, 1.0)
+            discovered = GATE._contained_process_pids(process, token, 1.0)
 
-        self.assertEqual({202, 505}, owned)
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(frozenset((202, 505)), discovered.pids)
+            self.assertTrue(discovered.complete)
+            owned = discovered.pids
+        else:
+            self.assertEqual({202, 505}, discovered)
+            owned = discovered
         with mock.patch.object(GATE.os, "killpg"), mock.patch.object(
             GATE.os, "kill"
         ) as kill:
@@ -527,10 +608,17 @@ class TestGateTests(unittest.TestCase):
         process = mock.Mock(pid=os.getpid())
         proc = mock.Mock()
         proc.is_dir.return_value = True
+        empty_discovery = (
+            GATE.ProcessDiscovery(frozenset(), True)
+            if GATE_GENERATION == SPLIT_GENERATION
+            else ()
+        )
         with mock.patch.object(GATE.sys, "platform", "linux"), mock.patch.object(
             GATE, "Path", return_value=proc
-        ), mock.patch.object(GATE, "_descendant_pids", return_value=()), mock.patch.object(
-            GATE, "_owned_process_pids", return_value=()
+        ), mock.patch.object(
+            GATE, "_descendant_pids", return_value=empty_discovery
+        ), mock.patch.object(
+            GATE, "_owned_process_pids", return_value=empty_discovery
         ), mock.patch.object(GATE, "_portable_process_snapshot") as portable:
             GATE._contained_process_pids(process, "token", time.monotonic() + 0.1)
 
@@ -541,11 +629,20 @@ class TestGateTests(unittest.TestCase):
         process.poll.return_value = 0
         events = []
 
-        discoveries = iter(({202}, {303}))
+        if GATE_GENERATION == SPLIT_GENERATION:
+            discoveries = iter(
+                (
+                    GATE.ProcessDiscovery(frozenset((202,)), True),
+                    GATE.ProcessDiscovery(frozenset((303,)), True),
+                )
+            )
+        else:
+            discoveries = iter(({202}, {303}))
 
         def discover(*_args):
             found = next(discoveries)
-            events.append(("discover", set(found)))
+            pids = found.pids if GATE_GENERATION == SPLIT_GENERATION else found
+            events.append(("discover", set(pids)))
             return found
 
         def signal_processes(_process, owned, process_signal):
@@ -562,7 +659,7 @@ class TestGateTests(unittest.TestCase):
             "monotonic",
             side_effect=(0.0, 0.0, 0.1, 0.1, 0.2, 0.96),
         ):
-            GATE._kill_process_tree(process, 1.0, "token")
+            cleanup = GATE._kill_process_tree(process, 1.0, "token")
 
         self.assertEqual(
             [
@@ -575,6 +672,8 @@ class TestGateTests(unittest.TestCase):
             ],
             events,
         )
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(((303, 202), True), cleanup)
 
     def test_cleanup_reserves_snapshot_and_final_kill_time(self):
         process = mock.Mock(pid=101)
@@ -583,6 +682,8 @@ class TestGateTests(unittest.TestCase):
 
         def discover(_process, _token, deadline, *_args):
             deadlines.append(deadline)
+            if GATE_GENERATION == SPLIT_GENERATION:
+                return GATE.ProcessDiscovery(frozenset(), True)
             return set()
 
         started = time.monotonic()
@@ -1487,7 +1588,7 @@ class TestGateTests(unittest.TestCase):
             )
             self.assertNotIn(unchanged_test, plan["supplemental_tests"])
 
-    def test_composite_plan_identity_invalidates_v1_and_changed_floor_receipts(self):
+    def test_composite_plan_identity_rejects_retired_receipt_schemas(self):
         candidate = MANIFEST.CandidateManifest(
             "revision-range", "candidate", "closure", (), (), "index", "base", "head"
         )
@@ -1522,24 +1623,34 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        self.assertEqual("agentfold.test-component-receipt/v3", GATE.RECEIPT_SCHEMA)
+        expected_schema = (
+            "agentfold.test-component-receipt/v5"
+            if GATE_GENERATION == SPLIT_GENERATION
+            else "agentfold.test-component-receipt/v3"
+        )
+        self.assertEqual(expected_schema, GATE.RECEIPT_SCHEMA)
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")
             subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
             receipt_dir = repo / "tmp/test-gate-receipts"
             receipt_dir.mkdir(parents=True)
-            (receipt_dir / f"{first['binding_digest']}.json").write_text(
-                json.dumps(
-                    {
-                        "schema": "agentfold.test-component-receipt/v1",
-                        "outcome": "pass",
-                        "binding": first,
-                    }
-                )
-            )
             with mock.patch.object(GATE, "REPO", repo):
-                self.assertIsNone(GATE.reusable_receipt(first))
+                versions = (1, 2, 3, 4) if GATE_GENERATION == SPLIT_GENERATION else (1,)
+                for version in versions:
+                    (receipt_dir / f"{first['binding_digest']}.json").write_text(
+                        json.dumps(
+                            {
+                                "schema": "agentfold.test-component-receipt/v{}".format(
+                                    version
+                                ),
+                                "outcome": "pass",
+                                "terminalized_pass": True,
+                                "binding": first,
+                            }
+                        )
+                    )
+                    self.assertIsNone(GATE.reusable_receipt(first))
 
     def test_receipt_without_cooperative_authority_is_invalid(self):
         candidate = MANIFEST.CandidateManifest(
@@ -1594,14 +1705,17 @@ class TestGateTests(unittest.TestCase):
             first = GATE.receipt_binding(
                 candidate, view, ("test.py",), "policy", "repository-tests/full"
             )
-            GATE.write_receipt(first)
+            if GATE_GENERATION == SPLIT_GENERATION:
+                self._publish_split_receipt_pair(first)
+            else:
+                GATE.write_receipt(first)
             self.assertIsNotNone(GATE.reusable_receipt(first))
             changed = dict(first)
             changed["policy_digest"] = "other"
             changed["binding_digest"] = MANIFEST.canonical_digest(changed)
             self.assertIsNone(GATE.reusable_receipt(changed))
 
-    def test_pythonpath_change_cannot_reuse_a_full_pass_receipt(self):
+    def test_python_import_environment_identity_matches_each_generation(self):
         candidate = MANIFEST.CandidateManifest(
             "staged-index", "candidate", "closure", (), (), "index"
         )
@@ -1617,7 +1731,10 @@ class TestGateTests(unittest.TestCase):
                 "repository-tests/full",
                 environment={"PATH": "/bin", "PYTHONPATH": "/first"},
             )
-            GATE.write_receipt(first)
+            if GATE_GENERATION == SPLIT_GENERATION:
+                self._publish_split_receipt_pair(first)
+            else:
+                GATE.write_receipt(first)
             changed = GATE.receipt_binding(
                 candidate,
                 view,
@@ -1627,10 +1744,136 @@ class TestGateTests(unittest.TestCase):
                 environment={"PATH": "/bin", "PYTHONPATH": "/second"},
             )
 
-            self.assertNotEqual(first["binding_digest"], changed["binding_digest"])
-            self.assertIsNone(GATE.reusable_receipt(changed))
+            if GATE_GENERATION == SPLIT_GENERATION:
+                self.assertEqual(first["binding_digest"], changed["binding_digest"])
+                self.assertIsNotNone(GATE.reusable_receipt(changed))
+            else:
+                self.assertNotEqual(first["binding_digest"], changed["binding_digest"])
+                self.assertIsNone(GATE.reusable_receipt(changed))
+
+    def _assert_split_final_prewarm_reused_by_canonical_hook(self):
+        source_repo = GATE.REPO
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            for relative in GATE.CONTROLLER_CLOSURE_PATHS:
+                destination = repo / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_repo / relative, destination)
+            shutil.copy2(source_repo / "agentfold.toml", repo / "agentfold.toml")
+            hook_source = source_repo / "automation/hooks/pre-commit"
+            hook = repo / "automation/hooks/pre-commit"
+            hook.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(hook_source, hook)
+            self.assertEqual(hook_source.read_bytes(), hook.read_bytes())
+            self.assertIn(
+                'python3 -I -S "$ROOT/automation/run_test_gate.py" routine --staged',
+                hook.read_text(),
+            )
+            for relative in (
+                "automation/check_core_scope.py",
+                "automation/reconcile/reconcile.py",
+            ):
+                script = repo / relative
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text(
+                    "#!/usr/bin/env python3\nraise SystemExit(0)\n"
+                )
+            (repo / ".gitignore").write_text("tmp/\n")
+            smoke = repo / "automation/tests/test_smoke.py"
+            smoke.parent.mkdir(parents=True)
+            smoke.write_text(
+                "import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n"
+            )
+            workflow = repo / ".github/workflows/harness.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: base\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "base controller closure"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "core.hooksPath", "automation/hooks"],
+                cwd=repo,
+                check=True,
+            )
+            configured_hook = subprocess.check_output(
+                ["git", "config", "--get", "core.hooksPath"],
+                cwd=repo,
+                text=True,
+            ).strip()
+            self.assertEqual("automation/hooks", configured_hook)
+            workflow.write_text("name: critical-candidate\n")
+            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
+
+            prewarm = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(repo / "automation/run_test_gate.py"),
+                    "final",
+                    "--explicit",
+                    "--staged",
+                ],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            self.assertEqual(0, prewarm.returncode, prewarm.stdout)
+            final_report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            final_full = next(
+                component
+                for component in final_report["components"]
+                if component["component_id"] == "repository-tests/full"
+            )
+            self.assertEqual("executed", final_full["evidence"], final_report)
+            markers = list(
+                (repo / "tmp/test-gate-receipts").glob("*.commit.json")
+            )
+            self.assertEqual(1, len(markers))
+            self.assertEqual(
+                GATE.PUBLICATION_COMMIT_SCHEMA,
+                json.loads(markers[0].read_text())["schema"],
+            )
+
+            committed = subprocess.run(
+                ["git", "commit", "-m", "exercise canonical routine hook"],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            self.assertEqual(0, committed.returncode, committed.stdout)
+            self.assertIn("pre-commit: routine test gate", committed.stdout)
+            routine_report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-routine.json").read_text()
+            )
+            routine_full = next(
+                component
+                for component in routine_report["components"]
+                if component["component_id"] == "repository-tests/full"
+            )
+            self.assertEqual("reused", routine_full["evidence"], routine_report)
 
     def test_final_prewarm_is_reused_by_actual_git_commit_hook(self):
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self._assert_split_final_prewarm_reused_by_canonical_hook()
+            return
         source_repo = GATE.REPO
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch) / "repo"
@@ -1674,6 +1917,15 @@ class TestGateTests(unittest.TestCase):
                         ("final", "--explicit", "--staged"),
                         started=time.monotonic(),
                     ),
+                )
+            if GATE_GENERATION == SPLIT_GENERATION:
+                markers = list(
+                    (repo / "tmp/test-gate-receipts").glob("*.commit.json")
+                )
+                self.assertEqual(1, len(markers))
+                self.assertEqual(
+                    GATE.PUBLICATION_COMMIT_SCHEMA,
+                    json.loads(markers[0].read_text())["schema"],
                 )
 
             hook = repo / ".git/hooks/pre-commit"
@@ -1968,6 +2220,27 @@ class TestGateTests(unittest.TestCase):
     def test_read_only_report_path_preserves_functional_exit_and_summary(self):
         report = GATE._base_report("routine", time.monotonic())
         report.update({"outcome": "pass", "evidence": "executed", "reason": "passed"})
+        if GATE_GENERATION == SPLIT_GENERATION:
+            summaries = []
+            with mock.patch.object(
+                GATE, "_atomic_json", side_effect=PermissionError(13, "read only")
+            ), mock.patch.object(
+                GATE, "_write_summary", side_effect=summaries.append
+            ):
+                exit_code = GATE.emit_report(report)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("passed", report["reason"])
+            self.assertTrue(report["terminalized_pass"])
+            self.assertEqual(0, report["gate_exit_code"])
+            self.assertEqual("error", report["publication_status"])
+            self.assertIn("read only", report["publication_reason"])
+            self.assertEqual("error", report["command_outcome"])
+            self.assertEqual({"disposition": "failed"}, report["report_write"])
+            self.assertIn("outcome: pass", summaries[0])
+            self.assertIn("publication: error", summaries[0])
+            self.assertIn("command: error (exit 2)", summaries[0])
+            return
         with mock.patch.object(GATE, "_write_report", side_effect=PermissionError(13, "read only")):
             exit_code = GATE.emit_report(report)
         self.assertEqual(0, exit_code)
@@ -1976,13 +2249,36 @@ class TestGateTests(unittest.TestCase):
     def test_unsafe_report_path_still_fails_closed(self):
         report = GATE._base_report("routine", time.monotonic())
         report.update({"outcome": "pass", "evidence": "executed", "reason": "passed"})
+        if GATE_GENERATION == SPLIT_GENERATION:
+            summaries = []
+            with mock.patch.object(
+                GATE,
+                "_safe_local_directory",
+                side_effect=GATE.GateError("unsafe report path"),
+            ), mock.patch.object(
+                GATE, "_write_summary", side_effect=summaries.append
+            ):
+                exit_code = GATE.emit_report(report)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("passed", report["reason"])
+            self.assertTrue(report["terminalized_pass"])
+            self.assertEqual(0, report["gate_exit_code"])
+            self.assertEqual("error", report["publication_status"])
+            self.assertEqual("unsafe report path", report["publication_reason"])
+            self.assertEqual("error", report["command_outcome"])
+            self.assertEqual({"disposition": "refused"}, report["report_write"])
+            self.assertIn("outcome: pass", summaries[0])
+            self.assertIn("publication: error", summaries[0])
+            self.assertIn("command: error (exit 2)", summaries[0])
+            return
         with mock.patch.object(GATE, "_write_report", side_effect=GATE.GateError("unsafe report path")):
             exit_code = GATE.emit_report(report)
         self.assertEqual(2, exit_code)
         self.assertEqual("error", report["outcome"])
         self.assertEqual({"disposition": "refused"}, report["report_write"])
 
-    def test_read_only_output_crossing_maximum_still_blocks_and_files(self):
+    def test_stdout_timing_uses_the_generation_accounting_boundary(self):
         clock = [0.0]
         summaries = []
         report = GATE._base_report("final", 0.0)
@@ -2001,11 +2297,16 @@ class TestGateTests(unittest.TestCase):
             summaries.append(summary)
             clock[0] += 1.1
 
+        report_writer = (
+            mock.patch.object(GATE, "_atomic_json")
+            if GATE_GENERATION == SPLIT_GENERATION
+            else mock.patch.object(
+                GATE, "_write_report", side_effect=PermissionError(13, "read only")
+            )
+        )
         with mock.patch.object(
             GATE.time, "monotonic", side_effect=lambda: clock[0]
-        ), mock.patch.object(
-            GATE, "_write_report", side_effect=PermissionError(13, "read only")
-        ), mock.patch.object(
+        ), report_writer, mock.patch.object(
             GATE, "_write_summary", side_effect=output
         ), mock.patch.object(
             GATE,
@@ -2020,12 +2321,19 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
 
-        self.assertEqual(1, exit_code)
-        self.assertEqual("blocked-incomplete", report["outcome"])
-        self.assertIn("budget_filing", report)
-        self.assertEqual(2, len(summaries))
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(0, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertFalse(report["maximum_exceeded"])
+            self.assertNotIn("budget_filing", report)
+            self.assertEqual(1, len(summaries))
+        else:
+            self.assertEqual(1, exit_code)
+            self.assertEqual("blocked-incomplete", report["outcome"])
+            self.assertIn("budget_filing", report)
+            self.assertEqual(2, len(summaries))
 
-    def test_output_and_report_persistence_count_toward_maximum_and_filing(self):
+    def test_publication_timing_uses_the_generation_accounting_boundary(self):
         clock = [0.0]
         persisted = []
         report = GATE._base_report("final", 0.0)
@@ -2055,9 +2363,21 @@ class TestGateTests(unittest.TestCase):
             clock[0] += 0.1
             return {"disposition": "filed", "mutated": True}
 
-        with mock.patch.object(GATE.time, "monotonic", side_effect=lambda: clock[0]), mock.patch.object(
-            GATE, "_write_report", side_effect=initial_write
-        ), mock.patch.object(GATE, "_atomic_json", side_effect=persist), mock.patch.object(
+        if GATE_GENERATION == SPLIT_GENERATION:
+            clock[0] = 0.4
+        report_writer = (
+            mock.patch.object(GATE, "_atomic_json", side_effect=persist)
+            if GATE_GENERATION == SPLIT_GENERATION
+            else mock.patch.object(GATE, "_write_report", side_effect=initial_write)
+        )
+        atomic_writer = (
+            contextlib.nullcontext()
+            if GATE_GENERATION == SPLIT_GENERATION
+            else mock.patch.object(GATE, "_atomic_json", side_effect=persist)
+        )
+        with mock.patch.object(
+            GATE.time, "monotonic", side_effect=lambda: clock[0]
+        ), report_writer, atomic_writer, mock.patch.object(
             GATE, "_write_summary", side_effect=output
         ), mock.patch.object(GATE, "file_target_breach", side_effect=file_breach):
             exit_code = GATE.emit_report(
@@ -2068,11 +2388,19 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
 
-        self.assertEqual(1, exit_code)
-        self.assertEqual("blocked-incomplete", report["outcome"])
-        self.assertTrue(report["maximum_exceeded"])
-        self.assertEqual("filed", report["budget_filing"]["disposition"])
-        self.assertTrue(any(item.get("maximum_exceeded") for item in persisted))
+        if GATE_GENERATION == SPLIT_GENERATION:
+            self.assertEqual(0, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertFalse(report["maximum_exceeded"])
+            self.assertNotIn("budget_filing", report)
+            self.assertEqual(1, len(persisted))
+            self.assertTrue(persisted[0]["terminalized_pass"])
+        else:
+            self.assertEqual(1, exit_code)
+            self.assertEqual("blocked-incomplete", report["outcome"])
+            self.assertTrue(report["maximum_exceeded"])
+            self.assertEqual("filed", report["budget_filing"]["disposition"])
+            self.assertTrue(any(item.get("maximum_exceeded") for item in persisted))
 
 
 if __name__ == "__main__":
