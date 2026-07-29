@@ -3064,6 +3064,12 @@ class TestGateTests(unittest.TestCase):
 
     def test_target_filing_accounts_once_then_freezes_without_correction(self):
         clock = iter((0.6, 0.8))
+
+        def monotonic():
+            if GATE_GENERATION == DEADLINE_GENERATION:
+                return 0.6
+            return next(clock)
+
         report = GATE._base_report("routine", 0.0)
         report.update(
             {
@@ -3074,11 +3080,20 @@ class TestGateTests(unittest.TestCase):
             }
         )
         options = mock.Mock(at_transition=None, explicit=False)
-        with mock.patch.object(GATE.time, "monotonic", side_effect=lambda: next(clock)), mock.patch.object(
-            GATE, "file_target_breach", return_value={"disposition": "filed", "mutated": True}
+        with mock.patch.object(
+            GATE.time, "monotonic", side_effect=monotonic
+        ), mock.patch.object(
+            GATE,
+            "file_target_breach",
+            return_value={"disposition": "filed", "mutated": True},
         ) as filing, mock.patch.object(GATE, "_atomic_json") as persist, mock.patch.object(
             GATE, "_write_summary"
-        ) as summary:
+        ) as summary, mock.patch.object(
+            GATE,
+            "_bounded_json_call",
+            side_effect=lambda call, _deadline: (True, call()),
+            create=True,
+        ):
             exit_code = GATE.emit_report(
                 report,
                 target=0.5,
@@ -3087,7 +3102,10 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
         self.assertEqual(0, exit_code)
-        self.assertEqual(0.8, report["duration_seconds"])
+        self.assertEqual(
+            0.6 if GATE_GENERATION == DEADLINE_GENERATION else 0.8,
+            report["duration_seconds"],
+        )
         self.assertTrue(report["target_exceeded"])
         self.assertFalse(report["maximum_exceeded"])
         filing.assert_called_once()
