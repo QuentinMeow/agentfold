@@ -384,3 +384,116 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `memory/decisions/2026-07-27-github-hard-test-gate-activation.md` and removed the two resolved
   queue items. Future enforcement remains with the existing external-oracle and OIDC-publisher
   tasks; no workflow, provider rule, or retry was changed.
+
+## 2026-07-28 — unanimous-blocker repair and record reconciliation (codex and delegated agents)
+
+- Repaired all six findings from the 0-approve/5-block review of `e530c428..64490ab5`. The
+  bootstrap now rejects reserved automatic authority before candidate imports. Allowed runs use
+  one sealed controller/index snapshot, a disposable index per component, a sanitized Python/Git
+  environment, and separately recorded controller and child interpreter identities.
+- Replaced the obsolete pull-request check with three clearly non-enforcing workflow diagnostics:
+  push repository diagnostics, trusted PR core/merge diagnostics, and cooperative PR complete
+  tests. Candidate workflow text is not treated as evidence of provider branch or ruleset policy.
+- The complete plan now includes candidate-only test namespaces. Terminal reporting freezes one
+  v3 report before a v4 receipt can attest its path, publication id, and digest. The composite
+  plan moved to v2 and the overlay algorithm to exact union namespaces v3, invalidating older
+  incomplete cache identities.
+- Three focused repair reviews followed the panel. Round 1 fixed pass-report/receipt-failure
+  contradiction, nested-namespace failure, successful exit with a detached child, mutable
+  `PYTHONPATH` source bytes, and false drift from sealed modes. Round 2 fixed unavailable process
+  discovery being read as an empty scan and a receipt surviving failed rollback. Round 3 fixed a
+  mutable component index and incomplete isolated-child interpreter identity.
+- Focused evidence passed the authority, correctness, evidence-integrity, gate, runner,
+  configuration, workflow, snapshot-mutation, quote-service, and reconciler groups recorded in
+  `verification.md`. The critical routine timing case blocked as expected at 60.15 seconds and
+  created neither a receipt nor a timing task.
+- At 2026-07-28 22:21:12–22:21:54 UTC, a fresh GitHub inspection of
+  [QuentinMeow/agentfold](https://github.com/QuentinMeow/agentfold) found no classic branch
+  protection for `main`. The sole default-branch ruleset, `main-projection` (id 19582703), was
+  disabled and contained no required status checks; the current task branch had no open pull
+  request. This is a time-bounded observation, not a claim about future provider state.
+- Removed the now-resolved manual retry and cleared the task's reciprocal queue action. The task
+  remains in progress: no post-repair exact final gate, full repository suite, production commit,
+  or fresh revision-bound merge review has run yet.
+
+## 2026-07-28 — start-handoff and verification-contract correction (codex)
+
+- Corrected the preceding entry's premature retry-resolution statement. The unanimous-review
+  retry is restored exactly at status `in-repair`, and the task again links it as a live queue
+  action. It remains blocking until a committed repaired range receives the fresh revision-bound
+  panel required by the retry.
+- Clarified the timing mathematics in the contracts. The configured maximum runs from invocation
+  start through bootstrap capture, controller startup, fallible gate work, cleanup, task filing,
+  validation, and terminal outcome freeze. Atomic receipt/report/stdout projection follows the
+  freeze outside that decision interval; external projection I/O can delay wall-clock return but
+  cannot change the frozen outcome.
+- Replaced the new summary-only verification block with retained command output from the current
+  staged bytes. Direct and package gate suites each ran 92 tests and were OK with one skip. Direct
+  and package runner suites each ran 52 tests and were OK. Direct and package configuration suites
+  each ran 28 tests and were OK. Workflow checks ran 18 legacy diagnostic tests with six skips
+  plus eight snapshot tests; the combined package command ran 26 and was OK with six skips.
+- Two standalone quote selector runs supplied the same files in opposite argument orders. Both
+  selected the canonical API-then-CLI order, ran five plus three tests, and passed both files.
+  Fresh read-only GitHub commands and their exact outputs are recorded in `verification.md` at
+  the UTC marker shown there.
+- No exact final gate, full repository suite, production commit hook, commit, or fresh
+  revision-bound review ran. The two timing journals and all stashes remain preserved.
+
+## 2026-07-28 — POSIX clock and committed-publication contract sync (codex)
+
+- Narrowed the documented runtime to CPython 3.7+ on POSIX. Windows is unsupported because the
+  gate depends on POSIX process-containment and cross-process clock primitives. The bootstrap now
+  carries `CLOCK_MONOTONIC` into the controller, with `os.times().elapsed` as the POSIX fallback,
+  so bootstrap freezing and startup count in the configured decision interval.
+- Updated the cache contract to receipt v5 plus the matching terminal v3 pass report and a v1
+  publication commit marker written last. The marker binds the receipt and report digests, paths,
+  publication id, candidate, and authority. Missing or mismatched members cannot be reused.
+- Separated the immutable gate decision from the publication/command outcome. Receipt, report,
+  marker, or stdout failure returns a command error and leaves no reusable evidence, but does not
+  rewrite the gate outcome that was frozen at the measured boundary.
+- The preceding 92-test gate results are superseded for the current implementation bytes. Fresh direct
+  and package runs each executed 98 tests and were OK with one skip. A focused ten-test clock,
+  terminal-publication, stdout, and commit-marker command was also OK; exact retained output is
+  in `verification.md`.
+- The unanimous-review retry remains live at status `in-repair`. No exact final gate, full
+  repository suite, production commit hook, commit, or fresh revision-bound review ran. The two
+  timing journals and all stashes remain preserved.
+
+## 2026-07-28 — atomic publication exact-output sync (codex)
+
+- Fresh direct and package gate runs each executed 102 tests and were OK with one skip; the
+  focused clock/publication command executed 14 tests and was OK. After atomic rename makes the
+  marker visible, directory-fsync or descriptor-close failures are advisory because the logical
+  publication is already committed; every pre-rename write, file-sync, or close failure remains
+  fatal. This evidence-only sync did not run an exact final/full gate or close the live retry.
+
+## 2026-07-28 — exact final stopped by core-scope receipt (codex)
+
+- The canonical `python3 -I -S automation/run_test_gate.py final --explicit --staged` attempt
+  exited 1 before reconciliation or repository tests. Candidate `e5283a…` reached core-scope in
+  0.77 seconds, which rejected the punctuation-wrapped `User-global writes` value and the
+  backticked, period-terminated thin-adapter value with the two findings retained verbatim in
+  `verification.md`. Coverage was 16 selected, 0 deferred, and 3 incomplete; total duration was
+  4.63 seconds. The v3 report was written, while receipt and publication marker were null.
+- Corrected only those fields to the template's canonical forms: `User-global writes` is exactly
+  `none`, and the thin adapter uses exact unquoted canonical/optional/policy/writes pairs. This
+  failed attempt produced no commit, receipt, marker, or new retry. The existing unanimous-review
+  retry remains live, and no final/full pass is claimed.
+
+## 2026-07-28 — exact compatibility bridge committed (codex and delegated agents)
+
+- The next final attempt, candidate `a6bd61f9…`, passed core scope and reconciliation but failed
+  its trusted floor after 544.18 seconds. Eleven of 15 floor files passed; the four failures were
+  the workflow, queue, gate, and test-runner modules that still expected the old contract. No
+  receipt, marker, or commit was created.
+- The first bridge candidate, `11bd3c5c…`, proved the repaired floor: all 15 floor files passed.
+  It still hit the 900-second final maximum because a migration-helper name matched a critical
+  glob and a changed shared support file caused all 14 automation modules to run again. The
+  supplemental lane was incomplete; no receipt, marker, or commit was created.
+- Reworked the bridge into closed old/new generation tests without widening the supplemental
+  manifest. Direct tests and reconciliation passed, as recorded in `verification.md`. The normal
+  hook deferred only reversible unfinished coverage after 59.758121 seconds and created commit
+  `fcc8d8d` (`test: bridge gate contract generations`).
+- Reapplied the protected production change on top of that bridge. It remains staged and still
+  needs an exact final pass, a production commit, and a fresh revision-bound merge review. The
+  live unanimous-review retry remains `in-repair`.

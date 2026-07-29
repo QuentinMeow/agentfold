@@ -1035,3 +1035,367 @@ Its normal hook passed the routine gate in 17.69 seconds with cooperative, non-e
 evidence. The status-only claim commit `d5aefe3` changed only `waiting` to `folding`; its normal
 hook passed the same gate in 15.54 seconds. The resolving candidate creates the predeclared ADR,
 removes both claimed items, and regenerates `memory/index.md`.
+
+## Current implementation — focused executable evidence
+
+```
+$ set -o pipefail
+$ python3 automation/tests/test_run_test_gate.py 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 102 tests in 37.456s
+
+OK (skipped=1)
+
+$ set -o pipefail
+$ python3 -m unittest automation.tests.test_run_test_gate 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 102 tests in 37.466s
+
+OK (skipped=1)
+```
+
+```
+$ set -o pipefail
+$ python3 -m unittest automation.tests.test_run_test_gate.TestGateTests.test_stdout_is_outside_the_frozen_measured_interval automation.tests.test_run_test_gate.TestGateTests.test_projection_is_single_and_outside_terminal_accounting automation.tests.test_run_test_gate.TestGateTests.test_gate_interval_start_requires_valid_handoff_monotonic_time automation.tests.test_run_test_gate.TestGateTests.test_cross_process_clock_fallback_survives_different_monotonic_epochs automation.tests.test_run_test_gate.TestGateTests.test_cross_process_clock_mismatch_and_unavailability_block automation.tests.test_run_test_gate.TestGateTests.test_bootstrap_elapsed_counts_toward_maximum_before_components automation.tests.test_run_test_gate.TestGateTests.test_receipt_projects_only_after_terminal_full_composite_pass automation.tests.test_run_test_gate.TestGateTests.test_broken_stdout_never_commits_receipt_even_if_cleanup_and_rewrite_fail automation.tests.test_run_test_gate.TestGateTests.test_marker_write_failure_invalidates_receipt_and_reports_command_error automation.tests.test_run_test_gate.TestGateTests.test_marker_directory_fsync_failure_after_rename_keeps_committed_pass automation.tests.test_run_test_gate.TestGateTests.test_marker_file_fsync_failure_before_rename_fails_publication automation.tests.test_run_test_gate.TestGateTests.test_marker_directory_close_failure_after_rename_keeps_committed_pass automation.tests.test_run_test_gate.TestGateTests.test_marker_file_close_failure_before_rename_fails_publication automation.tests.test_run_test_gate.TestGateTests.test_receipt_requires_matching_publication_commit_marker 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 14 tests in 3.291s
+
+OK
+```
+
+```
+$ set -o pipefail
+$ python3 automation/tests/test_run_tests.py 2>&1 | tail -n 12
+test_run_tests.py: error: --provider-hard requires an explicit view and test manifest
+.usage: test_run_tests.py [-h] [--staged] [--view-root VIEW_ROOT]
+                         [--test-file TEST_FILE]
+test_run_tests.py: error: --staged cannot be combined with --view-root or --test-file
+...
+----------------------------------------------------------------------
+Ran 52 tests in 2.284s
+
+OK
+PASS automation/tests/test_early_exit.py
+tests: 1/1 files passed
+test elapsed: 0.13s
+
+$ set -o pipefail
+$ python3 -m unittest automation.tests.test_run_tests 2>&1 | tail -n 12
+python3.7 -m unittest: error: --provider-hard requires an explicit view and test manifest
+.usage: python3.7 -m unittest [-h] [--staged] [--view-root VIEW_ROOT]
+                             [--test-file TEST_FILE]
+python3.7 -m unittest: error: --staged cannot be combined with --view-root or --test-file
+...
+----------------------------------------------------------------------
+Ran 52 tests in 2.232s
+
+OK
+PASS automation/tests/test_early_exit.py
+tests: 1/1 files passed
+test elapsed: 0.13s
+```
+
+```
+$ set -o pipefail
+$ python3 automation/tests/test_test_gate_config.py 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 28 tests in 0.093s
+
+OK
+
+$ set -o pipefail
+$ python3 -m unittest automation.tests.test_test_gate_config 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 28 tests in 0.093s
+
+OK
+```
+
+```
+$ set -o pipefail
+$ python3 automation/tests/test_github_action_projection_workflow.py 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 18 tests in 0.032s
+
+OK (skipped=6)
+
+$ set -o pipefail
+$ python3 automation/tests/test_harness_workflow.py 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 8 tests in 0.214s
+
+OK
+
+$ set -o pipefail
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow automation.tests.test_harness_workflow 2>&1 | tail -n 4
+----------------------------------------------------------------------
+Ran 26 tests in 0.249s
+
+OK (skipped=6)
+```
+
+The two standalone selector commands below intentionally supplied the same files in opposite
+argument orders. Their retained output is recorded in full.
+
+```
+$ python3 automation/run_tests.py --test-file services/quote-cli/tests/test_quote_cli.py --test-file services/quote-api/tests/test_quote_api.py
+test lane: explicit-view
+test reason: gate supplied an exact tested view and manifest
+evidence authority: cooperative-same-interpreter
+controlled completion: false
+enforcement eligible: false
+selected test files:
+  services/quote-api/tests/test_quote_api.py
+  services/quote-cli/tests/test_quote_cli.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.111s
+
+OK
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.308s
+
+OK
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 2/2 files passed
+test elapsed: 1.70s
+
+$ python3 automation/run_tests.py --test-file services/quote-api/tests/test_quote_api.py --test-file services/quote-cli/tests/test_quote_cli.py
+test lane: explicit-view
+test reason: gate supplied an exact tested view and manifest
+evidence authority: cooperative-same-interpreter
+controlled completion: false
+enforcement eligible: false
+selected test files:
+  services/quote-api/tests/test_quote_api.py
+  services/quote-cli/tests/test_quote_cli.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.117s
+
+OK
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.286s
+
+OK
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 2/2 files passed
+test elapsed: 1.62s
+```
+
+## Current provider read-only evidence
+
+```
+$ date -u '+%Y-%m-%dT%H:%M:%SZ'
+2026-07-28T22:46:44Z
+```
+
+```
+$ gh api repos/QuentinMeow/agentfold/branches/main/protection --jq '{required_status_checks: .required_status_checks}'
+gh: Branch not protected (HTTP 404)
+{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"404"}
+```
+
+Exit status: `1`.
+
+```
+$ gh api repos/QuentinMeow/agentfold/branches/main/protection/required_status_checks --jq '{strict: .strict, contexts: .contexts, checks: .checks}'
+gh: Branch not protected (HTTP 404)
+{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-status-checks-protection","status":"404"}
+```
+
+Exit status: `1`.
+
+```
+$ gh api repos/QuentinMeow/agentfold/rulesets/19582703 --jq '{id, name, enforcement, target, conditions, rules: [.rules[] | {type, parameters: (.parameters // null)}]}'
+{"conditions":{"ref_name":{"exclude":[],"include":["~DEFAULT_BRANCH"]}},"enforcement":"disabled","id":19582703,"name":"main-projection","rules":[{"parameters":null,"type":"deletion"},{"parameters":null,"type":"non_fast_forward"}],"target":"branch"}
+
+$ gh api repos/QuentinMeow/agentfold/rules/branches/main --jq 'map({type, ruleset_source_type, ruleset_source, ruleset_id})'
+[]
+
+$ gh pr list --repo QuentinMeow/agentfold --head task/2026-07-27-configure-test-gates-and-time-budgets --state open --json number,url --jq '.'
+[]
+```
+
+## Current structural evidence
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ wc -l automation/AGENTS.md
+      60 automation/AGENTS.md
+```
+
+`git diff --check` and `git diff --cached --check` each exited 0 with empty output.
+
+The active-contract stale search was run exactly as follows and exited 0 with empty output:
+
+```
+$ if rg -n 'receipt schema v4|Version 4 receipts|v4 receipt|POSIX and Windows|Windows clones|including (report|reporting)|reporting (inside|within)|end-to-end budget|report persistence.*interval|projection.*measured interval|whole gate.*report' automation/AGENTS.md handbook/testing-gates.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/task.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/design.md tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/plan.md; then exit 1; fi
+
+$ if rg -n 'Ran 9(2|8) tests' tasks/1_in-progress/2026-07-27-configure-test-gates-and-time-budgets/verification.md; then exit 1; fi
+```
+
+## Remaining verification boundary
+
+No exact final gate, full repository suite, production commit hook, or fresh revision-bound merge
+review has run after the unanimous-blocker repairs. Those steps remain required before completion
+or merge. The focused commands above are not complete-suite or commit evidence.
+
+## Failed exact-final core-scope admission
+
+The actual attempted command was:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+```
+
+It exited 1. Its retained machine report is
+`tmp/test-gate-reports/latest-final.json`. The following read-only extraction was then run against
+that report; the output is retained verbatim.
+
+```
+$ jq '{schema,gate_id,outcome,gate_exit_code,command_outcome,exit_code,reason,candidate:.candidate.digest,core_scope:(.components[0] | {component_id,outcome,evidence,duration_seconds:((.duration_seconds*100|round)/100),detail}),coverage:{selected:(.selected|length),deferred:(.deferred|length),incomplete:(.incomplete|length),incomplete_ids:.incomplete},duration_seconds:((.duration_seconds*100|round)/100),report_write,receipt:(.receipt // null),publication_commit_marker:(.publication_commit_marker // null)}' tmp/test-gate-reports/latest-final.json
+{
+  "schema": "agentfold.test-gate-report/v3",
+  "gate_id": "final",
+  "outcome": "blocked-failed",
+  "gate_exit_code": 1,
+  "command_outcome": "blocked-failed",
+  "exit_code": 1,
+  "reason": "core-scope failed",
+  "candidate": "e5283a0356dc656805bc925a6bbc6190f6bb38c6f66df2c6b7c6b9145dcc04c6",
+  "core_scope": {
+    "component_id": "core-scope",
+    "outcome": "failed",
+    "evidence": "executed",
+    "duration_seconds": 0.77,
+    "detail": "[core-scope] Core fit requires `**User-global writes:** none`\n[core-scope] `**Thin adapter:**` must be `none` or exact nonempty canonical=, optional=yes, policy=none, writes=repo-only pairs\n    fix: complete templates/task/design.md, route external setup outside core, or record review when --require-review is selected"
+  },
+  "coverage": {
+    "selected": 16,
+    "deferred": 0,
+    "incomplete": 3,
+    "incomplete_ids": [
+      "core-scope",
+      "reconcile",
+      "repository-tests/full"
+    ]
+  },
+  "duration_seconds": 4.63,
+  "report_write": {
+    "disposition": "written"
+  },
+  "receipt": null,
+  "publication_commit_marker": null
+}
+```
+
+No commit or new retry was created. This is failed admission evidence, not an exact-final or full
+repository-suite pass.
+
+## Core-scope receipt repair checks
+
+```
+$ python3 automation/check_core_scope.py --staged
+core-scope: pass (12 core path(s), task 2026-07-27-configure-test-gates-and-time-budgets; independent review manual; not invoked)
+
+$ python3 -m unittest automation.tests.test_check_core_scope.CoreScopeTests.test_user_global_write_declaration_must_be_none automation.tests.test_check_core_scope.CoreScopeTests.test_thin_adapter_contract_is_structured automation.tests.test_check_core_scope.CoreScopeTests.test_thin_adapter_values_are_exact_and_nonempty
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.021s
+
+OK
+```
+
+These focused checks repair only the core-scope receipt failure. They are not an exact-final or
+full repository-suite pass, and the independent revision-bound review was not invoked.
+
+## Exact-final attempt reached incompatible trusted tests
+
+The next actual invocation was:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+```
+
+Candidate `a6bd61f918885c703a201b63062372528b01103825783bdaa81efb9c6e9303a1`
+exited 1 after 544.18 seconds. Core scope passed in 0.75 seconds and reconciliation passed in
+16.41 seconds. The base-pinned floor then failed after 521.05 seconds: 11 of its 15 files passed,
+while these four files failed against the new production contract:
+
+- `automation/tests/test_github_action_projection_workflow.py`
+- `automation/tests/test_reconcile_queue.py`
+- `automation/tests/test_run_test_gate.py`
+- `automation/tests/test_run_tests.py`
+
+The attempt selected 16 files, deferred none, and left the full repository check incomplete. It
+created no receipt, publication marker, or commit. The failure showed that the trusted tests
+needed an exact compatibility bridge; rerunning the unchanged candidate would not have helped.
+
+## First compatibility-bridge attempt exceeded the final maximum
+
+After adding the first version of that bridge, the same actual command ran against candidate
+`11bd3c5c7927aeb99798f4cfa370a94d4582f95791b76244526dd398a027696c`:
+
+```
+$ python3 -I -S automation/run_test_gate.py final --explicit --staged
+```
+
+It exited 1 after 900.039886 seconds (900.04 seconds rounded). Core scope passed in 0.45 seconds,
+reconciliation passed in 16.74 seconds, and all 15 base-floor files passed in 535.98 seconds. The
+candidate supplemental lane was still incomplete after 344.70 seconds. The run selected 16 files
+and created no receipt, publication marker, or commit.
+
+The bridge behavior was correct, but its file layout made the run much larger than intended. The
+helper name accidentally matched the migration critical glob, and the changed shared support
+file caused all 14 automation test modules to run again in the supplemental lane. The repair was
+to give the bridge a normal test-module name and keep its shared support byte-identical.
+
+## Committed compatibility bridge
+
+The repaired bridge was checked directly before commit `fcc8d8dee7923d54c2ce15abd2de4a1ca678e85f`.
+The retained command evidence is below. Lines labeled `result summary` summarize the observed
+exit, case count, and wall time; they are not claimed as literal program output. The reconciler's
+zero-finding line is labeled separately as emitted output.
+
+```
+$ python3 -m unittest automation.tests.test_gate_generations
+[result summary] exit 0; 5/5 passed; command elapsed: 0.08s
+
+$ python3 -m unittest automation.tests.test_github_action_projection_workflow
+[result summary] exit 0; 18/18 passed with 6 pre-existing skips; command elapsed: 0.11s
+
+$ python3 -m unittest -q automation.tests.test_reconcile_queue
+[result summary] clean exit 0; loader count: 298 cases; the quiet command emitted no final
+summary; command elapsed: about 28.6s
+
+$ python3 -m unittest automation.tests.test_run_test_gate
+[result summary] exit 0; 66/66 passed with 1 pre-existing skip; command elapsed: 11.04s
+
+$ python3 -m unittest automation.tests.test_run_tests
+[result summary] exit 0; 49/49 passed; command elapsed: 2.04s
+
+$ python3 automation/reconcile/reconcile.py --check
+[emitted output] reconcile: 0 finding(s)
+[result summary] exit 0; command elapsed: 8.14s
+```
+
+The staged and unstaged diff checks were clean for the intended bridge scope. Its normal commit
+hook also succeeded without claiming complete coverage:
+
+```
+gate_id="routine"
+outcome="deferred"
+reason="reversible remainder deferred after repository-tests/selected"
+duration_seconds=59.758121
+```
+
+The hook passed core scope and reconciliation, then stopped the reversible selected-test
+remainder at the routine boundary. Commit `fcc8d8d` was created. This is successful routine-gate
+deferral evidence, not a complete final-gate pass for the staged production change.

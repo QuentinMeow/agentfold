@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Focused regression tests for exact, budgeted test-gate orchestration."""
 
-import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,23 +17,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-if __package__:
-    from .test_gate_generations import (
-        SPLIT_GENERATION,
-        gate_generation,
-    )
-else:
-    from test_gate_generations import (
-        SPLIT_GENERATION,
-        gate_generation,
-    )
-
 AUTOMATION = Path(__file__).resolve().parents[1]
 MODULE_PATH = AUTOMATION / "run_test_gate.py"
 SPEC = importlib.util.spec_from_file_location("run_test_gate", MODULE_PATH)
 GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
-GATE_GENERATION = gate_generation()
 MANIFEST = GATE.test_manifest
 CONFIG = GATE.test_gate_config
 def final_policy(mode):
@@ -53,8 +42,7 @@ def final_policy(mode):
     )
 class TestGateTests(unittest.TestCase):
     @staticmethod
-    def _publish_split_receipt_pair(binding):
-        """Publish the v5 receipt, v3 report, and last-commit marker as one pair."""
+    def _publish_receipt_pair(binding):
         report = GATE._base_report("final", 0.0)
         report.pop("_started")
         report.update(
@@ -76,7 +64,9 @@ class TestGateTests(unittest.TestCase):
                 "report_write": {"disposition": "written"},
             }
         )
-        report_directory = GATE._safe_local_directory(Path("tmp/test-gate-reports"))
+        report_directory = GATE._safe_local_directory(
+            Path("tmp/test-gate-reports")
+        )
         report_path = report_directory / "latest-final.json"
         receipt_path = GATE.write_receipt(binding, report, report_path)
         GATE._atomic_json(report_path, report)
@@ -94,6 +84,27 @@ class TestGateTests(unittest.TestCase):
             ),
         )
         return report
+
+    def _make_gate_bootstrap_repository(self, destination):
+        destination.mkdir()
+        for relative in GATE.CONTROLLER_CLOSURE_PATHS:
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(GATE.REPO / relative, target)
+            target.chmod(stat.S_IMODE(target.stat().st_mode) | stat.S_IWUSR)
+        target = destination / "agentfold.toml"
+        shutil.copy2(GATE.REPO / "agentfold.toml", target)
+        target.chmod(stat.S_IMODE(target.stat().st_mode) | stat.S_IWUSR)
+        (destination / ".gitignore").write_text("tmp/\n")
+        subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=destination, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"],
+            cwd=destination,
+            check=True,
+        )
+        subprocess.run(["git", "add", "."], cwd=destination, check=True)
+        subprocess.run(["git", "commit", "-qm", "bootstrap floor"], cwd=destination, check=True)
 
     @staticmethod
     def _kill_exact_marked_fixture_pid(pid_file, marker):
@@ -510,15 +521,12 @@ class TestGateTests(unittest.TestCase):
         with mock.patch.object(GATE.sys, "platform", "darwin"), mock.patch.object(
             GATE.subprocess, "run", return_value=result
         ) as run:
-            discovered = GATE._contained_process_pids(
+            discovery = GATE._contained_process_pids(
                 process, token, time.monotonic() + 1.0
             )
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual(frozenset((202, 505)), discovered.pids)
-            self.assertTrue(discovered.complete)
-        else:
-            self.assertEqual({202, 505}, discovered)
+        self.assertEqual(frozenset((202, 505)), discovery.pids)
+        self.assertTrue(discovery.complete)
         run.assert_called_once()
         self.assertEqual(
             ["ps", "eww", "-axo", "pid=,ppid=,uid=,command="],
@@ -526,7 +534,7 @@ class TestGateTests(unittest.TestCase):
         )
 
     def test_portable_snapshot_is_capped_at_300ms(self):
-        result = mock.Mock(stdout="")
+        result = mock.Mock(stdout="", returncode=0)
         with mock.patch.object(GATE.subprocess, "run", return_value=result) as run:
             GATE._portable_process_snapshot(time.monotonic() + 1.0)
 
@@ -545,13 +553,10 @@ class TestGateTests(unittest.TestCase):
         with mock.patch.object(GATE.subprocess, "run", side_effect=delayed_run):
             snapshot = GATE._portable_process_snapshot(started + 0.4)
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual(
-                ((202, 101, os.getuid(), "delayed"),), snapshot.rows
-            )
-            self.assertTrue(snapshot.complete)
-        else:
-            self.assertEqual(((202, 101, os.getuid(), "delayed"),), snapshot)
+        self.assertEqual(
+            ((202, 101, os.getuid(), "delayed"),), snapshot.rows
+        )
+        self.assertTrue(snapshot.complete)
         self.assertGreaterEqual(time.monotonic() - started, 0.15)
 
     def test_portable_snapshot_timeout_returns_no_unbounded_discovery(self):
@@ -561,11 +566,19 @@ class TestGateTests(unittest.TestCase):
             side_effect=subprocess.TimeoutExpired(("ps",), 0.2),
         ):
             snapshot = GATE._portable_process_snapshot(time.monotonic() + 0.2)
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual((), snapshot.rows)
-            self.assertFalse(snapshot.complete)
-        else:
-            self.assertEqual((), snapshot)
+        self.assertEqual((), snapshot.rows)
+        self.assertFalse(snapshot.complete)
+
+    def test_portable_snapshot_preserves_partial_rows_but_marks_nonzero_incomplete(self):
+        result = mock.Mock(
+            stdout=f"202 101 {os.getuid()} partial\n", returncode=1
+        )
+        with mock.patch.object(GATE.subprocess, "run", return_value=result):
+            snapshot = GATE._portable_process_snapshot(time.monotonic() + 0.2)
+        self.assertEqual(
+            ((202, 101, os.getuid(), "partial"),), snapshot.rows
+        )
+        self.assertFalse(snapshot.complete)
 
     def test_completed_portable_snapshot_is_consumed_at_exact_deadline(self):
         token = "deadline-token"
@@ -578,9 +591,7 @@ class TestGateTests(unittest.TestCase):
 
         def complete_at_deadline(_deadline):
             clock[0] = 1.0
-            if GATE_GENERATION == SPLIT_GENERATION:
-                return GATE.ProcessSnapshot(snapshot, True)
-            return snapshot
+            return GATE.ProcessSnapshot(snapshot, True)
 
         process = mock.Mock(pid=101)
         with mock.patch.object(GATE.sys, "platform", "darwin"), mock.patch.object(
@@ -588,19 +599,14 @@ class TestGateTests(unittest.TestCase):
         ), mock.patch.object(
             GATE, "_portable_process_snapshot", side_effect=complete_at_deadline
         ):
-            discovered = GATE._contained_process_pids(process, token, 1.0)
+            discovery = GATE._contained_process_pids(process, token, 1.0)
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual(frozenset((202, 505)), discovered.pids)
-            self.assertTrue(discovered.complete)
-            owned = discovered.pids
-        else:
-            self.assertEqual({202, 505}, discovered)
-            owned = discovered
+        self.assertEqual(frozenset((202, 505)), discovery.pids)
+        self.assertTrue(discovery.complete)
         with mock.patch.object(GATE.os, "killpg"), mock.patch.object(
             GATE.os, "kill"
         ) as kill:
-            GATE._signal_processes(process, owned, GATE.signal.SIGKILL)
+            GATE._signal_processes(process, discovery.pids, GATE.signal.SIGKILL)
         self.assertIn(mock.call(202, GATE.signal.SIGKILL), kill.call_args_list)
         self.assertIn(mock.call(505, GATE.signal.SIGKILL), kill.call_args_list)
 
@@ -608,17 +614,16 @@ class TestGateTests(unittest.TestCase):
         process = mock.Mock(pid=os.getpid())
         proc = mock.Mock()
         proc.is_dir.return_value = True
-        empty_discovery = (
-            GATE.ProcessDiscovery(frozenset(), True)
-            if GATE_GENERATION == SPLIT_GENERATION
-            else ()
-        )
         with mock.patch.object(GATE.sys, "platform", "linux"), mock.patch.object(
             GATE, "Path", return_value=proc
         ), mock.patch.object(
-            GATE, "_descendant_pids", return_value=empty_discovery
+            GATE,
+            "_descendant_pids",
+            return_value=GATE.ProcessDiscovery(frozenset(), True),
         ), mock.patch.object(
-            GATE, "_owned_process_pids", return_value=empty_discovery
+            GATE,
+            "_owned_process_pids",
+            return_value=GATE.ProcessDiscovery(frozenset(), True),
         ), mock.patch.object(GATE, "_portable_process_snapshot") as portable:
             GATE._contained_process_pids(process, "token", time.monotonic() + 0.1)
 
@@ -629,20 +634,16 @@ class TestGateTests(unittest.TestCase):
         process.poll.return_value = 0
         events = []
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            discoveries = iter(
-                (
-                    GATE.ProcessDiscovery(frozenset((202,)), True),
-                    GATE.ProcessDiscovery(frozenset((303,)), True),
-                )
+        discoveries = iter(
+            (
+                GATE.ProcessDiscovery(frozenset((202,)), True),
+                GATE.ProcessDiscovery(frozenset((303,)), True),
             )
-        else:
-            discoveries = iter(({202}, {303}))
+        )
 
         def discover(*_args):
             found = next(discoveries)
-            pids = found.pids if GATE_GENERATION == SPLIT_GENERATION else found
-            events.append(("discover", set(pids)))
+            events.append(("discover", set(found.pids)))
             return found
 
         def signal_processes(_process, owned, process_signal):
@@ -659,7 +660,7 @@ class TestGateTests(unittest.TestCase):
             "monotonic",
             side_effect=(0.0, 0.0, 0.1, 0.1, 0.2, 0.96),
         ):
-            cleanup = GATE._kill_process_tree(process, 1.0, "token")
+            cleaned, complete = GATE._kill_process_tree(process, 1.0, "token")
 
         self.assertEqual(
             [
@@ -672,8 +673,8 @@ class TestGateTests(unittest.TestCase):
             ],
             events,
         )
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual(((303, 202), True), cleanup)
+        self.assertEqual((303, 202), cleaned)
+        self.assertTrue(complete)
 
     def test_cleanup_reserves_snapshot_and_final_kill_time(self):
         process = mock.Mock(pid=101)
@@ -682,9 +683,7 @@ class TestGateTests(unittest.TestCase):
 
         def discover(_process, _token, deadline, *_args):
             deadlines.append(deadline)
-            if GATE_GENERATION == SPLIT_GENERATION:
-                return GATE.ProcessDiscovery(frozenset(), True)
-            return set()
+            return GATE.ProcessDiscovery(frozenset(), True)
 
         started = time.monotonic()
         cleanup_deadline = started + 0.2
@@ -745,6 +744,136 @@ class TestGateTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", observed)
         self.assertNotIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", observed)
         self.assertNotIn("UNRELATED_SECRET", observed)
+
+    def test_component_environment_strips_external_python_import_surfaces(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            external = root / "external"
+            working = root / "working"
+            external.mkdir()
+            working.mkdir()
+            (external / "mutable_external.py").write_text("VALUE = 'attacker'\n")
+            probe = (
+                "import json,os\n"
+                "try:\n import mutable_external\n loaded=True\n"
+                "except ImportError:\n loaded=False\n"
+                "names=('PYTHONPATH','PYTHONHOME','PYTHONUSERBASE','PYTHONSTARTUP')\n"
+                "print(json.dumps({'loaded':loaded,'python':{n:os.environ.get(n) for n in names},"
+                "'dontwrite':os.environ.get('PYTHONDONTWRITEBYTECODE')}))\n"
+            )
+            result = GATE.run_component(
+                "python-environment",
+                [sys.executable, "-c", probe],
+                2.0,
+                cwd=working,
+                environment={
+                    "PATH": os.environ.get("PATH", ""),
+                    "PYTHONPATH": str(external),
+                    "PYTHONHOME": str(external),
+                    "PYTHONUSERBASE": str(external),
+                    "PYTHONSTARTUP": str(external / "startup.py"),
+                },
+            )
+            self.assertEqual("pass", result.outcome, result.detail)
+            observed = json.loads(result.detail)
+            self.assertFalse(observed["loaded"])
+            self.assertEqual(
+                {name: None for name in observed["python"]}, observed["python"]
+            )
+            self.assertEqual("1", observed["dontwrite"])
+
+    def test_successful_component_cleans_detached_child_before_pass(self):
+        if not GATE.process_identity_discovery_available():
+            self.skipTest("process environment discovery is unavailable")
+        with tempfile.TemporaryDirectory() as scratch:
+            pid_file = Path(scratch) / "child.pid"
+            script = (
+                "import pathlib,subprocess,sys\n"
+                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],"
+                " start_new_session=True)\n"
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid))\n"
+            )
+            result = GATE.run_component(
+                "detached-success",
+                [sys.executable, "-c", script, str(pid_file)],
+                2.0,
+            )
+            self.assertEqual("pass", result.outcome, result.detail)
+            self.assertIn("cleaned", result.detail)
+            pid = int(pid_file.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def test_detached_child_with_unavailable_discovery_cannot_pass(self):
+        scratch_manager = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch_manager.cleanup)
+        pid_file = Path(scratch_manager.name) / "unobserved.pid"
+        marker = "agentfold-unobserved-" + os.urandom(12).hex()
+        self.addCleanup(self._kill_exact_marked_fixture_pid, pid_file, marker)
+        script = (
+            "import pathlib,subprocess,sys\n"
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)',"
+            "sys.argv[2]],start_new_session=True)\n"
+            "pathlib.Path(sys.argv[1]).write_text(str(child.pid))\n"
+        )
+        unavailable = GATE.ProcessDiscovery(frozenset(), False)
+        with mock.patch.object(
+            GATE, "_contained_process_pids", return_value=unavailable
+        ):
+            result = GATE.run_component(
+                "unavailable-discovery",
+                [sys.executable, "-c", script, str(pid_file), marker],
+                2.0,
+            )
+        self.assertEqual("incomplete", result.outcome)
+        self.assertIn("cleanup did not complete", result.detail)
+        self.assertTrue(pid_file.is_file())
+
+    def test_partial_discovery_cleans_known_pids_but_fails_closed(self):
+        process = mock.Mock(pid=101)
+        process.poll.return_value = 0
+        discoveries = iter(
+            (
+                GATE.ProcessDiscovery(frozenset((202,)), False),
+                GATE.ProcessDiscovery(frozenset(), False),
+                GATE.ProcessDiscovery(frozenset(), True),
+                GATE.ProcessDiscovery(frozenset(), True),
+            )
+        )
+        with mock.patch.object(
+            GATE, "_contained_process_pids", side_effect=lambda *_args: next(discoveries)
+        ), mock.patch.object(GATE, "_signal_processes") as signal_processes, mock.patch.object(
+            GATE, "_reap_contained_processes"
+        ):
+            cleaned, complete = GATE._cleanup_after_component_exit(
+                process, "token", time.monotonic() + 1.0
+            )
+        self.assertEqual((202,), cleaned)
+        self.assertFalse(complete)
+        self.assertTrue(
+            any(202 in call[0][1] for call in signal_processes.call_args_list)
+        )
+
+    def test_successful_root_with_incomplete_cleanup_cannot_pass(self):
+        with mock.patch.object(
+            GATE, "_cleanup_after_component_exit", return_value=((123,), False)
+        ):
+            result = GATE.run_component(
+                "cleanup-failure",
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                1.0,
+            )
+        self.assertEqual("incomplete", result.outcome)
+        self.assertIn("cleanup did not complete", result.detail)
+
+    def test_successful_component_without_children_remains_pass(self):
+        result = GATE.run_component(
+            "ordinary-success",
+            [sys.executable, "-c", "print('ordinary')"],
+            1.0,
+        )
+        self.assertEqual("pass", result.outcome, result.detail)
+        self.assertEqual("ordinary", result.detail)
 
     def test_only_verified_git_hook_exec_path_prefix_is_canonicalized(self):
         base_path = os.environ.get("PATH", "")
@@ -1588,7 +1717,128 @@ class TestGateTests(unittest.TestCase):
             )
             self.assertNotIn(unchanged_test, plan["supplemental_tests"])
 
-    def test_composite_plan_identity_rejects_retired_receipt_schemas(self):
+    def test_composite_plan_removes_candidate_only_namespace_from_floor(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            base_test = repo / "automation/tests/test_base.py"
+            base_test.parent.mkdir(parents=True)
+            base_test.write_text("BASE = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+
+            candidate_namespace = repo / "services/new-service/tests"
+            candidate_namespace.mkdir(parents=True)
+            helper = candidate_namespace / "helper.py"
+            added_test = candidate_namespace / "test_added.py"
+            helper.write_text("VALUE = 1\n")
+            added_test.write_text("ADDED = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+
+            capture = Path(scratch) / "capture"
+            capture.mkdir()
+            frozen = capture / "candidate.index"
+            with mock.patch.object(GATE, "REPO", repo):
+                MANIFEST.copy_staged_index(repo, frozen)
+                candidate = MANIFEST.staged_candidate(repo, frozen)
+                candidate_root = capture / "candidate"
+                candidate_view = MANIFEST.materialize_staged_candidate(
+                    repo, frozen, candidate_root
+                )
+                plan = GATE.composite_test_plan(
+                    candidate, candidate_root, candidate_view, capture
+                )
+
+            relative_test = added_test.relative_to(repo).as_posix()
+            relative_helper = helper.relative_to(repo).as_posix()
+            self.assertEqual(("automation/tests/test_base.py",), plan["floor_tests"])
+            self.assertFalse(
+                (plan["floor_root"] / "services/new-service/tests").exists()
+            )
+            self.assertEqual((relative_test,), plan["supplemental_tests"])
+            supplemental_paths = {
+                record["path"] for record in plan["identity"]["supplemental_records"]
+            }
+            self.assertIn(relative_test, supplemental_paths)
+            self.assertIn(relative_helper, supplemental_paths)
+            self.assertIn(
+                "services/new-service/tests",
+                plan["identity"]["candidate_test_namespaces"],
+            )
+
+    def test_composite_plan_normalizes_nested_namespaces_and_sealed_modes(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            parent_test = repo / "automation/tests/test_parent.py"
+            nested_test = repo / "automation/tests/nested/tests/test_nested.py"
+            parent_test.parent.mkdir(parents=True)
+            nested_test.parent.mkdir(parents=True)
+            parent_test.write_text("PARENT = True\n")
+            nested_test.write_text("NESTED = True\n")
+            nested_test.chmod(0o755)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "nested base"], cwd=repo, check=True)
+
+            added = repo / "automation/tests/nested/tests/test_added.py"
+            added.write_text("ADDED = True\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            capture = Path(scratch) / "capture"
+            capture.mkdir()
+            frozen = capture / "candidate.index"
+            with mock.patch.object(GATE, "REPO", repo):
+                MANIFEST.copy_staged_index(repo, frozen)
+                candidate = MANIFEST.staged_candidate(repo, frozen)
+                candidate_root = capture / "candidate"
+                MANIFEST.materialize_staged_candidate(repo, frozen, candidate_root)
+                parent_candidate = candidate_root / parent_test.relative_to(repo)
+                nested_candidate = candidate_root / nested_test.relative_to(repo)
+                added_candidate = candidate_root / added.relative_to(repo)
+                parent_candidate.chmod(0o400)
+                nested_candidate.chmod(0o500)
+                added_candidate.chmod(0o400)
+                candidate_view = MANIFEST.tree_manifest(candidate_root)
+                plan = GATE.composite_test_plan(
+                    candidate, candidate_root, candidate_view, capture
+                )
+
+            self.assertEqual(
+                ["automation/tests"], plan["identity"]["overlay_namespaces"]
+            )
+            self.assertEqual(
+                ["automation/tests"], plan["identity"]["base_namespace_roots"]
+            )
+            self.assertEqual(
+                (
+                    "automation/tests/nested/tests/test_added.py",
+                ),
+                plan["supplemental_tests"],
+            )
+            modes = {
+                record["path"]: record.get("mode")
+                for record in plan["identity"]["candidate_test_records"]
+                if record.get("kind") == "file"
+            }
+            self.assertEqual("100644", modes["automation/tests/test_parent.py"])
+            self.assertEqual(
+                "100755", modes["automation/tests/nested/tests/test_nested.py"]
+            )
+
+    def test_composite_plan_identity_invalidates_v1_through_v4_and_changed_floor_receipts(self):
         candidate = MANIFEST.CandidateManifest(
             "revision-range", "candidate", "closure", (), (), "index", "base", "head"
         )
@@ -1623,12 +1873,7 @@ class TestGateTests(unittest.TestCase):
                 composite_identity=second_plan,
             )
         self.assertNotEqual(first["binding_digest"], second["binding_digest"])
-        expected_schema = (
-            "agentfold.test-component-receipt/v5"
-            if GATE_GENERATION == SPLIT_GENERATION
-            else "agentfold.test-component-receipt/v3"
-        )
-        self.assertEqual(expected_schema, GATE.RECEIPT_SCHEMA)
+        self.assertEqual("agentfold.test-component-receipt/v5", GATE.RECEIPT_SCHEMA)
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             (repo / ".gitignore").write_text("tmp/\n")
@@ -1636,14 +1881,11 @@ class TestGateTests(unittest.TestCase):
             receipt_dir = repo / "tmp/test-gate-receipts"
             receipt_dir.mkdir(parents=True)
             with mock.patch.object(GATE, "REPO", repo):
-                versions = (1, 2, 3, 4) if GATE_GENERATION == SPLIT_GENERATION else (1,)
-                for version in versions:
+                for version in (1, 2, 3, 4):
                     (receipt_dir / f"{first['binding_digest']}.json").write_text(
                         json.dumps(
                             {
-                                "schema": "agentfold.test-component-receipt/v{}".format(
-                                    version
-                                ),
+                                "schema": "agentfold.test-component-receipt/v{}".format(version),
                                 "outcome": "pass",
                                 "terminalized_pass": True,
                                 "binding": first,
@@ -1705,17 +1947,14 @@ class TestGateTests(unittest.TestCase):
             first = GATE.receipt_binding(
                 candidate, view, ("test.py",), "policy", "repository-tests/full"
             )
-            if GATE_GENERATION == SPLIT_GENERATION:
-                self._publish_split_receipt_pair(first)
-            else:
-                GATE.write_receipt(first)
+            self._publish_receipt_pair(first)
             self.assertIsNotNone(GATE.reusable_receipt(first))
             changed = dict(first)
             changed["policy_digest"] = "other"
             changed["binding_digest"] = MANIFEST.canonical_digest(changed)
             self.assertIsNone(GATE.reusable_receipt(changed))
 
-    def test_python_import_environment_identity_matches_each_generation(self):
+    def test_stripped_pythonpath_does_not_change_a_full_pass_receipt(self):
         candidate = MANIFEST.CandidateManifest(
             "staged-index", "candidate", "closure", (), (), "index"
         )
@@ -1731,10 +1970,7 @@ class TestGateTests(unittest.TestCase):
                 "repository-tests/full",
                 environment={"PATH": "/bin", "PYTHONPATH": "/first"},
             )
-            if GATE_GENERATION == SPLIT_GENERATION:
-                self._publish_split_receipt_pair(first)
-            else:
-                GATE.write_receipt(first)
+            self._publish_receipt_pair(first)
             changed = GATE.receipt_binding(
                 candidate,
                 view,
@@ -1744,14 +1980,10 @@ class TestGateTests(unittest.TestCase):
                 environment={"PATH": "/bin", "PYTHONPATH": "/second"},
             )
 
-            if GATE_GENERATION == SPLIT_GENERATION:
-                self.assertEqual(first["binding_digest"], changed["binding_digest"])
-                self.assertIsNotNone(GATE.reusable_receipt(changed))
-            else:
-                self.assertNotEqual(first["binding_digest"], changed["binding_digest"])
-                self.assertIsNone(GATE.reusable_receipt(changed))
+            self.assertEqual(first["binding_digest"], changed["binding_digest"])
+            self.assertIsNotNone(GATE.reusable_receipt(changed))
 
-    def _assert_split_final_prewarm_reused_by_canonical_hook(self):
+    def test_final_prewarm_is_reused_by_actual_git_commit_hook(self):
         source_repo = GATE.REPO
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch) / "repo"
@@ -1869,113 +2101,6 @@ class TestGateTests(unittest.TestCase):
                 if component["component_id"] == "repository-tests/full"
             )
             self.assertEqual("reused", routine_full["evidence"], routine_report)
-
-    def test_final_prewarm_is_reused_by_actual_git_commit_hook(self):
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self._assert_split_final_prewarm_reused_by_canonical_hook()
-            return
-        source_repo = GATE.REPO
-        with tempfile.TemporaryDirectory() as scratch:
-            repo = Path(scratch) / "repo"
-            repo.mkdir()
-            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "config", "user.email", "test@example.invalid"],
-                cwd=repo,
-                check=True,
-            )
-            for relative in (
-                "automation/run_test_gate.py",
-                "automation/run_tests.py",
-                "automation/test_manifest.py",
-            ):
-                destination = repo / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_repo / relative, destination)
-            shutil.copy2(source_repo / "agentfold.toml", repo / "agentfold.toml")
-            (repo / ".gitignore").write_text("tmp/\n")
-            smoke = repo / "automation/tests/test_smoke.py"
-            smoke.parent.mkdir(parents=True)
-            smoke.write_text("import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n")
-            workflow = repo / ".github/workflows/harness.yml"
-            workflow.parent.mkdir(parents=True)
-            workflow.write_text("name: base\n")
-            subprocess.run(["git", "add", "."], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
-            workflow.write_text("name: critical-candidate\n")
-            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
-
-            noop = [sys.executable, "-c", "raise SystemExit(0)"]
-            admissions = (("core-scope", noop), ("reconcile", noop))
-            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
-                GATE, "admission_commands", return_value=admissions
-            ), mock.patch.object(GATE, "_write_summary"):
-                self.assertEqual(
-                    0,
-                    GATE.main(
-                        ("final", "--explicit", "--staged"),
-                        started=time.monotonic(),
-                    ),
-                )
-            if GATE_GENERATION == SPLIT_GENERATION:
-                markers = list(
-                    (repo / "tmp/test-gate-receipts").glob("*.commit.json")
-                )
-                self.assertEqual(1, len(markers))
-                self.assertEqual(
-                    GATE.PUBLICATION_COMMIT_SCHEMA,
-                    json.loads(markers[0].read_text())["schema"],
-                )
-
-            hook = repo / ".git/hooks/pre-commit"
-            hook.write_text(
-                "#!/usr/bin/env python3\n"
-                "import importlib.util,json,os,sys\n"
-                "from pathlib import Path\n"
-                f"path=Path({str(MODULE_PATH)!r})\n"
-                "spec=importlib.util.spec_from_file_location('hook_gate',str(path))\n"
-                "gate=importlib.util.module_from_spec(spec)\n"
-                "spec.loader.exec_module(gate)\n"
-                "gate.REPO=Path.cwd().resolve()\n"
-                "noop=[sys.executable,'-c','raise SystemExit(0)']\n"
-                "gate.admission_commands=lambda *args: (('core-scope',noop),('reconcile',noop))\n"
-                "original=gate.reusable_receipt\n"
-                "def probe(binding):\n"
-                " payload={'binding':binding,'git_environment':{name:os.environ.get(name) for name in ('GIT_EXEC_PATH','GIT_INDEX_FILE','GIT_PREFIX')},'safe_environment':gate.safe_process_environment()}\n"
-                " Path('hook-binding.json').write_text(json.dumps(payload,sort_keys=True))\n"
-                " return original(binding)\n"
-                "gate.reusable_receipt=probe\n"
-                "raise SystemExit(gate.main(('routine','--staged')))\n"
-            )
-            hook.chmod(0o755)
-
-            committed = subprocess.run(
-                ["git", "commit", "-m", "exercise real routine hook"],
-                cwd=repo,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-
-            self.assertEqual(0, committed.returncode, committed.stdout)
-            report = json.loads(
-                (repo / "tmp/test-gate-reports/latest-routine.json").read_text()
-            )
-            full = next(
-                component
-                for component in report["components"]
-                if component["component_id"] == "repository-tests/full"
-            )
-            diagnostic = {
-                "report": report,
-                "hook_probe": json.loads((repo / "hook-binding.json").read_text()),
-                "receipts": [
-                    json.loads(path.read_text())
-                    for path in (repo / "tmp/test-gate-receipts").glob("*.json")
-                ],
-            }
-            self.assertEqual("reused", full["evidence"], diagnostic)
 
     def test_provider_hard_boundary_disallows_local_receipts(self):
         provider = mock.Mock(provider_hard=True)
@@ -2220,65 +2345,95 @@ class TestGateTests(unittest.TestCase):
     def test_read_only_report_path_preserves_functional_exit_and_summary(self):
         report = GATE._base_report("routine", time.monotonic())
         report.update({"outcome": "pass", "evidence": "executed", "reason": "passed"})
-        if GATE_GENERATION == SPLIT_GENERATION:
-            summaries = []
-            with mock.patch.object(
-                GATE, "_atomic_json", side_effect=PermissionError(13, "read only")
-            ), mock.patch.object(
-                GATE, "_write_summary", side_effect=summaries.append
-            ):
-                exit_code = GATE.emit_report(report)
-            self.assertEqual(2, exit_code)
-            self.assertEqual("pass", report["outcome"])
-            self.assertEqual("passed", report["reason"])
-            self.assertTrue(report["terminalized_pass"])
-            self.assertEqual(0, report["gate_exit_code"])
-            self.assertEqual("error", report["publication_status"])
-            self.assertIn("read only", report["publication_reason"])
-            self.assertEqual("error", report["command_outcome"])
-            self.assertEqual({"disposition": "failed"}, report["report_write"])
-            self.assertIn("outcome: pass", summaries[0])
-            self.assertIn("publication: error", summaries[0])
-            self.assertIn("command: error (exit 2)", summaries[0])
-            return
-        with mock.patch.object(GATE, "_write_report", side_effect=PermissionError(13, "read only")):
+        summaries = []
+        with mock.patch.object(
+            GATE, "_atomic_json", side_effect=PermissionError(13, "read only")
+        ), mock.patch.object(GATE, "_write_summary", side_effect=summaries.append):
             exit_code = GATE.emit_report(report)
-        self.assertEqual(0, exit_code)
-        self.assertEqual({"disposition": "unavailable"}, report["report_write"])
+        self.assertEqual(2, exit_code)
+        self.assertEqual("pass", report["outcome"])
+        self.assertEqual("passed", report["reason"])
+        self.assertTrue(report["terminalized_pass"])
+        self.assertEqual(0, report["gate_exit_code"])
+        self.assertEqual("error", report["publication_status"])
+        self.assertIn("read only", report["publication_reason"])
+        self.assertEqual("error", report["command_outcome"])
+        self.assertEqual({"disposition": "failed"}, report["report_write"])
+        self.assertIn("outcome: pass", summaries[0])
+        self.assertIn("publication: error", summaries[0])
+        self.assertIn("command: error (exit 2)", summaries[0])
 
     def test_unsafe_report_path_still_fails_closed(self):
         report = GATE._base_report("routine", time.monotonic())
         report.update({"outcome": "pass", "evidence": "executed", "reason": "passed"})
-        if GATE_GENERATION == SPLIT_GENERATION:
-            summaries = []
-            with mock.patch.object(
-                GATE,
-                "_safe_local_directory",
-                side_effect=GATE.GateError("unsafe report path"),
-            ), mock.patch.object(
-                GATE, "_write_summary", side_effect=summaries.append
-            ):
-                exit_code = GATE.emit_report(report)
-            self.assertEqual(2, exit_code)
-            self.assertEqual("pass", report["outcome"])
-            self.assertEqual("passed", report["reason"])
-            self.assertTrue(report["terminalized_pass"])
-            self.assertEqual(0, report["gate_exit_code"])
-            self.assertEqual("error", report["publication_status"])
-            self.assertEqual("unsafe report path", report["publication_reason"])
-            self.assertEqual("error", report["command_outcome"])
-            self.assertEqual({"disposition": "refused"}, report["report_write"])
-            self.assertIn("outcome: pass", summaries[0])
-            self.assertIn("publication: error", summaries[0])
-            self.assertIn("command: error (exit 2)", summaries[0])
-            return
-        with mock.patch.object(GATE, "_write_report", side_effect=GATE.GateError("unsafe report path")):
+        summaries = []
+        with mock.patch.object(
+            GATE, "_safe_local_directory", side_effect=GATE.GateError("unsafe report path")
+        ), mock.patch.object(GATE, "_write_summary", side_effect=summaries.append):
             exit_code = GATE.emit_report(report)
         self.assertEqual(2, exit_code)
-        self.assertEqual("error", report["outcome"])
+        self.assertEqual("pass", report["outcome"])
+        self.assertEqual("passed", report["reason"])
+        self.assertTrue(report["terminalized_pass"])
+        self.assertEqual(0, report["gate_exit_code"])
+        self.assertEqual("error", report["publication_status"])
+        self.assertEqual("unsafe report path", report["publication_reason"])
+        self.assertEqual("error", report["command_outcome"])
         self.assertEqual({"disposition": "refused"}, report["report_write"])
+        self.assertIn("outcome: pass", summaries[0])
+        self.assertIn("publication: error", summaries[0])
+        self.assertIn("command: error (exit 2)", summaries[0])
 
-    def test_stdout_timing_uses_the_generation_accounting_boundary(self):
+    def test_report_failure_preserves_a_blocked_gate_decision(self):
+        report = GATE._base_report("final", 0.0)
+        report.update(
+            {
+                "outcome": "blocked-incomplete",
+                "evidence": "none",
+                "reason": "required coverage incomplete",
+                "incomplete": ["repository-tests/full"],
+            }
+        )
+        persisted = []
+        summaries = []
+
+        def fail_then_project(_path, value):
+            if not persisted:
+                persisted.append(json.loads(json.dumps(value)))
+                raise OSError("injected report failure")
+            persisted.append(json.loads(json.dumps(value)))
+
+        with mock.patch.object(
+            GATE.time, "monotonic", return_value=0.25
+        ), mock.patch.object(
+            GATE, "_atomic_json", side_effect=fail_then_project
+        ), mock.patch.object(
+            GATE, "_write_summary", side_effect=summaries.append
+        ):
+            exit_code = GATE.emit_report(report, maximum=1.0)
+
+        self.assertEqual(2, exit_code)
+        self.assertEqual(2, len(persisted))
+        frozen, error_projection = persisted
+        for field in (
+            "outcome",
+            "reason",
+            "duration_seconds",
+            "maximum_seconds",
+            "maximum_exceeded",
+            "terminalized_pass",
+            "gate_exit_code",
+        ):
+            self.assertEqual(frozen[field], error_projection[field])
+        self.assertEqual("blocked-incomplete", error_projection["outcome"])
+        self.assertEqual(1, error_projection["gate_exit_code"])
+        self.assertEqual("error", error_projection["publication_status"])
+        self.assertEqual("error", error_projection["command_outcome"])
+        self.assertEqual(2, error_projection["exit_code"])
+        self.assertIn("outcome: blocked-incomplete", summaries[0])
+        self.assertIn("command: error (exit 2)", summaries[0])
+
+    def test_stdout_is_outside_the_frozen_measured_interval(self):
         clock = [0.0]
         summaries = []
         report = GATE._base_report("final", 0.0)
@@ -2297,16 +2452,9 @@ class TestGateTests(unittest.TestCase):
             summaries.append(summary)
             clock[0] += 1.1
 
-        report_writer = (
-            mock.patch.object(GATE, "_atomic_json")
-            if GATE_GENERATION == SPLIT_GENERATION
-            else mock.patch.object(
-                GATE, "_write_report", side_effect=PermissionError(13, "read only")
-            )
-        )
         with mock.patch.object(
             GATE.time, "monotonic", side_effect=lambda: clock[0]
-        ), report_writer, mock.patch.object(
+        ), mock.patch.object(GATE, "_atomic_json"), mock.patch.object(
             GATE, "_write_summary", side_effect=output
         ), mock.patch.object(
             GATE,
@@ -2321,19 +2469,13 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            self.assertEqual(0, exit_code)
-            self.assertEqual("pass", report["outcome"])
-            self.assertFalse(report["maximum_exceeded"])
-            self.assertNotIn("budget_filing", report)
-            self.assertEqual(1, len(summaries))
-        else:
-            self.assertEqual(1, exit_code)
-            self.assertEqual("blocked-incomplete", report["outcome"])
-            self.assertIn("budget_filing", report)
-            self.assertEqual(2, len(summaries))
+        self.assertEqual(0, exit_code)
+        self.assertEqual("pass", report["outcome"])
+        self.assertFalse(report["maximum_exceeded"])
+        self.assertNotIn("budget_filing", report)
+        self.assertEqual(1, len(summaries))
 
-    def test_publication_timing_uses_the_generation_accounting_boundary(self):
+    def test_projection_is_single_and_outside_terminal_accounting(self):
         clock = [0.0]
         persisted = []
         report = GATE._base_report("final", 0.0)
@@ -2348,13 +2490,9 @@ class TestGateTests(unittest.TestCase):
         )
         options = mock.Mock(at_transition=None, explicit=True)
 
-        def initial_write(_report):
-            clock[0] += 0.1
-            return GATE.REPO / "tmp/test-gate-reports/latest-final.json"
-
         def persist(_path, value):
             persisted.append(json.loads(json.dumps(value)))
-            clock[0] += 0.1
+            clock[0] += 0.8
 
         def output(_summary):
             clock[0] += 0.9
@@ -2363,21 +2501,10 @@ class TestGateTests(unittest.TestCase):
             clock[0] += 0.1
             return {"disposition": "filed", "mutated": True}
 
-        if GATE_GENERATION == SPLIT_GENERATION:
-            clock[0] = 0.4
-        report_writer = (
-            mock.patch.object(GATE, "_atomic_json", side_effect=persist)
-            if GATE_GENERATION == SPLIT_GENERATION
-            else mock.patch.object(GATE, "_write_report", side_effect=initial_write)
-        )
-        atomic_writer = (
-            contextlib.nullcontext()
-            if GATE_GENERATION == SPLIT_GENERATION
-            else mock.patch.object(GATE, "_atomic_json", side_effect=persist)
-        )
-        with mock.patch.object(
-            GATE.time, "monotonic", side_effect=lambda: clock[0]
-        ), report_writer, atomic_writer, mock.patch.object(
+        clock[0] = 0.4
+        with mock.patch.object(GATE.time, "monotonic", side_effect=lambda: clock[0]), mock.patch.object(
+            GATE, "_atomic_json", side_effect=persist
+        ), mock.patch.object(
             GATE, "_write_summary", side_effect=output
         ), mock.patch.object(GATE, "file_target_breach", side_effect=file_breach):
             exit_code = GATE.emit_report(
@@ -2388,19 +2515,1228 @@ class TestGateTests(unittest.TestCase):
                 options=options,
             )
 
-        if GATE_GENERATION == SPLIT_GENERATION:
+        self.assertEqual(0, exit_code)
+        self.assertEqual("pass", report["outcome"])
+        self.assertFalse(report["maximum_exceeded"])
+        self.assertNotIn("budget_filing", report)
+        self.assertEqual(1, len(persisted))
+        self.assertTrue(persisted[0]["terminalized_pass"])
+
+    def test_reserved_boundary_raw_guard_runs_before_imports_git_and_state(self):
+        facade = AUTOMATION / "run_test_gate.py"
+        python = sys.executable
+        variants = (
+            ("final", "--provider-hard"),
+            ("final", "--provider-hard=malformed"),
+            ("final", "--provider-h"),
+            ("final", "--provider-hard-extra"),
+            ("final", "--provider-hard", "--provider-hard"),
+            ("final", "--at-transition"),
+            ("final", "--at-transition=pull-request"),
+            ("final", "--at-trans"),
+            ("final", "--at-transition-extra"),
+            ("final", "--at-transition", "pull-request", "--at-transition=again"),
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            poison = root / "poison"
+            poison.mkdir()
+            marker = root / "imported"
+            payload = "from pathlib import Path\nPath({!r}).write_text(__name__)\n".format(
+                str(marker)
+            )
+            for name in (
+                "sitecustomize.py",
+                "run_tests.py",
+                "test_manifest.py",
+                "test_gate_config.py",
+                "file_test_budget_task.py",
+            ):
+                (poison / name).write_text(payload)
+            git_marker = root / "git-ran"
+            git = poison / "git"
+            git.write_text("#!/bin/sh\nprintf ran > \"{}\"\nexit 99\n".format(git_marker))
+            git.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(poison)
+            environment["PATH"] = str(poison) + os.pathsep + environment.get("PATH", "")
+            for arguments in variants:
+                result = subprocess.run(
+                    [python, "-I", "-S", str(facade), *arguments],
+                    cwd=GATE.REPO,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertEqual(1, result.returncode, (arguments, result.stderr))
+                self.assertIn('"outcome":"blocked-incomplete"', result.stdout)
+                self.assertFalse(marker.exists(), arguments)
+                self.assertFalse(git_marker.exists(), arguments)
+
+    def test_loaded_module_path_audit_rejects_outside_dependency(self):
+        original = GATE.run_tests.__file__
+        try:
+            GATE.run_tests.__file__ = "/tmp/attacker/run_tests.py"
+            with self.assertRaisesRegex(GATE.GateError, "outside the execution snapshot"):
+                GATE.loaded_module_paths()
+        finally:
+            GATE.run_tests.__file__ = original
+
+    def test_facade_executes_staged_controller_not_unstaged_drift(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            controller = repo / "automation/test_gate_controller.py"
+            controller.write_text("raise SystemExit(77)\n" + controller.read_text())
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(repo / "automation/run_test_gate.py"),
+                    "routine",
+                    "--staged",
+                    "--unexpected",
+                ],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("unrecognized arguments: --unexpected", result.stderr)
+
+    def test_gate_interval_start_requires_valid_handoff_monotonic_time(self):
+        with mock.patch.object(GATE, "_HANDOFF", None), mock.patch.object(
+            GATE, "PROCESS_STARTED", 123.5
+        ):
+            self.assertEqual(123.5, GATE.gate_interval_started())
+
+        source, now = GATE._bootstrap_monotonic_start()
+        with mock.patch.object(
+            GATE,
+            "_HANDOFF",
+            {
+                "started_monotonic": now - 2.0,
+                "started_monotonic_source": source,
+            },
+        ):
+            translated = GATE.gate_interval_started()
+            self.assertGreaterEqual(time.monotonic() - translated, 2.0)
+            self.assertLess(time.monotonic() - translated, 2.1)
+
+        invalid = (-1, True, "earlier", float("nan"), float("inf"), now + 60.0)
+        for value in invalid:
+            with self.subTest(value=value), mock.patch.object(
+                GATE,
+                "_HANDOFF",
+                {
+                    "started_monotonic": value,
+                    "started_monotonic_source": source,
+                },
+            ), mock.patch.object(GATE, "emit_report", return_value=2) as emit, mock.patch.object(
+                GATE, "capture_candidate"
+            ) as capture:
+                self.assertEqual(2, GATE.main(("routine", "--staged")))
+                report = emit.call_args[0][0]
+                self.assertEqual("error", report["outcome"])
+                self.assertIn("monotonic start is invalid", report["reason"])
+                capture.assert_not_called()
+
+    def test_cross_process_clock_fallback_survives_different_monotonic_epochs(self):
+        times = (mock.Mock(elapsed=500.0), mock.Mock(elapsed=502.0))
+        with mock.patch.object(GATE.time, "clock_gettime", None), mock.patch.object(
+            GATE.os, "times", side_effect=times
+        ), mock.patch.object(GATE.time, "monotonic", return_value=-300.0):
+            source, started = GATE._bootstrap_monotonic_start()
+            self.assertEqual(GATE._BOOTSTRAP_OS_TIMES_SOURCE, source)
+            with mock.patch.object(
+                GATE,
+                "_HANDOFF",
+                {
+                    "started_monotonic": started,
+                    "started_monotonic_source": source,
+                },
+            ):
+                self.assertEqual(-302.0, GATE.gate_interval_started())
+
+    def test_cross_process_clock_mismatch_and_unavailability_block(self):
+        with mock.patch.object(
+            GATE,
+            "_HANDOFF",
+            {
+                "started_monotonic": 10.0,
+                "started_monotonic_source": GATE._HANDOFF_OS_TIMES_SOURCE,
+            },
+        ), mock.patch.object(
+            GATE,
+            "_controller_monotonic_sample",
+            return_value=(GATE._HANDOFF_CLOCK_GETTIME_SOURCE, 11.0),
+        ), mock.patch.object(GATE, "emit_report", return_value=2) as emit:
+            self.assertEqual(2, GATE.main(("routine", "--staged")))
+            self.assertIn("source mismatch", emit.call_args[0][0]["reason"])
+
+        with mock.patch.object(GATE.time, "clock_gettime", None), mock.patch.object(
+            GATE.os, "times", side_effect=OSError("unavailable")
+        ), mock.patch.object(GATE, "_freeze") as freeze:
+            with self.assertRaisesRegex(RuntimeError, "cross-process monotonic"):
+                GATE._dispatch(("routine", "--staged"))
+            freeze.assert_not_called()
+
+        with mock.patch.object(
+            GATE,
+            "_HANDOFF",
+            {
+                "started_monotonic": 10.0,
+                "started_monotonic_source": GATE._HANDOFF_OS_TIMES_SOURCE,
+            },
+        ), mock.patch.object(GATE.time, "clock_gettime", None), mock.patch.object(
+            GATE.os, "times", side_effect=OSError("unavailable")
+        ), mock.patch.object(GATE, "emit_report", return_value=2) as emit:
+            self.assertEqual(2, GATE.main(("routine", "--staged")))
+            self.assertIn("no supported cross-process", emit.call_args[0][0]["reason"])
+
+    def test_bootstrap_elapsed_counts_toward_maximum_before_components(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            repo = root / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            smoke = repo / "automation/tests/test_smoke.py"
+            smoke.parent.mkdir(parents=True)
+            smoke.write_text("import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n")
+            workflow = repo / ".github/workflows/harness.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: base\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "test floor"], cwd=repo, check=True)
+            workflow.write_text("name: candidate\n")
+            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
+            capture = root / "capture"
+            capture.mkdir()
+            bootstrap_source, bootstrap_now = GATE._bootstrap_monotonic_start()
+            bootstrap_started = bootstrap_now - 901.0
+            handoff = GATE._freeze(
+                repo,
+                ("final", "--explicit", "--staged"),
+                capture,
+                bootstrap_started,
+                bootstrap_source,
+            )
+            snapshot = Path(handoff["execution_root"])
+            handoff_path = capture / "handoff.json"
+            handoff_path.write_text(json.dumps(handoff))
+            handoff_path.chmod(0o400)
+            environment = os.environ.copy()
+            environment["AGENTFOLD_GATE_HANDOFF"] = str(handoff_path)
+            environment["AGENTFOLD_GATE_SOURCE_REPO"] = str(repo)
+            environment["AGENTFOLD_GATE_EXECUTION_ROOT"] = str(snapshot)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(snapshot / "automation/test_gate_controller.py"),
+                    "final",
+                    "--explicit",
+                    "--staged",
+                ],
+                cwd=snapshot,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertGreaterEqual(report["duration_seconds"], 901.0)
+            self.assertTrue(report["maximum_exceeded"])
+            self.assertEqual("blocked-incomplete", report["outcome"])
+            self.assertEqual("core-scope", report["components"][0]["component_id"])
+            self.assertEqual("none", report["components"][0]["evidence"])
+            self.assertFalse(
+                (repo / "tmp/test-gate-receipts").exists()
+                and any((repo / "tmp/test-gate-receipts").iterdir())
+            )
+
+    def test_snapshot_closure_mutation_blocks_before_component_execution(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            repo = root / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            capture = root / "capture"
+            capture.mkdir()
+            source, started = GATE._bootstrap_monotonic_start()
+            handoff = GATE._freeze(
+                repo, ("routine", "--staged"), capture, started, source
+            )
+            snapshot = Path(handoff["execution_root"])
+            frozen_index = Path(handoff["frozen_index"])
+            self.assertEqual(
+                handoff["frozen_index_sha256"], MANIFEST.file_digest(frozen_index)
+            )
+            self.assertEqual(0o400, frozen_index.stat().st_mode & 0o777)
+            GATE._unseal_snapshot(snapshot)
+            runner = snapshot / "automation/run_tests.py"
+            runner.write_text(runner.read_text() + "\n# closure mutation\n")
+            handoff_path = capture / "handoff.json"
+            handoff_path.write_text(json.dumps(handoff))
+            environment = os.environ.copy()
+            environment["AGENTFOLD_GATE_HANDOFF"] = str(handoff_path)
+            environment["AGENTFOLD_GATE_SOURCE_REPO"] = str(repo)
+            environment["AGENTFOLD_GATE_EXECUTION_ROOT"] = str(snapshot)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(snapshot / "automation/test_gate_controller.py"),
+                    "routine",
+                    "--staged",
+                ],
+                cwd=snapshot,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("controller closure changed after candidate capture", result.stdout)
+            self.assertIn("component timings:\n  (none)", result.stdout)
+
+    def test_source_index_drift_after_capture_blocks_before_components(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            repo = root / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            capture = root / "capture"
+            capture.mkdir()
+            source, started = GATE._bootstrap_monotonic_start()
+            handoff = GATE._freeze(
+                repo, ("routine", "--staged"), capture, started, source
+            )
+            snapshot = Path(handoff["execution_root"])
+            handoff_path = capture / "handoff.json"
+            handoff_path.write_text(json.dumps(handoff))
+            (repo / "agentfold.toml").write_text(
+                (repo / "agentfold.toml").read_text() + "\n# semantic source drift\n"
+            )
+            subprocess.run(["git", "add", "agentfold.toml"], cwd=repo, check=True)
+            environment = os.environ.copy()
+            environment["AGENTFOLD_GATE_HANDOFF"] = str(handoff_path)
+            environment["AGENTFOLD_GATE_SOURCE_REPO"] = str(repo)
+            environment["AGENTFOLD_GATE_EXECUTION_ROOT"] = str(snapshot)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    str(snapshot / "automation/test_gate_controller.py"),
+                    "routine",
+                    "--staged",
+                ],
+                cwd=snapshot,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("drifted before execution", result.stdout)
+            self.assertIn("component timings:\n  (none)", result.stdout)
+
+    def test_component_index_mutation_blocks_later_components_and_receipt(self):
+        source_repo = GATE.REPO
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            self._make_gate_bootstrap_repository(repo)
+            smoke = repo / "automation/tests/test_smoke.py"
+            smoke.parent.mkdir(parents=True)
+            smoke.write_text("import unittest\n\nclass Smoke(unittest.TestCase):\n    pass\n")
+            workflow = repo / ".github/workflows/harness.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: base\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "test floor"], cwd=repo, check=True)
+            workflow.write_text("name: candidate\n")
+            subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
+            live_index = MANIFEST.selected_index_path(repo)
+            live_before = MANIFEST.file_digest(live_index)
+            later_marker = Path(scratch) / "later-component-ran"
+            mutate_copy = [
+                sys.executable,
+                "-c",
+                "import subprocess; subprocess.run(['git','read-tree','HEAD'],check=True)",
+            ]
+            later = [
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path({!r}).write_text('ran')".format(
+                    str(later_marker)
+                ),
+            ]
+            admissions = (("core-scope", mutate_copy), ("reconcile", later))
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE, "admission_commands", return_value=admissions
+            ), mock.patch.object(GATE, "_write_summary"):
+                exit_code = GATE.main(
+                    ("final", "--explicit", "--staged"),
+                    started=time.monotonic(),
+                )
+            report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual(1, exit_code, report)
+            self.assertEqual("blocked-incomplete", report["outcome"])
+            self.assertEqual(1, len(report["components"]))
+            self.assertIn(
+                "disposable component index changed",
+                report["components"][0]["detail"],
+            )
+            self.assertFalse(later_marker.exists())
+            self.assertEqual(live_before, MANIFEST.file_digest(live_index))
+            receipts = repo / "tmp/test-gate-receipts"
+            self.assertFalse(receipts.exists() and any(receipts.iterdir()))
+        self.assertEqual(source_repo, GATE.REPO)
+
+    def test_frozen_index_read_only_mode_chmod_and_replacement_are_detected(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / "tracked.txt").write_text("tracked\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            frozen = Path(scratch) / "candidate.index"
+            MANIFEST.copy_staged_index(repo, frozen)
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            with mock.patch.object(GATE, "REPO", repo):
+                identity = GATE.seal_authoritative_frozen_index(frozen, base)
+                self.assertEqual(0o400, frozen.stat().st_mode & 0o777)
+                self.assertTrue(GATE.frozen_index_matches(frozen, base, identity))
+                frozen.chmod(0o600)
+                self.assertFalse(GATE.frozen_index_matches(frozen, base, identity))
+                frozen.chmod(0o400)
+                self.assertTrue(GATE.frozen_index_matches(frozen, base, identity))
+                replacement = Path(scratch) / "replacement.index"
+                replacement.write_bytes(frozen.read_bytes())
+                replacement.chmod(0o400)
+                os.replace(str(replacement), str(frozen))
+                self.assertFalse(GATE.frozen_index_matches(frozen, base, identity))
+
+    def test_environment_identity_strips_pythonpath_and_snapshot_paths(self):
+        first = {
+            "PATH": "/bin",
+            "PYTHONPATH": "/one",
+            "GIT_DIR": "/source/.git",
+            "GIT_INDEX_FILE": "/private/random-one/index",
+            "GIT_WORK_TREE": "/private/random-one/snapshot",
+        }
+        moved = dict(first)
+        moved["GIT_INDEX_FILE"] = "/private/random-two/index"
+        moved["GIT_WORK_TREE"] = "/private/random-two/snapshot"
+        changed = dict(moved)
+        changed["PYTHONPATH"] = "/two"
+        self.assertEqual(
+            GATE.environment_identity(first)["component_environment_digest"],
+            GATE.environment_identity(moved)["component_environment_digest"],
+        )
+        self.assertEqual(
+            GATE.environment_identity(first)["component_environment_digest"],
+            GATE.environment_identity(changed)["component_environment_digest"],
+        )
+        identity = GATE.environment_identity(first)["interpreter_identity"]
+        self.assertIn("controller", identity)
+        self.assertIn("child", identity)
+        self.assertEqual(1, identity["child"]["isolated"])
+        self.assertEqual(1, identity["child"]["no_site"])
+        self.assertEqual(1, identity["child"]["ignore_environment"])
+        self.assertEqual(
+            identity, GATE.controller_closure()["interpreter_identity"]
+        )
+
+    def test_exact_maximum_terminalizes_before_projection(self):
+        report = GATE._base_report("final", 0.0)
+        report.update(
+            {
+                "outcome": "pass",
+                "evidence": "executed",
+                "reason": "passed",
+                "critical": {"is_critical": True},
+            }
+        )
+        with mock.patch.object(GATE.time, "monotonic", return_value=1.0), mock.patch.object(
+            GATE, "_atomic_json"
+        ), mock.patch.object(GATE, "_write_summary"):
+            exit_code = GATE.emit_report(report, maximum=1.0)
+        self.assertEqual(1, exit_code)
+        self.assertTrue(report["maximum_exceeded"])
+        self.assertEqual("blocked-incomplete", report["outcome"])
+        self.assertFalse(report["terminalized_pass"])
+
+    def test_target_filing_accounts_once_then_freezes_without_correction(self):
+        clock = iter((0.6, 0.8))
+        report = GATE._base_report("routine", 0.0)
+        report.update(
+            {
+                "outcome": "pass",
+                "evidence": "executed",
+                "reason": "passed",
+                "candidate": {"digest": "candidate"},
+            }
+        )
+        options = mock.Mock(at_transition=None, explicit=False)
+        with mock.patch.object(GATE.time, "monotonic", side_effect=lambda: next(clock)), mock.patch.object(
+            GATE, "file_target_breach", return_value={"disposition": "filed", "mutated": True}
+        ) as filing, mock.patch.object(GATE, "_atomic_json") as persist, mock.patch.object(
+            GATE, "_write_summary"
+        ) as summary:
+            exit_code = GATE.emit_report(
+                report,
+                target=0.5,
+                maximum=1.0,
+                policy_digest="policy",
+                options=options,
+            )
+        self.assertEqual(0, exit_code)
+        self.assertEqual(0.8, report["duration_seconds"])
+        self.assertTrue(report["target_exceeded"])
+        self.assertFalse(report["maximum_exceeded"])
+        filing.assert_called_once()
+        persist.assert_called_once()
+        summary.assert_called_once()
+
+    def test_receipt_projects_only_after_terminal_full_composite_pass(self):
+        closure = GATE.controller_closure()
+        binding = {
+            "binding_digest": "a" * 64,
+            "candidate_digest": "candidate",
+            "candidate_closure_digest": "closure",
+            "controller_closure": closure,
+            "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+        }
+        report = GATE._base_report("final", 0.0)
+        report.update(
+            {
+                "outcome": "pass",
+                "evidence": "executed",
+                "reason": "passed",
+                "candidate": {"digest": "candidate", "closure_digest": "closure"},
+            }
+        )
+        persisted = []
+        with mock.patch.object(GATE.time, "monotonic", return_value=0.1), mock.patch.object(
+            GATE, "_atomic_json", side_effect=lambda path, value: persisted.append((path, value))
+        ), mock.patch.object(GATE, "_write_summary"):
+            exit_code = GATE.emit_report(
+                report,
+                receipt_binding_value=binding,
+                receipt_stable=lambda: True,
+            )
+        self.assertEqual(0, exit_code)
+        self.assertEqual(3, len(persisted))
+        self.assertEqual(GATE.RECEIPT_SCHEMA, persisted[0][1]["schema"])
+        self.assertEqual(GATE.REPORT_SCHEMA, persisted[1][1]["schema"])
+        self.assertEqual(GATE.PUBLICATION_COMMIT_SCHEMA, persisted[2][1]["schema"])
+        self.assertTrue(persisted[0][1]["terminalized_pass"])
+        self.assertEqual("success", persisted[0][1]["publication"]["status"])
+        self.assertEqual("pass", persisted[0][1]["command_outcome"])
+        self.assertEqual("success", persisted[1][1]["publication_status"])
+        self.assertEqual("pass", persisted[1][1]["command_outcome"])
+        self.assertEqual(
+            persisted[1][1]["publication_id"],
+            persisted[0][1]["publication"]["id"],
+        )
+        self.assertEqual(
+            MANIFEST.canonical_digest(persisted[1][1]),
+            persisted[0][1]["publication"]["report_digest"],
+        )
+        self.assertEqual(
+            MANIFEST.canonical_digest(persisted[0][1]),
+            persisted[2][1]["receipt"]["digest"],
+        )
+        self.assertEqual(
+            MANIFEST.canonical_digest(persisted[1][1]),
+            persisted[2][1]["report"]["digest"],
+        )
+
+    def test_broken_stdout_never_commits_receipt_even_if_cleanup_and_rewrite_fail(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "1" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original = GATE._atomic_json
+            report_writes = [0]
+
+            def reject_error_rewrite(path, value):
+                if "test-gate-reports" in str(path):
+                    report_writes[0] += 1
+                    if report_writes[0] > 1:
+                        raise OSError("injected rewrite failure")
+                original(path, value)
+
+            stderr = io.StringIO()
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE, "_atomic_json", side_effect=reject_error_rewrite
+            ), mock.patch.object(
+                GATE, "_write_summary", side_effect=BrokenPipeError("closed")
+            ), mock.patch.object(
+                GATE, "_remove_projection", return_value=False
+            ), mock.patch.object(GATE.sys, "stderr", stderr):
+                exit_code = GATE.emit_report(
+                    report,
+                    maximum=1.0,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            receipt_path, marker_path = (
+                repo / "tmp/test-gate-receipts" / ("1" * 64 + ".json"),
+                repo / "tmp/test-gate-receipts" / ("1" * 64 + ".commit.json"),
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("passed", report["reason"])
+            self.assertEqual(0.25, report["duration_seconds"])
+            self.assertFalse(report["maximum_exceeded"])
+            self.assertTrue(report["terminalized_pass"])
+            self.assertEqual(0, report["gate_exit_code"])
+            self.assertEqual("error", report["publication_status"])
+            self.assertEqual("error", report["command_outcome"])
+            self.assertEqual(2, report["exit_code"])
+            self.assertTrue(receipt_path.is_file())
+            self.assertFalse(marker_path.exists())
+            self.assertIn("stdout summary publication failed", stderr.getvalue())
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_marker_write_failure_invalidates_receipt_and_reports_command_error(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "2" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original = GATE._atomic_json
+
+            def fail_marker(path, value):
+                if str(path).endswith(".commit.json"):
+                    raise OSError("injected marker failure")
+                original(path, value)
+
+            stderr = io.StringIO()
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE, "_atomic_json", side_effect=fail_marker
+            ), mock.patch.object(GATE, "_write_summary"), mock.patch.object(
+                GATE.sys, "stderr", stderr
+            ):
+                exit_code = GATE.emit_report(
+                    report,
+                    maximum=1.0,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            receipt_path, marker_path = (
+                repo / "tmp/test-gate-receipts" / ("2" * 64 + ".json"),
+                repo / "tmp/test-gate-receipts" / ("2" * 64 + ".commit.json"),
+            )
+            persisted = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", persisted["outcome"])
+            self.assertEqual("passed", persisted["reason"])
+            self.assertEqual(0.25, persisted["duration_seconds"])
+            self.assertFalse(persisted["maximum_exceeded"])
+            self.assertTrue(persisted["terminalized_pass"])
+            self.assertEqual(0, persisted["gate_exit_code"])
+            self.assertEqual("error", persisted["publication_status"])
+            self.assertIn("commit marker failed", persisted["publication_reason"])
+            self.assertEqual("error", persisted["command_outcome"])
+            self.assertEqual(2, persisted["exit_code"])
+            self.assertFalse(receipt_path.exists())
+            self.assertFalse(marker_path.exists())
+            self.assertIn("publication commit marker failed", stderr.getvalue())
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_marker_directory_fsync_failure_after_rename_keeps_committed_pass(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "5" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original_fsync = GATE.os.fsync
+            calls = [0]
+
+            def fail_marker_directory_sync(descriptor):
+                calls[0] += 1
+                if calls[0] == 6:
+                    raise OSError("injected post-rename directory fsync failure")
+                return original_fsync(descriptor)
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE.os, "fsync", side_effect=fail_marker_directory_sync
+            ), mock.patch.object(GATE, "_write_summary"):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            self.assertEqual(6, calls[0])
             self.assertEqual(0, exit_code)
             self.assertEqual("pass", report["outcome"])
-            self.assertFalse(report["maximum_exceeded"])
-            self.assertNotIn("budget_filing", report)
-            self.assertEqual(1, len(persisted))
-            self.assertTrue(persisted[0]["terminalized_pass"])
-        else:
-            self.assertEqual(1, exit_code)
-            self.assertEqual("blocked-incomplete", report["outcome"])
-            self.assertTrue(report["maximum_exceeded"])
-            self.assertEqual("filed", report["budget_filing"]["disposition"])
-            self.assertTrue(any(item.get("maximum_exceeded") for item in persisted))
+            self.assertEqual("success", report["publication_status"])
+            self.assertEqual("pass", report["command_outcome"])
+            self.assertEqual(0, report["exit_code"])
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNotNone(GATE.reusable_receipt(binding))
+
+    def test_marker_file_fsync_failure_before_rename_fails_publication(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "6" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original_fsync = GATE.os.fsync
+            calls = [0]
+
+            def fail_marker_file_sync(descriptor):
+                calls[0] += 1
+                if calls[0] == 5:
+                    raise OSError("injected pre-rename file fsync failure")
+                return original_fsync(descriptor)
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE.os, "fsync", side_effect=fail_marker_file_sync
+            ), mock.patch.object(GATE, "_write_summary"), mock.patch.object(
+                GATE, "_write_publication_error"
+            ):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            receipt_path = (
+                repo / "tmp/test-gate-receipts" / ("6" * 64 + ".json")
+            )
+            marker_path = (
+                repo / "tmp/test-gate-receipts" / ("6" * 64 + ".commit.json")
+            )
+            self.assertGreaterEqual(calls[0], 7)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("error", report["publication_status"])
+            self.assertEqual("error", report["command_outcome"])
+            self.assertEqual(2, report["exit_code"])
+            self.assertFalse(receipt_path.exists())
+            self.assertFalse(marker_path.exists())
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_marker_directory_close_failure_after_rename_keeps_committed_pass(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "7" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original_close = GATE.os.close
+            original_atomic = GATE._atomic_json
+            close_calls = [0]
+            atomic_calls = [0]
+            (repo / "tmp/test-gate-reports").mkdir(parents=True)
+            (repo / "tmp/test-gate-receipts").mkdir(parents=True)
+
+            def fail_marker_directory_close(descriptor):
+                close_calls[0] += 1
+                result = original_close(descriptor)
+                if close_calls[0] == 6:
+                    raise OSError("injected post-rename directory close failure")
+                return result
+
+            def reject_any_error_rewrite(path, value):
+                atomic_calls[0] += 1
+                if atomic_calls[0] > 3:
+                    raise OSError("injected report rewrite failure")
+                return original_atomic(path, value)
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE,
+                "_safe_local_directory",
+                side_effect=lambda relative: repo / relative,
+            ), mock.patch.object(
+                GATE, "controller_closure", return_value=binding["controller_closure"]
+            ), mock.patch.object(
+                GATE.os, "close", side_effect=fail_marker_directory_close
+            ), mock.patch.object(
+                GATE, "_atomic_json", side_effect=reject_any_error_rewrite
+            ), mock.patch.object(GATE, "_write_summary"), mock.patch.object(
+                GATE, "_remove_projection", return_value=False
+            ) as cleanup:
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            self.assertEqual(6, close_calls[0])
+            self.assertEqual(3, atomic_calls[0])
+            cleanup.assert_not_called()
+            self.assertEqual(0, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("success", report["publication_status"])
+            self.assertEqual("pass", report["command_outcome"])
+            self.assertEqual(0, report["exit_code"])
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNotNone(GATE.reusable_receipt(binding))
+
+    def test_marker_file_close_failure_before_rename_fails_publication(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "8" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", 0.0)
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original_close = GATE.os.close
+            close_calls = [0]
+            (repo / "tmp/test-gate-reports").mkdir(parents=True)
+            (repo / "tmp/test-gate-receipts").mkdir(parents=True)
+
+            def fail_marker_file_close(descriptor):
+                close_calls[0] += 1
+                result = original_close(descriptor)
+                if close_calls[0] == 5:
+                    raise OSError("injected pre-rename file close failure")
+                return result
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE.time, "monotonic", return_value=0.25
+            ), mock.patch.object(
+                GATE,
+                "_safe_local_directory",
+                side_effect=lambda relative: repo / relative,
+            ), mock.patch.object(
+                GATE, "controller_closure", return_value=binding["controller_closure"]
+            ), mock.patch.object(
+                GATE.os, "close", side_effect=fail_marker_file_close
+            ), mock.patch.object(GATE, "_write_summary"), mock.patch.object(
+                GATE, "_write_publication_error"
+            ):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+
+            receipt_path = (
+                repo / "tmp/test-gate-receipts" / ("8" * 64 + ".json")
+            )
+            marker_path = (
+                repo / "tmp/test-gate-receipts" / ("8" * 64 + ".commit.json")
+            )
+            self.assertGreaterEqual(close_calls[0], 8)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("pass", report["outcome"])
+            self.assertEqual("error", report["publication_status"])
+            self.assertEqual("error", report["command_outcome"])
+            self.assertEqual(2, report["exit_code"])
+            self.assertFalse(receipt_path.exists())
+            self.assertFalse(marker_path.exists())
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_receipt_requires_matching_publication_commit_marker(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            with mock.patch.object(GATE, "REPO", repo):
+                binding = GATE.receipt_binding(
+                    candidate,
+                    view,
+                    ("test.py",),
+                    "policy",
+                    "repository-tests/full",
+                )
+                self._publish_receipt_pair(binding)
+                receipt_path, marker_path = GATE._receipt_cache_paths(binding)
+                original_marker = json.loads(marker_path.read_text())
+                self.assertIsNotNone(GATE.reusable_receipt(binding))
+
+                marker_path.unlink()
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+                GATE._atomic_json(marker_path, original_marker)
+                stale = dict(original_marker)
+                stale["publication_id"] = "3" * 64
+                GATE._atomic_json(marker_path, stale)
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+                GATE._atomic_json(marker_path, original_marker)
+                tampered = dict(original_marker)
+                tampered["receipt"] = dict(original_marker["receipt"])
+                tampered["receipt"]["digest"] = "4" * 64
+                GATE._atomic_json(marker_path, tampered)
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+                GATE._atomic_json(marker_path, original_marker)
+                receipt = json.loads(receipt_path.read_text())
+                receipt["publication"]["commit_marker_path"] = (
+                    "tmp/test-gate-receipts/elsewhere.commit.json"
+                )
+                GATE._atomic_json(receipt_path, receipt)
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_receipt_publication_failure_never_publishes_pass_report(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "b" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", time.monotonic())
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original = GATE._atomic_json
+
+            def fail_receipt(path, value):
+                if "test-gate-receipts" in str(path):
+                    raise OSError("injected receipt failure")
+                original(path, value)
+
+            summaries = []
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE, "_atomic_json", side_effect=fail_receipt
+            ), mock.patch.object(
+                GATE, "_write_summary", side_effect=summaries.append
+            ):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+            self.assertEqual(2, exit_code)
+            persisted = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual("pass", persisted["outcome"])
+            self.assertEqual("passed", persisted["reason"])
+            self.assertTrue(persisted["terminalized_pass"])
+            self.assertEqual(0, persisted["gate_exit_code"])
+            self.assertEqual("error", persisted["publication_status"])
+            self.assertIn("receipt persistence failed", persisted["publication_reason"])
+            self.assertEqual("error", persisted["command_outcome"])
+            self.assertEqual(2, persisted["exit_code"])
+            self.assertIn("publication_id", persisted)
+            self.assertIn("outcome: pass", summaries[0])
+            self.assertIn("publication: error", summaries[0])
+            self.assertIn("command: error (exit 2)", summaries[0])
+            self.assertFalse(
+                (repo / "tmp/test-gate-receipts" / ("b" * 64 + ".json")).exists()
+            )
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_report_publication_failure_rolls_back_new_receipt(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "c" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            receipt_path = repo / "tmp/test-gate-receipts" / ("c" * 64 + ".json")
+            receipt_path.parent.mkdir(parents=True)
+            receipt_path.write_text("invalid prior cache entry")
+            report = GATE._base_report("final", time.monotonic())
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original = GATE._atomic_json
+            report_writes = [0]
+
+            def fail_first_report(path, value):
+                if "test-gate-reports" in str(path):
+                    report_writes[0] += 1
+                    if report_writes[0] == 1:
+                        raise OSError("injected pass-report failure")
+                original(path, value)
+
+            summaries = []
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE, "_atomic_json", side_effect=fail_first_report
+            ), mock.patch.object(
+                GATE, "_write_summary", side_effect=summaries.append
+            ):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+            self.assertEqual(2, exit_code)
+            persisted = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual("pass", persisted["outcome"])
+            self.assertEqual("passed", persisted["reason"])
+            self.assertTrue(persisted["terminalized_pass"])
+            self.assertEqual(0, persisted["gate_exit_code"])
+            self.assertEqual("error", persisted["publication_status"])
+            self.assertIn("machine report persistence failed", persisted["publication_reason"])
+            self.assertEqual("error", persisted["command_outcome"])
+            self.assertEqual(2, persisted["exit_code"])
+            self.assertIn("outcome: pass", summaries[0])
+            self.assertIn("publication: error", summaries[0])
+            self.assertIn("command: error (exit 2)", summaries[0])
+            self.assertFalse(receipt_path.exists())
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(GATE.reusable_receipt(binding))
+
+    def test_surviving_receipt_after_report_failure_is_not_reusable(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            (repo / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            binding = {
+                "binding_digest": "e" * 64,
+                "candidate_digest": "candidate",
+                "candidate_closure_digest": "closure",
+                "controller_closure": GATE.controller_closure(),
+                "composite_test_plan": {"schema": GATE.COMPOSITE_TEST_PLAN_SCHEMA},
+            }
+            report = GATE._base_report("final", time.monotonic())
+            report.update(
+                {
+                    "outcome": "pass",
+                    "evidence": "executed",
+                    "reason": "passed",
+                    "candidate": {
+                        "digest": "candidate",
+                        "closure_digest": "closure",
+                    },
+                }
+            )
+            original = GATE._atomic_json
+            report_writes = [0]
+
+            def fail_pass_report(path, value):
+                if "test-gate-reports" in str(path):
+                    report_writes[0] += 1
+                    if report_writes[0] == 1:
+                        raise OSError("injected pass-report failure")
+                original(path, value)
+
+            with mock.patch.object(GATE, "REPO", repo), mock.patch.object(
+                GATE, "_atomic_json", side_effect=fail_pass_report
+            ), mock.patch.object(
+                GATE, "_remove_projection", return_value=False
+            ), mock.patch.object(GATE, "_write_summary"):
+                exit_code = GATE.emit_report(
+                    report,
+                    receipt_binding_value=binding,
+                    receipt_stable=lambda: True,
+                )
+            self.assertEqual(2, exit_code)
+            receipt_path = repo / "tmp/test-gate-receipts" / ("e" * 64 + ".json")
+            self.assertTrue(receipt_path.is_file())
+            persisted_report = json.loads(
+                (repo / "tmp/test-gate-reports/latest-final.json").read_text()
+            )
+            self.assertEqual("pass", persisted_report["outcome"])
+            self.assertTrue(persisted_report["terminalized_pass"])
+            self.assertEqual(0, persisted_report["gate_exit_code"])
+            self.assertEqual("error", persisted_report["publication_status"])
+            self.assertEqual("error", persisted_report["command_outcome"])
+            self.assertEqual(2, persisted_report["exit_code"])
+            options = mock.Mock(provider_hard=False)
+            with mock.patch.object(GATE, "REPO", repo):
+                self.assertIsNone(
+                    GATE.reusable_full_receipt(
+                        binding, "repository-tests/full", options
+                    )
+                )
+
+    def test_stale_pass_report_publication_id_mismatch_rejects_receipt(self):
+        candidate = MANIFEST.CandidateManifest(
+            "staged-index", "candidate", "closure", (), (), "index"
+        )
+        view = {"digest": "view"}
+        with mock.patch.object(GATE, "REPO", Path(tempfile.mkdtemp())):
+            (GATE.REPO / ".gitignore").write_text("tmp/\n")
+            subprocess.run(["git", "init", "-q"], cwd=GATE.REPO, check=True)
+            binding = GATE.receipt_binding(
+                candidate,
+                view,
+                ("test.py",),
+                "policy",
+                "repository-tests/full",
+            )
+            report = self._publish_receipt_pair(binding)
+            self.assertIsNotNone(GATE.reusable_receipt(binding))
+            report["publication_id"] = "f" * 64
+            report_path = GATE.REPO / "tmp/test-gate-reports/latest-final.json"
+            GATE._atomic_json(report_path, report)
+            self.assertIsNone(GATE.reusable_receipt(binding))
 
 
 if __name__ == "__main__":
