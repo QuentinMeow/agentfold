@@ -1,10 +1,10 @@
 # Flag a backticked absolute path instead of resolving it against the host filesystem
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from the second CI failure of this shape in two days
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-flag-machine-specific-paths-in-link-check.md`
+**Queue actions:** none
 
 ## Goal
 
