@@ -2,9 +2,10 @@
 """Run selected repository test files, each in its own process.
 
 Discovery covers services, canonical skills, and automation. Each child receives a
-sanitized Git environment, an empty ``HOME`` and XDG config root so no caller Git
-configuration is readable, and a fresh metadata-free projection outside every existing
-repository's discovery path. Subprocess-per-file keeps hyphenated folders
+sanitized Git environment, a scratch ``HOME`` and XDG config root carrying only the
+runner's own configuration so no caller Git configuration is readable and no repository
+a test builds runs background maintenance, and a fresh metadata-free projection outside
+every existing repository's discovery path. Subprocess-per-file keeps hyphenated folders
 importable-free and any test crash isolated. This is not a sandbox against deliberate
 absolute paths. The default is always the full suite. ``--staged`` maps every staged
 path through the input-ownership table below and runs only the tests those paths own:
@@ -33,6 +34,23 @@ TEST_GLOBS = (
     "automation/**/tests/test_*.py",
 )
 GIT_BOUNDARY_MARKER = "AgentFold isolated test view; not a Git repository.\n"
+# Written into the isolated scratch HOME by install_isolated_git_configuration(), which
+# explains why. Both `auto` keys are needed: Git through 2.54 gates the background spawn
+# on `maintenance.auto` alone, while newer Git falls back to `gc.auto` when
+# `maintenance.auto` is unset, and `gc.auto` is also what stops Git 2.23 auto-gc. The
+# `autoDetach` keys are the backstop: should either ever run, it stays in the foreground
+# and cannot outlive the command that started it.
+ISOLATED_GIT_CONFIGURATION = """\
+# Written by automation/run_tests.py. No test may rely on background Git maintenance:
+# it detaches and writes inside .git/objects after the foreground command has exited,
+# which races temporary-directory teardown.
+[gc]
+\tauto = 0
+\tautoDetach = false
+[maintenance]
+\tauto = false
+\tautoDetach = false
+"""
 SAFE_GIT_BEHAVIOR_VARIABLES = frozenset(
     (
         "GIT_AUTHOR_DATE",
@@ -831,13 +849,31 @@ def reject_projected_symlink_traversal(destination, relative_path):
 
 
 def install_isolated_git_configuration(scratch_root, child_environment):
-    """Point child Git configuration at empty scratch state, not the caller's.
+    """Point child Git configuration at scratch state the runner owns, not the caller's.
 
-    Isolation is environment-only: empty ``HOME`` and ``XDG_CONFIG_HOME`` mean Git finds
-    no global configuration on any version, ``GIT_CONFIG_NOSYSTEM`` blocks system
-    configuration, and ``GIT_CONFIG_GLOBAL`` repeats the global block on Git 2.32+.
-    ``git`` stays the real binary on ``PATH``: an interposed shell wrapper doubled the
-    process count of every Git call the suite makes, which is most of its wall time.
+    Isolation is environment-only: ``HOME`` and ``XDG_CONFIG_HOME`` point into a scratch
+    root holding nothing of the caller's, so no caller global configuration is reachable
+    on any Git version, and ``GIT_CONFIG_NOSYSTEM`` blocks system configuration. ``git``
+    stays the real binary on ``PATH``: an interposed shell wrapper doubled the process
+    count of every Git call the suite makes, which is most of its wall time.
+
+    The one file placed in that scratch ``HOME`` turns off automatic maintenance for
+    every repository any test builds. Since Git 2.30, ``git commit`` runs
+    ``git maintenance run --auto --detach``; the detached grandchild outlives the
+    foreground command and creates then removes ``<objects-dir>/maintenance.lock``, i.e.
+    it writes *inside* ``.git/objects`` after ``subprocess.run`` has already returned.
+    A fixture repository is far below the ``gc.auto`` threshold, so that lock is the only
+    work it ever does — but it is enough to race ``TemporaryDirectory`` teardown and fail
+    it with ``ENOTEMPTY`` on ``objects``. Disabling it also drops one spawned process per
+    commit, which the suite makes hundreds of.
+
+    Reaching Git of every vintage takes one file plus one variable, not two mechanisms.
+    ``GIT_CONFIG_COUNT`` needs Git 2.31 and ``GIT_CONFIG_GLOBAL`` needs 2.32, so neither
+    can carry a setting to the Git 2.23 some contributors run. Writing ``.gitconfig`` into
+    the scratch ``HOME`` covers those older versions, and ``GIT_CONFIG_GLOBAL`` must then
+    name that same file rather than ``os.devnull``: on 2.32+ it replaces the global scope
+    outright, so leaving it at ``os.devnull`` would silently discard the settings on
+    exactly the newer Git that needs them.
     """
     git_executable = shutil.which("git", path=child_environment.get("PATH"))
     if (
@@ -850,9 +886,11 @@ def install_isolated_git_configuration(scratch_root, child_environment):
     isolated_xdg_config = scratch_root / "git-xdg-config"
     isolated_home.mkdir(parents=True)
     isolated_xdg_config.mkdir()
+    isolated_global_config = isolated_home / ".gitconfig"
+    isolated_global_config.write_text(ISOLATED_GIT_CONFIGURATION, encoding="utf-8")
     child_environment["HOME"] = str(isolated_home)
     child_environment["XDG_CONFIG_HOME"] = str(isolated_xdg_config)
-    child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    child_environment["GIT_CONFIG_GLOBAL"] = str(isolated_global_config)
     child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
 
 
