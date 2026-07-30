@@ -1,3 +1,4 @@
+import ast
 import contextlib
 import importlib.util
 import io
@@ -300,6 +301,45 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertIn(f"skipped test files: {len(self.all_tests)}", output)
         self.assertIn("automation/tests/test_run_tests.py", output)
 
+    def test_an_empty_selection_still_prints_a_parseable_summary(self):
+        """A proved-empty run and a run that died before summarizing must not look alike.
+
+        Every run that selects at least one file ends with this line, and every
+        verification record in the repository transcribes it as its evidence.
+        """
+        selection = RUN_TESTS.TestSelection(
+            "staged", "every staged path is a record path no test reads", (), ()
+        )
+        stream = io.StringIO()
+
+        with mock.patch.object(
+            RUN_TESTS, "staged_test_selection", return_value=selection
+        ):
+            with contextlib.redirect_stdout(stream):
+                code = RUN_TESTS.main(["--staged"])
+        output = stream.getvalue()
+
+        self.assertEqual(0, code)
+        self.assertIn("tests: 0/0 files passed", output)
+        self.assertIn(
+            "no discovered test file can be affected by the staged change", output
+        )
+
+    def test_report_names_where_skipped_coverage_happens(self):
+        """A named skip is evidence; an unnamed one asks the reader to trust us."""
+        selection = RUN_TESTS.TestSelection(
+            "staged",
+            "every staged path is a record path no test reads",
+            (),
+            ("tasks/x/task.md -> record path, no test reads it",),
+        )
+        stream = io.StringIO()
+
+        with contextlib.redirect_stdout(stream):
+            RUN_TESTS.report_selection(selection, all_test_files=self.all_tests)
+
+        self.assertIn("the complete suite still runs on every push", stream.getvalue())
+
     def test_empty_unavailable_and_malformed_diffs_fall_back(self):
         outcomes = (
             self.git_result(b""),
@@ -601,6 +641,28 @@ class InputOwnershipTests(unittest.TestCase):
             paths = RUN_TESTS.filesystem_view_paths(RUN_TESTS.REPO)
         self.repository_paths = tuple(str(path) for path in paths)
 
+    def test_every_runner_attribute_this_file_names_actually_exists(self):
+        """Catch a rename whose only surviving caller sits behind an env-gated test.
+
+        ``install_isolated_git_wrapper`` was renamed when the Git shell wrapper was
+        removed, and the inert-probe call site kept the old name. That probe only runs
+        under AGENTFOLD_INERT_PROBE, so the suite stayed green while the proof it
+        performs raised AttributeError instead of running.
+        """
+        source = Path(__file__).read_text(encoding="utf-8")
+        named = set()
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "RUN_TESTS"
+            ):
+                named.add(node.attr)
+
+        self.assertTrue(named, "no runner attributes found to check")
+        missing = sorted(name for name in named if not hasattr(RUN_TESTS, name))
+        self.assertEqual([], missing)
+
     def test_every_declared_repository_read_is_owned_by_the_reader(self):
         checked = 0
         for test in self.all_tests:
@@ -696,7 +758,7 @@ class InputOwnershipTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="agentfold-inert-probe-") as scratch:
             scratch_root = Path(scratch).resolve()
             RUN_TESTS.validate_scratch_root(scratch_root, environment)
-            RUN_TESTS.install_isolated_git_wrapper(scratch_root, environment)
+            RUN_TESTS.install_isolated_git_configuration(scratch_root, environment)
             environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
             view = scratch_root / "view"
             RUN_TESTS.materialize_repository_view(
