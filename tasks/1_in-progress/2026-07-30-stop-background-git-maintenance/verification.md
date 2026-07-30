@@ -3,8 +3,8 @@
 **Verified:** 2026-07-30 by Claude Opus 5 (1M context)
 
 Two Git versions are available on this machine, which is what makes the portability
-claim checkable: `/usr/local/bin/git` is 2.23.0 (predates `git maintenance` entirely)
-and `/usr/bin/git` is 2.50.1 (has the detached auto-maintenance that CI hits).
+claim checkable: the git on PATH (/usr/local/bin/git) is 2.23.0 (predates `git maintenance` entirely)
+and the system git (/usr/bin/git) is 2.50.1 (has the detached auto-maintenance that CI hits).
 
 ## The mechanism: `git commit` spawns detached maintenance
 

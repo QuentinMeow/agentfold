@@ -12,7 +12,7 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   any `--auto` condition is evaluated and `daemonize()`s unconditionally, so the write
   inside `objects/` does not depend on the threshold. Confirmed identical in v2.47.0
   through v2.55.0.
-- Found `/usr/bin/git` is 2.50.1 (Apple Git-155) while `/usr/local/bin/git` on `PATH` is
+- Found the system git (/usr/bin/git) is 2.50.1 (Apple Git-155) while the git on PATH (/usr/local/bin/git) on `PATH` is
   2.23.0 — so both sides of the version boundary are testable on this machine. That is
   worth remembering for any future Git-version question here.
 - Dead end worth not repeating: tripping `too_many_loose_objects()` by dropping 38-hex
