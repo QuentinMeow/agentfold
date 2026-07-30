@@ -1,10 +1,10 @@
 # Give the commit gate a routine lane and let the push boundary own completeness
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-29, by claude, from `docs/designs/fast-local-test-feedback.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-2026-07-29-defer-full-suite-to-push-boundary.md`
+**Queue actions:** none
 
 ## Goal
 
