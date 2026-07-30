@@ -15,16 +15,26 @@ Uncertainty always falls back to full. Every narrow lane prunes the record paths
 its projection, so a test that starts reading one fails instead of silently invalidating
 the table. The projection contains working-tree bytes, not an index snapshot. Exit 0
 only if every selected file passes.
+
+``--jobs N`` runs N shards at once against that one shared projection. Shards are cut at
+test-method granularity, because one file is most of the suite, and the method names come
+from an ``ast`` walk that costs no subprocess; a file whose tests the walk cannot fully
+see runs whole rather than partly. ``--jobs 1`` is the historical serial run, one
+subprocess per file with inherited output and no added argument. Files listed in
+``QUARANTINED_TEST_FILES`` are never sharded and run in a reported serial tail.
 """
 import argparse
+import ast
 import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -197,8 +207,44 @@ def registered_top_level_names():
 REGISTERED_TOP_LEVEL_NAMES = registered_top_level_names()
 STAGED_PATH_REPORT_LIMIT = 12
 INERT_PROBE_ENVIRONMENT = "AGENTFOLD_INERT_PROBE"
+# Files that may never share the machine with another shard, and why. Each runs whole,
+# one at a time, after the parallel phase, and the run says so instead of hiding it.
+QUARANTINED_TEST_FILES = (
+    (
+        "automation/tests/test_run_tests.py",
+        "its tests re-run this whole runner, so a shard of it would nest a second "
+        "worker pool inside the first",
+    ),
+)
+# Enough shards per worker that a slow one cannot leave the others idle at the tail,
+# but not so many that per-shard interpreter startup and module import dominate.
+SHARD_UNITS_PER_WORKER = 6
+MINIMUM_SHARD_TESTS = 4
+TEST_METHOD_PREFIX = "test"
+TEST_CASE_BASE_NAMES = frozenset(("TestCase", "IsolatedAsyncioTestCase"))
+# Bases that provably contribute no test method, so a class using one stays readable.
+INERT_BASE_NAMES = frozenset(("object",))
+# Calls that can attach test methods no source-level walk can enumerate. ``type`` is
+# only one of them in its three-argument class-building form; ``type(x)`` is a question.
+HIDDEN_TEST_CALL_NAMES = frozenset(("globals", "setattr", "vars"))
+DYNAMIC_CLASS_CALL_NAME = "type"
+DYNAMIC_CLASS_ARGUMENT_COUNT = 3
+VERBOSE_CHILD_ARGUMENTS = ("-v",)
 TestSelection = namedtuple("TestSelection", "lane reason test_files staged_paths")
 TestSelection.__new__.__defaults__ = ((),)
+ShardUnit = namedtuple("ShardUnit", "relative names index count")
+ShardPlan = namedtuple("ShardPlan", "units tail opaque")
+
+
+def worker_count_argument(value):
+    """Reject a worker count that cannot describe a run."""
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("worker count must be an integer")
+    if count < 1:
+        raise argparse.ArgumentTypeError("worker count must be at least 1")
+    return count
 
 
 def parse_arguments(arguments):
@@ -209,7 +255,80 @@ def parse_arguments(arguments):
         action="store_true",
         help="select a conservative staged-change lane, falling back to full",
     )
+    parser.add_argument(
+        "--jobs",
+        type=worker_count_argument,
+        default=None,
+        metavar="N",
+        help=(
+            "run N test shards at once against one shared projection; 1 keeps the "
+            "historical serial subprocess-per-file run; default is physical cores"
+        ),
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="pass -v to every child so every executed test name is printed",
+    )
     return parser.parse_args(arguments)
+
+
+def physical_core_count():
+    """Report physical cores, or None where the platform cannot be asked cheaply."""
+    if sys.platform == "darwin":
+        sysctl = shutil.which("sysctl") or "/usr/sbin/sysctl"
+        try:
+            result = subprocess.run(
+                [sysctl, "-n", "hw.physicalcpu"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+        except OSError:
+            return None
+        reported = (result.stdout or "").strip()
+        if result.returncode or not reported.isdigit() or not int(reported):
+            return None
+        return int(reported)
+    if sys.platform.startswith("linux"):
+        try:
+            info = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        cores = set()
+        package = core = None
+        for line in info.splitlines():
+            key, separator, value = line.partition(":")
+            if not separator:
+                package = core = None
+                continue
+            key = key.strip()
+            if key == "physical id":
+                package = value.strip()
+            elif key == "core id":
+                core = value.strip()
+            if package is not None and core is not None:
+                cores.add((package, core))
+                package = core = None
+        return len(cores) or None
+    return None
+
+
+def default_worker_count():
+    """Default to physical cores, not to ``os.cpu_count()``.
+
+    The suite spends more system than user time: it is bound by process creation and
+    Git calls, not by arithmetic. Simultaneous-multithreading siblings share one core's
+    execution resources, so counting them oversubscribes the machine and adds
+    contention without adding throughput. Where the physical count cannot be read, half
+    the logical count is the closest safe guess, floored at two so a small
+    two-thread runner still shards.
+    """
+    physical = physical_core_count()
+    if physical:
+        return physical
+    logical = os.cpu_count() or 1
+    return max(1, min(logical, max(2, logical // 2)))
 
 
 def parse_staged_name_status(output):
@@ -1038,6 +1157,238 @@ def prune_inert_projection(view, test_files=(), repository=None):
     return removed
 
 
+def attribute_chain_name(node):
+    """Return the dotted name of a class base, or None for a computed expression."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def hides_test_methods(tree):
+    """Return whether this module can attach tests no source-level walk can see."""
+    top_level = sum(1 for node in tree.body if isinstance(node, ast.ClassDef))
+    nested = sum(1 for node in ast.walk(tree) if isinstance(node, ast.ClassDef))
+    if top_level != nested:
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            called = attribute_chain_name(node.func)
+            if called in HIDDEN_TEST_CALL_NAMES:
+                return True
+            if (
+                called == DYNAMIC_CLASS_CALL_NAME
+                and len(node.args) == DYNAMIC_CLASS_ARGUMENT_COUNT
+            ):
+                return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == "load_tests":
+                return True
+    return False
+
+
+def transitive_closure(direct, seeds):
+    """Grow each key's value over its local bases until nothing changes."""
+    closure = {name: set(value) for name, value in seeds.items()}
+    for _pass in range(len(closure) + 1):
+        changed = False
+        for name, bases in direct.items():
+            for base in bases:
+                if base in closure and not closure[base] <= closure[name]:
+                    closure[name] |= closure[base]
+                    changed = True
+        if not changed:
+            return closure
+    return None
+
+
+def discovered_test_names(source):
+    """Return every ``Class.test_method`` in one module, or None when unsure.
+
+    None means the walk cannot prove it saw every test — a base class defined outside
+    this file, the ``load_tests`` protocol, a class decorator or metaclass, a class
+    built at import time, or a class nested inside other code. The caller must then run
+    the whole file: a shard that silently drops the tests the walk missed would report
+    a green suite that never executed them.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    if hides_test_methods(tree):
+        return None
+    own_methods = {}
+    local_bases = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if node.decorator_list or node.keywords:
+            return None
+        bases = []
+        for base in node.bases:
+            name = attribute_chain_name(base)
+            if name is None:
+                return None
+            bases.append(name)
+        own_methods[node.name] = {
+            child.name
+            for child in node.body
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child.name.startswith(TEST_METHOD_PREFIX)
+        }
+        local_bases[node.name] = tuple(bases)
+    for bases in local_bases.values():
+        for base in bases:
+            leaf = base.rsplit(".", 1)[-1]
+            if leaf in TEST_CASE_BASE_NAMES or leaf in INERT_BASE_NAMES:
+                continue
+            if base not in local_bases:
+                return None
+    methods = transitive_closure(local_bases, own_methods)
+    collected = transitive_closure(
+        local_bases,
+        {
+            name: {name} if any(
+                base.rsplit(".", 1)[-1] in TEST_CASE_BASE_NAMES for base in bases
+            ) else set()
+            for name, bases in local_bases.items()
+        },
+    )
+    if methods is None or collected is None:
+        return None
+    names = tuple(sorted(
+        "{0}.{1}".format(class_name, method)
+        for class_name, own in collected.items()
+        if own
+        for method in methods[class_name]
+    ))
+    return names or None
+
+
+def split_evenly(names, target):
+    """Split one file's test names into near-equal chunks of about ``target``."""
+    count = min(len(names), max(1, int(round(len(names) / float(target)))))
+    chunks = []
+    start = 0
+    for index in range(count):
+        stop = len(names) * (index + 1) // count
+        chunks.append(tuple(names[start:stop]))
+        start = stop
+    return tuple(chunk for chunk in chunks if chunk)
+
+
+def shard_plan(test_files, worker_count, repository=None, quarantined=None):
+    """Cut the selected files into parallel shard units plus a reported serial tail."""
+    repository = REPO if repository is None else Path(repository)
+    quarantined = QUARANTINED_TEST_FILES if quarantined is None else quarantined
+    quarantined_names = {name for name, _reason in quarantined}
+    shardable = []
+    tail = []
+    opaque = []
+    for test in test_files:
+        relative = test.relative_to(repository)
+        if relative.as_posix() in quarantined_names:
+            tail.append(relative)
+            continue
+        try:
+            names = discovered_test_names(test.read_text(encoding="utf-8"))
+        except OSError:
+            names = None
+        if names is None:
+            opaque.append(relative)
+        shardable.append((relative, names))
+    total = sum(len(names) for _relative, names in shardable if names)
+    target = max(
+        MINIMUM_SHARD_TESTS,
+        -(-total // max(1, worker_count * SHARD_UNITS_PER_WORKER)),
+    )
+    units = []
+    for relative, names in sorted(
+        shardable,
+        key=lambda entry: (-len(entry[1] or ()), entry[0].as_posix()),
+    ):
+        chunks = split_evenly(names, target) if names else ((),)
+        for index, chunk in enumerate(chunks):
+            units.append(ShardUnit(relative, chunk, index + 1, len(chunks)))
+    return ShardPlan(tuple(units), tuple(tail), tuple(opaque))
+
+
+def shard_header(unit, returncode):
+    """Name one shard's file, position, and size above its buffered output."""
+    size = "{0} test(s)".format(len(unit.names)) if unit.names else "whole file"
+    return "--- {0} {1} shard {2}/{3}, {4}".format(
+        "FAIL" if returncode else "pass",
+        unit.relative,
+        unit.index,
+        unit.count,
+        size,
+    )
+
+
+def run_shard_units(
+    units,
+    test_cwd,
+    child_environment,
+    worker_count,
+    child_arguments=(),
+    emit_passing=False,
+):
+    """Run shards concurrently, emitting each one's output as one atomic block."""
+    lock = threading.Lock()
+    failed = set()
+
+    def execute(unit):
+        command = [sys.executable, str(test_cwd / unit.relative)]
+        command.extend(child_arguments)
+        command.extend(unit.names)
+        result = subprocess.run(
+            command,
+            cwd=test_cwd,
+            env=child_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        output = result.stdout or b""
+        with lock:
+            if result.returncode:
+                failed.add(unit.relative)
+            if result.returncode or emit_passing:
+                text = output.decode("utf-8", "replace")
+                if text and not text.endswith("\n"):
+                    text += "\n"
+                sys.stdout.write(shard_header(unit, result.returncode) + "\n" + text)
+                sys.stdout.flush()
+
+    with ThreadPoolExecutor(max_workers=max(1, min(worker_count, len(units)))) as pool:
+        tuple(pool.map(execute, units))
+    return frozenset(failed)
+
+
+def report_shard_plan(plan, quarantined=None):
+    """Print the schedule, the whole-file fallbacks, and the quarantine reasons."""
+    quarantined = QUARANTINED_TEST_FILES if quarantined is None else quarantined
+    reasons = dict(quarantined)
+    print("test shards: {0}".format(len(plan.units)))
+    for relative in plan.opaque:
+        print(
+            "  whole file: {0} -> test discovery could not see every test".format(
+                relative
+            )
+        )
+    for relative in plan.tail:
+        print(
+            "  serial tail: {0} -> not concurrency-safe, {1}".format(
+                relative,
+                reasons.get(relative.as_posix(), "quarantined"),
+            )
+        )
+    sys.stdout.flush()
+
+
 def main(arguments=()):
     started = time.monotonic()
     options = parse_arguments(arguments)
@@ -1058,6 +1409,12 @@ def main(arguments=()):
         print(f"tests: {len(test_files)}/{len(test_files)} files passed")
         print(f"test elapsed: {time.monotonic() - started:.2f}s")
         return 0
+    worker_count = (
+        options.jobs if options.jobs is not None else default_worker_count()
+    )
+    child_arguments = VERBOSE_CHILD_ARGUMENTS if options.verbose else ()
+    if worker_count > 1:
+        print("test workers: {0}".format(worker_count))
     configured_identity = configured_git_identity()
     child_environment = isolated_test_environment()
     for name, value in configured_identity.items():
@@ -1079,13 +1436,45 @@ def main(arguments=()):
             pruned = prune_inert_projection(test_cwd, test_files)
             print(f"pruned record paths from the narrow test view: {pruned}")
         child_environment[PROJECTED_REPOSITORY_ENVIRONMENT] = str(test_cwd)
-        for test, rel in zip(test_files, relative_tests):
-            result = subprocess.run(
-                [sys.executable, str(test_cwd / rel)],
-                cwd=test_cwd,
-                env=child_environment,
+        if worker_count == 1:
+            for test, rel in zip(test_files, relative_tests):
+                command = [sys.executable, str(test_cwd / rel)]
+                command.extend(child_arguments)
+                result = subprocess.run(
+                    command,
+                    cwd=test_cwd,
+                    env=child_environment,
+                )
+                (print(f"PASS {rel}") if result.returncode == 0 else failed.append(rel))
+        else:
+            plan = shard_plan(test_files, worker_count)
+            report_shard_plan(plan)
+            failed_relatives = set(
+                run_shard_units(
+                    plan.units,
+                    test_cwd,
+                    child_environment,
+                    worker_count,
+                    child_arguments=child_arguments,
+                    emit_passing=options.verbose,
+                )
             )
-            (print(f"PASS {rel}") if result.returncode == 0 else failed.append(rel))
+            for rel in plan.tail:
+                command = [sys.executable, str(test_cwd / rel)]
+                command.extend(child_arguments)
+                result = subprocess.run(
+                    command,
+                    cwd=test_cwd,
+                    env=child_environment,
+                )
+                if result.returncode:
+                    failed_relatives.add(rel)
+            for rel in relative_tests:
+                (
+                    print(f"PASS {rel}")
+                    if rel not in failed_relatives
+                    else failed.append(rel)
+                )
     for rel in failed:
         print(f"FAIL {rel}")
     print(f"tests: {len(test_files) - len(failed)}/{len(test_files)} files passed")
