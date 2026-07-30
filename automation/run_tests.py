@@ -599,7 +599,10 @@ def report_selection(selection, repository=None, all_test_files=()):
     selected = set(selection.test_files)
     skipped = tuple(test for test in all_test_files if test not in selected)
     if skipped:
-        print(f"skipped test files: {len(skipped)} (no staged path owns them)")
+        print(
+            f"skipped test files: {len(skipped)} (no staged path owns them); "
+            "the complete suite still runs on every push"
+        )
         for test in skipped:
             print(f"  {test.relative_to(repository)}")
     sys.stdout.flush()
@@ -1014,6 +1017,7 @@ def main(arguments=()):
             if not all_test_files
             else "no discovered test file can be affected by the staged change"
         )
+        print(f"tests: {len(test_files)}/{len(test_files)} files passed")
         print(f"test elapsed: {time.monotonic() - started:.2f}s")
         return 0
     configured_identity = configured_git_identity()
