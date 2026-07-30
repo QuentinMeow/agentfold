@@ -7,8 +7,9 @@ Only commands actually run and their real output.
 This task's central premise did not survive measurement, so it closes without its
 implementation landing. What follows is what was actually established and where the
 one surviving acceptance criterion shipped instead. The reasoning is recorded in
-`memory/decisions/2026-07-30-commit-gate-skips-only-on-proof.md`; the branch that
-carried the experiment is preserved on the remote as exp/c-tiered.
+`memory/decisions/2026-07-30-commit-gate-skips-only-on-proof.md`, and `design.md` beside
+this file inventories every part of the experiment and where it went. The branch that
+carried it, exp/c-tiered, was deleted on 2026-07-30 once that inventory was complete.
 
 ## The premise is unsound once input-ownership selection exists
 
