@@ -118,6 +118,40 @@ blobs through one reusable `git cat-file --batch` instead of a `git show` per ar
 caching facts keyed on immutable object IDs. Independent of A/C/E — it touches no file they
 touch — and it is the only lever that also speeds up **CI**, where local cores do not help.
 
+Measured, both arms under one lock in the same quiet window:
+
+| | before | after |
+|---|---:|---:|
+| full suite | 219.42s | **166.04s** (−24.3%) |
+| git spawns (long pole) | 9,981 | **7,045** (−29.4%) |
+| `reconcile --check` | 5.13s / 307 spawns | 4.56s / 214 spawns |
+
+Spawn reductions land where predicted: `git show` **1344 → 33**, fixture `init`+`config`
+**687 → 7**, `ls-tree` −521, `merge-base` −311. All 11 files pass; 0 reconciler findings.
+
+**Attribution, measured by interleaving three variants inside one lock hold:** base
+91.31s, Lever 1 only 90.91s (**−0.4%, inside the noise floor**), both levers 73.08s
+(−20%). **Lever 2 delivered the entire measurable win; the fixture template did not
+register**, even though its microbenchmark is genuinely 23ms/test cheaper and external
+research ranked it the #2 lever. Its durable value is 680 fewer processes and its guard
+test, not seconds. This is a useful correction to the research prior.
+
+Other negative results worth keeping: `rev-parse --git-path` caching returned a fifth of
+what raw duplicate counts promised, because almost every call is the first for that test's
+repository — the duplicates were across *different* repositories and cannot be shared.
+`git init --template=` alone is a rounding error (~6ms of a ~25ms fixture).
+
+### D and E are NOT additive
+
+The wrapper triples what removing a spawn is worth: ≈15ms in-suite versus ≈6ms standalone.
+So D's measured −53.4s was earned *on top of* the wrapper tax. Once E removes the wrapper,
+D's 2,936 removed spawns are worth roughly 2,936 × 6ms ≈ **18s, not 53s**. Do not add the
+two savings together.
+
+The same interaction explains why the long-pole file measures 160.0s inside `run_tests.py`
+but 91.3s standalone on identical code. D reached the wrapper conclusion independently,
+from the opposite direction, which is the strongest confirmation of E available here.
+
 ### A — Select tests by staged input ownership (branch exp/a-input-scope)
 
 Proven safe by experiment: with all 292 projected record files corrupted — and, in the
