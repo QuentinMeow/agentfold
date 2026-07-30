@@ -1,6 +1,6 @@
 # Which measured test-speed levers should land, and in what shape?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-29, by claude, from conversation `2026-07-29-1833PDT-fast-local-test-feedback`
 **Action:** Choose Option A, B, or C for what lands from the five measured experiments.
 **Full context:** `docs/designs/fast-local-test-feedback.md`
