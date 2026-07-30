@@ -1311,7 +1311,15 @@ class RunTestsIsolationTests(unittest.TestCase):
                 self.assertNotEqual(first, second)
                 self.assertEqual(scratch_root / "first", first.parent)
                 self.assertEqual(scratch_root / "second", second.parent)
-                self.assertEqual([], sorted(second.iterdir()))
+                self.assertEqual(
+                    [],
+                    [
+                        entry
+                        for entry in sorted(second.iterdir())
+                        if str(entry) != second_environment["GIT_CONFIG_GLOBAL"]
+                    ],
+                    "only the runner's own global config may sit in a scratch config root",
+                )
 
     def test_isolated_child_reads_no_caller_git_configuration(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -1408,6 +1416,49 @@ class RunTestsIsolationTests(unittest.TestCase):
                 self.assertEqual("", isolated.stdout)
                 break
 
+    def test_isolated_child_git_runs_no_background_maintenance(self):
+        """Every temp repository a test builds must inherit maintenance being off.
+
+        Since Git 2.30 a commit detaches `git maintenance run --auto`, whose child
+        creates `<objects-dir>/maintenance.lock` after the foreground command already
+        returned — a writer inside `.git/objects` racing temp-directory teardown.
+        Reading the keys back through Git itself is the only proof that carries: the
+        settings live in a file that Git 2.32+ would ignore were `GIT_CONFIG_GLOBAL`
+        still pointed at `os.devnull`.
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch).resolve()
+            child_environment = {
+                name: value
+                for name, value in os.environ.items()
+                if not name.startswith("GIT_")
+            }
+            RUN_TESTS.install_isolated_git_configuration(
+                root / "runner-scratch",
+                child_environment,
+            )
+            self.assertIn(
+                str(root / "runner-scratch"),
+                child_environment["GIT_CONFIG_GLOBAL"],
+                "the runner's global config must live inside its own scratch root",
+            )
+            for key, expected in (
+                ("gc.auto", "0"),
+                ("gc.autoDetach", "false"),
+                ("maintenance.auto", "false"),
+                ("maintenance.autoDetach", "false"),
+            ):
+                seen = subprocess.run(
+                    ["git", "config", "--get", key],
+                    cwd=str(root),
+                    env=child_environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                )
+                self.assertEqual(0, seen.returncode, f"{key}: {seen.stderr}")
+                self.assertEqual(expected, seen.stdout.strip(), key)
+
     def test_main_passes_the_isolated_environment_to_each_test(self):
         child_environment = {
             "PATH": os.environ.get("PATH", ""),
@@ -1464,9 +1515,12 @@ class RunTestsIsolationTests(unittest.TestCase):
             str(RUN_TESTS.REPO / relative_test),
             run.call_args[0][0][1],
         )
-        self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
-        self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
         scratch_root = test_cwd.parent
+        self.assertEqual(
+            str(scratch_root / "git-home" / ".gitconfig"),
+            child_environment["GIT_CONFIG_GLOBAL"],
+        )
+        self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
         self.assertEqual(
             str(scratch_root / "git-home"),
             child_environment["HOME"],
