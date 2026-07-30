@@ -214,3 +214,96 @@ permanent surface; and introduces no rule that must be kept correct forever.
 - Whether to close E's nine-site `GIT_CONFIG_NOSYSTEM` gap in the same change
   (recommended) or as a follow-up.
 - Whether the reconciler's ~6s becomes the next target once tests are ~26s.
+
+## Revision, 2026-07-30: what E, D and A actually delivered, and what is left
+
+E, D and A merged as pull requests 20, 21 and 22. Everything below was re-measured on
+merged main rather than carried over, because the earlier numbers described a repository
+that no longer exists.
+
+### Re-measured
+
+| | Before | Now | Change |
+|---|---|---|---|
+| Git spawns per full run | 13,261 | **9,466** | −28.6% |
+| Wall time with a Git child alive | 92-93% | **71.2%** | −21pp |
+| `git show` calls | 1,344 | 215 | the batching landed |
+| Full suite | 219s | ~120s | separate sessions, not comparable |
+
+The spawn census was run twice and produced byte-identical totals, so the counts are
+measurements and not estimates. System time still exceeds user time: the suite remains
+bound by process creation.
+
+The three poles are `automation/tests/test_reconcile_queue.py` at 67.3%,
+`automation/tests/test_check_action_projection.py` at 13.4%, and
+`automation/tests/test_inspect_workspace_boundaries.py` at 9.2% — 89.9% between them.
+
+### Two beliefs this revision corrects
+
+**Fixture templating is already harvested, not pending.** 487 of the 603 temp
+repositories a full run creates already cost zero spawns, because the two biggest files
+build a `.git` skeleton once and copy it. Eliminating every remaining `git init` fixture
+would remove ~206 spawns, about 2% of the suite. A micro-benchmark confirms the mechanism
+choice: copying the skeleton is 9.58x faster than `git init` plus two `git config`, while
+`git init --template=<empty>` is only 1.15x, because the empty template shrinks what
+`init` writes and does nothing about the two config spawns that dominate.
+
+**75.9% of spawns come from the code under test, not from fixtures.** Those are the tests
+doing their job and cannot be optimized away. Of the remainder, 21.2% is scenario
+construction — `add` and `commit` sequences building distinct histories, which one shared
+skeleton cannot express — and 2.5% is bare repository creation. This is the ceiling on
+every spawn-elimination approach, and it is why the next lever is not spawn elimination.
+
+### The remaining lever is parallelism, measured
+
+Interleaved serial-versus-four-shard A/B inside one session, which is the only comparison
+this host supports: **3.27x overall, 3.83x on the long pole** (130.88s to 34.21s), zero
+failures. All eleven files are concurrency-safe at process-level sharding, including the
+one previously assumed unsafe — seven concurrent executions of it produced no failures,
+because `os.environ` is per-interpreter and its `HOME` and `PATH` writes land in per-test
+temporary directories.
+
+Running all eleven files concurrently but unsharded takes 80.78s, capped by the single
+long-pole process. That number is the argument for sharding below the file: file-level
+parallelism alone cannot beat its slowest file.
+
+### Ruled out by measurement: per-test result caching
+
+The idea was to make gate cost scale with what changed rather than with what exists, by
+recording what each test reads and skipping any test none of whose inputs moved. It is
+the only approach that changes the growth curve rather than the constant, and it is the
+one this repository cannot currently build.
+
+- `sys.addaudithook` requires Python 3.8. The interpreter on `PATH` here is **3.7.6**,
+  where the function does not exist, and the workflow calls a bare `python3` with no
+  version pin, so the floor is whatever the runner provides.
+- Even where it exists, `os.stat` and `Path.exists()` emit **no audit event**. A read set
+  built this way silently misses "this test asserted the file is absent", which is
+  exactly the dependency an ownership table needs.
+- Audit hooks are strictly in-interpreter. Across two Git invocations, zero of six audit
+  records named any file inside the repository the child was working in. Since 75.9% of
+  spawns come from the code under test, the observable unit for them is the directory
+  handed to the child, which says only "this test read its own fixture".
+- Line-level tracing, the alternative capture mechanism, measured **11.65x** overhead in
+  pure Python. `sys.monitoring` would fix that and needs 3.12.
+
+So the mechanism is unavailable, and where available it is unsound in a way that fails
+open. Building it anyway would mean a gate that reports success for tests it did not run
+and could not prove it was safe to skip, which the repository's own honesty invariant
+forbids. Reviving it requires declaring and enforcing a minimum interpreter, and closing
+the metadata-read gap — most plausibly by hashing directory listings so an absence
+becomes a positive fact about a directory rather than an unobservable one.
+
+### What this means for the growth concern
+
+The concern that motivated this revision is that a fast suite still grows. It does. What
+changed is where the growth lands:
+
+- A commit touching no code selects nothing and costs 0.02s. Growth is irrelevant there.
+- A commit touching the reconciler selects the file that is 67.3% of the suite. Selection
+  is already correct; sharding divides that cost by the core count. Growth is divided,
+  not removed.
+
+Nothing measured here removes growth. The honest statement is that the constant is now
+small enough that linear growth is affordable for a long time, and that the mechanism
+which would remove it is blocked on an interpreter floor this repository has not set.
