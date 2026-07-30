@@ -1,10 +1,10 @@
 # Build test fixture history by writing Git objects instead of spawning add and commit
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from `docs/designs/fast-local-test-feedback.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-write-fixture-git-objects-in-process.md`
+**Queue actions:** none
 
 ## Goal
 
