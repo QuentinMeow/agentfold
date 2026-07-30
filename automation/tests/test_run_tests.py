@@ -13,6 +13,327 @@ RUN_TESTS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUN_TESTS)
 
 
+class StagedTestSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.all_tests = RUN_TESTS.repository_test_files()
+        self.api_test = RUN_TESTS.REPO / "services/quote-api/tests/test_quote_api.py"
+        self.cli_test = RUN_TESTS.REPO / "services/quote-cli/tests/test_quote_cli.py"
+        self.index_path = MODULE_PATH
+
+    @staticmethod
+    def git_result(stdout=b"", returncode=0):
+        return subprocess.CompletedProcess(
+            ["git"],
+            returncode,
+            stdout=stdout,
+            stderr=b"",
+        )
+
+    @staticmethod
+    def index_output(*path_modes):
+        object_id = b"0" * 40
+        return b"".join(
+            mode + b" " + object_id + b" 0\t" + path + b"\0"
+            for path, mode in path_modes
+        )
+
+    def index_path_result(self, index_path=None):
+        index_path = self.index_path if index_path is None else Path(index_path)
+        return self.git_result(os.fsencode(str(index_path)) + b"\n")
+
+    def selection(self, diff_output, *path_modes):
+        responses = (
+            self.index_path_result(),
+            self.git_result(diff_output),
+            self.git_result(self.index_output(*path_modes)),
+        )
+        with mock.patch.object(
+            RUN_TESTS.subprocess,
+            "run",
+            side_effect=responses,
+        ) as run:
+            selection = RUN_TESTS.staged_test_selection(self.all_tests)
+        return selection, run
+
+    def test_cli_addition_selects_only_the_cli_test(self):
+        path = b"services/quote-cli/quote_cli.py"
+
+        selection, run = self.selection(b"A\0" + path + b"\0", (path, b"100644"))
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual((self.cli_test,), selection.test_files)
+        self.assertEqual(
+            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            run.call_args_list[1][0][0],
+        )
+        self.assertEqual(
+            ["git", "ls-files", "--stage", "-z"],
+            run.call_args_list[2][0][0],
+        )
+
+    def test_api_modification_selects_api_and_dependent_cli_tests(self):
+        path = b"services/quote-api/quotes.json"
+
+        selection, _run = self.selection(b"M\0" + path + b"\0", (path, b"100644"))
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual((self.api_test, self.cli_test), selection.test_files)
+
+    def test_multiple_known_services_have_a_deterministic_dependency_union(self):
+        api_path = b"services/quote-api/quote_api.py"
+        cli_path = b"services/quote-cli/quote_cli.py"
+        diff = b"M\0" + cli_path + b"\0A\0" + api_path + b"\0"
+
+        selection, _run = self.selection(
+            diff,
+            (cli_path, b"100755"),
+            (api_path, b"100644"),
+        )
+
+        self.assertEqual((self.api_test, self.cli_test), selection.test_files)
+
+    def test_every_non_add_modify_status_falls_back_to_the_full_suite(self):
+        cases = (
+            b"D\0services/quote-cli/quote_cli.py\0",
+            b"T\0services/quote-cli/quote_cli.py\0",
+            (
+                b"R100\0services/quote-cli/old.py\0"
+                b"services/quote-cli/new.py\0"
+            ),
+        )
+        for diff in cases:
+            with self.subTest(diff=diff):
+                with mock.patch.object(
+                    RUN_TESTS.subprocess,
+                    "run",
+                    side_effect=(
+                        self.index_path_result(),
+                        self.git_result(diff),
+                    ),
+                ) as run:
+                    selection = RUN_TESTS.staged_test_selection(self.all_tests)
+                self.assertEqual("full", selection.lane)
+                self.assertEqual(self.all_tests, selection.test_files)
+                self.assertEqual(2, run.call_count)
+
+    def test_cross_cutting_or_unknown_service_path_falls_back(self):
+        for path in (
+            b"automation/run_tests.py",
+            b"services/unknown/service.py",
+            b"services/quote-api",
+            b"docs/speed.md",
+        ):
+            with self.subTest(path=path):
+                with mock.patch.object(
+                    RUN_TESTS.subprocess,
+                    "run",
+                    side_effect=(
+                        self.index_path_result(),
+                        self.git_result(b"M\0" + path + b"\0"),
+                    ),
+                ):
+                    selection = RUN_TESTS.staged_test_selection(self.all_tests)
+                self.assertEqual("full", selection.lane)
+
+    def test_empty_unavailable_and_malformed_diffs_fall_back(self):
+        outcomes = (
+            self.git_result(b""),
+            self.git_result(b"M\0services/quote-cli/quote_cli.py"),
+            self.git_result(b"", returncode=128),
+        )
+        for outcome in outcomes:
+            with self.subTest(outcome=outcome):
+                with mock.patch.object(
+                    RUN_TESTS.subprocess,
+                    "run",
+                    side_effect=(self.index_path_result(), outcome),
+                ):
+                    selection = RUN_TESTS.staged_test_selection(self.all_tests)
+                self.assertEqual("full", selection.lane)
+
+    def test_symlink_and_gitlink_index_modes_fall_back(self):
+        path = b"services/quote-cli/quote_cli.py"
+        for mode in (b"120000", b"160000"):
+            with self.subTest(mode=mode):
+                selection, _run = self.selection(
+                    b"M\0" + path + b"\0",
+                    (path, mode),
+                )
+                self.assertEqual("full", selection.lane)
+
+    def test_malformed_or_unavailable_index_listing_falls_back(self):
+        path = b"services/quote-cli/quote_cli.py"
+        diff = self.git_result(b"M\0" + path + b"\0")
+        outcomes = (
+            self.git_result(b"100644 malformed\0"),
+            self.git_result(b"", returncode=128),
+        )
+        for outcome in outcomes:
+            with self.subTest(outcome=outcome):
+                with mock.patch.object(
+                    RUN_TESTS.subprocess,
+                    "run",
+                    side_effect=(self.index_path_result(), diff, outcome),
+                ):
+                    selection = RUN_TESTS.staged_test_selection(self.all_tests)
+                self.assertEqual("full", selection.lane)
+
+    def test_working_tree_symlink_falls_back_because_projection_uses_its_bytes(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            api_tests = repository / "services/quote-api/tests"
+            cli_tests = service / "tests"
+            external = Path(scratch) / "external.py"
+            service.mkdir(parents=True)
+            api_tests.mkdir(parents=True)
+            cli_tests.mkdir(parents=True)
+            external.write_text("print('external')\n")
+            try:
+                os.symlink(str(external), str(service / "quote_cli.py"))
+            except (NotImplementedError, OSError):
+                self.skipTest("symlinks are unavailable")
+            api_test = api_tests / "test_quote_api.py"
+            cli_test = cli_tests / "test_quote_cli.py"
+            api_test.write_text("pass\n")
+            cli_test.write_text("pass\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"stable-index")
+            path = b"services/quote-cli/quote_cli.py"
+            responses = (
+                self.index_path_result(index_path),
+                self.git_result(b"M\0" + path + b"\0"),
+                self.git_result(self.index_output((path, b"100644"))),
+            )
+
+            with mock.patch.object(
+                RUN_TESTS.subprocess,
+                "run",
+                side_effect=responses,
+            ):
+                selection = RUN_TESTS.staged_test_selection(
+                    (api_test, cli_test),
+                    repository,
+                )
+
+            self.assertEqual("full", selection.lane)
+
+    def test_missing_mapped_test_falls_back(self):
+        path = b"services/quote-api/quote_api.py"
+
+        responses = (
+            self.index_path_result(),
+            self.git_result(b"M\0" + path + b"\0"),
+            self.git_result(self.index_output((path, b"100644"))),
+        )
+        with mock.patch.object(
+            RUN_TESTS.subprocess,
+            "run",
+            side_effect=responses,
+        ):
+            selection = RUN_TESTS.staged_test_selection((self.api_test,))
+
+        self.assertEqual("full", selection.lane)
+
+    def test_newly_discovered_test_in_selected_service_is_not_skipped(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            tests = service / "tests"
+            tests.mkdir(parents=True)
+            changed = service / "quote_cli.py"
+            existing = tests / "test_quote_cli.py"
+            new_test = tests / "test_new_behavior.py"
+            changed.write_text("pass\n")
+            existing.write_text("pass\n")
+            new_test.write_text("raise AssertionError('must be selected')\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"stable-index")
+            raw_changed = b"services/quote-cli/quote_cli.py"
+            responses = (
+                self.index_path_result(index_path),
+                self.git_result(b"M\0" + raw_changed + b"\0"),
+                self.git_result(
+                    self.index_output((raw_changed, b"100644"))
+                ),
+            )
+
+            with mock.patch.object(
+                RUN_TESTS.subprocess,
+                "run",
+                side_effect=responses,
+            ):
+                selection = RUN_TESTS.staged_test_selection(
+                    (existing, new_test),
+                    repository,
+                )
+
+            self.assertEqual("staged", selection.lane)
+            self.assertEqual((new_test, existing), selection.test_files)
+
+    def test_index_change_between_git_reads_falls_back_to_full(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            tests = service / "tests"
+            tests.mkdir(parents=True)
+            changed = service / "quote_cli.py"
+            test = tests / "test_quote_cli.py"
+            changed.write_text("pass\n")
+            test.write_text("pass\n")
+            index_path = repository / "index.fixture"
+            index_path.write_bytes(b"before")
+            raw_changed = b"services/quote-cli/quote_cli.py"
+            responses = iter(
+                (
+                    self.index_path_result(index_path),
+                    self.git_result(b"M\0" + raw_changed + b"\0"),
+                    self.git_result(
+                        self.index_output((raw_changed, b"100644"))
+                    ),
+                )
+            )
+
+            def run_with_index_change(*_args, **_kwargs):
+                result = next(responses)
+                if result.args == ["git"] and result.stdout.startswith(b"100644 "):
+                    index_path.write_bytes(b"after")
+                return result
+
+            with mock.patch.object(
+                RUN_TESTS.subprocess,
+                "run",
+                side_effect=run_with_index_change,
+            ):
+                selection = RUN_TESTS.staged_test_selection((test,), repository)
+
+            self.assertEqual("full", selection.lane)
+            self.assertIn("index changed", selection.reason)
+
+    def test_default_interface_is_the_full_suite(self):
+        options = RUN_TESTS.parse_arguments(())
+        selection = RUN_TESTS.full_selection(self.all_tests, "full suite requested")
+
+        self.assertFalse(options.staged)
+        self.assertEqual("full", selection.lane)
+        self.assertEqual(self.all_tests, selection.test_files)
+
+    def test_pre_commit_requests_the_staged_lane(self):
+        hook = (RUN_TESTS.REPO / "automation/hooks/pre-commit").read_text()
+
+        self.assertIn('automation/run_tests.py" --staged', hook)
+
+    def test_name_status_parser_handles_nul_delimited_special_paths(self):
+        entries = RUN_TESTS.parse_staged_name_status(
+            b"M\0services/quote-cli/line\nname.py\0"
+        )
+
+        self.assertEqual(
+            (("M", (b"services/quote-cli/line\nname.py",)),),
+            entries,
+        )
+
+
 class RunTestsIsolationTests(unittest.TestCase):
     def test_child_environment_removes_every_git_local_variable(self):
         factory = getattr(RUN_TESTS, "isolated_test_environment", None)

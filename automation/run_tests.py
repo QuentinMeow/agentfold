@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""Run every repository test file, each in its own process.
+"""Run selected repository test files, each in its own process.
 
 Discovery covers services, canonical skills, and automation. Each child receives a
 sanitized Git environment and a fresh metadata-free projection outside every existing
 repository's discovery path. Subprocess-per-file keeps hyphenated folders
 importable-free and any test crash isolated. This is not a sandbox against deliberate
-absolute paths. Exit 0 only if every file passes.
+absolute paths. The default is always the full suite. ``--staged`` selects a narrow
+service lane only when every staged entry is known-safe; uncertainty falls back to the
+full suite. The projection contains working-tree bytes, not an index snapshot. Exit 0
+only if every selected file passes.
 """
+import argparse
+import hashlib
 import os
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from collections import namedtuple
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -39,6 +46,281 @@ GIT_IDENTITY_CONFIG = (
 )
 REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
 PROJECTED_REPOSITORY_ENVIRONMENT = "AGENTFOLD_TEST_VIEW_ROOT"
+REGULAR_INDEX_MODES = frozenset((b"100644", b"100755"))
+SERVICE_TEST_DEPENDENCIES = (
+    (
+        b"services/quote-api/",
+        ("quote-api", "quote-cli"),
+    ),
+    (
+        b"services/quote-cli/",
+        ("quote-cli",),
+    ),
+)
+TestSelection = namedtuple("TestSelection", "lane reason test_files")
+
+
+def parse_arguments(arguments):
+    """Parse the deliberately small runner interface."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="select a conservative staged-change lane, falling back to full",
+    )
+    return parser.parse_args(arguments)
+
+
+def parse_staged_name_status(output):
+    """Parse ``git diff --name-status -z`` output without line delimiters."""
+    if not output or not output.endswith(b"\0"):
+        raise ValueError("empty or unterminated staged diff")
+    fields = output[:-1].split(b"\0")
+    entries = []
+    index = 0
+    while index < len(fields):
+        raw_status = fields[index]
+        index += 1
+        try:
+            status = raw_status.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ValueError("non-ASCII staged status") from error
+        if status in ("A", "D", "M", "T", "U", "X", "B"):
+            path_count = 1
+        elif (
+            len(status) > 1
+            and status[0] in ("C", "R")
+            and status[1:].isdigit()
+            and 0 <= int(status[1:]) <= 100
+        ):
+            path_count = 2
+        else:
+            raise ValueError("unknown staged status")
+        if index + path_count > len(fields):
+            raise ValueError("staged status is missing a path")
+        paths = tuple(fields[index:index + path_count])
+        if any(not path for path in paths):
+            raise ValueError("staged path is empty")
+        entries.append((status, paths))
+        index += path_count
+    return tuple(entries)
+
+
+def parse_index_entries(output):
+    """Parse ``git ls-files --stage -z`` into path-to-entry mappings."""
+    if output and not output.endswith(b"\0"):
+        raise ValueError("unterminated index listing")
+    entries = {}
+    for record in output[:-1].split(b"\0") if output else ():
+        try:
+            header, path = record.split(b"\t", 1)
+            mode, object_id, stage = header.split(b" ")
+        except ValueError as error:
+            raise ValueError("malformed index entry") from error
+        if (
+            not path
+            or len(mode) != 6
+            or any(byte not in b"01234567" for byte in mode)
+            or not object_id
+            or any(byte not in b"0123456789abcdefABCDEF" for byte in object_id)
+            or stage not in (b"0", b"1", b"2", b"3")
+        ):
+            raise ValueError("malformed index entry")
+        entries.setdefault(path, []).append((mode, stage))
+    return entries
+
+
+def full_selection(all_test_files, reason):
+    """Return the fail-closed full-suite choice."""
+    return TestSelection("full", reason, tuple(all_test_files))
+
+
+def selected_git_index_path(repository, environment):
+    """Resolve the exact index file used by selector Git commands."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-path", "index"],
+        cwd=repository,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        raise RuntimeError("could not resolve the selected Git index")
+    raw_path = result.stdout.rstrip(b"\n")
+    if not raw_path or b"\0" in raw_path or b"\n" in raw_path:
+        raise RuntimeError("selected Git index path is malformed")
+    path = Path(os.fsdecode(raw_path))
+    return path if path.is_absolute() else repository / path
+
+
+def index_fingerprint(index_path):
+    """Hash the selected index so mixed Git reads cannot approve a narrow lane."""
+    try:
+        return hashlib.sha256(index_path.read_bytes()).digest()
+    except OSError as error:
+        raise RuntimeError("could not fingerprint the selected Git index") from error
+
+
+def discovered_service_tests(all_test_files, services, repository):
+    """Return every discovered test owned by the requested service closure."""
+    tests_by_service = {service: [] for service in services}
+    for test in all_test_files:
+        try:
+            relative = test.relative_to(repository)
+        except ValueError:
+            continue
+        if (
+            len(relative.parts) == 4
+            and relative.parts[0] == "services"
+            and relative.parts[1] in tests_by_service
+            and relative.parts[2] == "tests"
+            and relative.name.startswith("test_")
+            and relative.suffix == ".py"
+        ):
+            tests_by_service[relative.parts[1]].append(test)
+    if any(not tests for tests in tests_by_service.values()):
+        return ()
+    return tuple(sorted({test for tests in tests_by_service.values() for test in tests}))
+
+
+def staged_test_selection(all_test_files, repository=None):
+    """Map a wholly known staged service diff to its conservative test closure."""
+    repository = REPO if repository is None else Path(repository)
+    selector_environment = dict(os.environ)
+    try:
+        index_path = selected_git_index_path(repository, selector_environment)
+        initial_index_fingerprint = index_fingerprint(index_path)
+        diff = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            cwd=repository,
+            env=selector_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, RuntimeError):
+        return full_selection(all_test_files, "staged index or diff unavailable")
+    if diff.returncode:
+        return full_selection(all_test_files, "staged diff unavailable")
+    try:
+        entries = parse_staged_name_status(diff.stdout)
+    except (TypeError, ValueError):
+        return full_selection(all_test_files, "staged diff empty or malformed")
+
+    selected_services = set()
+    changed_paths = []
+    for status, paths in entries:
+        if status not in ("A", "M"):
+            return full_selection(
+                all_test_files,
+                "staged change has a non-add/modify status",
+            )
+        path = paths[0]
+        dependencies = None
+        for prefix, services in SERVICE_TEST_DEPENDENCIES:
+            if path.startswith(prefix) and len(path) > len(prefix):
+                dependencies = services
+                break
+        if dependencies is None:
+            return full_selection(
+                all_test_files,
+                "staged path is outside the known narrow service scopes",
+            )
+        changed_paths.append(path)
+        selected_services.update(dependencies)
+
+    try:
+        index_result = subprocess.run(
+            ["git", "ls-files", "--stage", "-z"],
+            cwd=repository,
+            env=selector_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError:
+        return full_selection(all_test_files, "index entry types unavailable")
+    if index_result.returncode:
+        return full_selection(all_test_files, "index entry types unavailable")
+    try:
+        index_entries = parse_index_entries(index_result.stdout)
+    except (TypeError, ValueError):
+        return full_selection(all_test_files, "index entry listing is malformed")
+    for raw_path in sorted(changed_paths):
+        path_entries = index_entries.get(raw_path)
+        if (
+            path_entries is None
+            or len(path_entries) != 1
+            or path_entries[0][0] not in REGULAR_INDEX_MODES
+            or path_entries[0][1] != b"0"
+        ):
+            return full_selection(
+                all_test_files,
+                "staged path is not one regular index entry",
+            )
+        working_path = repository / Path(os.fsdecode(raw_path))
+        try:
+            unsafe_working_path = (
+                path_crosses_symlink(working_path, repository)
+                or not working_path.is_file()
+            )
+        except (OSError, ValueError):
+            unsafe_working_path = True
+        if unsafe_working_path:
+            return full_selection(
+                all_test_files,
+                "working-tree bytes are unavailable or cross a symlink",
+            )
+
+    selected_tests = discovered_service_tests(
+        all_test_files,
+        selected_services,
+        repository,
+    )
+    if not selected_tests:
+        return full_selection(
+            all_test_files,
+            "a mapped service has no complete discovered test scope",
+        )
+    for test in selected_tests:
+        try:
+            unavailable_test = (
+                path_crosses_symlink(test, repository)
+                or not test.is_file()
+            )
+        except (OSError, ValueError):
+            unavailable_test = True
+        if unavailable_test:
+            return full_selection(
+                all_test_files,
+                "a mapped test is unavailable or crosses a symlink",
+            )
+    try:
+        stable_index = index_fingerprint(index_path) == initial_index_fingerprint
+    except RuntimeError:
+        stable_index = False
+    if not stable_index:
+        return full_selection(
+            all_test_files,
+            "Git index changed while selecting staged tests",
+        )
+    return TestSelection(
+        "staged",
+        "all staged paths map to known service dependencies",
+        selected_tests,
+    )
+
+
+def report_selection(selection, repository=None):
+    """Print stable evidence for the lane chosen before tests begin."""
+    repository = REPO if repository is None else Path(repository)
+    print(f"test lane: {selection.lane}")
+    print(f"test reason: {selection.reason}")
+    print("selected test files:")
+    if selection.test_files:
+        for test in selection.test_files:
+            print(f"  {test.relative_to(repository)}")
+    else:
+        print("  (none)")
+    sys.stdout.flush()
 
 
 def git_local_environment_names():
@@ -392,15 +674,25 @@ def materialize_repository_view(
     seen_repositories.remove(repository)
 
 
-def main():
+def main(arguments=()):
+    started = time.monotonic()
+    options = parse_arguments(arguments)
+    all_test_files = repository_test_files()
+    selection = (
+        staged_test_selection(all_test_files)
+        if options.staged
+        else full_selection(all_test_files, "full suite requested")
+    )
+    report_selection(selection)
+    test_files = selection.test_files
+    if not test_files:
+        print("no repository tests found")
+        print(f"test elapsed: {time.monotonic() - started:.2f}s")
+        return 0
     configured_identity = configured_git_identity()
     child_environment = isolated_test_environment()
     for name, value in configured_identity.items():
         child_environment.setdefault(name, value)
-    test_files = repository_test_files()
-    if not test_files:
-        print("no repository tests found")
-        return 0
     failed = []
     with tempfile.TemporaryDirectory(prefix="agentfold-tests-") as scratch:
         scratch_root = Path(scratch).resolve()
@@ -425,8 +717,9 @@ def main():
     for rel in failed:
         print(f"FAIL {rel}")
     print(f"tests: {len(test_files) - len(failed)}/{len(test_files)} files passed")
+    print(f"test elapsed: {time.monotonic() - started:.2f}s")
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
