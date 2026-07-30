@@ -205,3 +205,36 @@ reconcile: 0 finding(s)
 $ python3 automation/check_core_scope.py --staged
 core-scope: pass (3 core path(s), task 2026-07-29-run-repository-tests-in-parallel; independent review manual; not invoked)
 ```
+
+## Re-measured on the combined stack, 2026-07-30
+
+The branch was rebased onto the honest-reporting and background-maintenance branches,
+since all three touch the runner. Four full suites, alternating worker counts inside one
+session, which is the only comparison this host supports:
+
+```
+$ for j in 1 8 1 8; do python3 automation/run_tests.py --jobs $j; done
+jobs=1  tests: 11/11 files passed  test elapsed: 125.53s
+jobs=8  tests: 11/11 files passed  test elapsed:  36.43s
+jobs=1  tests: 11/11 files passed  test elapsed: 124.01s
+jobs=8  tests: 11/11 files passed  test elapsed:  40.19s
+```
+
+Means 124.77s against 38.31s, a ratio of **3.26x**, with every file passing in all four
+runs. An independent profile of the same repository measured 3.27x for an interleaved
+serial-versus-four-shard comparison, arrived at by a different method.
+
+CPU for one eight-worker run:
+
+```
+$ /usr/bin/time -p python3 automation/run_tests.py --jobs 8
+tests: 11/11 files passed
+test elapsed: 39.17s
+real 39.29
+user 112.84
+sys 124.44
+```
+
+System time still exceeds user time, so the suite remains bound by process creation even
+when the wall clock is divided across cores. Sharding divides that cost; it does not
+change its nature.
