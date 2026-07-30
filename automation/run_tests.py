@@ -2,7 +2,8 @@
 """Run selected repository test files, each in its own process.
 
 Discovery covers services, canonical skills, and automation. Each child receives a
-sanitized Git environment and a fresh metadata-free projection outside every existing
+sanitized Git environment, an empty ``HOME`` and XDG config root so no caller Git
+configuration is readable, and a fresh metadata-free projection outside every existing
 repository's discovery path. Subprocess-per-file keeps hyphenated folders
 importable-free and any test crash isolated. This is not a sandbox against deliberate
 absolute paths. The default is always the full suite. ``--staged`` selects a narrow
@@ -13,7 +14,6 @@ only if every selected file passes.
 import argparse
 import hashlib
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -44,7 +44,6 @@ GIT_IDENTITY_CONFIG = (
     ("user.name", "GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"),
     ("user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"),
 )
-REAL_GIT_ENVIRONMENT = "AGENTFOLD_TEST_REAL_GIT"
 PROJECTED_REPOSITORY_ENVIRONMENT = "AGENTFOLD_TEST_VIEW_ROOT"
 REGULAR_INDEX_MODES = frozenset((b"100644", b"100755"))
 SERVICE_TEST_DEPENDENCIES = (
@@ -545,45 +544,30 @@ def reject_projected_symlink_traversal(destination, relative_path):
             )
 
 
-def install_isolated_git_wrapper(scratch_root, child_environment):
-    """Put Git behind a config-isolated wrapper without changing other tools' HOME."""
-    git_executable = child_environment.get(REAL_GIT_ENVIRONMENT)
-    if git_executable is None:
-        git_executable = shutil.which(
-            "git",
-            path=child_environment.get("PATH"),
-        )
+def install_isolated_git_configuration(scratch_root, child_environment):
+    """Point child Git configuration at empty scratch state, not the caller's.
+
+    Isolation is environment-only: empty ``HOME`` and ``XDG_CONFIG_HOME`` mean Git finds
+    no global configuration on any version, ``GIT_CONFIG_NOSYSTEM`` blocks system
+    configuration, and ``GIT_CONFIG_GLOBAL`` repeats the global block on Git 2.32+.
+    ``git`` stays the real binary on ``PATH``: an interposed shell wrapper doubled the
+    process count of every Git call the suite makes, which is most of its wall time.
+    """
+    git_executable = shutil.which("git", path=child_environment.get("PATH"))
     if (
         not git_executable
         or not Path(git_executable).is_file()
         or not os.access(git_executable, os.X_OK)
     ):
         raise RuntimeError("could not locate Git for the isolated test environment")
-    git_executable = str(Path(git_executable).resolve())
-    wrapper_directory = scratch_root / "git-wrapper"
     isolated_home = scratch_root / "git-home"
     isolated_xdg_config = scratch_root / "git-xdg-config"
-    wrapper_directory.mkdir(parents=True)
-    isolated_home.mkdir()
+    isolated_home.mkdir(parents=True)
     isolated_xdg_config.mkdir()
-    wrapper = wrapper_directory / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        f"HOME={shlex.quote(str(isolated_home))} "
-        f"XDG_CONFIG_HOME={shlex.quote(str(isolated_xdg_config))} "
-        "GIT_CONFIG_NOSYSTEM=1 "
-        f"exec {shlex.quote(git_executable)} \"$@\"\n"
-    )
-    wrapper.chmod(0o700)
-    original_path = child_environment.get("PATH", "")
-    child_environment["PATH"] = (
-        str(wrapper_directory)
-        if not original_path
-        else str(wrapper_directory) + os.pathsep + original_path
-    )
+    child_environment["HOME"] = str(isolated_home)
+    child_environment["XDG_CONFIG_HOME"] = str(isolated_xdg_config)
     child_environment["GIT_CONFIG_GLOBAL"] = os.devnull
     child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
-    child_environment[REAL_GIT_ENVIRONMENT] = git_executable
 
 
 def seal_bare_repository_view(destination, child_environment):
@@ -697,7 +681,7 @@ def main(arguments=()):
     with tempfile.TemporaryDirectory(prefix="agentfold-tests-") as scratch:
         scratch_root = Path(scratch).resolve()
         validate_scratch_root(scratch_root, child_environment)
-        install_isolated_git_wrapper(scratch_root, child_environment)
+        install_isolated_git_configuration(scratch_root, child_environment)
         child_environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
         test_cwd = scratch_root / "view"
         relative_tests = tuple(test.relative_to(REPO) for test in test_files)

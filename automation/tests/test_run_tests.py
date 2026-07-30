@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -810,33 +811,138 @@ class RunTestsIsolationTests(unittest.TestCase):
                     support,
                 )
 
-    def test_nested_runner_wrapper_reuses_the_original_git_executable(self):
+    def test_nested_runner_isolation_stacks_no_interposed_git_on_path(self):
         with tempfile.TemporaryDirectory() as scratch:
-            scratch_root = Path(scratch)
-            first_environment = {"PATH": os.environ.get("PATH", "")}
-            RUN_TESTS.install_isolated_git_wrapper(
+            scratch_root = Path(scratch).resolve()
+            caller_path = os.environ.get("PATH", "")
+            first_environment = {"PATH": caller_path}
+            RUN_TESTS.install_isolated_git_configuration(
                 scratch_root / "first",
                 first_environment,
             )
-            original_git = first_environment[RUN_TESTS.REAL_GIT_ENVIRONMENT]
-            first_wrapper = first_environment["PATH"].split(os.pathsep, 1)[0]
+            original_git = shutil.which("git", path=first_environment["PATH"])
 
             second_environment = dict(first_environment)
-            RUN_TESTS.install_isolated_git_wrapper(
+            RUN_TESTS.install_isolated_git_configuration(
                 scratch_root / "second",
                 second_environment,
             )
 
+            self.assertEqual(caller_path, first_environment["PATH"])
+            self.assertEqual(caller_path, second_environment["PATH"])
             self.assertEqual(
                 original_git,
-                second_environment[RUN_TESTS.REAL_GIT_ENVIRONMENT],
+                shutil.which("git", path=second_environment["PATH"]),
             )
-            second_wrapper = second_environment["PATH"].split(os.pathsep, 1)[0]
-            self.assertNotEqual(first_wrapper, second_wrapper)
-            self.assertIn(
-                original_git,
-                (Path(second_wrapper) / "git").read_text(),
+            resolved = Path(original_git).resolve()
+            self.assertTrue(os.access(str(resolved), os.X_OK))
+            self.assertFalse(
+                str(resolved).startswith(str(scratch_root)),
+                "a nested runner must resolve Git outside every scratch root",
             )
+            self.assertEqual([], sorted(scratch_root.rglob("git")))
+            for name in ("HOME", "XDG_CONFIG_HOME"):
+                first = Path(first_environment[name])
+                second = Path(second_environment[name])
+                self.assertNotEqual(first, second)
+                self.assertEqual(scratch_root / "first", first.parent)
+                self.assertEqual(scratch_root / "second", second.parent)
+                self.assertEqual([], sorted(second.iterdir()))
+
+    def test_isolated_child_reads_no_caller_git_configuration(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch).resolve()
+            caller_home = root / "caller-home"
+            caller_xdg = root / "caller-xdg"
+            (caller_xdg / "git").mkdir(parents=True)
+            caller_home.mkdir()
+            (caller_home / ".gitconfig").write_text(
+                "[user]\n\tname = Caller Home Identity\n"
+            )
+            (caller_xdg / "git" / "config").write_text(
+                "[user]\n\temail = caller-xdg@example.invalid\n"
+            )
+            caller_environment = {
+                name: value
+                for name, value in os.environ.items()
+                if not name.startswith("GIT_")
+            }
+            caller_environment["HOME"] = str(caller_home)
+            caller_environment["XDG_CONFIG_HOME"] = str(caller_xdg)
+            child_environment = dict(caller_environment)
+            RUN_TESTS.install_isolated_git_configuration(
+                root / "runner-scratch",
+                child_environment,
+            )
+
+            def read(*arguments, environment):
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=str(root),
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                )
+
+            self.assertEqual(
+                "Caller Home Identity",
+                read(
+                    "config",
+                    "--get",
+                    "user.name",
+                    environment=caller_environment,
+                ).stdout.strip(),
+            )
+            self.assertEqual(
+                "caller-xdg@example.invalid",
+                read(
+                    "config",
+                    "--get",
+                    "user.email",
+                    environment=caller_environment,
+                ).stdout.strip(),
+            )
+            for key in ("user.name", "user.email"):
+                isolated = read(
+                    "config",
+                    "--get",
+                    key,
+                    environment=child_environment,
+                )
+                self.assertEqual(1, isolated.returncode, isolated.stderr)
+                self.assertEqual("", isolated.stdout)
+            listing = read(
+                "config",
+                "--list",
+                "--show-origin",
+                environment=child_environment,
+            )
+            self.assertNotIn(str(caller_home), listing.stdout)
+            self.assertNotIn(str(caller_xdg), listing.stdout)
+            system = read("config", "--system", "--list", environment=caller_environment)
+            names = [
+                line.split("=", 1)[0]
+                for line in system.stdout.splitlines()
+                if "=" in line and not line.startswith("include.")
+            ]
+            for name in [name for name in names if names.count(name) == 1]:
+                if read(
+                    "config",
+                    "--get",
+                    name,
+                    environment=caller_environment,
+                ).returncode:
+                    continue
+                isolated = read(
+                    "config",
+                    "--get",
+                    name,
+                    environment=child_environment,
+                )
+                self.assertEqual(1, isolated.returncode, isolated.stderr)
+                self.assertEqual("", isolated.stdout)
+                break
 
     def test_main_passes_the_isolated_environment_to_each_test(self):
         child_environment = {
@@ -896,8 +1002,20 @@ class RunTestsIsolationTests(unittest.TestCase):
         )
         self.assertEqual(os.devnull, child_environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", child_environment["GIT_CONFIG_NOSYSTEM"])
-        self.assertEqual("/caller/home", child_environment["HOME"])
-        self.assertEqual("/caller/xdg", child_environment["XDG_CONFIG_HOME"])
+        scratch_root = test_cwd.parent
+        self.assertEqual(
+            str(scratch_root / "git-home"),
+            child_environment["HOME"],
+        )
+        self.assertEqual(
+            str(scratch_root / "git-xdg-config"),
+            child_environment["XDG_CONFIG_HOME"],
+        )
+        self.assertEqual(
+            os.environ.get("PATH", ""),
+            child_environment["PATH"],
+            "Git must resolve from the caller's PATH, never an interposed wrapper",
+        )
 
     def test_main_materializes_one_view_for_every_discovered_test(self):
         child_environment = {"PATH": os.environ.get("PATH", "")}
