@@ -380,6 +380,30 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
 
+    def test_backticked_absolute_path_is_machine_specific_not_a_link(self):
+        """The verdict must not depend on the filesystem of whoever runs the check.
+
+        Resolving an absolute path falls through to probing the host, so a record
+        naming a real local binary passed on the machine that wrote it and failed on
+        the Linux runner. Both paths below exist on the runner and neither exists on
+        every machine, which is exactly why existence is the wrong question.
+        """
+        for absolute in ("/usr/local/git/bin/git", "/opt/homebrew/bin/git"):
+            with self.subTest(absolute=absolute), self.repo() as root:
+                self.write(root, "docs/design.md", f"# Design\n\nRuns `{absolute}`.\n")
+                messages = self.messages(RECONCILE.check_links())
+
+                self.assertEqual(1, len(messages), messages)
+                self.assertIn("absolute path", messages[0])
+                self.assertIn(absolute, messages[0])
+
+    def test_relative_path_that_exists_is_still_a_valid_link(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n\nSee `docs/other.md`.\n")
+            self.write(root, "docs/other.md", "# Other\n")
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
     def test_code_escaped_indented_and_malformed_links_are_not_context(self):
         disguises = (
             "`[design](docs/design.md)`",

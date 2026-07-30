@@ -36,7 +36,7 @@ What is true today, mapped to the desired-state lines.
   first event. Pull requests opened after that merged are green on both.
   No template↔check drift detection yet.
 - **Test gate cost (2026-07-30)**: three measured changes are merged. The runner no
-  longer interposes a `/bin/sh` script named `git` on the child path, so a Git call is
+  longer interposes a /bin/sh script named `git` on the child path, so a Git call is
   one process instead of two; the reconciler reads blob bytes through one reusable
   `git cat-file --batch` reader and caches facts under immutable object IDs; and
   `--staged` maps every staged path through an input-ownership table, so a records-only

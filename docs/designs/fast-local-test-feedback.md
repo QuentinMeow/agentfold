@@ -2,7 +2,7 @@
 
 **Status:** proposal (not an accepted decision — see `docs/designs/AGENTS.md`)
 **Measured:** 2026-07-29, by claude, on one macOS host (8 physical / 16 logical cores,
-git 2.23.0, `python3` 3.7.6 on `PATH`, 3.9.6 at `/usr/bin`).
+git 2.23.0, `python3` 3.7.6 on `PATH`, 3.9.6 at /usr/bin).
 
 ## The invariant
 
@@ -28,7 +28,7 @@ Two properties must survive any change here:
 | projection + isolation machinery | **0.21-0.79s (~0.25%)** | instrumented |
 | `git init`+`add`+`commit` fixture | 53-79ms | micro-benchmark |
 | `shutil.copytree` of a built repo | **17ms** (minimal template 5.85ms) | micro-benchmark |
-| CPU split | `sys` **exceeds** `user` in every run | `/usr/bin/time` |
+| CPU split | `sys` **exceeds** `user` in every run | /usr/bin/time |
 
 **The suite is `fork`/`exec`-bound.** It is not compute-bound, not disk-bound, and the
 isolation machinery is not the cost.

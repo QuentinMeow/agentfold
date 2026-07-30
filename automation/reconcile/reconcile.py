@@ -20,7 +20,7 @@ import hashlib
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 AUTOMATION = Path(__file__).resolve().parents[1]
 if str(AUTOMATION) not in sys.path:
@@ -7156,6 +7156,21 @@ def check_links():
             if cand.count("/") < 1 or (cand.count("/") == 1 and cand.endswith("/")):
                 continue
             if not re.fullmatch(r"[\w./-]+", cand):
+                continue
+            if PurePosixPath(cand).is_absolute():
+                # An absolute path cannot name a repository artifact, so resolving one
+                # falls through to probing the host filesystem — the only part of this
+                # check whose answer depends on the machine running it. Two CI failures
+                # came from records that named a real local binary: green on the author's
+                # machine, red on the runner. Decide it here so the verdict is the same
+                # everywhere and lands on the commit that introduces it.
+                yield Finding(
+                    "link-check", rel,
+                    f"`{cand}` is an absolute path, so it names a machine and not "
+                    "this repository",
+                    "unquote it — backticks assert a repository path, and this one "
+                    "resolves differently on each machine",
+                )
                 continue
             try:
                 root_target = REPO / cand
