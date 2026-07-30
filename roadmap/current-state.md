@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-25
+**Last-updated:** 2026-07-30
 
 What is true today, mapped to the desired-state lines.
 
@@ -34,6 +34,17 @@ What is true today, mapped to the desired-state lines.
   request, because the merge revision the payload has not computed yet is read as empty
   or replaced by the base tip — filed as `2026-07-25-fix-pull-request-admission-event-race`.
   No template↔check drift detection yet.
+- **Test gate cost (2026-07-30)**: three measured changes are merged. The runner no
+  longer interposes a `/bin/sh` script named `git` on the child path, so a Git call is
+  one process instead of two; the reconciler reads blob bytes through one reusable
+  `git cat-file --batch` reader and caches facts under immutable object IDs; and
+  `--staged` maps every staged path through an input-ownership table, so a records-only
+  commit selects no test at all and names every file it skipped. A records-only
+  pre-commit run measures 0.02s in the test step. The complete local suite is still
+  ~199s with system time above user time, so it remains bound by process creation
+  rather than computation, and its cost still scales with the whole suite rather than
+  with the change. Investigation and remaining levers:
+  `docs/designs/fast-local-test-feedback.md`.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet. Each treats the message queue as the
