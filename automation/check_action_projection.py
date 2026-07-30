@@ -2,6 +2,8 @@
 """Require external action sections to project live queue items."""
 import argparse
 from collections import Counter
+import contextlib
+import functools
 import json
 import os
 import re
@@ -1733,27 +1735,187 @@ def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
     return next(iter(task_ids), None)
 
 
-def candidate_record(path, repo=REPO, candidate_revision=None):
-    if candidate_revision is None:
-        output = git_output(["ls-files", "--stage", "-z", "--", path], repo=repo)
-    else:
-        output = git_output(
-            [
-                "--no-replace-objects", "ls-tree", "-z",
-                candidate_revision, "--", path,
-            ],
-            repo=repo,
+class RepositoryView:
+    """One read of one repository view, answering every path in a run.
+
+    The index and a candidate tree are each immutable for the length of a
+    single check run, so asking Git about one path at a time buys nothing and
+    costs one process per question. Reading the whole view once and matching
+    paths in memory returns the same verdicts: a path absent from the listing
+    is the pathspec that matched nothing, and a path carrying more than one
+    record is the merge-staged entry the per-path read also refused.
+    """
+
+    def __init__(self, repo=REPO, candidate_revision=None):
+        self.repo = repo
+        self.candidate_revision = candidate_revision
+        self._records = None
+        self._paths = None
+        self._sizes = None
+        self._texts = {}
+
+    def _load(self):
+        if self._records is not None:
+            return
+        if self.candidate_revision is None:
+            output = git_output(["ls-files", "--stage", "-z"], repo=self.repo)
+        else:
+            output = git_output(
+                [
+                    "--no-replace-objects", "ls-tree", "-r", "-z",
+                    self.candidate_revision,
+                ],
+                repo=self.repo,
+            )
+        records = {}
+        paths = []
+        for record in output.split(b"\0"):
+            if not record:
+                continue
+            metadata, separator, encoded_path = record.partition(b"\t")
+            parts = metadata.decode("ascii", errors="replace").split()
+            if not separator or len(parts) != 3:
+                continue
+            path = encoded_path.decode("utf-8", errors="surrogateescape")
+            records.setdefault(path, []).append(parts)
+            paths.append(path)
+        self._records = records
+        self._paths = paths
+
+    def record(self, path):
+        """Return the one record naming exactly `path`, or None."""
+        self._load()
+        found = self._records.get(path)
+        return found[0] if found is not None and len(found) == 1 else None
+
+    def paths_under(self, prefix):
+        """List every recorded path a literal directory pathspec would match.
+
+        An empty prefix is refused rather than read as "everything": Git
+        refuses it too, and a snapshot must not invent a meaning the per-path
+        read never had.
+        """
+        if not prefix:
+            raise ValueError("a candidate path prefix must not be empty")
+        self._load()
+        return [
+            path for path in self._paths
+            if path == prefix or path.startswith(prefix + "/")
+        ]
+
+    def text(self, path):
+        """Return one path's decoded blob, read once per run.
+
+        Several checks read the same queue item for different fields, so the
+        blob a run needs is usually asked for more than once.
+        """
+        if path not in self._texts:
+            object_name = (
+                f":{path}" if self.candidate_revision is None
+                else f"{self.candidate_revision}:{path}"
+            )
+            output = git_output(
+                ["--no-replace-objects", "show", object_name], repo=self.repo
+            )
+            try:
+                self._texts[path] = output.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise RuntimeError(f"`{path}` is not valid UTF-8") from error
+        return self._texts[path]
+
+    def size(self, object_id):
+        self._load()
+        if self._sizes is None:
+            self._sizes = self._read_sizes()
+        if object_id not in self._sizes:
+            raise RuntimeError("Git returned an invalid candidate object size")
+        return self._sizes[object_id]
+
+    def _read_sizes(self):
+        """Read every recorded object's size in one batch instead of one each."""
+        object_ids = []
+        seen = set()
+        for parts_list in self._records.values():
+            for parts in parts_list:
+                object_id = (
+                    parts[2] if self.candidate_revision is not None else parts[1]
+                )
+                if object_id not in seen:
+                    seen.add(object_id)
+                    object_ids.append(object_id)
+        if not object_ids:
+            return {}
+        result = subprocess.run(
+            ["git", "--no-replace-objects", "cat-file", "--batch-check"],
+            cwd=self.repo,
+            input=("\n".join(object_ids) + "\n").encode("ascii"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
         )
-    records = [record for record in output.split(b"\0") if record]
-    if len(records) != 1:
-        return None
-    metadata, separator, encoded_path = records[0].partition(b"\t")
-    parts = metadata.decode("ascii", errors="replace").split()
-    if not (
-        separator
-        and encoded_path.decode("utf-8", errors="surrogateescape") == path
-        and len(parts) == 3
-    ):
+        if result.returncode:
+            raise RuntimeError(
+                result.stderr.decode("utf-8", errors="replace").strip()
+                or "could not inspect the Git candidate"
+            )
+        sizes = {}
+        for line in result.stdout.decode("ascii", errors="replace").splitlines():
+            fields = line.split()
+            if len(fields) != 3:
+                continue  # a `missing` line names no size
+            try:
+                sizes[fields[0]] = int(fields[2])
+            except ValueError:
+                continue
+        return sizes
+
+
+_REPOSITORY_VIEWS = None
+
+
+@contextlib.contextmanager
+def repository_views():
+    """Share one read of each repository view for the length of one run.
+
+    Reentrant, so a caller that already opened a run is never handed a second
+    view that could disagree with the first. Outside every scope each lookup
+    reads Git again: a snapshot must never answer for a repository that has
+    moved on since it was taken.
+    """
+    global _REPOSITORY_VIEWS
+    if _REPOSITORY_VIEWS is not None:
+        yield
+        return
+    _REPOSITORY_VIEWS = {}
+    try:
+        yield
+    finally:
+        _REPOSITORY_VIEWS = None
+
+
+def repository_view(repo=REPO, candidate_revision=None):
+    if _REPOSITORY_VIEWS is None:
+        return RepositoryView(repo, candidate_revision)
+    key = (str(repo), candidate_revision)
+    view = _REPOSITORY_VIEWS.get(key)
+    if view is None:
+        view = RepositoryView(repo, candidate_revision)
+        _REPOSITORY_VIEWS[key] = view
+    return view
+
+
+def within_one_repository_view(function):
+    """Run `function` inside one shared repository-view scope."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        with repository_views():
+            return function(*args, **kwargs)
+    return wrapper
+
+
+def candidate_record(path, repo=REPO, candidate_revision=None):
+    parts = repository_view(repo, candidate_revision).record(path)
+    if parts is None:
         return None
     if candidate_revision is not None and parts[1] != "blob":
         return None
@@ -1769,32 +1931,11 @@ def tracked_regular_file(path, repo=REPO, candidate_revision=None):
     if candidate_revision is None and parts[2] != "0":
         return False
     object_id = parts[2] if candidate_revision is not None else parts[1]
-    size = git_output(
-        ["--no-replace-objects", "cat-file", "-s", object_id],
-        repo=repo,
-    )
-    try:
-        return int(size.strip()) > 0
-    except ValueError as error:
-        raise RuntimeError("Git returned an invalid candidate object size") from error
+    return repository_view(repo, candidate_revision).size(object_id) > 0
 
 
 def candidate_paths(prefix, repo=REPO, candidate_revision=None):
-    if candidate_revision is None:
-        output = git_output(["ls-files", "-z", "--", prefix], repo=repo)
-    else:
-        output = git_output(
-            [
-                "--no-replace-objects", "ls-tree", "-r", "--name-only", "-z",
-                candidate_revision, "--", prefix,
-            ],
-            repo=repo,
-        )
-    return [
-        record.decode("utf-8", errors="surrogateescape")
-        for record in output.split(b"\0")
-        if record
-    ]
+    return repository_view(repo, candidate_revision).paths_under(prefix)
 
 
 def live_queue_paths(
@@ -1839,16 +1980,7 @@ def normalized_task_id(value):
 
 
 def candidate_text(path, repo=REPO, candidate_revision=None):
-    object_name = f":{path}" if candidate_revision is None \
-        else f"{candidate_revision}:{path}"
-    output = git_output(
-        ["--no-replace-objects", "show", object_name],
-        repo=repo,
-    )
-    try:
-        return output.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise RuntimeError(f"`{path}` is not valid UTF-8") from error
+    return repository_view(repo, candidate_revision).text(path)
 
 
 def canonical_queue_action(path, repo=REPO, candidate_revision=None):
@@ -2002,6 +2134,7 @@ def external_source_release_states(value):
     return parsed
 
 
+@within_one_repository_view
 def external_source_release_findings(
     state_value,
     base_revision,
@@ -2312,6 +2445,7 @@ def external_action_source_states(value):
     return states
 
 
+@within_one_repository_view
 def projection_findings(
     text,
     titles,
@@ -2687,6 +2821,7 @@ def projection_findings(
     return findings
 
 
+@within_one_repository_view
 def external_action_source_findings(
     value,
     titles,
@@ -2824,6 +2959,7 @@ def read_env_values(names):
     return values
 
 
+@within_one_repository_view
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)

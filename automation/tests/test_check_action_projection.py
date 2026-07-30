@@ -3923,5 +3923,202 @@ class ActionProjectionTests(unittest.TestCase):
         self.assertNotIn("codex", source)
 
 
+class RepositoryViewTests(unittest.TestCase):
+    """One read of a repository view must answer exactly what per-path reads did."""
+
+    @contextlib.contextmanager
+    def repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(str(git_fixture_skeleton()), str(root / ".git"))
+            with mock.patch.object(PROJECTION, "REPO", root):
+                yield root
+
+    @staticmethod
+    def git(root, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+
+    def test_a_directory_is_not_a_tracked_file_and_has_no_record(self):
+        with self.repo() as root:
+            (root / "queue").mkdir()
+            (root / "queue" / "item.md").write_text("body\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "one file under one directory")
+            revision = self.git(root, "rev-parse", "HEAD")
+            for candidate_revision in (None, revision):
+                # A directory holding exactly one file is the case where a
+                # per-path read returns a single record that is not the path.
+                self.assertIsNone(PROJECTION.candidate_record(
+                    "queue", repo=root, candidate_revision=candidate_revision
+                ))
+                self.assertFalse(PROJECTION.tracked_regular_file(
+                    "queue", repo=root, candidate_revision=candidate_revision
+                ))
+                self.assertTrue(PROJECTION.tracked_regular_file(
+                    "queue/item.md",
+                    repo=root,
+                    candidate_revision=candidate_revision,
+                ))
+                self.assertEqual(
+                    ["queue/item.md"],
+                    PROJECTION.candidate_paths(
+                        "queue",
+                        repo=root,
+                        candidate_revision=candidate_revision,
+                    ),
+                )
+
+    def test_a_path_recorded_at_several_merge_stages_is_not_one_record(self):
+        with self.repo() as root:
+            (root / "item.md").write_text("base\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.git(root, "checkout", "-q", "-b", "other")
+            (root / "item.md").write_text("other\n", encoding="utf-8")
+            self.git(root, "commit", "-qam", "other side")
+            self.git(root, "checkout", "-q", base)
+            self.git(root, "checkout", "-q", "-B", "mine")
+            (root / "item.md").write_text("mine\n", encoding="utf-8")
+            self.git(root, "commit", "-qam", "my side")
+            merge = subprocess.run(
+                ["git", "merge", "--no-commit", "other"],
+                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, merge.returncode, "the merge must conflict")
+            staged = self.git(root, "ls-files", "--stage", "item.md")
+            self.assertGreater(len(staged.splitlines()), 1, staged)
+            self.assertIsNone(PROJECTION.candidate_record("item.md", repo=root))
+            self.assertFalse(
+                PROJECTION.tracked_regular_file("item.md", repo=root)
+            )
+
+    def test_an_empty_tracked_file_is_not_a_tracked_regular_file(self):
+        with self.repo() as root:
+            (root / "empty.md").write_text("", encoding="utf-8")
+            (root / "full.md").write_text("x\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.assertFalse(PROJECTION.tracked_regular_file("empty.md", repo=root))
+            self.assertTrue(PROJECTION.tracked_regular_file("full.md", repo=root))
+
+    def test_a_view_is_read_once_inside_one_scope(self):
+        with self.repo() as root:
+            (root / "queue").mkdir()
+            (root / "a.md").write_text("a\n", encoding="utf-8")
+            (root / "b.md").write_text("b\n", encoding="utf-8")
+            (root / "queue" / "c.md").write_text("c\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with mock.patch.object(
+                PROJECTION, "git_output", wraps=PROJECTION.git_output
+            ) as reads, PROJECTION.repository_views():
+                for _ in range(4):
+                    PROJECTION.tracked_regular_file("a.md", repo=root)
+                    PROJECTION.tracked_regular_file("b.md", repo=root)
+                    PROJECTION.candidate_paths("queue", repo=root)
+            self.assertEqual(
+                1, reads.call_count,
+                "one scope must read the index once, not once per lookup",
+            )
+
+    def test_a_later_run_never_answers_from_an_earlier_run_s_view(self):
+        with self.repo() as root:
+            (root / "queue").mkdir()
+            (root / "queue" / "a.md").write_text("a\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with PROJECTION.repository_views():
+                self.assertEqual(
+                    ["queue/a.md"],
+                    PROJECTION.candidate_paths("queue", repo=root),
+                )
+                self.assertFalse(
+                    PROJECTION.tracked_regular_file("queue/b.md", repo=root)
+                )
+            (root / "queue" / "b.md").write_text("b\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with PROJECTION.repository_views():
+                self.assertEqual(
+                    ["queue/a.md", "queue/b.md"],
+                    PROJECTION.candidate_paths("queue", repo=root),
+                )
+                self.assertTrue(
+                    PROJECTION.tracked_regular_file("queue/b.md", repo=root)
+                )
+            self.assertIsNone(
+                PROJECTION._REPOSITORY_VIEWS,
+                "a closed scope must leave no view behind",
+            )
+
+    def test_a_nested_scope_joins_the_open_one_rather_than_diverging(self):
+        with self.repo() as root:
+            (root / "a.md").write_text("a\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with PROJECTION.repository_views():
+                outer = PROJECTION.repository_view(root, None)
+                with PROJECTION.repository_views():
+                    self.assertIs(outer, PROJECTION.repository_view(root, None))
+                # Leaving the inner scope must not close the outer one.
+                self.assertIs(outer, PROJECTION.repository_view(root, None))
+            self.assertIsNone(PROJECTION._REPOSITORY_VIEWS)
+
+    def test_outside_every_scope_each_lookup_reads_the_repository_again(self):
+        with self.repo() as root:
+            (root / "queue").mkdir()
+            (root / "queue" / "a.md").write_text("a\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.assertEqual(
+                ["queue/a.md"], PROJECTION.candidate_paths("queue", repo=root)
+            )
+            (root / "queue" / "b.md").write_text("b\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.assertEqual(
+                ["queue/a.md", "queue/b.md"],
+                PROJECTION.candidate_paths("queue", repo=root),
+            )
+
+    def test_an_empty_prefix_is_refused_rather_than_read_as_everything(self):
+        with self.repo() as root:
+            (root / "a.md").write_text("a\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            # Git refuses an empty pathspec; the snapshot must not quietly
+            # start answering it with the whole repository.
+            with self.assertRaises(ValueError):
+                PROJECTION.candidate_paths("", repo=root)
+
+    def test_one_blob_is_read_once_per_run_and_re_read_in_the_next(self):
+        with self.repo() as root:
+            (root / "item.md").write_text("first\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with PROJECTION.repository_views():
+                self.assertEqual(
+                    "first\n", PROJECTION.candidate_text("item.md", repo=root)
+                )
+                (root / "item.md").write_text("second\n", encoding="utf-8")
+                self.git(root, "add", ".")
+                self.assertEqual(
+                    "first\n",
+                    PROJECTION.candidate_text("item.md", repo=root),
+                    "one run must see one consistent view",
+                )
+            with PROJECTION.repository_views():
+                self.assertEqual(
+                    "second\n", PROJECTION.candidate_text("item.md", repo=root)
+                )
+
+    def test_reading_a_path_the_repository_does_not_track_still_raises(self):
+        with self.repo() as root:
+            (root / "a.md").write_text("a\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            with PROJECTION.repository_views():
+                with self.assertRaises(RuntimeError):
+                    PROJECTION.candidate_text("missing.md", repo=root)
+
+
 if __name__ == "__main__":
     unittest.main()
