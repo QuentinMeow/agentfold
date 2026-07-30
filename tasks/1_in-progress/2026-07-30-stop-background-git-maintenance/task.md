@@ -1,10 +1,10 @@
 # Stop background Git maintenance racing temporary-directory teardown in tests
 
-**Claimed-by:** unclaimed
+**Claimed-by:** Claude Opus 5 (1M context)
 **Filed:** 2026-07-30, by Claude Opus 5 (1M context), from chat — CI failure on [run 30518101787](https://github.com/QuentinMeow/agentfold/actions/runs/30518101787)
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-background-git-maintenance.md`
+**Queue actions:** none
 
 ## Goal
 
