@@ -1,10 +1,10 @@
 # Read each repository view once per action-projection run instead of once per path
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from `docs/designs/fast-local-test-feedback.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-batch-action-projection-git-reads.md`
+**Queue actions:** none
 
 ## Goal
 
