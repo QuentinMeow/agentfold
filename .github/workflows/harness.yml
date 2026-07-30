@@ -131,17 +131,54 @@ jobs:
         env:
           ACTION_PROJECTION_EVENT: ${{ github.event_name }}
           ACTION_PROJECTION_PR_NUMBER: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.issue.number }}
-          ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || '' }}
+          ACTION_PROJECTION_EXPECTED_HEAD: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          ACTION_PROJECTION_EXPECTED_BASE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || '' }}
         run: |
+          # The merge ref is mutable, so the candidate must be pinned to this
+          # event. merge_commit_sha cannot do it: GitHub computes it
+          # asynchronously, so it arrives empty on `opened`, stale after
+          # `synchronize`, and names the real merge once the pull request
+          # closes. head.sha and base.sha are always present and never move for
+          # a given event, and a merge commit's parent ids are covered by its
+          # own object id, so the parent shape binds the fetched candidate to
+          # this event's head and to no other revision. Every mismatch — an
+          # unmergeable pull request, a vanished merge ref, an unexpected commit
+          # shape — fails the job rather than admitting an unpinned candidate.
           git fetch --no-tags origin \
             "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
           ACTION_PROJECTION_CANDIDATE_REVISION="$(
             git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
           )"
           if [ "$ACTION_PROJECTION_EVENT" = "pull_request_target" ]; then
-            test -n "$ACTION_PROJECTION_EXPECTED_REVISION"
-            test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
-              "$ACTION_PROJECTION_EXPECTED_REVISION"
+            if [ -z "$ACTION_PROJECTION_EXPECTED_HEAD" ] ||
+                [ -z "$ACTION_PROJECTION_EXPECTED_BASE" ]; then
+              echo "pull-request payload carries no head or base revision" >&2
+              exit 1
+            fi
+            ACTION_PROJECTION_MERGED_HEAD="$(
+              git --no-replace-objects rev-parse --verify --quiet \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION^2^{commit}"
+            )" || {
+              echo "merge candidate is not a merge commit" >&2
+              exit 1
+            }
+            if git --no-replace-objects rev-parse --verify --quiet \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION^3^{commit}" \
+                > /dev/null; then
+              echo "merge candidate has more than two parents" >&2
+              exit 1
+            fi
+            if [ "$ACTION_PROJECTION_MERGED_HEAD" != \
+                "$ACTION_PROJECTION_EXPECTED_HEAD" ]; then
+              echo "merge candidate does not merge this event's head" >&2
+              exit 1
+            fi
+            if ! git --no-replace-objects merge-base --is-ancestor \
+                "$ACTION_PROJECTION_EXPECTED_BASE" \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION^1"; then
+              echo "merge candidate does not contain this event's base" >&2
+              exit 1
+            fi
           fi
           printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             >> "$GITHUB_OUTPUT"
@@ -431,19 +468,65 @@ jobs:
         env:
           SOURCE_RELEASE_EVENT: ${{ github.event_name }}
           SOURCE_RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          SOURCE_RELEASE_EXPECTED_CANDIDATE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+          SOURCE_RELEASE_EXPECTED_HEAD: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          SOURCE_RELEASE_EXPECTED_BASE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || '' }}
+          SOURCE_RELEASE_PUSH_CANDIDATE: ${{ github.event_name == 'push' && github.sha || '' }}
         run: |
+          # A push admits exactly the revision the event names, so github.sha is
+          # that event's own candidate. A pull_request_target event names the
+          # base-branch tip in github.sha, never the merge, so the candidate is
+          # pinned by the merge ref's parent shape instead — see the identical
+          # binding in the action-projection job for why merge_commit_sha
+          # cannot pin it.
           if [ "$SOURCE_RELEASE_EVENT" = "pull_request_target" ]; then
             git fetch --no-tags origin \
               "refs/pull/$SOURCE_RELEASE_PR_NUMBER/merge"
           else
-            git fetch --no-tags origin "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+            if [ -z "$SOURCE_RELEASE_PUSH_CANDIDATE" ]; then
+              echo "push payload carries no candidate revision" >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "$SOURCE_RELEASE_PUSH_CANDIDATE"
           fi
           SOURCE_RELEASE_CANDIDATE="$(
             git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
           )"
-          test "$SOURCE_RELEASE_CANDIDATE" = \
-            "$SOURCE_RELEASE_EXPECTED_CANDIDATE"
+          if [ "$SOURCE_RELEASE_EVENT" = "pull_request_target" ]; then
+            if [ -z "$SOURCE_RELEASE_EXPECTED_HEAD" ] ||
+                [ -z "$SOURCE_RELEASE_EXPECTED_BASE" ]; then
+              echo "pull-request payload carries no head or base revision" >&2
+              exit 1
+            fi
+            SOURCE_RELEASE_MERGED_HEAD="$(
+              git --no-replace-objects rev-parse --verify --quiet \
+                "$SOURCE_RELEASE_CANDIDATE^2^{commit}"
+            )" || {
+              echo "merge candidate is not a merge commit" >&2
+              exit 1
+            }
+            if git --no-replace-objects rev-parse --verify --quiet \
+                "$SOURCE_RELEASE_CANDIDATE^3^{commit}" > /dev/null; then
+              echo "merge candidate has more than two parents" >&2
+              exit 1
+            fi
+            if [ "$SOURCE_RELEASE_MERGED_HEAD" != \
+                "$SOURCE_RELEASE_EXPECTED_HEAD" ]; then
+              echo "merge candidate does not merge this event's head" >&2
+              exit 1
+            fi
+            if ! git --no-replace-objects merge-base --is-ancestor \
+                "$SOURCE_RELEASE_EXPECTED_BASE" \
+                "$SOURCE_RELEASE_CANDIDATE^1"; then
+              echo "merge candidate does not contain this event's base" >&2
+              exit 1
+            fi
+          else
+            if [ "$SOURCE_RELEASE_CANDIDATE" != \
+                "$SOURCE_RELEASE_PUSH_CANDIDATE" ]; then
+              echo "fetched candidate is not the revision this push names" >&2
+              exit 1
+            fi
+          fi
           printf 'revision=%s\n' "$SOURCE_RELEASE_CANDIDATE" \
             >> "$GITHUB_OUTPUT"
       - name: Resolve disappearing external sources from provider state
