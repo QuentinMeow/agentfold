@@ -55,4 +55,4 @@ both interpreters here, and the previous attempt produced no measured speedup.
 Option A, because it meets the goal with the smallest permanent surface and removes the
 need to decide what not to test.
 
-**Your answer:** ______
+**Your answer:** Option B, extended — transcribed by claude from chat on 2026-07-30, not typed by the owner. The owner merged pull requests 20, 21 and 22, which is Option B exactly, then rejected 26-30s as a stopping point and asked for the parts of experiment C worth keeping to be rebuilt correctly. Verbatim wording and the consequences are recorded in the resolving decision record.
