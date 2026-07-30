@@ -1,7 +1,11 @@
+import contextlib
 import importlib.util
+import io
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -93,14 +97,16 @@ class StagedTestSelectionTests(unittest.TestCase):
 
         self.assertEqual((self.api_test, self.cli_test), selection.test_files)
 
-    def test_every_non_add_modify_status_falls_back_to_the_full_suite(self):
+    def test_removing_or_renaming_a_non_record_path_falls_back(self):
         cases = (
             b"D\0services/quote-cli/quote_cli.py\0",
-            b"T\0services/quote-cli/quote_cli.py\0",
+            b"D\0automation/run_tests.py\0",
+            b"D\0.gitignore\0",
             (
                 b"R100\0services/quote-cli/old.py\0"
                 b"services/quote-cli/new.py\0"
             ),
+            b"U\0services/quote-cli/quote_cli.py\0",
         )
         for diff in cases:
             with self.subTest(diff=diff):
@@ -117,12 +123,22 @@ class StagedTestSelectionTests(unittest.TestCase):
                 self.assertEqual(self.all_tests, selection.test_files)
                 self.assertEqual(2, run.call_count)
 
-    def test_cross_cutting_or_unknown_service_path_falls_back(self):
+    def test_typechange_into_a_symlink_falls_back(self):
+        path = b"services/quote-cli/quote_cli.py"
+
+        selection, _run = self.selection(b"T\0" + path + b"\0", (path, b"120000"))
+
+        self.assertEqual("full", selection.lane)
+        self.assertEqual(self.all_tests, selection.test_files)
+
+    def test_unregistered_paths_fall_back_to_the_full_suite(self):
         for path in (
-            b"automation/run_tests.py",
             b"services/unknown/service.py",
             b"services/quote-api",
-            b"docs/speed.md",
+            b"brand-new-directory/module.py",
+            b"brand-new-directory/README.md",
+            b".gitignore",
+            b"handbook",
         ):
             with self.subTest(path=path):
                 with mock.patch.object(
@@ -135,6 +151,154 @@ class StagedTestSelectionTests(unittest.TestCase):
                 ):
                     selection = RUN_TESTS.staged_test_selection(self.all_tests)
                 self.assertEqual("full", selection.lane)
+                self.assertEqual(self.all_tests, selection.test_files)
+
+    def test_record_only_changes_select_no_test_at_all(self):
+        diff = (
+            b"M\0tasks/1_in-progress/2026-07-29-example/task.md\0"
+            b"A\0history/conversations/2026-07-29-x/handover.md\0"
+            b"D\0message-queue/needs-agent/requests/done.md\0"
+            b"R100\0tasks/0_backlog/2026-07-29-example/task.md\0"
+            b"tasks/1_in-progress/2026-07-29-example/design.md\0"
+            b"M\0memory/index.md\0M\0docs/designs/speed.md\0"
+            b"M\0roadmap/current-state.md\0M\0handbook/git-workflow.md\0"
+            b"M\0templates/task/task.md\0M\0README.md\0M\0AGENTS.md\0"
+            b"M\0LICENSE\0M\0automation/AGENTS.md\0"
+        )
+
+        with mock.patch.object(
+            RUN_TESTS.subprocess,
+            "run",
+            side_effect=(self.index_path_result(), self.git_result(diff)),
+        ) as run:
+            selection = RUN_TESTS.staged_test_selection(self.all_tests)
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual((), selection.test_files)
+        self.assertIn("record path", selection.reason)
+        self.assertEqual(2, run.call_count)
+        self.assertEqual(14, len(selection.staged_paths))
+
+    def test_automation_input_selects_only_its_registered_owners(self):
+        cases = (
+            (b"automation/run_tests.py", ("test_run_tests.py",)),
+            (b"automation/hooks/pre-commit", ("test_run_tests.py",)),
+            (b"automation/reconcile/reconcile.py", ("test_reconcile_queue.py",)),
+            (b"automation/mine_cochange.py", ("test_mine_cochange.py",)),
+            (b"automation/cochange-ledger.txt", ("test_mine_cochange.py",)),
+            (b"automation/check_core_scope.py", ("test_check_core_scope.py",)),
+            (
+                b".github/workflows/harness.yml",
+                (
+                    "test_check_core_scope.py",
+                    "test_github_action_projection_workflow.py",
+                    "test_reconcile_queue.py",
+                ),
+            ),
+        )
+        for path, expected in cases:
+            with self.subTest(path=path):
+                selection, _run = self.selection(
+                    b"M\0" + path + b"\0",
+                    (path, b"100644"),
+                )
+
+                self.assertEqual("staged", selection.lane)
+                self.assertEqual(
+                    expected,
+                    tuple(test.name for test in selection.test_files),
+                )
+
+    def test_unregistered_automation_path_selects_every_automation_test(self):
+        path = b"automation/markdown_semantics.py"
+        expected = tuple(
+            test.name
+            for test in RUN_TESTS.group_test_files(
+                self.all_tests,
+                RUN_TESTS.REPO,
+                "automation",
+            )
+        )
+
+        selection, _run = self.selection(
+            b"M\0" + path + b"\0",
+            (path, b"100644"),
+        )
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual(expected, tuple(test.name for test in selection.test_files))
+        self.assertIn("test_reconcile_queue.py", expected)
+        self.assertNotIn("test_quote_cli.py", expected)
+
+    def test_a_test_file_change_selects_only_that_test(self):
+        path = b"automation/tests/test_mine_cochange.py"
+
+        selection, _run = self.selection(
+            b"M\0" + path + b"\0",
+            (path, b"100644"),
+        )
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual(
+            ("test_mine_cochange.py",),
+            tuple(test.name for test in selection.test_files),
+        )
+
+    def test_a_record_shaped_path_inside_a_test_directory_selects_its_tests(self):
+        path = b"automation/tests/fixture-notes.md"
+        expected = tuple(
+            test.name
+            for test in RUN_TESTS.group_test_files(
+                self.all_tests,
+                RUN_TESTS.REPO,
+                "automation",
+            )
+        )
+        kind, tests = RUN_TESTS.staged_path_owners(path, self.all_tests)
+
+        self.assertEqual("tests", kind)
+        self.assertEqual(expected, tuple(test.name for test in tests))
+
+    def test_mixed_record_code_and_service_paths_select_the_union(self):
+        record = b"tasks/1_in-progress/2026-07-29-example/worklog.md"
+        automation_path = b"automation/reconcile/reconcile.py"
+        service_path = b"services/quote-cli/quote_cli.py"
+        diff = (
+            b"M\0" + record + b"\0"
+            b"M\0" + automation_path + b"\0"
+            b"M\0" + service_path + b"\0"
+        )
+
+        selection, _run = self.selection(
+            diff,
+            (automation_path, b"100644"),
+            (service_path, b"100644"),
+        )
+
+        self.assertEqual("staged", selection.lane)
+        self.assertEqual(
+            ("test_reconcile_queue.py", "test_quote_cli.py"),
+            tuple(test.name for test in selection.test_files),
+        )
+        self.assertEqual(3, len(selection.staged_paths))
+
+    def test_report_names_the_lane_the_reason_and_the_skipped_files(self):
+        selection = RUN_TESTS.TestSelection(
+            "staged",
+            "every staged path is a record path no test reads",
+            (),
+            ("tasks/x/task.md -> record path, no test reads it",),
+        )
+        stream = io.StringIO()
+
+        with contextlib.redirect_stdout(stream):
+            RUN_TESTS.report_selection(selection, all_test_files=self.all_tests)
+        output = stream.getvalue()
+
+        self.assertIn("test lane: staged", output)
+        self.assertIn("record path, no test reads it", output)
+        self.assertIn(f"skipped test files: {len(self.all_tests)}", output)
+        self.assertIn("automation/tests/test_run_tests.py", output)
 
     def test_empty_unavailable_and_malformed_diffs_fall_back(self):
         outcomes = (
@@ -333,6 +497,244 @@ class StagedTestSelectionTests(unittest.TestCase):
             (("M", (b"services/quote-cli/line\nname.py",)),),
             entries,
         )
+
+
+REPOSITORY_BASE_FROM_DUNDER_FILE = re.compile(
+    r"^([A-Z][A-Z_0-9]*)\s*=\s*\(?\s*Path\(__file__\)",
+    re.MULTILINE,
+)
+REPOSITORY_BASE_FROM_BASE = re.compile(
+    r"^([A-Z][A-Z_0-9]*)\s*=\s*\(?\s*([A-Za-z_][A-Za-z_0-9.]*)",
+    re.MULTILINE,
+)
+REPOSITORY_PATH_CHAIN = re.compile(
+    r"(?P<head>(?:Path\(__file__\)|[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*)"
+    r"(?:\.[A-Za-z_][A-Za-z_0-9]*(?:\(\))?|\[\d+\])*)"
+    r"(?P<segments>(?:\s*/\s*[\"'][^\"'\n]+[\"'])+)"
+)
+QUOTED_SEGMENT = re.compile(r"[\"']([^\"'\n]+)[\"']")
+IDENTIFIER_TOKENS = re.compile(r"[.\[\]()]+")
+MODULE_IMPORT = re.compile(
+    r"^(?:from\s+([a-z_][a-z_0-9]*)\s+import|import\s+([a-z_][a-z_0-9]*))",
+    re.MULTILINE,
+)
+IMPORTABLE_MODULE_GLOBS = ("automation/*.py", ".github/scripts/*.py")
+
+
+def identifier_tokens(text):
+    """Split a dotted or subscripted expression head into bare identifiers."""
+    return tuple(token for token in IDENTIFIER_TOKENS.split(text) if token)
+
+
+def repository_base_names(source):
+    """Return the names a module binds to a real repository directory."""
+    bases = {"REPO"}
+    bases.update(REPOSITORY_BASE_FROM_DUNDER_FILE.findall(source))
+    for _pass in range(3):
+        for name, origin in REPOSITORY_BASE_FROM_BASE.findall(source):
+            if any(token in bases for token in identifier_tokens(origin)):
+                bases.add(name)
+    return bases
+
+
+def declared_repository_references(source):
+    """Return the path literals a module joins onto a real repository directory."""
+    bases = repository_base_names(source)
+    references = set()
+    for match in REPOSITORY_PATH_CHAIN.finditer(source):
+        head = match.group("head")
+        rooted = "Path(__file__)" in head or any(
+            token in bases for token in identifier_tokens(head)
+        )
+        if not rooted:
+            continue
+        segments = QUOTED_SEGMENT.findall(match.group("segments"))
+        joined = "/".join(segment.strip("/") for segment in segments if segment)
+        if joined:
+            references.add(joined)
+    return tuple(sorted(references))
+
+
+def matching_repository_paths(reference, repository_paths):
+    """Return the real repository paths a declared reference can name."""
+    return tuple(
+        path
+        for path in repository_paths
+        if path == reference or path.endswith("/" + reference)
+    )
+
+
+def owning_test_files(relative_path, all_test_files):
+    """Return the tests a repository path owns, reading the full suite as everything."""
+    kind, owners = RUN_TESTS.staged_path_owners(
+        os.fsencode(relative_path),
+        all_test_files,
+    )
+    if kind == "unknown":
+        return set(all_test_files)
+    return set(owners)
+
+
+class InputOwnershipTests(unittest.TestCase):
+    """Keep INPUT_TEST_OWNERS honest about what the discovered tests actually read.
+
+    Both checks are static and cost milliseconds, which is why they can run inside
+    every suite. They only see repository reads written in this repository's idiom —
+    a literal joined onto a directory derived from ``Path(__file__)`` — so they are
+    the cheap half of the guard; ``prune_inert_projection`` is the half that catches
+    a read the parser cannot see, by deleting record paths from every narrow lane.
+    ``services/`` is excluded because it keeps its pre-existing dependency closure:
+    test_run_tests.py names service paths to assert they exist, not to read them,
+    and any removal there already falls back to the full suite.
+    """
+
+    def setUp(self):
+        self.all_tests = RUN_TESTS.repository_test_files()
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith("GIT_")
+        }
+        try:
+            paths = RUN_TESTS.repository_view_paths(environment, RUN_TESTS.REPO)
+        except RuntimeError:
+            paths = RUN_TESTS.filesystem_view_paths(RUN_TESTS.REPO)
+        self.repository_paths = tuple(str(path) for path in paths)
+
+    def test_every_declared_repository_read_is_owned_by_the_reader(self):
+        checked = 0
+        for test in self.all_tests:
+            source = test.read_text(encoding="utf-8")
+            for reference in declared_repository_references(source):
+                for candidate in matching_repository_paths(
+                    reference,
+                    self.repository_paths,
+                ):
+                    if candidate.startswith("services/"):
+                        continue
+                    checked += 1
+                    owners = owning_test_files(candidate, self.all_tests)
+                    self.assertIn(
+                        test,
+                        owners,
+                        "{0} reads {1}, which the ownership table does not give "
+                        "it; add the owner or make the path fall back to full"
+                        .format(test.name, candidate),
+                    )
+        self.assertGreater(checked, 0, "the reference parser found nothing to check")
+
+    def test_ownership_is_closed_under_module_imports(self):
+        modules = {}
+        for pattern in IMPORTABLE_MODULE_GLOBS:
+            for path in RUN_TESTS.REPO.glob(pattern):
+                modules[path.stem] = str(path.relative_to(RUN_TESTS.REPO))
+        self.assertIn("markdown_semantics", modules)
+        for name, relative in sorted(modules.items()):
+            source = (RUN_TESTS.REPO / relative).read_text(encoding="utf-8")
+            importer_owners = owning_test_files(relative, self.all_tests)
+            for direct, plain in MODULE_IMPORT.findall(source):
+                imported = direct or plain
+                if imported == name or imported not in modules:
+                    continue
+                imported_owners = owning_test_files(
+                    modules[imported],
+                    self.all_tests,
+                )
+                self.assertLessEqual(
+                    {test.name for test in importer_owners},
+                    {test.name for test in imported_owners},
+                    "{0} imports {1}, so every owner of {0} must own {1}"
+                    .format(relative, modules[imported]),
+                )
+
+    def test_pruning_removes_record_paths_and_keeps_test_fixtures(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            view = Path(scratch) / "view"
+            (view / "tasks/0_backlog/example").mkdir(parents=True)
+            (view / "tasks/0_backlog/example/task.md").write_text("task\n")
+            (view / "automation/tests").mkdir(parents=True)
+            (view / "automation/AGENTS.md").write_text("contract\n")
+            (view / "automation/run_tests.py").write_text("code\n")
+            (view / "automation/tests/test_probe.py").write_text("pass\n")
+            (view / "automation/tests/fixture.md").write_text("fixture\n")
+            (view / "LICENSE").write_text("license\n")
+            (view / "README.md").write_text("readme\n")
+            projected_test = view / "automation/tests/test_probe.py"
+
+            removed = RUN_TESTS.prune_inert_projection(
+                view,
+                (projected_test,),
+                view,
+            )
+
+            self.assertEqual(4, removed)
+            self.assertFalse((view / "tasks").exists())
+            self.assertFalse((view / "automation/AGENTS.md").exists())
+            self.assertFalse((view / "LICENSE").exists())
+            self.assertFalse((view / "README.md").exists())
+            self.assertTrue((view / "automation/run_tests.py").exists())
+            self.assertTrue((view / "automation/tests/fixture.md").exists())
+            self.assertTrue(projected_test.exists())
+
+    @unittest.skipUnless(
+        os.environ.get(RUN_TESTS.INERT_PROBE_ENVIRONMENT),
+        "set {0}=1 to run the whole suite against a record-free projection"
+        .format(RUN_TESTS.INERT_PROBE_ENVIRONMENT),
+    )
+    def test_the_whole_suite_passes_against_a_record_free_projection(self):
+        """The expensive half of the inert proof: delete the records, run everything.
+
+        Opt-in because it costs a full suite run. It is the only check that covers a
+        record read written outside this repository's path idiom, in a test the narrow
+        lanes happen never to select.
+        """
+        all_tests = RUN_TESTS.repository_test_files()
+        environment = RUN_TESTS.isolated_test_environment()
+        for name, value in RUN_TESTS.configured_git_identity().items():
+            environment.setdefault(name, value)
+        failed = []
+        with tempfile.TemporaryDirectory(prefix="agentfold-inert-probe-") as scratch:
+            scratch_root = Path(scratch).resolve()
+            RUN_TESTS.validate_scratch_root(scratch_root, environment)
+            RUN_TESTS.install_isolated_git_wrapper(scratch_root, environment)
+            environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
+            view = scratch_root / "view"
+            RUN_TESTS.materialize_repository_view(
+                view,
+                environment,
+                additional_paths=RUN_TESTS.test_support_paths(all_tests),
+            )
+            removed = RUN_TESTS.prune_inert_projection(view, all_tests)
+            environment[RUN_TESTS.PROJECTED_REPOSITORY_ENVIRONMENT] = str(view)
+            # The projected copy of this file must not probe its own projection: its
+            # records are already gone, so the nested probe would find nothing to prune.
+            environment.pop(RUN_TESTS.INERT_PROBE_ENVIRONMENT, None)
+            print("inert probe: removed {0} record path(s)".format(removed))
+            self.assertGreater(removed, 0)
+            for test in all_tests:
+                relative = test.relative_to(RUN_TESTS.REPO)
+                result = subprocess.run(
+                    [sys.executable, str(view / relative)],
+                    cwd=str(view),
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                print(
+                    "inert probe: {0} {1}".format(
+                        "PASS" if result.returncode == 0 else "FAIL",
+                        relative,
+                    ),
+                    flush=True,
+                )
+                if result.returncode:
+                    failed.append(
+                        "{0}\n{1}".format(
+                            relative,
+                            result.stdout.decode("utf-8", "replace")[-2000:],
+                        )
+                    )
+        self.assertEqual([], failed)
 
 
 class RunTestsIsolationTests(unittest.TestCase):

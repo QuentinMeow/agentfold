@@ -6,9 +6,13 @@ sanitized Git environment, an empty ``HOME`` and XDG config root so no caller Gi
 configuration is readable, and a fresh metadata-free projection outside every existing
 repository's discovery path. Subprocess-per-file keeps hyphenated folders
 importable-free and any test crash isolated. This is not a sandbox against deliberate
-absolute paths. The default is always the full suite. ``--staged`` selects a narrow
-service lane only when every staged entry is known-safe; uncertainty falls back to the
-full suite. The projection contains working-tree bytes, not an index snapshot. Exit 0
+absolute paths. The default is always the full suite. ``--staged`` maps every staged
+path through the input-ownership table below and runs only the tests those paths own:
+record paths (`INERT_PATH_PREFIXES`, Markdown outside a test's own directory) own no
+test, while a removed non-record path and any unregistered path own the full suite.
+Uncertainty always falls back to full. Every narrow lane prunes the record paths out of
+its projection, so a test that starts reading one fails instead of silently invalidating
+the table. The projection contains working-tree bytes, not an index snapshot. Exit 0
 only if every selected file passes.
 """
 import argparse
@@ -56,7 +60,127 @@ SERVICE_TEST_DEPENDENCIES = (
         ("quote-cli",),
     ),
 )
-TestSelection = namedtuple("TestSelection", "lane reason test_files")
+# Record paths: no test reads their content or their existence. The claim is enforced
+# twice — statically by InputOwnershipTests and dynamically by pruning them out of every
+# narrow lane's projection (`prune_inert_projection`).
+INERT_PATH_PREFIXES = (
+    b"docs/",
+    b"handbook/",
+    b"history/",
+    b"memory/",
+    b"message-queue/",
+    b"roadmap/",
+    b"tasks/",
+    b"templates/",
+)
+INERT_ROOT_PATHS = (b"LICENSE",)
+MARKDOWN_SUFFIX = b".md"
+# Which discovered test files read each non-service repository input. Entries ending in
+# "/" match a prefix, the rest match one exact path. Owners come from the paths a test
+# declares it reads, the module import closure of those paths, and any test that names
+# the input textually; a shared module owned by most of the suite (for example
+# automation/markdown_semantics.py) is deliberately left out so that it lands on the
+# coarse group fallback below.
+INPUT_TEST_OWNERS = (
+    (
+        b".github/scripts/collect_conversation_actions.py",
+        (
+            "automation/tests/test_collect_github_review_actions.py",
+            "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_resolve_github_external_sources.py",
+        ),
+    ),
+    (
+        b".github/scripts/collect_review_actions.py",
+        (
+            "automation/tests/test_check_core_scope.py",
+            "automation/tests/test_collect_github_review_actions.py",
+            "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_resolve_github_external_sources.py",
+        ),
+    ),
+    (
+        b".github/scripts/resolve_external_source_releases.py",
+        (
+            "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_resolve_github_external_sources.py",
+        ),
+    ),
+    (
+        b".github/workflows/harness.yml",
+        (
+            "automation/tests/test_check_core_scope.py",
+            "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_reconcile_queue.py",
+        ),
+    ),
+    (
+        b"automation/check_action_projection.py",
+        (
+            "automation/tests/test_check_action_projection.py",
+            "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_reconcile_queue.py",
+            "automation/tests/test_resolve_github_external_sources.py",
+        ),
+    ),
+    (
+        b"automation/check_core_scope.py",
+        ("automation/tests/test_check_core_scope.py",),
+    ),
+    (
+        b"automation/cochange-ledger.txt",
+        ("automation/tests/test_mine_cochange.py",),
+    ),
+    (
+        b"automation/core-scope-paths.txt",
+        ("automation/tests/test_check_core_scope.py",),
+    ),
+    (
+        b"automation/hooks/pre-commit",
+        ("automation/tests/test_run_tests.py",),
+    ),
+    (
+        b"automation/inspect_workspace_boundaries.py",
+        ("automation/tests/test_inspect_workspace_boundaries.py",),
+    ),
+    (
+        b"automation/install.py",
+        ("automation/tests/test_check_core_scope.py",),
+    ),
+    (
+        b"automation/mine_cochange.py",
+        ("automation/tests/test_mine_cochange.py",),
+    ),
+    (
+        b"automation/reconcile/",
+        ("automation/tests/test_reconcile_queue.py",),
+    ),
+    (
+        b"automation/run_tests.py",
+        ("automation/tests/test_run_tests.py",),
+    ),
+)
+# Any other path under these groups owns every discovered test in the group: only that
+# group's tests can read them, but which file owns which is not registered above.
+GROUP_TEST_OWNERS = (
+    (b".github/", "automation"),
+    (b"automation/", "automation"),
+    (b"skills/", "skills"),
+)
+
+def registered_top_level_names():
+    """Return the top-level entries whose contents the tables above describe."""
+    names = {prefix.split(b"/")[0] for prefix in INERT_PATH_PREFIXES}
+    names.update(prefix.split(b"/")[0] for prefix, _group in GROUP_TEST_OWNERS)
+    names.update(prefix.split(b"/")[0] for prefix, _services in SERVICE_TEST_DEPENDENCIES)
+    return frozenset(names)
+
+
+REGISTERED_TOP_LEVEL_NAMES = registered_top_level_names()
+STAGED_PATH_REPORT_LIMIT = 12
+INERT_PROBE_ENVIRONMENT = "AGENTFOLD_INERT_PROBE"
+TestSelection = namedtuple("TestSelection", "lane reason test_files staged_paths")
+TestSelection.__new__.__defaults__ = ((),)
 
 
 def parse_arguments(arguments):
@@ -182,8 +306,133 @@ def discovered_service_tests(all_test_files, services, repository):
     return tuple(sorted({test for tests in tests_by_service.values() for test in tests}))
 
 
+def group_test_files(all_test_files, repository, group):
+    """Return every discovered test under one top-level group folder."""
+    owned = []
+    for test in all_test_files:
+        try:
+            relative = test.relative_to(repository)
+        except ValueError:
+            continue
+        parts = relative.parts
+        if (
+            len(parts) > 2
+            and parts[0] == group
+            and parts[-2] == "tests"
+            and relative.name.startswith("test_")
+            and relative.suffix == ".py"
+        ):
+            owned.append(test)
+    return tuple(sorted(owned))
+
+
+def named_test_files(names, all_test_files, repository):
+    """Resolve ownership-table test names against discovery, failing closed."""
+    discovered = {}
+    for test in all_test_files:
+        try:
+            discovered[str(test.relative_to(repository))] = test
+        except ValueError:
+            continue
+    resolved = []
+    for name in names:
+        test = discovered.get(name)
+        if test is None:
+            return None
+        resolved.append(test)
+    return tuple(sorted(resolved))
+
+
+def test_path_owners(all_test_files, repository):
+    """Map discovered test paths and their directories to the tests they own."""
+    file_owners = {}
+    directory_owners = {}
+    for test in all_test_files:
+        try:
+            relative = test.relative_to(repository)
+        except ValueError:
+            continue
+        file_owners[os.fsencode(str(relative))] = (test,)
+        directory = os.fsencode(str(relative.parent)) + b"/"
+        directory_owners.setdefault(directory, set()).add(test)
+    return (
+        file_owners,
+        tuple(
+            (directory, tuple(sorted(tests)))
+            for directory, tests in sorted(directory_owners.items())
+        ),
+    )
+
+
+def staged_path_owners(path, all_test_files, repository=None, owners=None):
+    """Classify one staged path against the input-ownership table.
+
+    Returns ``("tests", tests)`` for a path whose readers are known, ``("inert", ())``
+    for a record path no test reads, and ``("unknown", ())`` when only the full suite
+    is a safe answer — including for every unregistered top-level entry.
+    """
+    repository = REPO if repository is None else Path(repository)
+    file_owners, directory_owners = (
+        test_path_owners(all_test_files, repository) if owners is None else owners
+    )
+    if path in file_owners:
+        return "tests", file_owners[path]
+    for directory, tests in directory_owners:
+        if path.startswith(directory):
+            return "tests", tests
+    for prefix, services in SERVICE_TEST_DEPENDENCIES:
+        if path.startswith(prefix) and len(path) > len(prefix):
+            selected = discovered_service_tests(all_test_files, services, repository)
+            return ("tests", selected) if selected else ("unknown", ())
+    for entry, names in INPUT_TEST_OWNERS:
+        matched = (
+            path.startswith(entry) and len(path) > len(entry)
+            if entry.endswith(b"/")
+            else path == entry
+        )
+        if matched:
+            selected = named_test_files(names, all_test_files, repository)
+            return ("tests", selected) if selected is not None else ("unknown", ())
+    registered = (
+        b"/" not in path or path.split(b"/")[0] in REGISTERED_TOP_LEVEL_NAMES
+    )
+    if registered and (path.endswith(MARKDOWN_SUFFIX) or path in INERT_ROOT_PATHS):
+        return "inert", ()
+    for prefix in INERT_PATH_PREFIXES:
+        if path.startswith(prefix) and len(path) > len(prefix):
+            return "inert", ()
+    for prefix, group in GROUP_TEST_OWNERS:
+        if path.startswith(prefix) and len(path) > len(prefix):
+            return "tests", group_test_files(all_test_files, repository, group)
+    return "unknown", ()
+
+
+def staged_path_note(path, kind, tests):
+    """Describe one staged path's ownership decision for the run's own report."""
+    printable = os.fsdecode(path)
+    if kind == "inert":
+        return "{0} -> record path, no test reads it".format(printable)
+    if not tests:
+        return "{0} -> owned, but no such test is discovered".format(printable)
+    names = ", ".join(sorted(test.name for test in tests))
+    return "{0} -> {1}".format(printable, names)
+
+
+def staged_entry_paths(status, paths):
+    """Split one staged entry into paths that still exist and paths that are gone."""
+    if status in ("A", "M", "T"):
+        return (paths[0],), ()
+    if status == "D":
+        return (), (paths[0],)
+    if status[0] == "R":
+        return (paths[1],), (paths[0],)
+    if status[0] == "C":
+        return (paths[1],), ()
+    return None, None
+
+
 def staged_test_selection(all_test_files, repository=None):
-    """Map a wholly known staged service diff to its conservative test closure."""
+    """Map every staged path to the tests it owns, or fall back to the full suite."""
     repository = REPO if repository is None else Path(repository)
     selector_environment = dict(os.environ)
     try:
@@ -205,80 +454,96 @@ def staged_test_selection(all_test_files, repository=None):
     except (TypeError, ValueError):
         return full_selection(all_test_files, "staged diff empty or malformed")
 
-    selected_services = set()
+    owners = test_path_owners(all_test_files, repository)
+    selected = set()
     changed_paths = []
+    notes = []
     for status, paths in entries:
-        if status not in ("A", "M"):
+        present, removed = staged_entry_paths(status, paths)
+        if present is None:
             return full_selection(
                 all_test_files,
-                "staged change has a non-add/modify status",
+                "staged change has an unmergeable status",
             )
-        path = paths[0]
-        dependencies = None
-        for prefix, services in SERVICE_TEST_DEPENDENCIES:
-            if path.startswith(prefix) and len(path) > len(prefix):
-                dependencies = services
-                break
-        if dependencies is None:
-            return full_selection(
+        for path in removed:
+            kind, _tests = staged_path_owners(
+                path,
                 all_test_files,
-                "staged path is outside the known narrow service scopes",
+                repository,
+                owners,
             )
-        changed_paths.append(path)
-        selected_services.update(dependencies)
+            if kind != "inert":
+                return full_selection(
+                    all_test_files,
+                    "a removed or renamed non-record path cannot be narrowed",
+                )
+            notes.append(
+                "{0} -> removed record path, no test reads it".format(
+                    os.fsdecode(path)
+                )
+            )
+        for path in present:
+            kind, tests = staged_path_owners(
+                path,
+                all_test_files,
+                repository,
+                owners,
+            )
+            if kind == "unknown":
+                return full_selection(
+                    all_test_files,
+                    "staged path has no registered test owner",
+                )
+            notes.append(staged_path_note(path, kind, tests))
+            if kind == "inert":
+                continue
+            changed_paths.append(path)
+            selected.update(tests)
 
-    try:
-        index_result = subprocess.run(
-            ["git", "ls-files", "--stage", "-z"],
-            cwd=repository,
-            env=selector_environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except OSError:
-        return full_selection(all_test_files, "index entry types unavailable")
-    if index_result.returncode:
-        return full_selection(all_test_files, "index entry types unavailable")
-    try:
-        index_entries = parse_index_entries(index_result.stdout)
-    except (TypeError, ValueError):
-        return full_selection(all_test_files, "index entry listing is malformed")
-    for raw_path in sorted(changed_paths):
-        path_entries = index_entries.get(raw_path)
-        if (
-            path_entries is None
-            or len(path_entries) != 1
-            or path_entries[0][0] not in REGULAR_INDEX_MODES
-            or path_entries[0][1] != b"0"
-        ):
-            return full_selection(
-                all_test_files,
-                "staged path is not one regular index entry",
-            )
-        working_path = repository / Path(os.fsdecode(raw_path))
+    if changed_paths:
         try:
-            unsafe_working_path = (
-                path_crosses_symlink(working_path, repository)
-                or not working_path.is_file()
+            index_result = subprocess.run(
+                ["git", "ls-files", "--stage", "-z"],
+                cwd=repository,
+                env=selector_environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-        except (OSError, ValueError):
-            unsafe_working_path = True
-        if unsafe_working_path:
-            return full_selection(
-                all_test_files,
-                "working-tree bytes are unavailable or cross a symlink",
-            )
+        except OSError:
+            return full_selection(all_test_files, "index entry types unavailable")
+        if index_result.returncode:
+            return full_selection(all_test_files, "index entry types unavailable")
+        try:
+            index_entries = parse_index_entries(index_result.stdout)
+        except (TypeError, ValueError):
+            return full_selection(all_test_files, "index entry listing is malformed")
+        for raw_path in sorted(changed_paths):
+            path_entries = index_entries.get(raw_path)
+            if (
+                path_entries is None
+                or len(path_entries) != 1
+                or path_entries[0][0] not in REGULAR_INDEX_MODES
+                or path_entries[0][1] != b"0"
+            ):
+                return full_selection(
+                    all_test_files,
+                    "staged path is not one regular index entry",
+                )
+            working_path = repository / Path(os.fsdecode(raw_path))
+            try:
+                unsafe_working_path = (
+                    path_crosses_symlink(working_path, repository)
+                    or not working_path.is_file()
+                )
+            except (OSError, ValueError):
+                unsafe_working_path = True
+            if unsafe_working_path:
+                return full_selection(
+                    all_test_files,
+                    "working-tree bytes are unavailable or cross a symlink",
+                )
 
-    selected_tests = discovered_service_tests(
-        all_test_files,
-        selected_services,
-        repository,
-    )
-    if not selected_tests:
-        return full_selection(
-            all_test_files,
-            "a mapped service has no complete discovered test scope",
-        )
+    selected_tests = tuple(sorted(selected))
     for test in selected_tests:
         try:
             unavailable_test = (
@@ -303,22 +568,40 @@ def staged_test_selection(all_test_files, repository=None):
         )
     return TestSelection(
         "staged",
-        "all staged paths map to known service dependencies",
+        (
+            "every staged path maps to its registered test owners"
+            if selected_tests
+            else "every staged path is a record path no test reads"
+        ),
         selected_tests,
+        tuple(notes),
     )
 
 
-def report_selection(selection, repository=None):
+def report_selection(selection, repository=None, all_test_files=()):
     """Print stable evidence for the lane chosen before tests begin."""
     repository = REPO if repository is None else Path(repository)
     print(f"test lane: {selection.lane}")
     print(f"test reason: {selection.reason}")
+    if selection.staged_paths:
+        print(f"staged paths: {len(selection.staged_paths)}")
+        for note in selection.staged_paths[:STAGED_PATH_REPORT_LIMIT]:
+            print(f"  {note}")
+        hidden = len(selection.staged_paths) - STAGED_PATH_REPORT_LIMIT
+        if hidden > 0:
+            print(f"  ... {hidden} more staged path(s) with the same decisions")
     print("selected test files:")
     if selection.test_files:
         for test in selection.test_files:
             print(f"  {test.relative_to(repository)}")
     else:
         print("  (none)")
+    selected = set(selection.test_files)
+    skipped = tuple(test for test in all_test_files if test not in selected)
+    if skipped:
+        print(f"skipped test files: {len(skipped)} (no staged path owns them)")
+        for test in skipped:
+            print(f"  {test.relative_to(repository)}")
     sys.stdout.flush()
 
 
@@ -658,6 +941,62 @@ def materialize_repository_view(
     seen_repositories.remove(repository)
 
 
+def remove_projected_entry(target):
+    """Delete one projected file, symlink, or subtree; return the files removed."""
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+        return 1
+    if not target.is_dir():
+        return 0
+    removed = 0
+    for _root, _directories, file_names in os.walk(str(target), followlinks=False):
+        removed += len(file_names)
+    shutil.rmtree(str(target))
+    return removed
+
+
+def prune_inert_projection(view, test_files=(), repository=None):
+    """Strip record paths out of a narrow lane's projection.
+
+    No selected test may read a record path, so deleting them makes a future
+    undeclared read fail instead of silently invalidating ``INPUT_TEST_OWNERS``.
+    A test's own directory keeps its Markdown fixtures.
+    """
+    view = Path(view)
+    if not view.is_dir():
+        return 0
+    repository = REPO if repository is None else Path(repository)
+    kept_directories = set()
+    for test in test_files:
+        try:
+            relative = test.relative_to(repository)
+        except ValueError:
+            continue
+        kept_directories.add(view / relative.parent)
+    removed = 0
+    for prefix in INERT_PATH_PREFIXES:
+        removed += remove_projected_entry(view / os.fsdecode(prefix.rstrip(b"/")))
+    for name in INERT_ROOT_PATHS:
+        removed += remove_projected_entry(view / os.fsdecode(name))
+    markdown_suffix = os.fsdecode(MARKDOWN_SUFFIX)
+    for current_root, directory_names, file_names in os.walk(
+        str(view),
+        followlinks=False,
+    ):
+        current = Path(current_root)
+        directory_names[:] = [
+            name for name in directory_names if not (current / name).is_symlink()
+        ]
+        if any(
+            kept == current or kept in current.parents for kept in kept_directories
+        ):
+            continue
+        for file_name in file_names:
+            if file_name.endswith(markdown_suffix):
+                removed += remove_projected_entry(current / file_name)
+    return removed
+
+
 def main(arguments=()):
     started = time.monotonic()
     options = parse_arguments(arguments)
@@ -667,10 +1006,14 @@ def main(arguments=()):
         if options.staged
         else full_selection(all_test_files, "full suite requested")
     )
-    report_selection(selection)
+    report_selection(selection, all_test_files=all_test_files)
     test_files = selection.test_files
     if not test_files:
-        print("no repository tests found")
+        print(
+            "no repository tests found"
+            if not all_test_files
+            else "no discovered test file can be affected by the staged change"
+        )
         print(f"test elapsed: {time.monotonic() - started:.2f}s")
         return 0
     configured_identity = configured_git_identity()
@@ -690,6 +1033,9 @@ def main(arguments=()):
             child_environment,
             additional_paths=test_support_paths(test_files),
         )
+        if selection.lane != "full":
+            pruned = prune_inert_projection(test_cwd, test_files)
+            print(f"pruned record paths from the narrow test view: {pruned}")
         child_environment[PROJECTED_REPOSITORY_ENVIRONMENT] = str(test_cwd)
         for test, rel in zip(test_files, relative_tests):
             result = subprocess.run(
