@@ -1,10 +1,10 @@
 # Make an empty selection report itself in the same parseable shape as any other run
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from `memory/decisions/2026-07-30-commit-gate-skips-only-on-proof.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-report-unrun-coverage-honestly.md`
+**Queue actions:** none
 
 ## Goal
 
