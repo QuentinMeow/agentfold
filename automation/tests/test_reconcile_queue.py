@@ -4,10 +4,12 @@ import datetime
 import hashlib
 import importlib.util
 import io
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -16,6 +18,13 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "reconcile" / "reconcile.py"
 SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
+
+FIXTURE_GIT_PATH = Path(__file__).resolve().parent / "fixture_git.py"
+FIXTURE_GIT_SPEC = importlib.util.spec_from_file_location(
+    "fixture_git", FIXTURE_GIT_PATH
+)
+FIXTURE_GIT = importlib.util.module_from_spec(FIXTURE_GIT_SPEC)
+FIXTURE_GIT_SPEC.loader.exec_module(FIXTURE_GIT)
 
 GIT_FIXTURE_IDENTITY = (
     ("user.name", "Test"),
@@ -131,6 +140,18 @@ class ReconcileQueueTests(unittest.TestCase):
 
     @staticmethod
     def git(root, *args):
+        """Run one fixture Git command, in process where that is equivalent.
+
+        `add` and `commit` build history nothing here inspects through Git's own
+        porcelain, and they are the two commands the fixtures run most, so
+        `fixture_git` writes their loose objects and index entries directly.
+        It declines any invocation it does not speak for exactly — an
+        intent-to-add, a worktree carrying ignore rules, an unreadable index —
+        and the command then falls through to real Git unchanged.
+        """
+        served = FIXTURE_GIT.run(Path(root), args)
+        if served is not None:
+            return served
         return subprocess.run(
             ["git", *args],
             cwd=root,
@@ -176,6 +197,136 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(
                 "the copied skeleton commits",
                 self.git(root, "log", "-1", "--format=%s"),
+            )
+
+    # The clock `fixture_git` derives for each commit: the first commit sits on the
+    # pinned epoch, and every later commit sits a minute past its newest parent.
+    FIXTURE_HISTORY_OFFSETS = (0, 60, 120, 120, 180)
+    # The tip that history hashes to. Pinned here so a change in the writer, the
+    # identity, or the clock fails as a changed identifier rather than silently.
+    FIXTURE_HISTORY_HEAD = "c3352b6f7af71715c6d07639d17eb0d04626372e"
+
+    @staticmethod
+    def real_git(root, *args, **environment):
+        """Run real Git with an environment that pins what it records."""
+        pinned = dict(os.environ)
+        pinned.update(environment)
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(root),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            env=pinned,
+        ).stdout.strip()
+
+    @staticmethod
+    def loose_objects(root):
+        """Return every loose object under a repository, keyed by its identifier."""
+        base = Path(root) / ".git" / "objects"
+        return {
+            item.relative_to(base).as_posix(): zlib.decompress(item.read_bytes())
+            for item in sorted(base.rglob("*"))
+            if item.is_file() and item.parent.name not in ("info", "pack")
+        }
+
+    def build_fixture_history(self, root, in_process):
+        """Build one identical history, either in process or with real Git."""
+        root.mkdir(parents=True)
+        self.init_git(root)
+        offsets = iter(self.FIXTURE_HISTORY_OFFSETS)
+
+        def stage(*pathspec):
+            if in_process:
+                FIXTURE_GIT.stage(root, pathspec)
+            else:
+                self.real_git(root, "add", *pathspec)
+
+        def record(message):
+            if in_process:
+                FIXTURE_GIT.commit(root, [message])
+                return
+            stamp = "{0} +0000".format(FIXTURE_GIT.FIXTURE_EPOCH + next(offsets))
+            self.real_git(
+                root, "commit", "-m", message,
+                GIT_AUTHOR_NAME=FIXTURE_GIT.FIXTURE_NAME,
+                GIT_AUTHOR_EMAIL=FIXTURE_GIT.FIXTURE_EMAIL,
+                GIT_COMMITTER_NAME=FIXTURE_GIT.FIXTURE_NAME,
+                GIT_COMMITTER_EMAIL=FIXTURE_GIT.FIXTURE_EMAIL,
+                GIT_AUTHOR_DATE=stamp,
+                GIT_COMMITTER_DATE=stamp,
+            )
+
+        self.write(root, "README.md", "# Base\n")
+        self.write(root, "a/one.md", "# One\n")
+        self.write(root, "a/b/two.md", "# Two\n")
+        self.write(root, "run.sh", "#!/bin/sh\necho hi\n").chmod(0o755)
+        (root / "link.md").symlink_to("README.md")
+        stage(".")
+        record("base")
+
+        self.write(root, "README.md", "# Head\n")
+        (root / "a/one.md").unlink()
+        self.write(root, "a/c/three.md", "# Three\n")
+        stage("-A")
+        record("head")
+
+        trunk = self.real_git(root, "branch", "--show-current")
+        self.real_git(root, "checkout", "-q", "-b", "side")
+        self.write(root, "side.md", "# Side\n")
+        stage(".")
+        record("side work")
+
+        self.real_git(root, "checkout", "-q", trunk)
+        self.write(root, "trunk.md", "# Trunk\n")
+        stage(".")
+        record("trunk work")
+
+        self.real_git(root, "merge", "--no-ff", "--no-commit", "side")
+        record("synthetic merge")
+
+    def test_written_fixture_objects_match_what_real_git_writes(self):
+        """Guard the shortcut: the writer must produce real Git's objects exactly.
+
+        Without this the fixtures could drift into meaning something Git does not
+        agree with, silently. The comparison is over object identifiers and the
+        decompressed object bytes, which is the whole invariant; the compressed
+        bytes also match on Git's default loose-object level, but zlib framing is
+        a property of the compressor rather than of the object format.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real"
+            written = Path(tmp) / "written"
+            self.build_fixture_history(real, in_process=False)
+            self.build_fixture_history(written, in_process=True)
+
+            expected = self.loose_objects(real)
+            produced = self.loose_objects(written)
+            self.assertEqual(sorted(expected), sorted(produced))
+            self.assertGreater(len(expected), 10)
+            for name in sorted(expected):
+                self.assertEqual(
+                    expected[name],
+                    produced[name],
+                    f"object `{name}` is not what real Git writes",
+                )
+            self.assertEqual(
+                self.real_git(real, "rev-parse", "HEAD"),
+                self.real_git(written, "rev-parse", "HEAD"),
+            )
+            self.assertEqual(
+                self.FIXTURE_HISTORY_HEAD,
+                self.real_git(written, "rev-parse", "HEAD"),
+            )
+            self.assertEqual(
+                self.real_git(real, "ls-files", "--stage"),
+                self.real_git(written, "ls-files", "--stage"),
+            )
+            self.assertEqual("", self.real_git(written, "status", "--porcelain"))
+            self.assertEqual(
+                self.real_git(real, "log", "--format=%H %ct %s", "--all"),
+                self.real_git(written, "log", "--format=%H %ct %s", "--all"),
             )
 
     def test_github_adapter_handles_root_push_and_always_runs_tests(self):
