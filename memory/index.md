@@ -39,6 +39,7 @@
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
+- [A new check and its first violation can arrive on separate green branches](lessons/automation/green-branches-can-merge-to-red.md) — Independent stack legs are only ever tested apart, so a check on one and violating text on the other produce a failure that existed on neither
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 
 ## known-issues

@@ -44,10 +44,13 @@ What is true today, mapped to the desired-state lines.
   pre-commit run measures 0.02s in the test step. The complete local suite is still
   ~120s serially, with system time above user time, so it remains bound by process
   creation rather than computation. Sharding below the file, background-maintenance
-  isolation, in-process fixture history and a machine-independent link check are
-  implemented and in review, not merged; measured together the complete suite runs in
-  38.31s against 124.77s serial in the same session. Investigation, the levers, and the
-  one approach ruled out by measurement: `docs/designs/fast-local-test-feedback.md`.
+  isolation, in-process fixture history and a machine-independent link check are now
+  merged too; measured together the complete suite ran in 38.31s against 124.77s serial
+  in the same session, and later sessions on the same host measure it between 25s and
+  50s, so only same-session pairs compare. Investigation, the levers, and the one
+  approach ruled out by measurement: `docs/designs/fast-local-test-feedback.md`. The
+  action-projection gate's own per-path Git reads are the open item, in review at 84
+  processes down to 2 per run.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet. Each treats the message queue as the
