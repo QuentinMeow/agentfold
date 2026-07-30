@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Static event, trust, candidate, and actor matrix for the GitHub adapter."""
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +11,18 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/harness.yml"
 JOB_HEADER_RE = re.compile(r"^  (?P<name>[a-z][a-z0-9-]*):\n", re.MULTILINE)
+RUN_BLOCK_MARKER = "        run: |\n"
+RUN_BLOCK_INDENT = " " * 10
+# GitHub Actions runs every `run:` block as `bash -e {0}`.
+STEP_SHELL = ("bash", "-e")
+GIT_FIXTURE_ENVIRONMENT = {
+    "GIT_AUTHOR_NAME": "harness",
+    "GIT_AUTHOR_EMAIL": "harness@example.invalid",
+    "GIT_COMMITTER_NAME": "harness",
+    "GIT_COMMITTER_EMAIL": "harness@example.invalid",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+}
 TRUSTED_GATE_JOBS = (
     "prepare-trusted-final-test-gate",
     "trusted-final-test-runner",
@@ -24,6 +39,107 @@ def workflow_job(workflow, name):
             else len(workflow)
         return workflow[match.start():end]
     return ""
+
+
+def step_shell_script(step):
+    """Return one step's literal `run:` block with its block indent removed."""
+    _before, separator, remainder = step.partition(RUN_BLOCK_MARKER)
+    if not separator:
+        return ""
+    lines = []
+    for line in remainder.splitlines(keepends=True):
+        if line.startswith(RUN_BLOCK_INDENT):
+            lines.append(line[len(RUN_BLOCK_INDENT):])
+        elif line.strip():
+            break
+        else:
+            lines.append("\n")
+    return "".join(lines)
+
+
+def git(repository, *arguments):
+    """Run one Git command in a fixture repository and return its stdout."""
+    environment = dict(os.environ)
+    environment.update(GIT_FIXTURE_ENVIRONMENT)
+    result = subprocess.run(
+        ("git", *arguments),
+        cwd=str(repository),
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout.decode("utf-8").strip()
+
+
+class MergeRefFixture:
+    """A local origin whose pull refs carry every merge-candidate shape.
+
+    The candidate steps only inspect commit identity and parent shape, so every
+    commit here shares one empty tree and differs by parents and message.
+    """
+
+    def __init__(self, root):
+        self.root = Path(root)
+        self.remote = self.root / "remote"
+        self.remote.mkdir()
+        git(self.remote, "init", "--quiet", "--bare")
+        git(self.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
+        tree = git(self.remote, "hash-object", "-t", "tree", "-w", os.devnull)
+        self.base = self.commit(tree, "base")
+        self.advanced_base = self.commit(tree, "advanced base", self.base)
+        self.head = self.commit(tree, "head", self.base)
+        self.raced_head = self.commit(tree, "raced head", self.head)
+        self.unrelated = self.commit(tree, "unrelated")
+        git(self.remote, "update-ref", "refs/heads/main", self.advanced_base)
+        self.publish(1, self.merge(tree, self.base, self.head))
+        self.publish(2, self.merge(tree, self.advanced_base, self.head))
+        self.publish(3, self.merge(tree, self.base, self.raced_head))
+        self.publish(4, self.head)
+        self.publish(5, self.merge(tree, self.base, self.head, self.raced_head))
+
+    def commit(self, tree, message, *parents):
+        arguments = ["commit-tree", tree, "-m", message]
+        for parent in parents:
+            arguments.extend(("-p", parent))
+        return git(self.remote, *arguments)
+
+    def merge(self, tree, *parents):
+        return self.commit(tree, "Merge " + " ".join(parents), *parents)
+
+    def publish(self, number, revision):
+        git(self.remote, "update-ref", f"refs/pull/{number}/merge", revision)
+
+    def workspace(self):
+        workspace = Path(tempfile.mkdtemp(dir=str(self.root)))
+        git(workspace, "init", "--quiet")
+        git(workspace, "remote", "add", "origin", str(self.remote))
+        return workspace
+
+    def run_step(self, script, environment):
+        """Run one candidate step as Actions would, and report its outcome."""
+        workspace = self.workspace()
+        script_path = workspace / "step.sh"
+        script_path.write_text(script, encoding="utf-8")
+        output_path = workspace / "step-output.txt"
+        output_path.write_text("", encoding="utf-8")
+        step_environment = dict(os.environ)
+        step_environment.update(GIT_FIXTURE_ENVIRONMENT)
+        step_environment["GITHUB_OUTPUT"] = str(output_path)
+        step_environment.update(environment)
+        result = subprocess.run(
+            (*STEP_SHELL, str(script_path)),
+            cwd=str(workspace),
+            env=step_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        return (
+            result.returncode,
+            output_path.read_text(encoding="utf-8"),
+            result.stderr.decode("utf-8"),
+        )
 
 
 def trusted_gate_regime(workflow):
@@ -152,7 +268,12 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         self.assert_contains_all(fetch, (
             '"refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"',
-            "github.event.pull_request.merge_commit_sha",
+            "ACTION_PROJECTION_EXPECTED_HEAD: "
+            "${{ github.event_name == 'pull_request_target' && "
+            "github.event.pull_request.head.sha || '' }}",
+            "ACTION_PROJECTION_EXPECTED_BASE: "
+            "${{ github.event_name == 'pull_request_target' && "
+            "github.event.pull_request.base.sha || '' }}",
             'rev-parse --verify "FETCH_HEAD^{commit}"',
             '>> "$GITHUB_OUTPUT"',
         ))
@@ -345,9 +466,15 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         self.assert_contains_all(candidate, (
             '"refs/pull/$SOURCE_RELEASE_PR_NUMBER/merge"',
-            "github.event.pull_request.merge_commit_sha",
-            "github.sha",
-            'test "$SOURCE_RELEASE_CANDIDATE" =',
+            "SOURCE_RELEASE_EXPECTED_HEAD: "
+            "${{ github.event_name == 'pull_request_target' && "
+            "github.event.pull_request.head.sha || '' }}",
+            "SOURCE_RELEASE_EXPECTED_BASE: "
+            "${{ github.event_name == 'pull_request_target' && "
+            "github.event.pull_request.base.sha || '' }}",
+            "SOURCE_RELEASE_PUSH_CANDIDATE: "
+            "${{ github.event_name == 'push' && github.sha || '' }}",
+            '"$SOURCE_RELEASE_CANDIDATE" != \\',
         ))
         resolve = self.step(
             "external-source-release-admission",
@@ -371,7 +498,10 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             '--candidate-revision "$SOURCE_RELEASE_CANDIDATE"',
             "--label github-external-source-release",
         ))
-        self.assertNotIn("pull_request.head.sha", job)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", job)
+        self.assertNotIn(
+            '--candidate-revision "$SOURCE_RELEASE_EXPECTED_HEAD"', job
+        )
 
     def test_review_surfaces_enforce_actions_with_honest_trust_ceiling(self):
         self.assertIn("permissions:\n  contents: read", self.workflow)
@@ -503,6 +633,184 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
                 "agentfold-conversation-actions.json",
                 "--label github-current-pull-request-conversation-state",
             ))
+
+    def test_merge_candidate_is_pinned_by_parent_shape_not_merge_commit_sha(self):
+        """merge_commit_sha is eventually consistent, so it cannot pin anything.
+
+        It arrives empty on `opened` and stale after `synchronize`, which made
+        both admission jobs fail closed on revisions GitHub had already
+        computed. The parent shape of the fetched merge commit pins the same
+        immutable candidate to the same event without that race.
+        """
+        steps = (
+            (
+                "authoritative-external-action-projection",
+                "Fetch immutable PR candidate without checking it out",
+                "ACTION_PROJECTION_CANDIDATE_REVISION",
+                "ACTION_PROJECTION_MERGED_HEAD",
+                "ACTION_PROJECTION_EXPECTED_HEAD",
+                "ACTION_PROJECTION_EXPECTED_BASE",
+            ),
+            (
+                "external-source-release-admission",
+                "Fetch immutable source-release candidate",
+                "SOURCE_RELEASE_CANDIDATE",
+                "SOURCE_RELEASE_MERGED_HEAD",
+                "SOURCE_RELEASE_EXPECTED_HEAD",
+                "SOURCE_RELEASE_EXPECTED_BASE",
+            ),
+        )
+        for job, name, candidate, merged, head, base in steps:
+            with self.subTest(job=job):
+                step = self.step(job, name)
+                self.assert_contains_all(step, (
+                    f'"${candidate}^2^{{commit}}"',
+                    f'"${candidate}^3^{{commit}}"',
+                    f'if [ "${merged}" != \\',
+                    f'"${head}" ]; then',
+                    "merge-base --is-ancestor \\",
+                    f'"${base}" \\',
+                    f'"${candidate}^1"',
+                    "exit 1",
+                ))
+                self.assertNotIn(
+                    "github.event.pull_request.merge_commit_sha", step
+                )
+        self.assertNotIn(
+            "github.event.pull_request.merge_commit_sha", self.workflow
+        )
+
+    def test_candidate_step_admits_the_event_merge_and_survives_a_moved_base(self):
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            for job, name, prefix in (
+                (
+                    "authoritative-external-action-projection",
+                    "Fetch immutable PR candidate without checking it out",
+                    "ACTION_PROJECTION",
+                ),
+                (
+                    "external-source-release-admission",
+                    "Fetch immutable source-release candidate",
+                    "SOURCE_RELEASE",
+                ),
+            ):
+                script = step_shell_script(self.step(job, name))
+                self.assertTrue(script, f"{job} step has no shell script")
+                number_variable = f"{prefix}_PR_NUMBER"
+                base_environment = {
+                    f"{prefix}_EVENT": "pull_request_target",
+                    f"{prefix}_EXPECTED_HEAD": fixture.head,
+                    f"{prefix}_EXPECTED_BASE": fixture.base,
+                }
+                for label, number, expected in (
+                    ("merge of this event's head", "1", fixture.head),
+                    ("base branch moved since the event", "2", fixture.head),
+                ):
+                    with self.subTest(job=job, admitted=label):
+                        code, output, stderr = fixture.run_step(
+                            script,
+                            {**base_environment, number_variable: number},
+                        )
+                        self.assertEqual(code, 0, stderr)
+                        merge = git(
+                            fixture.remote, "rev-parse",
+                            f"refs/pull/{number}/merge",
+                        )
+                        self.assertEqual(output, f"revision={merge}\n")
+                        self.assertEqual(
+                            git(fixture.remote, "rev-parse", f"{merge}^2"),
+                            expected,
+                        )
+
+    def test_candidate_step_fails_closed_on_every_unpinned_candidate(self):
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            for job, name, prefix in (
+                (
+                    "authoritative-external-action-projection",
+                    "Fetch immutable PR candidate without checking it out",
+                    "ACTION_PROJECTION",
+                ),
+                (
+                    "external-source-release-admission",
+                    "Fetch immutable source-release candidate",
+                    "SOURCE_RELEASE",
+                ),
+            ):
+                script = step_shell_script(self.step(job, name))
+                rejected = (
+                    ("head raced ahead of the event", "3",
+                     fixture.head, fixture.base,
+                     "does not merge this event's head"),
+                    ("merge ref is not a merge commit", "4",
+                     fixture.head, fixture.base,
+                     "is not a merge commit"),
+                    ("merge ref has a third parent", "5",
+                     fixture.head, fixture.base,
+                     "has more than two parents"),
+                    ("base is not contained in the merge", "1",
+                     fixture.head, fixture.unrelated,
+                     "does not contain this event's base"),
+                    ("payload carries no head revision", "1",
+                     "", fixture.base,
+                     "carries no head or base revision"),
+                    ("payload carries no base revision", "1",
+                     fixture.head, "",
+                     "carries no head or base revision"),
+                    ("merge ref does not resolve", "9",
+                     fixture.head, fixture.base, ""),
+                )
+                for label, number, head, base, message in rejected:
+                    with self.subTest(job=job, rejected=label):
+                        code, output, stderr = fixture.run_step(script, {
+                            f"{prefix}_EVENT": "pull_request_target",
+                            f"{prefix}_EXPECTED_HEAD": head,
+                            f"{prefix}_EXPECTED_BASE": base,
+                            f"{prefix}_PR_NUMBER": number,
+                        })
+                        self.assertNotEqual(code, 0, output)
+                        self.assertEqual(output, "")
+                        if message:
+                            self.assertIn(message, stderr)
+
+    def test_source_release_push_candidate_is_the_revision_the_push_names(self):
+        script = step_shell_script(self.step(
+            "external-source-release-admission",
+            "Fetch immutable source-release candidate",
+        ))
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            code, output, stderr = fixture.run_step(script, {
+                "SOURCE_RELEASE_EVENT": "push",
+                "SOURCE_RELEASE_PUSH_CANDIDATE": fixture.advanced_base,
+            })
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(output, f"revision={fixture.advanced_base}\n")
+            code, output, stderr = fixture.run_step(script, {
+                "SOURCE_RELEASE_EVENT": "push",
+                "SOURCE_RELEASE_PUSH_CANDIDATE": "",
+            })
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("carries no candidate revision", stderr)
+
+    def test_issue_comment_candidate_keeps_its_declared_trust_ceiling(self):
+        """An issue_comment payload names no head, so its ref stays unpinned."""
+        script = step_shell_script(self.step(
+            "authoritative-external-action-projection",
+            "Fetch immutable PR candidate without checking it out",
+        ))
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            code, output, stderr = fixture.run_step(script, {
+                "ACTION_PROJECTION_EVENT": "issue_comment",
+                "ACTION_PROJECTION_PR_NUMBER": "1",
+                "ACTION_PROJECTION_EXPECTED_HEAD": "",
+                "ACTION_PROJECTION_EXPECTED_BASE": "",
+            })
+            self.assertEqual(code, 0, stderr)
+            merge = git(fixture.remote, "rev-parse", "refs/pull/1/merge")
+            self.assertEqual(output, f"revision={merge}\n")
 
     def test_no_untrusted_candidate_is_ever_checked_out(self):
         for forbidden in (
