@@ -3,7 +3,7 @@
 ## 2026-07-29 — implementation and measurement (claude)
 
 - Traced the cost: 13,261 Git subprocess calls per full suite, 92-93% of wall time inside
-  them, and each one paying an extra `fork`+`exec` for the `/bin/sh` shim.
+  them, and each one paying an extra `fork`+`exec` for the /bin/sh shim.
 - Replaced the shim with environment-based isolation. Verified with live canaries in the
   caller's `~/.gitconfig`, `XDG` config, a global `core.hooksPath`, and a `!`-shell alias
   that none are visible to children before or after.
