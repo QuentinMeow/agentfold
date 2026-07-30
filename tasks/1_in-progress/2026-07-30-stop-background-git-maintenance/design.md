@@ -19,7 +19,7 @@ detached grandchild. So the write inside `objects/` is unconditional: being far 
 
 The constraint that shapes the fix: the setting must reach Git 2.23 *and* Git 2.4x/2.5x,
 must apply to every temp repository any test creates, and must not reintroduce a wrapper
-script (a `/bin/sh` shim named `git` was removed precisely because it doubled the process
+script (a /bin/sh shim named `git` was removed precisely because it doubled the process
 count of every Git call).
 
 ## Options considered
