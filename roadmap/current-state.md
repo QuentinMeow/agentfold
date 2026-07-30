@@ -30,9 +30,10 @@ What is true today, mapped to the desired-state lines.
   action entry link one live human queue item, and rejects action-like prose outside
   that section. Provider sources always retain an actor-correct version binding even
   when their prose directly links the queue; the GitHub workflow is a thin event
-  adapter. Both of its admission jobs are currently red on every freshly opened pull
-  request, because the merge revision the payload has not computed yet is read as empty
-  or replaced by the base tip — filed as `2026-07-25-fix-pull-request-admission-event-race`.
+  adapter. Its two admission jobs no longer read a merge revision the payload has not
+  computed yet: each binds the candidate through the merge commit's own parents, whose
+  object ids that commit's identifier already covers, so the binding is knowable on the
+  first event. Pull requests opened after that merged are green on both.
   No template↔check drift detection yet.
 - **Test gate cost (2026-07-30)**: three measured changes are merged. The runner no
   longer interposes a `/bin/sh` script named `git` on the child path, so a Git call is
@@ -41,10 +42,12 @@ What is true today, mapped to the desired-state lines.
   `--staged` maps every staged path through an input-ownership table, so a records-only
   commit selects no test at all and names every file it skipped. A records-only
   pre-commit run measures 0.02s in the test step. The complete local suite is still
-  ~199s with system time above user time, so it remains bound by process creation
-  rather than computation, and its cost still scales with the whole suite rather than
-  with the change. Investigation and remaining levers:
-  `docs/designs/fast-local-test-feedback.md`.
+  ~120s serially, with system time above user time, so it remains bound by process
+  creation rather than computation. Sharding below the file, background-maintenance
+  isolation, in-process fixture history and a machine-independent link check are
+  implemented and in review, not merged; measured together the complete suite runs in
+  38.31s against 124.77s serial in the same session. Investigation, the levers, and the
+  one approach ruled out by measurement: `docs/designs/fast-local-test-feedback.md`.
 - **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
   `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
   gardener is a protocol only — no script yet. Each treats the message queue as the
