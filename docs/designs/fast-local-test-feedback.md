@@ -215,6 +215,15 @@ permanent surface; and introduces no rule that must be kept correct forever.
   (recommended) or as a follow-up.
 - Whether the reconciler's ~6s becomes the next target once tests are ~26s.
 
+## Resolution
+
+The owner chose Option B and then asked for more than it offered, rejecting 26-30s as a
+stopping point and directing that the parts of the tiered-lane experiment worth keeping be
+rebuilt rather than merged. That answer is folded into
+`memory/decisions/2026-07-30-commit-gate-skips-only-on-proof.md`, which records the durable
+rule: a local gate may skip a test only on evidence that running it cannot change the
+answer, never on the promise that a later boundary will run it.
+
 ## Revision, 2026-07-30: what E, D and A actually delivered, and what is left
 
 E, D and A merged as pull requests 20, 21 and 22. Everything below was re-measured on
