@@ -1,10 +1,10 @@
 # Make the two admission checks pass on a freshly opened pull request
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-25, by claude, from the CI failure observed while opening pull request 13 for task 2026-07-25-mine-markdown-cochange-couplings
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-fix-pull-request-admission-event-race.md`
+**Queue actions:** none
 
 ## Goal
 
