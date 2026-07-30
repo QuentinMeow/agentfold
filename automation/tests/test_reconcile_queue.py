@@ -1,8 +1,10 @@
+import atexit
 import contextlib
 import datetime
 import hashlib
 import importlib.util
 import io
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -14,6 +16,52 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "reconcile" / "reconcile.py"
 SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
+
+GIT_FIXTURE_IDENTITY = (
+    ("user.name", "Test"),
+    ("user.email", "test@example.invalid"),
+)
+_GIT_FIXTURE_SKELETON = None
+
+
+def build_git_fixture_skeleton(root):
+    """Create the canonical fixture repository with real Git, once."""
+    template = root / "empty-template"
+    template.mkdir()
+    origin = root / "origin"
+    origin.mkdir()
+    # An empty --template keeps the sample hooks, description, and exclude file
+    # out of the skeleton: nothing here reads them, and they are most of what
+    # `git init` writes.
+    commands = [["git", "init", f"--template={template}"]]
+    commands.extend(
+        ["git", "config", key, value] for key, value in GIT_FIXTURE_IDENTITY
+    )
+    for command in commands:
+        subprocess.run(
+            command,
+            cwd=origin,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    return origin / ".git"
+
+
+def git_fixture_skeleton():
+    """Return the shared, relocatable `.git` every repository test copies.
+
+    Every one of these tests needs the same empty repository, and `git init`
+    plus two `git config` runs cost three process spawns per test. Building the
+    skeleton once and copying it costs one directory copy instead.
+    """
+    global _GIT_FIXTURE_SKELETON
+    if _GIT_FIXTURE_SKELETON is None:
+        holder = tempfile.mkdtemp(prefix="agentfold-git-fixture-")
+        atexit.register(shutil.rmtree, holder, True)
+        _GIT_FIXTURE_SKELETON = build_git_fixture_skeleton(Path(holder))
+    return _GIT_FIXTURE_SKELETON
 
 
 VALID_DECISION = """# Choose the admission boundary
@@ -93,9 +141,42 @@ class ReconcileQueueTests(unittest.TestCase):
         ).stdout.strip()
 
     def init_git(self, root):
-        self.git(root, "init")
-        self.git(root, "config", "user.name", "Test")
-        self.git(root, "config", "user.email", "test@example.invalid")
+        """Copy the shared skeleton instead of re-running `git init` per test."""
+        shutil.copytree(
+            str(git_fixture_skeleton()), str(Path(root) / ".git")
+        )
+
+    def test_copied_fixture_skeleton_matches_a_real_git_init(self):
+        """Guard the shortcut: a real `git init` must still produce this repository."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real = build_git_fixture_skeleton(Path(tmp))
+            copied = git_fixture_skeleton()
+            self.assertEqual(
+                sorted(item.relative_to(real).as_posix()
+                       for item in real.rglob("*")),
+                sorted(item.relative_to(copied).as_posix()
+                       for item in copied.rglob("*")),
+            )
+            for item in sorted(real.rglob("*")):
+                if item.is_file():
+                    relative = item.relative_to(real)
+                    self.assertEqual(
+                        item.read_bytes(),
+                        (copied / relative).read_bytes(),
+                        f"`{relative}` drifted from what `git init` writes",
+                    )
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Real\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "the copied skeleton commits")
+            # The recorded author can come from the environment, so assert on
+            # what the copy actually carries: the fixture identity config.
+            self.assertEqual("Test", self.git(root, "config", "user.name"))
+            self.assertEqual(
+                "the copied skeleton commits",
+                self.git(root, "log", "-1", "--format=%s"),
+            )
 
     def test_github_adapter_handles_root_push_and_always_runs_tests(self):
         workflow = (

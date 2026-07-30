@@ -1,8 +1,10 @@
+import atexit
 import contextlib
 import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -17,18 +19,94 @@ SPEC = importlib.util.spec_from_file_location("check_action_projection", MODULE_
 PROJECTION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROJECTION)
 
+GIT_FIXTURE_IDENTITY = (
+    ("user.name", "Test"),
+    ("user.email", "test@example.invalid"),
+)
+_GIT_FIXTURE_SKELETON = None
+
+
+def build_git_fixture_skeleton(root):
+    """Create the canonical fixture repository with real Git, once."""
+    template = root / "empty-template"
+    template.mkdir()
+    origin = root / "origin"
+    origin.mkdir()
+    # An empty --template leaves out the sample hooks, description, and exclude
+    # file: nothing here reads them, and they are most of what `git init` writes.
+    commands = [["git", "init", f"--template={template}"]]
+    commands.extend(
+        ["git", "config", key, value] for key, value in GIT_FIXTURE_IDENTITY
+    )
+    for command in commands:
+        subprocess.run(
+            command,
+            cwd=origin,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    return origin / ".git"
+
+
+def git_fixture_skeleton():
+    """Return the shared, relocatable `.git` every repository test copies.
+
+    Each test needs the same empty repository, and `git init` plus two
+    `git config` runs cost three process spawns per test. The skeleton is built
+    once and copied instead.
+    """
+    global _GIT_FIXTURE_SKELETON
+    if _GIT_FIXTURE_SKELETON is None:
+        holder = tempfile.mkdtemp(prefix="agentfold-git-fixture-")
+        atexit.register(shutil.rmtree, holder, True)
+        _GIT_FIXTURE_SKELETON = build_git_fixture_skeleton(Path(holder))
+    return _GIT_FIXTURE_SKELETON
+
 
 class ActionProjectionTests(unittest.TestCase):
     @contextlib.contextmanager
     def repo(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.git(root, "init")
-            self.git(root, "config", "user.name", "Test")
-            self.git(root, "config", "user.email", "test@example.invalid")
+            shutil.copytree(
+                str(git_fixture_skeleton()), str(root / ".git")
+            )
             (root / "message-queue").mkdir()
             with mock.patch.object(PROJECTION, "REPO", root):
                 yield root
+
+    def test_copied_fixture_skeleton_matches_a_real_git_init(self):
+        """Guard the shortcut: a real `git init` must still produce this repository."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real = build_git_fixture_skeleton(Path(tmp))
+            copied = git_fixture_skeleton()
+            self.assertEqual(
+                sorted(item.relative_to(real).as_posix()
+                       for item in real.rglob("*")),
+                sorted(item.relative_to(copied).as_posix()
+                       for item in copied.rglob("*")),
+            )
+            for item in sorted(real.rglob("*")):
+                if item.is_file():
+                    relative = item.relative_to(real)
+                    self.assertEqual(
+                        item.read_bytes(),
+                        (copied / relative).read_bytes(),
+                        f"`{relative}` drifted from what `git init` writes",
+                    )
+        with self.repo() as root:
+            (root / "README.md").write_text("# Real\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "the copied skeleton commits")
+            # The recorded author can come from the environment, so assert on
+            # what the copy actually carries: the fixture identity config.
+            self.assertEqual("Test", self.git(root, "config", "user.name"))
+            self.assertEqual(
+                "the copied skeleton commits",
+                self.git(root, "log", "-1", "--format=%s"),
+            )
 
     @staticmethod
     def git(root, *args):
