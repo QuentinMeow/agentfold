@@ -158,6 +158,28 @@ core-scope: pass (2 core path(s), task 2026-07-30-write-fixture-git-objects-in-p
 exit=0
 ```
 
+## Whole automation group, through the pre-commit hook
+
+The hook that gated the implementation commit ran `automation/run_tests.py --staged`,
+which selects every discovered test in the automation group for a new path under
+`automation/`. Tail of that run:
+
+```
+pruned record paths from the narrow test view: 335
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 9/9 files passed
+test elapsed: 121.26s
+pre-commit: OK
+```
+
 ## Not changed
 
 `automation/tests/test_check_core_scope.py` creates a repository with
