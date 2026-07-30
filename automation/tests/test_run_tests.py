@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -520,6 +521,11 @@ class StagedTestSelectionTests(unittest.TestCase):
         selection = RUN_TESTS.full_selection(self.all_tests, "full suite requested")
 
         self.assertFalse(options.staged)
+        self.assertFalse(options.verbose)
+        self.assertIsNone(
+            options.jobs,
+            "the worker count stays unresolved until a run needs it",
+        )
         self.assertEqual("full", selection.lane)
         self.assertEqual(self.all_tests, selection.test_files)
 
@@ -797,6 +803,427 @@ class InputOwnershipTests(unittest.TestCase):
                         )
                     )
         self.assertEqual([], failed)
+
+
+class ShardDiscoveryTests(unittest.TestCase):
+    """Guard the one thing sharding can get silently wrong: dropping a test.
+
+    Every check here is static and costs milliseconds. The rule the runner has to keep
+    is that ``discovered_test_names`` either enumerates every test unittest would
+    collect, or returns None so the file runs whole.
+    """
+
+    def test_methods_inherited_from_a_local_base_belong_to_the_child(self):
+        names = RUN_TESTS.discovered_test_names(
+            "import unittest\n"
+            "\n"
+            "class BaseCase(unittest.TestCase):\n"
+            "    def test_shared(self):\n"
+            "        pass\n"
+            "\n"
+            "class ChildCase(BaseCase):\n"
+            "    def test_own(self):\n"
+            "        pass\n"
+        )
+
+        self.assertEqual(
+            (
+                "BaseCase.test_shared",
+                "ChildCase.test_own",
+                "ChildCase.test_shared",
+            ),
+            names,
+        )
+
+    def test_a_mixin_that_is_not_a_case_still_contributes_its_methods(self):
+        names = RUN_TESTS.discovered_test_names(
+            "import unittest\n"
+            "\n"
+            "class SharedChecks(object):\n"
+            "    def test_shared(self):\n"
+            "        pass\n"
+            "\n"
+            "class ChildCase(SharedChecks, unittest.TestCase):\n"
+            "    def test_own(self):\n"
+            "        pass\n"
+        )
+
+        self.assertEqual(("ChildCase.test_own", "ChildCase.test_shared"), names)
+
+    def test_discovery_falls_back_when_it_cannot_see_every_test(self):
+        opaque_sources = {
+            "base class from another module": (
+                "from shared import BaseCase\n"
+                "class ChildCase(BaseCase):\n"
+                "    def test_own(self):\n"
+                "        pass\n"
+            ),
+            "load_tests protocol": (
+                "import unittest\n"
+                "class Case(unittest.TestCase):\n"
+                "    def test_own(self):\n"
+                "        pass\n"
+                "def load_tests(loader, tests, pattern):\n"
+                "    return tests\n"
+            ),
+            "methods attached at import time": (
+                "import unittest\n"
+                "class Case(unittest.TestCase):\n"
+                "    pass\n"
+                "setattr(Case, 'test_generated', lambda self: None)\n"
+            ),
+            "class built by a three-argument type call": (
+                "import unittest\n"
+                "Case = type('Case', (unittest.TestCase,), "
+                "{'test_one': lambda self: None})\n"
+            ),
+            "class built by a metaclass": (
+                "import unittest\n"
+                "class Case(unittest.TestCase, metaclass=type):\n"
+                "    def test_own(self):\n"
+                "        pass\n"
+            ),
+            "decorated class": (
+                "import unittest\n"
+                "@unittest.skipUnless(True, 'reason')\n"
+                "class Case(unittest.TestCase):\n"
+                "    def test_own(self):\n"
+                "        pass\n"
+            ),
+            "class nested inside other code": (
+                "import unittest\n"
+                "if True:\n"
+                "    class Case(unittest.TestCase):\n"
+                "        def test_own(self):\n"
+                "            pass\n"
+            ),
+            "unparseable source": "class Case(unittest.TestCase)\n",
+            "no case at all": "value = 1\n",
+        }
+        for label, source in sorted(opaque_sources.items()):
+            with self.subTest(label):
+                self.assertIsNone(RUN_TESTS.discovered_test_names(source))
+
+    def test_discovery_matches_what_unittest_collects_for_every_real_test_file(self):
+        checked = 0
+        for test in RUN_TESTS.repository_test_files():
+            names = RUN_TESTS.discovered_test_names(test.read_text(encoding="utf-8"))
+            self.assertIsNotNone(
+                names,
+                "{0} would run whole; that is safe but say so on purpose"
+                .format(test.name),
+            )
+            spec = importlib.util.spec_from_file_location(
+                "shard_probe_" + test.stem,
+                test,
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            loaded = set()
+            for suite in unittest.defaultTestLoader.loadTestsFromModule(module):
+                for case in suite:
+                    loaded.add(
+                        "{0}.{1}".format(
+                            type(case).__name__,
+                            case._testMethodName,
+                        )
+                    )
+            self.assertEqual(loaded, set(names), test.name)
+            checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_every_discovered_test_lands_in_exactly_one_shard_or_the_tail(self):
+        tests = RUN_TESTS.repository_test_files()
+        plan = RUN_TESTS.shard_plan(tests, 8)
+        quarantined = {name for name, _reason in RUN_TESTS.QUARANTINED_TEST_FILES}
+
+        scheduled = []
+        for unit in plan.units:
+            self.assertTrue(unit.names, "a real test file must shard by test name")
+            scheduled.extend(
+                "{0}::{1}".format(unit.relative.as_posix(), name)
+                for name in unit.names
+            )
+        expected = []
+        for test in tests:
+            relative = test.relative_to(RUN_TESTS.REPO).as_posix()
+            if relative in quarantined:
+                continue
+            expected.extend(
+                "{0}::{1}".format(relative, name)
+                for name in RUN_TESTS.discovered_test_names(
+                    test.read_text(encoding="utf-8")
+                )
+            )
+        self.assertEqual(sorted(expected), sorted(scheduled))
+        self.assertEqual(len(set(scheduled)), len(scheduled))
+        self.assertEqual(
+            sorted(Path(name) for name in quarantined),
+            sorted(plan.tail),
+        )
+        self.assertEqual((), plan.opaque)
+
+    def test_an_unreadable_file_runs_whole_instead_of_being_dropped(self):
+        missing = RUN_TESTS.REPO / "automation/tests/test_absent_probe.py"
+        plan = RUN_TESTS.shard_plan((missing,), 4)
+
+        self.assertEqual(1, len(plan.units))
+        self.assertEqual((), plan.units[0].names)
+        self.assertEqual((Path("automation/tests/test_absent_probe.py"),), plan.opaque)
+
+    def test_the_quarantined_file_is_reported_with_its_reason(self):
+        tests = (RUN_TESTS.REPO / "automation/tests/test_run_tests.py",)
+        plan = RUN_TESTS.shard_plan(tests, 4)
+        report = io.StringIO()
+        with contextlib.redirect_stdout(report):
+            RUN_TESTS.report_shard_plan(plan)
+        printed = report.getvalue()
+
+        self.assertEqual((), plan.units)
+        self.assertIn("serial tail: automation/tests/test_run_tests.py", printed)
+        self.assertIn("not concurrency-safe", printed)
+        self.assertIn("nest a second worker pool", printed)
+
+    def test_worker_count_must_be_a_positive_integer(self):
+        for rejected in ("0", "-1", "two", ""):
+            with self.subTest(rejected):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        RUN_TESTS.parse_arguments(("--jobs", rejected))
+        self.assertEqual(3, RUN_TESTS.parse_arguments(("--jobs", "3")).jobs)
+
+    def test_the_default_worker_count_is_physical_cores_not_logical_ones(self):
+        with mock.patch.object(RUN_TESTS, "physical_core_count", return_value=6):
+            self.assertEqual(6, RUN_TESTS.default_worker_count())
+        with mock.patch.object(RUN_TESTS, "physical_core_count", return_value=None):
+            for logical, expected in ((16, 8), (4, 2), (2, 2), (1, 1)):
+                with self.subTest(logical):
+                    with mock.patch.object(RUN_TESTS.os, "cpu_count", return_value=logical):
+                        self.assertEqual(expected, RUN_TESTS.default_worker_count())
+
+
+class ShardExecutionTests(unittest.TestCase):
+    def test_shard_output_is_emitted_as_one_uninterrupted_block(self):
+        units = tuple(
+            RUN_TESTS.ShardUnit(
+                Path("automation/tests/test_probe.py"),
+                ("Case.test_{0}".format(index),),
+                index + 1,
+                12,
+            )
+            for index in range(12)
+        )
+
+        def fake_run(command, **_keywords):
+            index = command[-1].rsplit("_", 1)[1]
+            time.sleep(0.005)
+            body = "".join(
+                "line {0} of shard {1}\n".format(line, index) for line in range(40)
+            )
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout=body.encode("utf-8"),
+            )
+
+        report = io.StringIO()
+        with mock.patch.object(RUN_TESTS.subprocess, "run", side_effect=fake_run):
+            with contextlib.redirect_stdout(report):
+                failed = RUN_TESTS.run_shard_units(
+                    units,
+                    Path("/view"),
+                    {},
+                    8,
+                )
+
+        self.assertEqual(
+            frozenset((Path("automation/tests/test_probe.py"),)),
+            failed,
+        )
+        blocks = report.getvalue().split("--- FAIL ")
+        self.assertEqual(13, len(blocks))
+        for block in blocks[1:]:
+            shards = {
+                line.rsplit(" ", 1)[1]
+                for line in block.splitlines()
+                if line.startswith("line ")
+            }
+            self.assertEqual(1, len(shards), block)
+            self.assertEqual(40, len(block.splitlines()) - 1, block)
+
+    def test_a_passing_shard_stays_quiet_unless_the_run_asked_for_names(self):
+        unit = RUN_TESTS.ShardUnit(
+            Path("automation/tests/test_probe.py"),
+            ("Case.test_one",),
+            1,
+            1,
+        )
+        completed = subprocess.CompletedProcess(["python"], 0, stdout=b"ok\n")
+
+        quiet = io.StringIO()
+        with mock.patch.object(RUN_TESTS.subprocess, "run", return_value=completed):
+            with contextlib.redirect_stdout(quiet):
+                RUN_TESTS.run_shard_units((unit,), Path("/view"), {}, 2)
+        loud = io.StringIO()
+        with mock.patch.object(RUN_TESTS.subprocess, "run", return_value=completed):
+            with contextlib.redirect_stdout(loud):
+                RUN_TESTS.run_shard_units(
+                    (unit,),
+                    Path("/view"),
+                    {},
+                    2,
+                    emit_passing=True,
+                )
+
+        self.assertEqual("", quiet.getvalue())
+        self.assertIn("--- pass automation/tests/test_probe.py", loud.getvalue())
+        self.assertIn("ok", loud.getvalue())
+
+    def test_a_shard_command_carries_the_child_arguments_then_the_test_names(self):
+        unit = RUN_TESTS.ShardUnit(
+            Path("automation/tests/test_probe.py"),
+            ("Case.test_one", "Case.test_two"),
+            1,
+            1,
+        )
+        completed = subprocess.CompletedProcess(["python"], 0, stdout=b"")
+
+        with mock.patch.object(
+            RUN_TESTS.subprocess,
+            "run",
+            return_value=completed,
+        ) as run:
+            RUN_TESTS.run_shard_units(
+                (unit,),
+                Path("/view"),
+                {},
+                2,
+                child_arguments=("-v",),
+            )
+
+        self.assertEqual(
+            [
+                sys.executable,
+                str(Path("/view/automation/tests/test_probe.py")),
+                "-v",
+                "Case.test_one",
+                "Case.test_two",
+            ],
+            list(run.call_args[0][0]),
+        )
+
+    def test_parallel_main_shards_the_pool_and_leaves_the_tail_for_last(self):
+        child_environment = {"PATH": os.environ.get("PATH", "")}
+        shardable = RUN_TESTS.REPO / "services/quote-cli/tests/test_quote_cli.py"
+        quarantined = RUN_TESTS.REPO / "automation/tests/test_run_tests.py"
+        tests = (shardable, quarantined)
+        expected_names = RUN_TESTS.discovered_test_names(
+            shardable.read_text(encoding="utf-8")
+        )
+        completed = subprocess.CompletedProcess(["python"], 0, stdout=b"")
+        report = io.StringIO()
+
+        with mock.patch.object(
+            RUN_TESTS,
+            "isolated_test_environment",
+            return_value=child_environment,
+        ):
+            with mock.patch.object(RUN_TESTS, "configured_git_identity", return_value={}):
+                with mock.patch.object(
+                    RUN_TESTS,
+                    "repository_test_files",
+                    return_value=tests,
+                ):
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "test_support_paths",
+                        return_value=(),
+                    ):
+                        with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
+                            with mock.patch.object(
+                                RUN_TESTS,
+                                "materialize_repository_view",
+                            ):
+                                with mock.patch.object(
+                                    RUN_TESTS.subprocess,
+                                    "run",
+                                    return_value=completed,
+                                ) as run:
+                                    with contextlib.redirect_stdout(report):
+                                        self.assertEqual(
+                                            0,
+                                            RUN_TESTS.main(("--jobs", "4")),
+                                        )
+
+        printed = report.getvalue()
+        commands = [list(call[0][0]) for call in run.call_args_list]
+        self.assertIn("test workers: 4", printed)
+        self.assertIn("test shards: 1", printed)
+        self.assertIn("serial tail: automation/tests/test_run_tests.py", printed)
+        self.assertIn("PASS services/quote-cli/tests/test_quote_cli.py", printed)
+        self.assertIn("PASS automation/tests/test_run_tests.py", printed)
+        self.assertIn("tests: 2/2 files passed", printed)
+        self.assertEqual(2, len(commands))
+        self.assertTrue(
+            commands[0][1].endswith("services/quote-cli/tests/test_quote_cli.py"),
+        )
+        self.assertEqual(list(expected_names), commands[0][2:])
+        self.assertTrue(
+            commands[-1][1].endswith("automation/tests/test_run_tests.py"),
+            "the quarantined file runs after every shard, never beside one",
+        )
+        self.assertEqual(
+            2,
+            len(commands[-1]),
+            "the quarantined file runs whole, exactly as a serial run runs it",
+        )
+
+    def test_a_failing_shard_fails_the_file_and_the_process(self):
+        child_environment = {"PATH": os.environ.get("PATH", "")}
+        tests = (RUN_TESTS.REPO / "automation/tests/test_probe.py",)
+        failure = subprocess.CompletedProcess(
+            ["python"],
+            1,
+            stdout=b"FAIL: test_one (__main__.Case)\n",
+        )
+        report = io.StringIO()
+
+        with mock.patch.object(
+            RUN_TESTS,
+            "isolated_test_environment",
+            return_value=child_environment,
+        ):
+            with mock.patch.object(RUN_TESTS, "configured_git_identity", return_value={}):
+                with mock.patch.object(
+                    RUN_TESTS,
+                    "repository_test_files",
+                    return_value=tests,
+                ):
+                    with mock.patch.object(
+                        RUN_TESTS,
+                        "test_support_paths",
+                        return_value=(),
+                    ):
+                        with mock.patch.object(RUN_TESTS, "validate_scratch_root"):
+                            with mock.patch.object(
+                                RUN_TESTS,
+                                "materialize_repository_view",
+                            ):
+                                with mock.patch.object(
+                                    RUN_TESTS.subprocess,
+                                    "run",
+                                    return_value=failure,
+                                ):
+                                    with contextlib.redirect_stdout(report):
+                                        self.assertEqual(
+                                            1,
+                                            RUN_TESTS.main(("--jobs", "4")),
+                                        )
+
+        printed = report.getvalue()
+        self.assertIn("FAIL: test_one (__main__.Case)", printed)
+        self.assertIn("FAIL automation/tests/test_probe.py", printed)
+        self.assertIn("tests: 0/1 files passed", printed)
 
 
 class RunTestsIsolationTests(unittest.TestCase):
@@ -1497,8 +1924,16 @@ class RunTestsIsolationTests(unittest.TestCase):
                                     "run",
                                     return_value=completed,
                                 ) as run:
-                                    self.assertEqual(0, RUN_TESTS.main())
+                                    self.assertEqual(
+                                        0,
+                                        RUN_TESTS.main(("--jobs", "1")),
+                                    )
 
+        self.assertEqual(
+            [sys.executable, run.call_args[0][0][1]],
+            list(run.call_args[0][0]),
+            "one worker must keep the historical argument-free invocation",
+        )
         self.assertIs(child_environment, run.call_args[1]["env"])
         test_cwd = Path(run.call_args[1]["cwd"]).resolve()
         self.assertNotEqual(RUN_TESTS.REPO, test_cwd)
@@ -1571,7 +2006,10 @@ class RunTestsIsolationTests(unittest.TestCase):
                                     "run",
                                     return_value=completed,
                                 ) as run:
-                                    self.assertEqual(0, RUN_TESTS.main())
+                                    self.assertEqual(
+                                        0,
+                                        RUN_TESTS.main(("--jobs", "1")),
+                                    )
 
         materialize.assert_called_once()
         self.assertEqual(
