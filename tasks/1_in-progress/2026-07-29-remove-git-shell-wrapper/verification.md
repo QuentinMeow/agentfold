@@ -406,10 +406,10 @@ Reading the two side by side:
   all `rc=1` / not-a-command), and it stays unreadable **even when a test strips `GIT_*`
   from its own environment**, because `HOME` and `XDG_CONFIG_HOME` do not start with
   `GIT_` and therefore survive that stripping.
-- `git` now resolves to `/usr/local/bin/git`, whose first bytes are `0xcafebabe` (a Mach-O
+- `git` now resolves to /usr/local/bin/git, whose first bytes are `0xcafebabe` (a Mach-O
   universal binary), not `#!/bin/sh`. The interposed process is gone; `git` still resolves
   from `PATH`, which is what the tests require. (The pre-change code reported the
-  `Path(...).resolve()`d `/usr/local/git/bin/git` because it had to embed that path in the
+  `Path(...).resolve()`d /usr/local/git/bin/git because it had to embed that path in the
   shim; the new code only needs to prove Git is resolvable, so it no longer canonicalizes.)
 - **One line differs**, and only one: `system push.default` in the *`GIT_*`-stripped*
   sub-environment. See §5.5.
@@ -463,7 +463,7 @@ That comprehension drops `GIT_CONFIG_NOSYSTEM` along with the local pointers it 
 - Post-change, they run the real binary with no `GIT_CONFIG_NOSYSTEM`, so system config is
   readable — the `system push.default: rc=0 out='simple'` line in §5.2.
 
-This machine's system config is not empty: `/usr/local/git/etc/gitconfig` (via
+This machine's system config is not empty: /usr/local/git/etc/gitconfig (via
 `git config --system --list --show-origin`) contains `core.excludesfile=~/.gitignore`,
 `credential.helper=osxkeychain`, `push.default=simple`, `include.path=~/.gitcinclude`, and
 ~20 aliases, several of which are `!`-shell aliases.
@@ -531,7 +531,7 @@ mocked-subprocess fixture.
 This is in fact the *stated repo rule*, not just a lucky absence: `automation/AGENTS.md`
 — "Tracked executables use repository-local state only" — is mechanically enforced by
 `global_state_findings()` in `check_core_scope.py`, whose `GLOBAL_STATE_MARKERS` reject
-`Path.home()`, `expanduser`, `$HOME`, `~/.`, and `/Users/<name>/` in any tracked
+`Path.home()`, `expanduser`, `$HOME`, `~/.`, and /Users/<name>/ in any tracked
 `automation/` or `skills/` executable. So a future tracked executable *cannot* start
 depending on the caller's `HOME` without failing the core-scope gate.
 
@@ -663,7 +663,7 @@ one finding — `core changes require a task/<task-id> branch and matching task 
 which is the experimental-branch condition, not a property of this diff. Crucially it
 produces **no** `references home environment` finding: `GLOBAL_STATE_MARKERS` in
 `check_core_scope.py` reject `Path.home()`, `expanduser`, `environ["HOME"]`, `$HOME`, `~/.`
-and `/Users/<name>/` in tracked `automation/` executables, and
+and /Users/<name>/ in tracked `automation/` executables, and
 `child_environment["HOME"] = str(isolated_home)` matches none of them (the `\benviron\[`
 pattern needs a word boundary before `environ`, which `child_environment[` does not have).
 
