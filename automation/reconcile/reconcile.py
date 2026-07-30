@@ -88,8 +88,15 @@ _GIT_STAGED_PARENTS_CACHE = None
 _GIT_STAGED_SIDE_COMMITS_CACHE = None
 _GIT_STAGED_SIDE_CREATION_CACHE = {}
 _GIT_TREE_PATH_ENTRY_CACHE = {}
+_GIT_TREE_BLOB_ENTRY_CACHE = {}
 _GIT_REVISION_PARENTS_CACHE = {}
+_GIT_ANCESTRY_CACHE = {}
+_GIT_MERGE_BASE_CACHE = {}
+_GIT_COMMIT_AVAILABLE_CACHE = {}
+_GIT_OBJECT_KIND_CACHE = {}
+_GIT_REPOSITORY_PATH_CACHE = {}
 _GIT_SCHEMA_ACTIVATION_CACHE = {}
+_GIT_IMMUTABLE_CACHE_REPO = None
 _TASK_SNAPSHOT_CACHE = {}
 _HANDOVER_HISTORY_RECHECK_ACTIVE = False
 
@@ -268,6 +275,39 @@ def delivery_class(name):
     return matched.group(1) if matched else None
 
 
+def immutable_revision(revision):
+    """Return whether a revision names one exact, unchangeable Git object."""
+    return bool(revision) and bool(FULL_GIT_OID_RE.fullmatch(revision))
+
+
+def scope_immutable_git_caches():
+    """Bind the object-ID caches to one repository, dropping a stale scope.
+
+    What a full object ID contains — a tree entry, blob bytes, a parent list,
+    an ancestry answer — cannot change while the repository stays the same, so
+    those answers are cached for the whole process instead of once per
+    reconciler invocation. Another repository need not hold the same objects,
+    so switching ``REPO`` (only tests do) discards the cached answers and the
+    reader process opened against the old repository.
+    """
+    global _GIT_IMMUTABLE_CACHE_REPO
+    scope = str(REPO)
+    if scope == _GIT_IMMUTABLE_CACHE_REPO:
+        return
+    _GIT_IMMUTABLE_CACHE_REPO = scope
+    _GIT_TREE_BLOB_ENTRY_CACHE.clear()
+    _GIT_ANCESTRY_CACHE.clear()
+    _GIT_MERGE_BASE_CACHE.clear()
+    _GIT_COMMIT_AVAILABLE_CACHE.clear()
+    _GIT_OBJECT_KIND_CACHE.clear()
+    _GIT_REPOSITORY_PATH_CACHE.clear()
+    _GIT_TREE_PATH_ENTRY_CACHE.clear()
+    _GIT_REVISION_PARENTS_CACHE.clear()
+    _GIT_SCHEMA_ACTIVATION_CACHE.clear()
+    _GIT_BLOB_CACHE.clear()
+    close_git_cat_file()
+
+
 def start_git_snapshot_cache():
     """Reuse one immutable index/HEAD view during a reconciler invocation."""
     global _GIT_SNAPSHOT_CACHE_ACTIVE
@@ -391,6 +431,24 @@ def parse_git_tree_records(data):
     return entries
 
 
+def parse_git_tree_blob_records(data):
+    """Return path-to-(mode, object) blob entries from NUL-delimited ls-tree output."""
+    entries = {}
+    for record in data.split(b"\0"):
+        metadata, separator, encoded_name = record.partition(b"\t")
+        if not separator:
+            continue
+        parts = metadata.decode("ascii", errors="replace").split()
+        if len(parts) != 3:
+            continue
+        mode, kind, oid = parts
+        if kind != "blob":
+            continue
+        name = encoded_name.decode("utf-8", errors="surrogateescape")
+        entries[name] = (mode, oid)
+    return entries
+
+
 def git_failure(result, fallback):
     detail = result.stderr.decode(
         "utf-8", errors="replace"
@@ -502,6 +560,23 @@ def git_index_entries(prefix):
     return entries
 
 
+def git_index_path_entry(path):
+    """Return one exact staged (mode, object) pair from a single index query."""
+    result = subprocess.run(
+        ["git", "ls-files", "--stage", "-z", "--", path],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise GitSnapshotError(git_failure(
+            result, f"could not inspect Git index path `{path}`"
+        ))
+    modes, oids, _ = parse_git_index_records(result.stdout)
+    return modes.get(path), oids.get(path)
+
+
 def git_index_has_path(path):
     """Return whether any index stage or mode represents this exact path."""
     if _GIT_SNAPSHOT_CACHE_ACTIVE:
@@ -554,35 +629,17 @@ def validate_range_candidate(change_range):
     for label, revision in (("base", base), ("head", range_head)):
         if revision is None:
             continue
-        commit = subprocess.run(
-            [
-                "git", "--no-replace-objects", "cat-file", "-e",
-                f"{revision}^{{commit}}",
-            ],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if commit.returncode:
-            detail = commit.stderr.decode(
-                "utf-8", errors="replace"
-            ).strip() if commit.stderr else ""
+        returncode, detail = git_commit_available(revision)
+        if returncode:
             raise GitSnapshotError(
                 detail or f"--range {label} is not an available commit"
             )
     if base is not None:
-        common = subprocess.run(
-            ["git", "--no-replace-objects", "merge-base", base, range_head],
-            cwd=REPO,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if common.returncode or not common.stdout.strip():
-            raise GitSnapshotError(git_failure(
-                common, "--range base and head have no merge base"
-            ))
+        returncode, common, detail = git_merge_base_result(base, range_head)
+        if returncode or not common.strip():
+            raise GitSnapshotError(
+                detail.strip() or "--range base and head have no merge base"
+            )
     if _GIT_HEAD_OID != range_head:
         ancestry = subprocess.run(
             ["git", "rev-list", "--parents", "-n", "1", _GIT_HEAD_OID],
@@ -665,34 +722,19 @@ def validate_displaced_tip(displaced_tip, change_range):
             "--displaced-tip requires a full BASE...HEAD --range"
         )
     range_head = change_range.split("...", 1)[1]
-    available = subprocess.run(
-        [
-            "git", "--no-replace-objects", "cat-file", "-e",
-            f"{displaced_tip}^{{commit}}",
-        ],
-        cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
+    returncode, detail = git_commit_available(displaced_tip)
+    if returncode:
+        raise GitSnapshotError(
+            detail or "--displaced-tip is not an available commit"
+        )
+    returncode, _common, detail = git_merge_base_result(
+        displaced_tip, range_head
     )
-    if available.returncode:
-        raise GitSnapshotError(git_failure(
-            available, "--displaced-tip is not an available commit"
-        ))
-    common = subprocess.run(
-        [
-            "git", "--no-replace-objects", "merge-base",
-            displaced_tip, range_head,
-        ],
-        cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if common.returncode:
-        raise GitSnapshotError(git_failure(
-            common, "--displaced-tip and --range head have no merge base"
-        ))
+    if returncode:
+        raise GitSnapshotError(
+            detail.strip()
+            or "--displaced-tip and --range head have no merge base"
+        )
 
 
 def live_queue_items():
@@ -831,26 +873,18 @@ def repo_artifact_bytes(path):
     if (REPO / ".git").exists():
         if _GIT_SNAPSHOT_CACHE_ACTIVE and relative in _GIT_ARTIFACT_CACHE:
             return _GIT_ARTIFACT_CACHE[relative]
-        mode = git_index_entries(relative).get(relative)
+        if _GIT_SNAPSHOT_CACHE_ACTIVE:
+            mode = git_index_entries(relative).get(relative)
+            oid = _GIT_INDEX_OID_CACHE.get(relative)
+        else:
+            # One index query carries both the mode and the object to read, so
+            # the staged bytes cost no second spawn.
+            mode, oid = git_index_path_entry(relative)
         if mode not in ("100644", "100755"):
             if _GIT_SNAPSHOT_CACHE_ACTIVE:
                 _GIT_ARTIFACT_CACHE[relative] = None
             return None
-        if _GIT_SNAPSHOT_CACHE_ACTIVE:
-            value = git_blob_bytes(_GIT_INDEX_OID_CACHE.get(relative))
-        else:
-            artifact = subprocess.run(
-                ["git", "show", f":{relative}"],
-                cwd=REPO,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if artifact.returncode:
-                raise GitSnapshotError(
-                    f"could not read staged Git object for `{relative}`"
-                )
-            value = artifact.stdout
+        value = git_blob_bytes(oid)
         if _GIT_SNAPSHOT_CACHE_ACTIVE:
             _GIT_ARTIFACT_CACHE[relative] = value
         return value
@@ -863,10 +897,17 @@ def repo_artifact_bytes(path):
 
 
 def git_blob_bytes(oid):
-    """Read a captured index object through one reusable cat-file process."""
+    """Read one captured object through the reusable cat-file process.
+
+    Blob bytes are what their object ID says they are, so the reader stays open
+    across reconciler invocations and every caller — index reads and historical
+    tree reads alike — pays one ``fork``/``exec`` per repository instead of one
+    ``git show`` per artifact.
+    """
     global _GIT_CAT_FILE_PROCESS
     if not oid:
         return None
+    scope_immutable_git_caches()
     if oid in _GIT_BLOB_CACHE:
         return _GIT_BLOB_CACHE[oid]
     if _GIT_CAT_FILE_PROCESS is None:
@@ -1117,8 +1158,12 @@ def mutated_queue_paths_from_name_status(data):
     return paths
 
 
-def git_artifact_bytes_at(revision, path):
-    """Read one regular repository file at an exact commit, or return absent."""
+def git_tree_blob_entry(revision, path):
+    """Return one exact tree blob as (mode, object), or None when absent."""
+    scope_immutable_git_caches()
+    cache_key = (revision, path)
+    if cache_key in _GIT_TREE_BLOB_ENTRY_CACHE:
+        return _GIT_TREE_BLOB_ENTRY_CACHE[cache_key]
     tree = subprocess.run(
         ["git", "--no-replace-objects", "ls-tree", "-z", revision, "--", path],
         cwd=REPO,
@@ -1130,21 +1175,18 @@ def git_artifact_bytes_at(revision, path):
         raise GitSnapshotError(git_failure(
             tree, f"could not inspect `{path}` at {revision}"
         ))
-    entries = parse_git_tree_records(tree.stdout)
-    if entries.get(path) not in ("100644", "100755"):
+    entry = parse_git_tree_blob_records(tree.stdout).get(path)
+    if immutable_revision(revision):
+        _GIT_TREE_BLOB_ENTRY_CACHE[cache_key] = entry
+    return entry
+
+
+def git_artifact_bytes_at(revision, path):
+    """Read one regular repository file at an exact commit, or return absent."""
+    entry = git_tree_blob_entry(revision, path)
+    if entry is None or entry[0] not in ("100644", "100755"):
         return None
-    artifact = subprocess.run(
-        ["git", "--no-replace-objects", "show", f"{revision}:{path}"],
-        cwd=REPO,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if artifact.returncode:
-        raise GitSnapshotError(git_failure(
-            artifact, f"could not read `{path}` at {revision}"
-        ))
-    return artifact.stdout
+    return git_blob_bytes(entry[1])
 
 
 def decode_utf8_artifact(artifact, label):
@@ -1201,9 +1243,10 @@ def schema_activation_commits(head, path, field, version="v1"):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
         return (), None
+    scope_immutable_git_caches()
     cache_key = (head, path, field, version)
-    if _GIT_SNAPSHOT_CACHE_ACTIVE \
-            and cache_key in _GIT_SCHEMA_ACTIVATION_CACHE:
+    cacheable = _GIT_SNAPSHOT_CACHE_ACTIVE or immutable_revision(head)
+    if cacheable and cache_key in _GIT_SCHEMA_ACTIVATION_CACHE:
         return _GIT_SCHEMA_ACTIVATION_CACHE[cache_key]
     history = subprocess.run(
         [
@@ -1222,6 +1265,7 @@ def schema_activation_commits(head, path, field, version="v1"):
         )
         if _GIT_SNAPSHOT_CACHE_ACTIVE:
             _GIT_SCHEMA_ACTIVATION_CACHE[cache_key] = result
+        # A failed read is only reused inside the invocation that saw it.
         return result
     activations = []
     for commit in history.stdout.splitlines():
@@ -1232,7 +1276,7 @@ def schema_activation_commits(head, path, field, version="v1"):
         if text_fields(text).get(field, "").strip() == version:
             activations.append(commit)
     result = tuple(activations), None
-    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+    if cacheable:
         _GIT_SCHEMA_ACTIVATION_CACHE[cache_key] = result
     return result
 
@@ -1258,25 +1302,148 @@ def candidate_activation_heads(head):
     return (head,) if head else ()
 
 
+def git_merge_base_result(base, head, replace_objects=False):
+    """Return (returncode, stdout, stderr) for one merge-base question.
+
+    A merge base of two full object IDs is a fact about immutable history, so a
+    settled answer is reused for the repository. Failures are never cached: the
+    objects they could not reach may still arrive.
+    """
+    scope_immutable_git_caches()
+    cache_key = (replace_objects, base, head)
+    cacheable = immutable_revision(base) and immutable_revision(head)
+    if cacheable and cache_key in _GIT_MERGE_BASE_CACHE:
+        return _GIT_MERGE_BASE_CACHE[cache_key]
+    command = ["git"]
+    if not replace_objects:
+        command.append("--no-replace-objects")
+    command.extend(["merge-base", base, head])
+    common = subprocess.run(
+        command,
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    answer = common.returncode, common.stdout, common.stderr
+    if cacheable and common.returncode in (0, 1):
+        _GIT_MERGE_BASE_CACHE[cache_key] = answer
+    return answer
+
+
+def git_commit_available(revision):
+    """Return (returncode, detail) for one commit-availability probe.
+
+    Only a present commit is remembered. An absent object may be written later,
+    so a negative answer is always asked again.
+    """
+    scope_immutable_git_caches()
+    cacheable = immutable_revision(revision)
+    if cacheable and revision in _GIT_COMMIT_AVAILABLE_CACHE:
+        return _GIT_COMMIT_AVAILABLE_CACHE[revision]
+    probe = subprocess.run(
+        [
+            "git", "--no-replace-objects", "cat-file", "-e",
+            f"{revision}^{{commit}}",
+        ],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    detail = probe.stderr.decode(
+        "utf-8", errors="replace"
+    ).strip() if probe.stderr else ""
+    answer = probe.returncode, detail
+    if cacheable and probe.returncode == 0:
+        _GIT_COMMIT_AVAILABLE_CACHE[revision] = answer
+    return answer
+
+
+def git_object_kind(object_id):
+    """Return (returncode, kind) for one object-type probe."""
+    scope_immutable_git_caches()
+    cacheable = immutable_revision(object_id)
+    if cacheable and object_id in _GIT_OBJECT_KIND_CACHE:
+        return _GIT_OBJECT_KIND_CACHE[object_id]
+    result = subprocess.run(
+        ["git", "cat-file", "-t", object_id],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    answer = result.returncode, result.stdout.strip()
+    if cacheable and result.returncode == 0:
+        _GIT_OBJECT_KIND_CACHE[object_id] = answer
+    return answer
+
+
+def git_repository_path(name):
+    """Return one repository metadata location, resolved once per repository."""
+    scope_immutable_git_caches()
+    if name in _GIT_REPOSITORY_PATH_CACHE:
+        return _GIT_REPOSITORY_PATH_CACHE[name]
+    location = subprocess.run(
+        ["git", "rev-parse", "--git-path", name],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if location.returncode:
+        raise GitSnapshotError(
+            location.stderr.strip() or f"could not locate {name}"
+        )
+    resolved = Path(location.stdout.strip())
+    if not resolved.is_absolute():
+        resolved = REPO / resolved
+    _GIT_REPOSITORY_PATH_CACHE[name] = resolved
+    return resolved
+
+
+def git_ancestry_probe(ancestor, descendant, replace_objects=False):
+    """Answer one ancestry question, reusing settled object-ID comparisons.
+
+    Whether one commit reaches another is a fact about immutable history, so a
+    definite answer between two full object IDs is kept for the repository.
+    Errors are never cached: an object can still arrive later.
+    """
+    scope_immutable_git_caches()
+    cache_key = (replace_objects, ancestor, descendant)
+    cacheable = immutable_revision(ancestor) and immutable_revision(descendant)
+    if cacheable and cache_key in _GIT_ANCESTRY_CACHE:
+        return _GIT_ANCESTRY_CACHE[cache_key]
+    command = ["git"]
+    if not replace_objects:
+        command.append("--no-replace-objects")
+    command.extend(["merge-base", "--is-ancestor", ancestor, descendant])
+    relationship = subprocess.run(
+        command,
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    detail = relationship.stderr.decode(
+        "utf-8", errors="replace"
+    ).strip() if relationship.stderr else ""
+    probe = relationship.returncode, detail
+    if cacheable and relationship.returncode in (0, 1):
+        _GIT_ANCESTRY_CACHE[cache_key] = probe
+    return probe
+
+
 def descended_from_any(revision, ancestors):
     """Return whether revision descends from any ancestor, failing Git errors closed."""
     for ancestor in ancestors:
-        relationship = subprocess.run(
-            [
-                "git", "--no-replace-objects", "merge-base",
-                "--is-ancestor", ancestor, revision,
-            ],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if relationship.returncode == 0:
+        returncode, detail = git_ancestry_probe(ancestor, revision)
+        if returncode == 0:
             return True, None
-        if relationship.returncode != 1:
-            detail = relationship.stderr.decode(
-                "utf-8", errors="replace"
-            ).strip() if relationship.stderr else ""
+        if returncode != 1:
             return False, detail or (
                 f"could not compare activation {ancestor} to {revision}"
             )
@@ -1289,24 +1456,12 @@ def governed_by_activation_join(revision, activations):
     if governed or error:
         return governed, error
     for activation in activations:
-        relationship = subprocess.run(
-            [
-                "git", "--no-replace-objects", "merge-base",
-                "--is-ancestor", revision, activation,
-            ],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if relationship.returncode == 1:
+        returncode, detail = git_ancestry_probe(revision, activation)
+        if returncode == 1:
             # Neither commit descends from the other. The candidate that joins
             # them activates the schema for this newly admitted history.
             return True, None
-        if relationship.returncode != 0:
-            detail = relationship.stderr.decode(
-                "utf-8", errors="replace"
-            ).strip() if relationship.stderr else ""
+        if returncode != 0:
             return False, detail or (
                 f"could not compare {revision} to activation {activation}"
             )
@@ -1420,20 +1575,13 @@ def queue_revision_edges(activations):
         revision_range = range_head
     else:
         base, range_head = CHANGE_RANGE.split("...", 1)
-        merge_base = subprocess.run(
-            ["git", "--no-replace-objects", "merge-base", base, range_head],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if merge_base.returncode or not merge_base.stdout.strip():
+        returncode, common, detail = git_merge_base_result(base, range_head)
+        if returncode or not common.strip():
             raise GitSnapshotError(
-                merge_base.stderr.strip()
+                detail.strip()
                 or "could not find the queue-deletion range merge base"
             )
-        revision_range = f"{merge_base.stdout.strip()}..{range_head}"
+        revision_range = f"{common.strip()}..{range_head}"
 
     revisions = subprocess.run(
         [
@@ -1639,22 +1787,10 @@ def displaced_tip_edge():
             "--displaced-tip requires a full BASE...HEAD --range"
         )
     range_head = CHANGE_RANGE.split("...", 1)[1]
-    ancestor = subprocess.run(
-        [
-            "git", "--no-replace-objects", "merge-base",
-            "--is-ancestor", DISPLACED_TIP, range_head,
-        ],
-        cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if ancestor.returncode == 0:
+    returncode, detail = git_ancestry_probe(DISPLACED_TIP, range_head)
+    if returncode == 0:
         return None
-    if ancestor.returncode != 1:
-        detail = ancestor.stderr.decode(
-            "utf-8", errors="replace"
-        ).strip() if ancestor.stderr else ""
+    if returncode != 1:
         raise GitSnapshotError(
             detail or "could not compare the pushed old tip to the new head"
         )
@@ -2108,7 +2244,8 @@ def queue_mutation_problem(
 
 
 def revision_parents(revision, label):
-    if _GIT_SNAPSHOT_CACHE_ACTIVE \
+    scope_immutable_git_caches()
+    if (_GIT_SNAPSHOT_CACHE_ACTIVE or immutable_revision(revision)) \
             and revision in _GIT_REVISION_PARENTS_CACHE:
         return _GIT_REVISION_PARENTS_CACHE[revision]
     ancestry = subprocess.run(
@@ -2127,7 +2264,7 @@ def revision_parents(revision, label):
             ancestry.stderr.strip() or f"could not inspect {label}"
         )
     parents = ancestry.stdout.split()[1:]
-    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+    if _GIT_SNAPSHOT_CACHE_ACTIVE or immutable_revision(revision):
         _GIT_REVISION_PARENTS_CACHE[revision] = parents
     return parents
 
@@ -2142,21 +2279,7 @@ def staged_parent_oids():
     parents = [head] if head else []
     if not (REPO / ".git").exists():
         return tuple(parents)
-    location = subprocess.run(
-        ["git", "rev-parse", "--git-path", "MERGE_HEAD"],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if location.returncode:
-        raise GitSnapshotError(
-            location.stderr.strip() or "could not locate MERGE_HEAD"
-        )
-    merge_head = Path(location.stdout.strip())
-    if not merge_head.is_absolute():
-        merge_head = REPO / merge_head
+    merge_head = git_repository_path("MERGE_HEAD")
     try:
         lines = merge_head.read_text(encoding="ascii").splitlines()
     except FileNotFoundError:
@@ -2170,20 +2293,11 @@ def staged_parent_oids():
         oid = line.strip()
         if not FULL_GIT_OID_RE.fullmatch(oid):
             raise GitSnapshotError("MERGE_HEAD contains an invalid object ID")
-        commit = subprocess.run(
-            [
-                "git", "--no-replace-objects", "cat-file", "-e",
-                f"{oid}^{{commit}}",
-            ],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if commit.returncode:
-            raise GitSnapshotError(git_failure(
-                commit, f"MERGE_HEAD {oid} is not a committed parent"
-            ))
+        returncode, detail = git_commit_available(oid)
+        if returncode:
+            raise GitSnapshotError(
+                detail or f"MERGE_HEAD {oid} is not a committed parent"
+            )
         if oid not in parents:
             parents.append(oid)
     result = tuple(parents)
@@ -2286,9 +2400,10 @@ def candidate_parent_oids(revision):
 
 def git_tree_path_entry(revision, path):
     """Return one exact tree entry as (mode, object), or None when absent."""
+    scope_immutable_git_caches()
     cache_key = (revision, path)
-    if _GIT_SNAPSHOT_CACHE_ACTIVE \
-            and cache_key in _GIT_TREE_PATH_ENTRY_CACHE:
+    cacheable = _GIT_SNAPSHOT_CACHE_ACTIVE or immutable_revision(revision)
+    if cacheable and cache_key in _GIT_TREE_PATH_ENTRY_CACHE:
         return _GIT_TREE_PATH_ENTRY_CACHE[cache_key]
     tree = subprocess.run(
         [
@@ -2306,7 +2421,7 @@ def git_tree_path_entry(revision, path):
         ))
     records = [record for record in tree.stdout.split(b"\0") if record]
     if not records:
-        if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        if cacheable:
             _GIT_TREE_PATH_ENTRY_CACHE[cache_key] = None
         return None
     metadata, separator, encoded_name = records[0].partition(b"\t")
@@ -2318,7 +2433,7 @@ def git_tree_path_entry(revision, path):
         )
     mode, kind, oid = fields
     result = mode, kind, oid
-    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+    if cacheable:
         _GIT_TREE_PATH_ENTRY_CACHE[cache_key] = result
     return result
 
@@ -2359,15 +2474,8 @@ def candidate_path_entry(revision, path):
 
 def parent_merge_base(parent, other):
     """Return two candidate parents' merge base, or None when unrelated."""
-    common = subprocess.run(
-        ["git", "--no-replace-objects", "merge-base", parent, other],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    return common.stdout.strip() if common.returncode == 0 else None
+    returncode, common, _detail = git_merge_base_result(parent, other)
+    return common.strip() if returncode == 0 else None
 
 
 def parent_supplies_absent_path(parent, other, path, boundary=None):
@@ -2812,22 +2920,13 @@ def review_candidate_problem(text, revision):
 
 
 def git_is_ancestor(ancestor, descendant):
-    result = subprocess.run(
-        [
-            "git", "--no-replace-objects", "merge-base", "--is-ancestor",
-            ancestor, descendant,
-        ],
-        cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if result.returncode not in (0, 1):
+    returncode, detail = git_ancestry_probe(ancestor, descendant)
+    if returncode not in (0, 1):
         raise GitSnapshotError(
-            result.stderr.decode("utf-8", errors="replace").strip()
+            detail
             or f"could not compare Git ancestry for {ancestor} and {descendant}"
         )
-    return result.returncode == 0
+    return returncode == 0
 
 
 def deletion_and_later_candidates(revision):
@@ -4372,29 +4471,16 @@ def git_review_revision_problems(revision):
     object_ids = revision[len("git:"):].split("...")
     problems = []
     for object_id in object_ids:
-        result = subprocess.run(
-            ["git", "cat-file", "-t", object_id],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if result.returncode:
+        returncode, kind = git_object_kind(object_id)
+        if returncode:
             problems.append(f"{object_id} is unavailable")
-        elif result.stdout.strip() != "commit":
-            problems.append(
-                f"{object_id} is {result.stdout.strip()}, not a commit"
-            )
+        elif kind != "commit":
+            problems.append(f"{object_id} is {kind}, not a commit")
     if len(object_ids) == 2 and not problems:
-        merge_base = subprocess.run(
-            ["git", "merge-base", object_ids[0], object_ids[1]],
-            cwd=REPO,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+        returncode, _common, _detail = git_merge_base_result(
+            object_ids[0], object_ids[1], replace_objects=True
         )
-        if merge_base.returncode:
+        if returncode:
             problems.append("base and head have no merge base")
     return problems
 
@@ -5774,13 +5860,8 @@ def newly_added_handovers():
             paths.add(candidate)
     if CHANGE_RANGE and not CHANGE_RANGE.startswith("root:"):
         base, head = CHANGE_RANGE.split("...", 1)
-        merge_base = subprocess.run(
-            ["git", "merge-base", base, head],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+        returncode, common, detail = git_merge_base_result(
+            base, head, replace_objects=True
         )
         tree = subprocess.run(
             [
@@ -5793,10 +5874,10 @@ def newly_added_handovers():
             stderr=subprocess.PIPE,
             check=False,
         )
-        if merge_base.returncode or tree.returncode:
-            return set(), merge_base.stderr.strip() or tree.stderr.strip() \
+        if returncode or tree.returncode:
+            return set(), detail.strip() or tree.stderr.strip() \
                 or "could not inspect range handover incarnations"
-        boundary = merge_base.stdout.strip()
+        boundary = common.strip()
         for line in tree.stdout.splitlines():
             candidate = Path(line)
             parts = candidate.parts
@@ -5821,14 +5902,10 @@ def newly_added_handovers():
             if not creation:
                 return set(), latest.stderr.strip() \
                     or f"could not find current creation commit for {candidate}"
-            before_boundary = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", creation, boundary],
-                cwd=REPO,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
+            returncode, _detail = git_ancestry_probe(
+                creation, boundary, replace_objects=True
             )
-            if before_boundary.returncode != 0:
+            if returncode != 0:
                 paths.add(candidate)
     if CHANGE_RANGE:
         range_head = (
