@@ -726,6 +726,21 @@ def git_index_entries(prefix):
     return entries
 
 
+def git_index_entry_mode(relative):
+    """Return one exact candidate index mode without scanning the whole index.
+
+    `git_index_entries` answers "what is under this prefix", so asking it about a
+    single file filtered every captured path to reach one dictionary key. The
+    captured index is already keyed by path, so an exact question is a lookup.
+    """
+    if not (REPO / ".git").exists():
+        return None
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        return _GIT_INDEX_CACHE.get(relative)
+    mode, _oid = git_index_path_entry(relative)
+    return mode
+
+
 def git_index_path_entry(path):
     """Return one exact staged (mode, object) pair from a single index query."""
     result = subprocess.run(
@@ -766,10 +781,13 @@ def git_head_paths(prefix):
     if not (REPO / ".git").exists():
         return set()
     if _GIT_SNAPSHOT_CACHE_ACTIVE:
-        return set(paths_under_prefix(
-            {name: None for name in _GIT_HEAD_PATHS_CACHE},
-            prefix,
-        ))
+        prefix = prefix.rstrip("/")
+        if prefix in ("", "."):
+            return set(_GIT_HEAD_PATHS_CACHE)
+        return {
+            name for name in _GIT_HEAD_PATHS_CACHE
+            if name == prefix or name.startswith(prefix + "/")
+        }
     result = subprocess.run(
         ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
         cwd=REPO,
@@ -956,9 +974,7 @@ def live_markdown_files():
 
 def readable_queue_item(item):
     """Queue state must be stored in a repository-local regular file."""
-    mode = git_index_entries(item.relative_to(REPO).as_posix()).get(
-        item.relative_to(REPO).as_posix()
-    )
+    mode = git_index_entry_mode(item.relative_to(REPO).as_posix())
     if mode is not None:
         return mode in ("100644", "100755")
     return item.is_file() and not item.is_symlink()
@@ -1046,7 +1062,7 @@ def repo_artifact_bytes(path):
         if _GIT_SNAPSHOT_CACHE_ACTIVE and relative in _GIT_ARTIFACT_CACHE:
             return _GIT_ARTIFACT_CACHE[relative]
         if _GIT_SNAPSHOT_CACHE_ACTIVE:
-            mode = git_index_entries(relative).get(relative)
+            mode = _GIT_INDEX_CACHE.get(relative)
             oid = _GIT_INDEX_OID_CACHE.get(relative)
         else:
             # One index query carries both the mode and the object to read, so
@@ -1959,23 +1975,11 @@ def queue_revision_edges(activations):
             raise GitSnapshotError(governance_error)
         if not governed:
             continue
-        ancestry = subprocess.run(
-            [
-                "git", "--no-replace-objects", "rev-list",
-                "--parents", "-n", "1", commit,
-            ],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if ancestry.returncode:
-            raise GitSnapshotError(
-                ancestry.stderr.strip()
-                or f"could not inspect parents of {commit}"
-            )
-        for parent in ancestry.stdout.split()[1:]:
+        # Six independent checks walk this same edge set. `revision_parents` runs
+        # the identical `git rev-list --parents -n 1` — so shallow boundaries and
+        # grafts are still honoured — but answers the second and later asks about
+        # one revision from its cache instead of another process.
+        for parent in revision_parents(commit, f"parents of {commit}"):
             yield parent, commit
 
 
@@ -6789,17 +6793,14 @@ def handover_current_incarnation_text(rel):
     created_at = history.stdout.strip() if history.returncode == 0 else ""
     if not created_at:
         return None, history.stderr.strip() or "could not find creation commit"
-    artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if artifact.returncode:
-        return None, artifact.stderr.strip() or "could not read creation bytes"
-    return artifact.stdout, None
+    # The creation commit is a full object ID, so its bytes come from the reusable
+    # `cat-file --batch` reader rather than one `git show` per handover.
+    artifact = git_artifact_bytes_at(created_at, rel.as_posix())
+    if artifact is None:
+        return None, "could not read creation bytes"
+    return decode_utf8_artifact(
+        artifact, f"`{rel.as_posix()}` at {created_at}"
+    ), None
 
 
 def prior_governed_v1_handover_incarnation(rel):
