@@ -409,6 +409,39 @@ TOTAL git spawns: 849  findings: 1
 task record at that revision. Without it, the change would cost 51 spawns per deletion on
 that path instead of 3.
 
+## 8. Re-run at `b1895c6d7f17820630da3b1a4c1f073443f6e9c6`
+
+The transcripts above were taken at `767fd554afc8e7f84031ac2a7e3e22b55da2ab32`, before this
+file and the worklog were committed. Repeated at the commit that carries them:
+
+```
+$ python3 automation/reconcile/reconcile.py --check ; echo check exit=$?
+reconcile: 0 finding(s)
+check exit=0
+
+$ python3 automation/run_tests.py
+[... the same 11 PASS lines ...]
+tests: 11/11 files passed
+test elapsed: 26.12s
+
+$ sh stage_stuck_deletion.sh after
+D  message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md
+M  tasks/1_in-progress/2026-07-25-fix-handover-projection-code-span-copy/task.md
+reconcile.py in this edit: NONE STAGED
+$ python3 automation/reconcile/reconcile.py --check ; echo FINAL_ACCEPTANCE_EXIT=$?
+reconcile: 0 finding(s)
+FINAL_ACCEPTANCE_EXIT=0
+
+$ python3 replay.py after/.../reconcile.py after --range root:b1895c6d7f17820630da3b1a4c1f073443f6e9c6 > f-new.txt ; echo new exit=$?
+new exit=1
+$ python3 replay.py before/.../reconcile.py after --range root:b1895c6d7f17820630da3b1a4c1f073443f6e9c6 > f-old.txt ; echo old exit=$?
+old exit=1
+$ tail -1 f-new.txt
+reconcile: 55 finding(s)
+$ diff f-old.txt f-new.txt && echo IDENTICAL AT FINAL TIP
+IDENTICAL AT FINAL TIP
+```
+
 ## Review verdicts (when a review was explicitly run)
 
 No independent review was invoked for this change; `--require-review` was not selected.
