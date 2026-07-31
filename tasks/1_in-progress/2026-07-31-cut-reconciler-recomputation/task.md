@@ -1,10 +1,10 @@
 # Cut the reconciler's repeated recomputation so the pre-commit gate returns faster
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-31, by claude, from task `2026-07-30-cache-reconciler-git-object-reads`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-cut-reconciler-recomputation.md`
+**Queue actions:** none
 
 ## Goal
 
