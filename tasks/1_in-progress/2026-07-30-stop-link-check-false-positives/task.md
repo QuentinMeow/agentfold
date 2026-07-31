@@ -1,11 +1,11 @@
 # Stop link-check false positives without weakening real checking
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Mode:** async
 **Filed:** 2026-07-30, by claude, from a link-check false-positive audit
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-link-check-false-positives.md`
+**Queue actions:** none
 
 ## Goal
 
