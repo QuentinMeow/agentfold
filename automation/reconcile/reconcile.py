@@ -103,6 +103,7 @@ _GIT_REPOSITORY_PATH_CACHE = {}
 _GIT_SCHEMA_ACTIVATION_CACHE = {}
 _GIT_IMMUTABLE_CACHE_REPO = None
 _TASK_SNAPSHOT_CACHE = {}
+_LIVE_QUEUE_PATHS_CACHE = None
 _HANDOVER_HISTORY_RECHECK_ACTIVE = False
 
 # Required bold-key fields per queue folder (relative to message-queue/). Delivery
@@ -406,7 +407,7 @@ def start_git_snapshot_cache():
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = True
     _GIT_INDEX_CACHE = None
@@ -424,6 +425,7 @@ def start_git_snapshot_cache():
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
     load_git_index_snapshot()
     load_git_head_snapshot()
     load_git_ignored_snapshot()
@@ -439,7 +441,7 @@ def stop_git_snapshot_cache():
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = False
     _GIT_INDEX_CACHE = None
@@ -457,6 +459,7 @@ def stop_git_snapshot_cache():
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
 
 
 def close_git_cat_file():
@@ -3246,7 +3249,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
 
     tree = subprocess.run(
         [
@@ -3298,6 +3301,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
         _GIT_REVISION_PARENTS_CACHE,
         _GIT_SCHEMA_ACTIVATION_CACHE,
         _TASK_SNAPSHOT_CACHE,
+        _LIVE_QUEUE_PATHS_CACHE,
     )
     close_git_cat_file()
     if not preserve_change_range:
@@ -3319,6 +3323,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
     try:
         yield
     finally:
@@ -3340,6 +3345,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
             _GIT_REVISION_PARENTS_CACHE,
             _GIT_SCHEMA_ACTIVATION_CACHE,
             _TASK_SNAPSHOT_CACHE,
+            _LIVE_QUEUE_PATHS_CACHE,
         ) = saved
 
 
@@ -6532,6 +6538,35 @@ def newly_added_handovers():
     return paths, None
 
 
+def live_queue_paths_by_actor():
+    """Return the readable needs-human and needs-agent path sets in one walk.
+
+    Which queue files exist is a property of the bound candidate — the captured
+    index, the captured HEAD path set, and the untracked queue files on disk — not
+    of the check asking, yet every governed handover asks for both sets. The answer
+    is therefore derived once per candidate. `git_revision_candidate` drops it with
+    the other candidate-scoped caches, so a rebound historical tree can never read
+    the answer another tree produced.
+    """
+    global _LIVE_QUEUE_PATHS_CACHE
+    if _GIT_SNAPSHOT_CACHE_ACTIVE and _LIVE_QUEUE_PATHS_CACHE is not None:
+        return _LIVE_QUEUE_PATHS_CACHE
+    human = set()
+    agent = set()
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue
+        actor = item.relative_to(QUEUE).parts[0]
+        if actor == "needs-human":
+            human.add(item.relative_to(REPO).as_posix())
+        elif actor == "needs-agent":
+            agent.add(item.relative_to(REPO).as_posix())
+    result = (human, agent)
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        _LIVE_QUEUE_PATHS_CACHE = result
+    return result
+
+
 def live_human_queue_paths():
     """Return every readable needs-human item, whatever state it is in.
 
@@ -6539,21 +6574,13 @@ def live_human_queue_paths():
     `human_action_unresolved` answers that, and a projection governed by
     action-entry v3 applies it on top of this set (history/AGENTS.md).
     """
-    return {
-        item.relative_to(REPO).as_posix()
-        for item in live_queue_items() or ()
-        if readable_queue_item(item)
-        and item.relative_to(QUEUE).parts[0] == "needs-human"
-    }
+    # A fresh set per caller: the shared answer is derived once, but a caller that
+    # narrows or extends its copy must not edit the next caller's view.
+    return set(live_queue_paths_by_actor()[0])
 
 
 def live_agent_queue_paths():
-    return {
-        item.relative_to(REPO).as_posix()
-        for item in live_queue_items() or ()
-        if readable_queue_item(item)
-        and item.relative_to(QUEUE).parts[0] == "needs-agent"
-    }
+    return set(live_queue_paths_by_actor()[1])
 
 
 def split_live_queue_entries(entries):
