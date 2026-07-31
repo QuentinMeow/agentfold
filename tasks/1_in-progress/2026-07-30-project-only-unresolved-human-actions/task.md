@@ -1,10 +1,10 @@
 # Project only the human actions that still await the human
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from chat — the owner reported the repeated ask
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-project-only-unresolved-human-actions.md`
+**Queue actions:** none
 
 ## Goal
 
