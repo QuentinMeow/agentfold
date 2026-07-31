@@ -60,6 +60,31 @@ parity check                    IDENTICAL  rc=0/0  stdout lines=1
 PARITY: ALL IDENTICAL
 ```
 
+Repeated at the delivered HEAD, after the record commits, so the proof covers exactly the
+tree being handed over rather than an intermediate one:
+
+```
+$ python3 tmp/perf/ab.py parity 4d72249fc4cfc8da62efa61b9f7b5fcfe6f7f4aa check \
+    range:c208552d0c15297316d3ab9ac08085b294a6998c...b0b05d25c4060d84ee29eca96017bb2153fd4911 \
+    range:2ba9606a64bbc9b24008f6b773689d2c05fffae4...b0b05d25c4060d84ee29eca96017bb2153fd4911 \
+    rootrange:b0b05d25c4060d84ee29eca96017bb2153fd4911
+  A-baseline  check                    rc=0 lines=   1    7.12s
+  A-baseline  range:c208552d0c152973   rc=0 lines=   1   39.55s
+  A-baseline  range:2ba9606a64bbc9b2   rc=0 lines=   1  115.53s
+  A-baseline  rootrange:b0b05d25c406   rc=1 lines= 111  454.69s
+  B-current   check                    rc=0 lines=   1    5.34s
+  B-current   range:c208552d0c152973   rc=0 lines=   1   27.06s
+  B-current   range:2ba9606a64bbc9b2   rc=0 lines=   1   59.38s
+  B-current   rootrange:b0b05d25c406   rc=1 lines= 111  257.29s
+
+parity check                    IDENTICAL  rc=0/0  stdout lines=1
+parity range:c208552d0c152973   IDENTICAL  rc=0/0  stdout lines=1
+parity range:2ba9606a64bbc9b2   IDENTICAL  rc=0/0  stdout lines=1
+parity rootrange:b0b05d25c406   IDENTICAL  rc=1/1  stdout lines=111
+
+PARITY: ALL IDENTICAL
+```
+
 ## Wall time, interleaved baseline/current
 
 ```
