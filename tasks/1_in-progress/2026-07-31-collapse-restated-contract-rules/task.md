@@ -1,10 +1,10 @@
 # Collapse contract rules that are restated, circular, or describe nothing that runs
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-07-31, branch task/2026-07-31-collapse-restated-contract-rules)
 **Filed:** 2026-07-31, by claude, from an audit of restated and unenforced contract text
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-collapse-restated-contract-rules.md`
+**Queue actions:** none
 
 ## Goal
 

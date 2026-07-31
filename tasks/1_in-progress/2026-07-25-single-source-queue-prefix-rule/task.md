@@ -1,10 +1,10 @@
 # Single-source the queue delivery-prefix rule out of every live contract that restates it
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-07-31, branch task/2026-07-31-collapse-restated-contract-rules)
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Parent:** 2026-07-31-collapse-restated-contract-rules
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-single-source-queue-prefix-rule.md`
+**Queue actions:** none
 
 ## Goal
 
