@@ -228,8 +228,10 @@ HANDOVER_AGENT_LINK_RE = re.compile(
 # projection: only unresolved needs-human actions are projected (history/AGENTS.md).
 HANDOVER_ENTRY_VERSIONS = ("v1", "v2", "v3")
 UNRESOLVED_HUMAN_ENTRY_VERSION = "v3"
-# Statuses whose next actor is an agent, so the item no longer awaits its owner.
-QUEUE_AGENT_TURN_STATUSES = frozenset({"awaiting-artifact", "folding"})
+# The needs-human status that binds nothing for the human to act on at all.
+QUEUE_UNBOUND_HUMAN_STATUS = "awaiting-artifact"
+# The needs-human statuses a committed human response resolves.
+QUEUE_ANSWERABLE_HUMAN_STATUSES = frozenset({"waiting", "folding"})
 
 RETRY_GENERATOR = "reconcile.py/v1"
 RETRY_PROJECTION_START = "<!-- reconcile:projection:start -->"
@@ -6483,6 +6485,12 @@ def newly_added_handovers():
 
 
 def live_human_queue_paths():
+    """Return every readable needs-human item, whatever state it is in.
+
+    This answers "does the file exist", not "does it still await its owner" —
+    `human_action_unresolved` answers that, and a projection governed by
+    action-entry v3 applies it on top of this set (history/AGENTS.md).
+    """
     return {
         item.relative_to(REPO).as_posix()
         for item in live_queue_items() or ()
@@ -6655,10 +6663,10 @@ def handover_queue_text_at_creation(rel, queue_path):
 def human_action_unresolved(text):
     """Return whether a needs-human item still owes its owner an action.
 
-    Only the three states the queue contract hands to an agent resolve an item:
-    ``folding`` (an agent has claimed the committed, immutable response),
-    ``awaiting-artifact`` (nothing is bound yet for the human to judge), and
-    ``waiting`` that already carries a concrete committed response. Everything
+    An item awaits its owner until a concrete ``**Your answer:**`` or
+    ``**Your review:**`` is committed; the later ``waiting`` -> ``folding``
+    claim only moves an already-answered item to the agent. ``awaiting-artifact``
+    binds nothing to judge, so it is an agent's turn from the start. Anything
     else — an absent, empty, or unrecognised ``**Status:**``, a blank response
     placeholder, or text that could not be read at all — stays unresolved, so a
     malformed item is repeated to its owner rather than silently withheld.
@@ -6666,9 +6674,9 @@ def human_action_unresolved(text):
     if text is None:
         return True
     status = text_fields(text).get("Status", "").strip().strip("`")
-    if status in QUEUE_AGENT_TURN_STATUSES:
+    if status == QUEUE_UNBOUND_HUMAN_STATUS:
         return False
-    if status != "waiting":
+    if status not in QUEUE_ANSWERABLE_HUMAN_STATUSES:
         return True
     return first_concrete_response(human_response_fields(text)) is None
 

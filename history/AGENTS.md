@@ -32,10 +32,10 @@ The action-entry marker independently versions strict projection syntax. Version
 freezes the structural entry contract that existing records passed when they were
 created. Version 2 keeps that structure and adds raw-HTML and action-origin checks.
 Version 3 keeps both and selects only **unresolved** human actions: one awaits its owner
-while `Status: waiting` carries no concrete `**Your answer:**` or `**Your review:**`
-value, whereas `folding`, `awaiting-artifact`, and any committed response are an agent's
-turn; an unreadable or unrecognised state stays projected. Every projection of pending
-human action — this section and the chat reply the root contract requires — is that set.
+until a concrete `**Your answer:**` or `**Your review:**` is committed, and the later
+`folding` claim only moves an already-answered item on. `awaiting-artifact` binds nothing
+to judge; any other state, unreadable or unrecognised, stays projected. Every projection
+of pending human action — this section and the chat reply the root asks for — is that set.
 Each post-activation entry is one top-level bullet whose first content is
 `[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
 ` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both from that

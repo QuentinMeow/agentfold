@@ -7633,6 +7633,10 @@ class ReconcileQueueTests(unittest.TestCase):
             "**Status:** parked\n**Your review:** approved\n",
             "**Your review:** approved\n",
             "**Status:** waiting\n**Your answer:** n/a\n",
+            # A folding claim without the committed response it claims to be
+            # folding is malformed, so it keeps its owner's attention.
+            "**Status:** folding\n",
+            "**Status:** folding\n**Your review:** ______\n",
         )
         for text in resolved:
             self.assertFalse(

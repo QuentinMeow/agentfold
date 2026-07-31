@@ -45,15 +45,21 @@ the agent's turn:
 
 | State | Why it is not the human's turn |
 |-------|-------------------------------|
-| `Status: folding` | `message-queue/AGENTS.md`: the response is already committed and immutable, and "the later `waiting` → `folding` claim changes only status and freezes action". The root `AGENTS.md` ritual step 2 assigns the next move (fold, then delete) to an agent. `active_blocking_repair_problem()` already refuses to accept `folding` without "a concrete committed human response", so this state cannot exist without the human having acted. |
+| `Status: waiting` **with** a concrete `**Your answer:**`/`**Your review:**` | `message-queue/AGENTS.md`: "Commit the first human response while `waiting`; it is immutable" and "a concrete human response freezes timing". The root `AGENTS.md` ritual step 2 tells the *agent* to scan for exactly these filled lines and claim them. The human has acted; repeating it back is the noise this task removes. A counter-question is not lost — the contract requires a same-timing successor item, which is itself live and projected. |
+| `Status: folding` **with** that same concrete response | The claim edge cannot add a response: `queue-resolution` rejects a `waiting` → `folding` transition that "changed more than status", and `active_blocking_repair_problem()` refuses a `folding` item with no "concrete committed human response". So a well-formed `folding` item is an already-answered one whose next move (fold, then delete) belongs to an agent. |
 | `Status: awaiting-artifact` | Reviews only, and `check_queue_schema` already enforces that such an item carries `Review target: pending`, `Review revision: pending`, and `Review outcome: pending`. There is literally nothing bound for the human to judge; publishing the target is agent work. |
-| `Status: waiting` with a concrete `**Your answer:**`/`**Your review:**` | `message-queue/AGENTS.md`: "Commit the first human response while `waiting`; it is immutable" and "a concrete human response freezes timing". The root `AGENTS.md` ritual step 2 tells the *agent* to scan for exactly these filled lines and claim them. The human has acted; repeating it back is the noise this task removes. A counter-question is not lost — the contract requires a same-timing successor item, which is itself live and projected. |
 
-Everything else stays projected. Specifically, the rule **fails open**:
+The predicate collapses to one sentence: an item awaits its owner until a concrete
+response is committed, except that `awaiting-artifact` is an agent's turn from the start.
+Everything else stays projected — the rule **fails open**:
 
-- `Status: waiting` with `______`, an empty value, or no response field at all → projected.
+- `waiting` or `folding` with `______`, an empty value, or no response field → projected.
 - `**Status:**` absent, empty, or an unrecognised value → projected.
 - The item cannot be read or decoded at the creation snapshot → projected.
+
+The second bullet is why `folding` is not treated as resolved on its own: a `folding`
+claim with no committed response contradicts its own meaning, and the safe reading of a
+self-contradictory item is that its owner should still see it.
 
 **Which way this errs: permissive.** Only the three states above drop out, and each is
 one the reconciler independently validates elsewhere (`check_queue_schema` restricts the
@@ -104,8 +110,12 @@ the states.
 - **A staleness finding for a queue item left in `folding`.** The aggressive version
   would be a reconciler check ("item has been `folding` for more than N days") so a
   stalled fold surfaces as a *finding* instead of as inbox noise. `STALE_QUEUE_DAYS` (30)
-  already exists as a precedent. Not implemented: it changes what the reconciler blocks
-  on, which is the owner's call, not a velocity fix's.
+  is the precedent, but not the coverage: `check_stale_queue` today reaches `blocking-*`
+  items by age and `future-blocking-*` items with a clock-checkable date, and nothing
+  else — so a `future-blocking` item parked in `folding` on an `event:`/`transition:`
+  boundary, which is exactly the item that prompted this task, is reached by neither that
+  check nor (now) the human projection. Not implemented here: it changes what the
+  reconciler blocks on, which is the owner's call rather than a velocity fix's.
 - **Dropping `awaiting-artifact` was the closest call.** The conservative reading is that
   an item parked in `needs-human/` should stay visible so the owner knows something is
   coming. It is excluded because the contract makes the state mean "no artifact is bound
