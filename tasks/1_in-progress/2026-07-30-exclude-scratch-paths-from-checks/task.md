@@ -1,10 +1,10 @@
 # Stop the reconciler's untracked-file scans from reporting findings under `tmp/`
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from two agents independently bricking their checkout
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-exclude-scratch-paths-from-checks.md`
+**Queue actions:** none
 
 ## Goal
 
@@ -23,18 +23,18 @@ still be checked even at a path that also matches an ignore rule.
 
 ## Acceptance criteria
 
-- [ ] WHEN an untracked file under git-ignored `tmp/` would otherwise trip a
+- [x] WHEN an untracked file under git-ignored `tmp/` would otherwise trip a
       filesystem-walking check (`agents-budget` and others), THE SYSTEM SHALL report no
       finding for it.
-- [ ] WHEN a tracked file sits at a path that also matches a `.gitignore` rule, THE
+- [x] WHEN a tracked file sits at a path that also matches a `.gitignore` rule, THE
       SYSTEM SHALL still check it exactly as before.
-- [ ] THE SYSTEM SHALL determine "ignored" by asking Git once per reconciler invocation
+- [x] THE SYSTEM SHALL determine "ignored" by asking Git once per reconciler invocation
       (no per-candidate-file process spawn), consistent with the existing Git
       index/HEAD snapshot cache.
-- [ ] Every filesystem-walking check that scans the live working tree for untracked
+- [x] Every filesystem-walking check that scans the live working tree for untracked
       content (not just `check_agents_budget`) SHALL share one exclusion primitive
       instead of each carrying its own special case.
-- [ ] A regression test in `automation/tests/` SHALL cover a git-ignored scratch file
+- [x] A regression test in `automation/tests/` SHALL cover a git-ignored scratch file
       producing no finding, and a tracked file at an ignored-looking path still
       producing one.
 
