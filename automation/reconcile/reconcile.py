@@ -139,6 +139,19 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 TASK_BOUNDARY_RE = re.compile(
     r"^task:(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)$"
 )
+# The `task:<id>` token a commit message carries. One pattern serves every
+# reader, so a commit attributed to a task means the same thing everywhere.
+TASK_COMMIT_TAG_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])task:\s*"
+    r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)"
+    r"(?![A-Za-z0-9-])"
+)
+# The statuses a task may hold at a commit whose work resolves a queue action:
+# every status past pickup. `0_backlog` is excluded, so a later claim cannot
+# retroactively validate work committed while nobody owned the task.
+RESOLVING_TASK_STATUSES = frozenset(
+    {"1_in-progress", "2_blocked", "3_in-review", "4_done"}
+)
 TRANSITION_BOUNDARY_RE = re.compile(r"^transition:([a-z0-9][a-z0-9-]*)$")
 EVENT_BOUNDARY_RE = re.compile(r"^event:([a-z0-9][a-z0-9-]*)$")
 OPERATION_BOUNDARY_RE = re.compile(r"^operation:([a-z0-9][a-z0-9-]*)$")
@@ -3067,11 +3080,114 @@ def resolution_evidence_paths(text):
     return paths
 
 
-def resolution_evidence_problem(text, prior_revision, revision):
+def earlier_resolution_task_ids(path, text, prior_revision):
+    """Return the tasks whose earlier commits may carry one item's evidence.
+
+    A queue action can only be resolved by work the repository already
+    attributes to it, so the admitted set starts from the tasks that linked
+    this exact canonical path before the resolution edge, and subtracts the
+    tasks the item's own timing boundary gates: work attributed to the
+    boundary an action blocks may not also resolve that action.
+
+    Every input this cannot read answers the empty set, which leaves the
+    deletion-edge comparison as the only way to pass.
+    """
+    got = text_fields(text)
+    timing = delivery_class(Path(path).name)
+    if timing == "blocking":
+        field = "Blocks now"
+        tokens = blocking_boundary_tokens(got.get(field, ""))
+    elif timing == "future-blocking":
+        field = "Blocks at"
+        tokens = future_boundary_tokens(got.get(field, ""))
+    else:
+        # `non-blocking-*` declares **If unanswered:**, prose that names no
+        # boundary, and a name with no delivery class declares nothing at all.
+        # Neither parses to a boundary this rule could bind work to.
+        return set()
+    if not tokens or not has_concrete_value(got.get(field, "")):
+        return set()  # a timing value Git cannot parse admits nothing
+    try:
+        linking = task_ids_linking_queue_at(prior_revision, path)
+    except GitSnapshotError:
+        return set()
+    own_boundary = boundary_task_ids(
+        blocking_boundary_tokens(got.get("Blocks now", ""))
+    )
+    own_boundary.update(boundary_task_ids(
+        future_boundary_tokens(got.get("Blocks at", ""))
+    ))
+    return linking - own_boundary
+
+
+def evidence_landed_for_task(evidence, revision, task_ids):
+    """Whether reachable history already carries one task's evidence change.
+
+    ``git log`` decides what "changed this path" means, including its own
+    merge simplification: a merge counts only when it is TREESAME to no
+    parent. A commit qualifies when it also names one admitted task and that
+    task was already picked up at that commit.
+
+    This only ever answers "already resolved", so every failure — an
+    unreadable revision, a Git call that exits non-zero, a malformed frame —
+    answers ``False`` and leaves the caller's finding exactly as it was.
+    """
+    if not task_ids:
+        return False
+    tips = [
+        tip for tip in (
+            (revision,) if revision is not None else staged_parent_oids()
+        ) if tip
+    ]
+    if not tips:
+        return False
+    log = subprocess.run(
+        [
+            "git", "--no-replace-objects", "log",
+            "--format=%H%n%B%x00", *tips, "--", evidence,
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if log.returncode:
+        return False
+    for record in log.stdout.split(b"\0"):
+        oid, separator, message = record.lstrip(b"\n").partition(b"\n")
+        if not separator:
+            continue
+        commit = oid.decode("ascii", errors="replace")
+        if not immutable_revision(commit):
+            continue
+        named = set(TASK_COMMIT_TAG_RE.findall(
+            message.decode("utf-8", errors="replace")
+        ))
+        for task_id in sorted(named.intersection(task_ids)):
+            status, _task = task_status_at(commit, task_id)
+            if status in RESOLVING_TASK_STATUSES:
+                return True
+    return False
+
+
+def resolution_evidence_landed_earlier(evidence, revision, task_ids):
+    """Whether an admitted task already committed this evidence change.
+
+    Only ever answers "already resolved", so every failure answers ``False``
+    and leaves the caller's finding exactly as the deletion edge left it.
+    """
+    try:
+        return evidence_landed_for_task(evidence, revision, task_ids)
+    except (GitSnapshotError, OSError, ValueError, UnicodeError):
+        return False
+
+
+def resolution_evidence_problem(item_path, text, prior_revision, revision):
     paths = resolution_evidence_paths(text)
     if not paths:
         return "missing non-queue **Resolution evidence:** file path"
     unchanged = []
+    admitted = None
     for path in paths:
         before = git_artifact_bytes_at(prior_revision, path)
         after = (
@@ -3079,7 +3195,19 @@ def resolution_evidence_problem(text, prior_revision, revision):
             if revision is None
             else git_artifact_bytes_at(revision, path)
         )
-        if after is None or after == before:
+        if after is None:
+            unchanged.append(path)
+            continue
+        if after != before:
+            continue  # the deletion edge itself carries the evidence
+        if admitted is None:
+            try:
+                admitted = earlier_resolution_task_ids(
+                    item_path, text, prior_revision
+                )
+            except (GitSnapshotError, OSError, ValueError, UnicodeError):
+                admitted = set()
+        if not resolution_evidence_landed_earlier(path, revision, admitted):
             unchanged.append(path)
     if unchanged:
         return (
@@ -3471,33 +3599,49 @@ def task_status_in_candidate(revision, task_id):
 
 
 def task_ids_linking_queue_at(revision, queue_path):
-    """Return task ids whose exact revision links one canonical queue item."""
+    """Return task ids whose exact revision links one canonical queue item.
+
+    The one recursive listing already names every task record's object, so
+    each `task.md` is read straight from that object through the reusable
+    ``cat-file --batch`` reader instead of asking Git for the same entry a
+    second time, once per task.
+    """
     tree = subprocess.run(
         [
             "git", "--no-replace-objects", "ls-tree",
-            "-r", "--name-only", revision, "--", "tasks",
+            "-r", "-z", revision, "--", "tasks",
         ],
         cwd=REPO,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
     if tree.returncode:
         raise GitSnapshotError(
-            tree.stderr.strip()
+            tree.stderr.decode("utf-8", errors="replace").strip()
             or f"could not inspect task links in {revision}"
         )
     task_ids = set()
-    for candidate in tree.stdout.splitlines():
+    for record in tree.stdout.split(b"\0"):
+        metadata, separator, encoded_name = record.partition(b"\t")
+        if not separator:
+            continue
+        parts = metadata.decode("ascii", errors="replace").split()
+        if len(parts) != 3:
+            raise GitSnapshotError(
+                f"Git returned malformed tree data for {revision}"
+            )
+        mode, kind, oid = parts
+        candidate = encoded_name.decode("utf-8", errors="surrogateescape")
         matched = re.fullmatch(
             rf"tasks/(?:{'|'.join(TASK_STATUSES)})/"
             r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/task\.md",
             candidate,
         )
-        if not matched:
+        if not matched or kind != "blob" \
+                or mode not in ("100644", "100755"):
             continue
-        artifact = git_artifact_bytes_at(revision, candidate)
+        artifact = git_blob_bytes(oid)
         if artifact is None:
             continue
         task = text_fields(decode_utf8_artifact(
@@ -3705,7 +3849,7 @@ def negative_review_cancellation_problem(
 ):
     """Require a rejected artifact or task pursuit to be mechanically withdrawn."""
     evidence_problem = resolution_evidence_problem(
-        text, prior_revision, revision
+        path, text, prior_revision, revision
     )
     if evidence_problem:
         return evidence_problem
@@ -3810,7 +3954,7 @@ def review_cleanup_boundary_problem(
         )
     if boundary_task_ids(tokens):
         return resolution_evidence_problem(
-            text, prior_revision, revision
+            path, text, prior_revision, revision
         )
     if timing == "future-blocking":
         first = tokens[0] if tokens else ""
@@ -3818,13 +3962,13 @@ def review_cleanup_boundary_problem(
         if date_boundary is not None and date_boundary > TODAY:
             return "future review cannot close before its recorded date boundary"
         return resolution_evidence_problem(
-            text, prior_revision, revision
+            path, text, prior_revision, revision
         )
     if transitions or any(
         OPERATION_BOUNDARY_RE.fullmatch(token) for token in tokens
     ):
         problem = resolution_evidence_problem(
-            text, prior_revision, revision
+            path, text, prior_revision, revision
         )
         return (
             "blocking review needs durable boundary evidence: " + problem
@@ -4016,7 +4160,9 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                         + cancellation_problem
                     )
             return None
-        return resolution_evidence_problem(text, prior_revision, revision)
+        return resolution_evidence_problem(
+            path, text, prior_revision, revision
+        )
     item = REPO / path
     if actor == "needs-agent" and leaf == "retries" \
             and reconciler_owned_retry(item, text):
@@ -4038,7 +4184,7 @@ def queue_deletion_problem(path, text, prior_revision, revision):
         path, text, prior_revision, actor, leaf
     )
     return lifecycle or resolution_evidence_problem(
-        text, prior_revision, revision
+        path, text, prior_revision, revision
     )
 
 
@@ -4892,12 +5038,7 @@ def task_ids_from_change_range(change_range):
         check=False,
     )
     if messages.returncode == 0:
-        task_ids.update(re.findall(
-            r"(?<![A-Za-z0-9_-])task:\s*"
-            r"(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)"
-            r"(?![A-Za-z0-9-])",
-            messages.stdout,
-        ))
+        task_ids.update(TASK_COMMIT_TAG_RE.findall(messages.stdout))
     return task_ids
 
 
