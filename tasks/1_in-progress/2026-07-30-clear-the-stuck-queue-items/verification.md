@@ -251,6 +251,24 @@ SUITE_EXIT=0
 Every commit on this branch went through the pre-commit hook, which runs the core-scope gate,
 the reconciler, and the staged-path test lane. No `--no-verify` bypass was used at any point.
 
+The transcripts above were taken at `6f07c4b`, before this file and the worklog were
+committed. Repeated on a clean tree at `f42932e`, the commit that carries them:
+
+```
+$ git status --porcelain
+$ git log --oneline -1
+f42932e harness: record the stuck-queue clearing verification and diagnosis
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+check exit=0
+
+$ python3 automation/run_tests.py
+[the same eleven PASS lines]
+tests: 11/11 files passed
+test elapsed: 50.73s
+SUITE_EXIT=0
+```
+
 ## 7. One thing the scratch clone exposed
 
 While the clone existed under `tmp/`, `--check` reported it:
