@@ -13,5 +13,7 @@ Small verifiable steps, each with a named artifact or check. Check off as comple
 - [ ] 5. Replace the worktree existence gates at `check_mode_valid`,
       `check_stale_queue`, `check_roadmap_fresh`, and `check_memory_index` with
       index-backed gates, after checking each one reproduces
-- [ ] 6. Add one regression test per defect and per fixed gate site; full suite green
-- [ ] 7. Update `automation/AGENTS.md` and record real output in `verification.md`
+- [ ] 6. Give `Finding` a severity from an `ADVISORY_CHECKS` set, register `stale-task`
+      in `CHECKS`, count blocking and advisory separately, and exit 1 only on blocking
+- [ ] 7. Add one regression test per defect and per fixed gate site; full suite green
+- [ ] 8. Update `automation/AGENTS.md` and record real output in `verification.md`

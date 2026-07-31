@@ -8,7 +8,7 @@ executes; Python stdlib only, so automation runs on a bare clone.
 | `check_action_projection.py` | binds provider asks and task actions to live canonical queue items for the selected next actor | PR/provider boundary, on demand |
 | `check_core_scope.py` | gates core diffs on substitution evidence and repo-local state; `--require-review` validates a revision-bound manual review receipt | pre-commit, PR CI, on demand |
 | `core-scope-paths.txt` | registers thin agent/provider adapter files whose changes need the same core-scope check | read by the core-scope gate |
-| `reconcile/reconcile.py` | checks every harness invariant; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
+| `reconcile/reconcile.py` | checks every harness invariant, streaming findings as they are produced so a later failure cannot discard them; every finding is `blocking` or, for the age-driven ids in `ADVISORY_CHECKS` (`memory-expiry`, `roadmap-fresh`, `stale-queue`, `stale-task`), `advisory` — advisory findings print with an `(advisory)` marker and are counted separately, but only blocking ones exit 1, so an unchanged clean tree never fails on a calendar date; `--fail-on-advisory` opts a maintenance run into failing on them too, and a check that cannot run at all exits 2 with one line naming the file or check, never exit 1; existence gates read the Git index rather than `Path.is_file()`, so deleting a worktree copy cannot hide a staged violation; `--file-retries` turns findings into blocking repair items in `message-queue/needs-agent/retries/` and garbage-collects fixed ones; `--fix-index` regenerates `memory/index.md` | pre-commit (`--check`), CI, on demand |
 | `hooks/pre-commit` | blocks commits when core scope, repository invariants, or tests fail | every commit (installed) |
 | `install.py` | idempotent setup: git hooks path, agent-adapter symlinks (`CLAUDE.md` shims, skill dirs) | once per clone |
 | `inspect_workspace_boundaries.py` | read-only check of declared layered-workspace root and Git-metadata topology; reports cleanliness/content/capability/publication limits explicitly | manually, before later layered-workspace admission |
@@ -17,10 +17,10 @@ executes; Python stdlib only, so automation runs on a bare clone.
 
 Rules:
 
-- A new repository-state invariant = a `CHECKS` entry in `reconcile.py` plus the rule
-  where agents read it. External artifact boundaries use a canonical standalone gate,
-  tests, and thin adapters. Check ids stay stable because retry filenames embed them
-  (`memory/lessons/automation/deterministic-finding-keys.md`).
+- A new repository-state invariant = a `CHECKS` entry in `reconcile.py` (every emitted
+  id is a key, carrying one severity tier) plus the rule where agents read it. External
+  artifact boundaries use a canonical standalone gate, tests, and thin adapters. Check ids
+  stay stable because retry filenames embed them (`memory/lessons/automation/deterministic-finding-keys.md`).
 - Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
   shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
   actor's generic schema. Timing only escalates while live and freezes on human response.

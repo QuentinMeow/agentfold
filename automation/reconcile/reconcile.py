@@ -245,9 +245,29 @@ LINK_PATH_EXTENSIONS = {
 }
 
 
+# Advisory checks report drift that the calendar alone can create, so an unchanged
+# clean tree must never start failing on a date
+# (`handbook/principles/eventual-consistency.md`). Every other check is blocking.
+ADVISORY_CHECKS = {
+    "memory-expiry",
+    "roadmap-fresh",
+    "stale-queue",
+    "stale-task",
+}
+
+
 class Finding:
     def __init__(self, check, subject, message, fix):
         self.check, self.subject, self.message, self.fix = check, subject, message, fix
+
+    @property
+    def advisory(self):
+        """Whether this reports age-driven drift instead of a broken invariant."""
+        return self.check in ADVISORY_CHECKS
+
+    @property
+    def severity(self):
+        return "advisory" if self.advisory else "blocking"
 
     def __str__(self):
         return f"[{self.check}] {self.subject}: {self.message}"
@@ -255,6 +275,10 @@ class Finding:
 
 class GitSnapshotError(RuntimeError):
     """The exact Git candidate could not be read safely."""
+
+
+class CheckFailure(RuntimeError):
+    """One check could not run to completion, so its result is unknown."""
 
 
 def fields(path):
@@ -1076,9 +1100,15 @@ def git_blob_bytes(oid):
 
 
 def repo_text(path):
+    # Both decodes route through decode_utf8_artifact so an unreadable file is one
+    # named GitSnapshotError, never a bare UnicodeDecodeError that exits like a finding.
+    try:
+        label = f"`{path.relative_to(REPO).as_posix()}`"
+    except ValueError:
+        label = f"`{path}`"
     artifact = repo_artifact_bytes(path)
     if artifact is not None:
-        return artifact.decode("utf-8")
+        return decode_utf8_artifact(artifact, label)
     if (REPO / ".git").exists():
         relative = path.relative_to(REPO).as_posix()
         if git_index_has_path(relative) \
@@ -1086,7 +1116,16 @@ def repo_text(path):
             raise GitSnapshotError(
                 f"`{relative}` is tracked but not a readable regular candidate file"
             )
-    return path.read_text(encoding="utf-8")
+    return decode_utf8_artifact(path.read_bytes(), label)
+
+
+def candidate_has_file(path):
+    """Whether the commit candidate or the worktree carries this file.
+
+    Existence gates read the Git index first: content checks read staged bytes, so
+    deleting the worktree copy must not hide a violation the commit still carries.
+    """
+    return repo_artifact_bytes(path) is not None or path.is_file()
 
 
 def context_path_candidates(value):
@@ -4596,8 +4635,8 @@ def check_queue_schema():
 
 
 def check_stale_queue():
-    if not QUEUE.is_dir():
-        return
+    # No worktree gate: live_queue_items() reads the Git index first, so a staged
+    # item still ages when its worktree copy is gone, and yields nothing otherwise.
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue
@@ -5339,11 +5378,23 @@ def check_task_structure():
                     and repo_artifact_bytes(task / "verification.md") is None:
                 yield Finding("task-structure", rel, "missing verification.md",
                               "record real command output per templates/task/verification.md")
-            if entry_name == "1_in-progress" and task.is_dir() \
-                    and days_old(task) > STALE_TASK_DAYS:
-                yield Finding("stale-task", rel,
-                              f"untouched for over {STALE_TASK_DAYS} days",
-                              "continue it, or move back to 0_backlog and unclaim")
+
+
+def check_stale_task():
+    """Advisory: an in-progress task nobody has touched has probably lost its claim.
+
+    Registered under its own id so the retry garbage collector — which only clears
+    findings whose `Check` is a `CHECKS` key — can retire its items, and so one id
+    maps to exactly one severity tier.
+    """
+    for task in sorted(live_task_directories()):
+        rel = task.relative_to(REPO)
+        if rel.parts[1] != "1_in-progress" or not task.is_dir():
+            continue
+        if days_old(task) > STALE_TASK_DAYS:
+            yield Finding("stale-task", rel,
+                          f"untouched for over {STALE_TASK_DAYS} days",
+                          "continue it, or move back to 0_backlog and unclaim")
 
 
 def task_admission_enabled(revision=None):
@@ -7371,7 +7422,9 @@ def generated_index():
 
 def check_memory_index():
     index = MEMORY / "index.md"
-    if not MEMORY.is_dir():
+    indexed = bool(git_index_entries("memory")) \
+        if (REPO / ".git").exists() else False
+    if not indexed and not MEMORY.is_dir():
         return
     artifact = repo_artifact_bytes(index)
     if artifact is None \
@@ -7533,7 +7586,7 @@ def check_agents_budget():
 
 def check_mode_valid():
     root = REPO / "AGENTS.md"
-    if not root.is_file():
+    if not candidate_has_file(root):
         return
     mode = fields(root).get("Collaboration mode", "").strip("`* ").split("`")[0].strip("` ")
     if mode not in ("autonomous", "async", "pair"):
@@ -7545,7 +7598,7 @@ def check_mode_valid():
 def check_roadmap_fresh():
     current = REPO / "roadmap" / "current-state.md"
     done = TASKS / "4_done"
-    if not current.is_file() or not done.is_dir():
+    if not candidate_has_file(current):
         return
     updated = parse_date(fields(current).get("Last-updated", ""))
     if (REPO / ".git").exists():
@@ -7555,13 +7608,17 @@ def check_roadmap_fresh():
             if len(Path(name).parts) >= 4
             and TASK_ID_RE.fullmatch(Path(name).parts[2])
         }
+        # TASK_ID_RE accepts an impossible calendar date such as 2026-02-30, and
+        # parse_date returns None for it; max() must never compare None to a date.
         newest = max(
-            (parse_date(task_id) for task_id in done_ids),
+            (filed for filed in map(parse_date, done_ids) if filed),
             default=None,
         )
-    else:
+    elif done.is_dir():
         newest = max((parse_date(t.name) for t in done.iterdir()
                       if t.is_dir() and parse_date(t.name)), default=None)
+    else:
+        return
     if updated and newest and updated < newest:
         yield Finding("roadmap-fresh", "roadmap/current-state.md",
                       f"Last-updated {updated} predates the newest done task ({newest})",
@@ -7579,6 +7636,7 @@ CHECKS = {
     "task-structure": check_task_structure,
     "task-admission": check_task_admission_history,
     "task-action-origin": check_task_action_origin,
+    "stale-task": check_stale_task,
     "handover-present": check_handover_present,
     "handover-queue-projection": check_handover_queue_projection,
     "memory-schema": check_memory_schema,
@@ -7903,6 +7961,24 @@ def file_retries(findings):
     return len(wanted), removed
 
 
+def run_checks():
+    """Yield findings check by check, naming any check that cannot run.
+
+    A generator, so callers can print each finding as it is produced: one crashing
+    check must never discard the findings the earlier checks already reported.
+    """
+    for name, check in CHECKS.items():
+        try:
+            for finding in check():
+                yield finding
+        except GitSnapshotError:
+            raise
+        except Exception as error:
+            raise CheckFailure(
+                f"check `{name}` failed: {type(error).__name__}: {error}"
+            ) from error
+
+
 def reconcile(argv=None):
     global ACTIVE_TASK_ID, ACTIVE_TRANSITIONS, CHANGE_RANGE, DISPLACED_TIP
     parser = argparse.ArgumentParser(description=__doc__)
@@ -7911,6 +7987,11 @@ def reconcile(argv=None):
                         help="write repair items for findings; gc fixed ones")
     parser.add_argument("--fix-index", action="store_true",
                         help="regenerate memory/index.md")
+    parser.add_argument(
+        "--fail-on-advisory",
+        action="store_true",
+        help="also exit 1 on advisory findings; for maintenance runs, never the gate",
+    )
     parser.add_argument(
         "--at-transition",
         action="append",
@@ -7986,17 +8067,28 @@ def reconcile(argv=None):
         if not (args.check or args.file_retries):
             return 0
 
-    findings = [f for check in CHECKS.values() for f in check()]
-    for f in findings:
-        print(f)
+    findings = []
+    blocking = 0
+    for f in run_checks():
+        # Printed as produced, so a later crash cannot discard what is already found.
+        findings.append(f)
+        blocking += 0 if f.advisory else 1
+        print(f"{f}  (advisory)" if f.advisory else str(f))
         print(f"    fix: {f.fix}")
 
     if args.file_retries:
         filed, removed = file_retries(findings)
         print(f"retries: {filed} filed/refreshed, {removed} cleared")
 
-    print(f"reconcile: {len(findings)} finding(s)")
-    return 1 if findings else 0
+    advisory = len(findings) - blocking
+    summary = f"reconcile: {blocking} blocking finding(s)"
+    if advisory:
+        summary += (
+            f", {advisory} advisory"
+            + (" (also failing)" if args.fail_on_advisory else " (not blocking)")
+        )
+    print(summary)
+    return 1 if blocking or (advisory and args.fail_on_advisory) else 0
 
 
 def main(argv=None):
@@ -8005,6 +8097,16 @@ def main(argv=None):
         return reconcile(argv)
     except GitSnapshotError as error:
         print(f"reconcile: Git snapshot error: {error}", file=sys.stderr)
+        return 2
+    except CheckFailure as error:
+        print(f"reconcile: {error}", file=sys.stderr)
+        return 2
+    except Exception as error:
+        # Exit 2, never 1: a crash must never be indistinguishable from findings.
+        print(
+            f"reconcile: aborted, {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
         return 2
     finally:
         stop_git_snapshot_cache()

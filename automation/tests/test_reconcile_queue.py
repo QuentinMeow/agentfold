@@ -13225,6 +13225,259 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.messages(findings),
             )
 
+    # ---------------------------------------------------------------------
+    # Honest failure reporting: a crash is not a finding, a staged violation
+    # is not erased by a deleted worktree copy, and age never bricks a commit
+    # (task 2026-07-30-report-check-failures-honestly).
+
+    def collected(self, check):
+        """Run one check under a live index snapshot, as the CLI would."""
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return list(check())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_unreadable_markdown_reports_the_file_and_exits_two(self):
+        for staged in (False, True):
+            with self.subTest(staged=staged), self.repo() as root:
+                self.init_git(root)
+                scratch = root / "docs" / "scratch.md"
+                scratch.parent.mkdir(parents=True)
+                scratch.write_bytes(b"# Scratch \xff\xfe notes\n")
+                if staged:
+                    self.git(root, "add", ".")
+
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        contextlib.redirect_stderr(err):
+                    code = RECONCILE.main(["--check"])
+
+                # Exit 2, never 1: a crash must not look like "findings exist".
+                self.assertEqual(2, code, out.getvalue() + err.getvalue())
+                self.assertIn(
+                    "`docs/scratch.md` is not valid UTF-8", err.getvalue()
+                )
+                self.assertNotIn("Traceback", err.getvalue())
+
+    def test_a_crashing_check_keeps_the_findings_already_reported(self):
+        def healthy():
+            yield RECONCILE.Finding(
+                "link-check",
+                "docs/a.md",
+                "`docs/gone.md` does not exist",
+                "fix the path",
+            )
+
+        def broken():
+            raise ValueError("boom")
+            yield  # unreachable; keeps this a generator like every check
+
+        with self.repo() as root:
+            self.init_git(root)
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict(
+                RECONCILE.CHECKS,
+                {"link-check": healthy, "memory-index": broken},
+                clear=True,
+            ), contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                code = RECONCILE.main(["--check"])
+
+            self.assertEqual(2, code)
+            self.assertIn("`docs/gone.md` does not exist", out.getvalue())
+            self.assertIn(
+                "check `memory-index` failed: ValueError: boom", err.getvalue()
+            )
+
+    def test_impossible_done_task_date_never_crashes_roadmap_freshness(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "roadmap/current-state.md", "**Last-updated:** 2026-07-01\n"
+            )
+            # TASK_ID_RE accepts this id; datetime.date cannot parse it.
+            self.write(root, "tasks/4_done/2026-02-30-impossible/task.md", "# No\n")
+            self.write(root, "tasks/4_done/2026-07-22-real/task.md", "# Real\n")
+            self.git(root, "add", ".")
+
+            findings = self.collected(RECONCILE.check_roadmap_fresh)
+            self.assertEqual(
+                ["Last-updated 2026-07-01 predates the newest done task "
+                 "(2026-07-22)"],
+                self.messages(findings),
+            )
+
+    def test_staged_mode_violation_survives_a_deleted_worktree_copy(self):
+        with self.repo() as root:
+            self.init_git(root)
+            agents = self.write(
+                root, "AGENTS.md", "**Collaboration mode:** `bogus-mode`\n"
+            )
+            self.git(root, "add", ".")
+            agents.unlink()
+
+            self.assertEqual(
+                ["collaboration mode 'bogus-mode' is not autonomous|async|pair"],
+                self.messages(self.collected(RECONCILE.check_mode_valid)),
+            )
+
+    def test_staged_roadmap_staleness_survives_a_deleted_worktree_copy(self):
+        with self.repo() as root:
+            self.init_git(root)
+            current = self.write(
+                root, "roadmap/current-state.md", "**Last-updated:** 2026-07-01\n"
+            )
+            self.write(root, "tasks/4_done/2026-07-22-real/task.md", "# Real\n")
+            self.git(root, "add", ".")
+            current.unlink()
+            shutil.rmtree(root / "tasks" / "4_done")
+
+            self.assertEqual(
+                ["Last-updated 2026-07-01 predates the newest done task "
+                 "(2026-07-22)"],
+                self.messages(self.collected(RECONCILE.check_roadmap_fresh)),
+            )
+
+    def test_staged_queue_age_survives_a_deleted_message_queue_folder(self):
+        with self.repo() as root:
+            self.init_git(root)
+            rel = "message-queue/needs-agent/requests/blocking-old.md"
+            self.write(
+                root,
+                rel,
+                "**Filed:** 2026-06-01\n**Blocks now:** transition:commit\n",
+            )
+            self.git(root, "add", ".")
+            shutil.rmtree(root / "message-queue")
+
+            self.assertEqual(
+                [rel],
+                [str(f.subject)
+                 for f in self.collected(RECONCILE.check_stale_queue)],
+            )
+
+    def test_staged_memory_index_drift_survives_a_deleted_memory_folder(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "memory/facts/fact.md",
+                "# Fact\n\n**Description:** a fact\n"
+                "**Review-by:** 2027-01-01\n",
+            )
+            self.write(root, "memory/index.md", "# stale index\n")
+            self.git(root, "add", ".")
+            shutil.rmtree(root / "memory")
+
+            self.assertEqual(
+                ["index does not match the memory files"],
+                self.messages(self.collected(RECONCILE.check_memory_index)),
+            )
+
+    def test_every_advisory_check_id_is_registered_and_tiered(self):
+        self.assertEqual(
+            set(), RECONCILE.ADVISORY_CHECKS - set(RECONCILE.CHECKS)
+        )
+        self.assertIn("stale-task", RECONCILE.CHECKS)
+        self.assertEqual(
+            "advisory", RECONCILE.Finding("stale-task", "x", "", "").severity
+        )
+        self.assertEqual(
+            "blocking",
+            RECONCILE.Finding("task-structure", "x", "", "").severity,
+        )
+
+    def test_stale_task_is_reported_by_its_own_registered_check(self):
+        with self.repo() as root:
+            task = self.make_task(root, "1_in-progress", "none")
+            aged = datetime.datetime(2026, 6, 1).timestamp()
+            for item in [task, *sorted(task.rglob("*"))]:
+                os.utime(item, (aged, aged))
+
+            self.assertEqual(
+                ["untouched for over 14 days"],
+                self.messages(list(RECONCILE.CHECKS["stale-task"]())),
+            )
+            # The structural check no longer emits an id it does not own.
+            self.assertEqual(
+                [],
+                [f for f in RECONCILE.check_task_structure()
+                 if f.check == "stale-task"],
+            )
+
+    def test_advisory_findings_report_without_failing_the_local_gate(self):
+        def advisory():
+            yield RECONCILE.Finding(
+                "memory-expiry",
+                "memory/facts/x.md",
+                "Review-by 2026-01-01 is past",
+                "run the memory-gardener skill",
+            )
+
+        def blocking():
+            yield RECONCILE.Finding(
+                "link-check",
+                "docs/a.md",
+                "`docs/gone.md` does not exist",
+                "fix the path",
+            )
+
+        cases = (
+            (["--check"], {"memory-expiry": advisory}, 0,
+             "reconcile: 0 blocking finding(s), 1 advisory (not blocking)"),
+            (["--check", "--fail-on-advisory"], {"memory-expiry": advisory}, 1,
+             "reconcile: 0 blocking finding(s), 1 advisory (also failing)"),
+            (["--check"],
+             {"memory-expiry": advisory, "link-check": blocking}, 1,
+             "reconcile: 1 blocking finding(s), 1 advisory (not blocking)"),
+            (["--check"], {"link-check": blocking}, 1,
+             "reconcile: 1 blocking finding(s)"),
+        )
+        with self.repo() as root:
+            self.init_git(root)
+            for argv, checks, expected, summary in cases:
+                with self.subTest(argv=argv, checks=sorted(checks)):
+                    out = io.StringIO()
+                    with mock.patch.dict(
+                        RECONCILE.CHECKS, checks, clear=True
+                    ), contextlib.redirect_stdout(out):
+                        code = RECONCILE.main(argv)
+                    printed = out.getvalue()
+                    self.assertEqual(expected, code, printed)
+                    self.assertIn(summary, printed)
+                    if "memory-expiry" in checks:
+                        self.assertIn(
+                            "[memory-expiry] memory/facts/x.md: "
+                            "Review-by 2026-01-01 is past  (advisory)",
+                            printed,
+                        )
+                    if "link-check" in checks:
+                        self.assertIn(
+                            "[link-check] docs/a.md: "
+                            "`docs/gone.md` does not exist\n",
+                            printed,
+                        )
+
+    def test_an_expired_memory_entry_does_not_block_the_commit_gate(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "memory/facts/aging.md",
+                "# Aging fact\n\n**Description:** ages out\n"
+                "**Review-by:** 2026-07-01\n",
+            )
+            self.write(root, "memory/index.md", RECONCILE.generated_index())
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = RECONCILE.main(["--check"])
+            printed = out.getvalue()
+
+            self.assertEqual(0, code, printed)
+            self.assertIn("[memory-expiry] memory/facts/aging.md", printed)
+            self.assertIn("(advisory)", printed)
+
 
 if __name__ == "__main__":
     unittest.main()
