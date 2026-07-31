@@ -7652,8 +7652,9 @@ def check_roadmap_fresh():
 # retry garbage collection all look an id up here, so an emitted id that is missing
 # is not cosmetic: its retry can never be certified as cleared and never collected,
 # and a `blocking-*` one then stops every merge forever. One function may answer to
-# several ids — `ReconcileRegistryTests` holds every emitted id to this map, and the
-# runner deduplicates by function identity so a shared function still runs once.
+# several ids: `test_every_emitted_check_id_is_registered` holds every id the source
+# emits to this map, and the runner deduplicates by function identity so a shared
+# function still runs once.
 CHECKS = {
     "queue-name": check_queue_name,
     "queue-location": check_queue_location,
@@ -7959,8 +7960,9 @@ def generated_retry_collectable(check):
     finding than the one it cleared. `queue-resolution` is excluded on purpose:
     its checker reads the very deletion being judged, so it can never certify its
     own retry, which is why `retry_text` also predeclares a manual evidence line.
-    Keep this in step with `queue_deletion_problem`; `ReconcileRegistryTests`
-    fails when the two disagree.
+    Keep this in step with `queue_deletion_problem`, and keep every emitted check
+    id registered in `CHECKS` — `test_every_emitted_check_id_is_registered` and
+    `test_queue_resolution_retry_is_never_garbage_collected` fail otherwise.
     """
     return check in CHECKS and check != "queue-resolution"
 
