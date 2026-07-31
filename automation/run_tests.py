@@ -4,11 +4,15 @@
 Discovery covers services, canonical skills, and automation. Each child receives a
 sanitized Git environment, a scratch ``HOME`` and XDG config root carrying only the
 runner's own configuration so no caller Git configuration is readable and no repository
-a test builds runs background maintenance, and a fresh metadata-free projection outside
-every existing repository's discovery path. Subprocess-per-file keeps hyphenated folders
-importable-free and any test crash isolated. This is not a sandbox against deliberate
-absolute paths. The default is always the full suite. ``--staged`` maps every staged
-path through the input-ownership table below and runs only the tests those paths own:
+a test builds runs background maintenance, a fresh metadata-free projection outside
+every existing repository's discovery path, and a redirected ``TMPDIR`` so every fixture
+repository a test builds lands under this run's own scratch root instead of the real
+system temp directory (``install_isolated_scratch_tmpdir``); an interrupted run then
+leaves at most one named directory behind, never hundreds of anonymous ones. Subprocess-
+per-file keeps hyphenated folders importable-free and any test crash isolated. This is not
+a sandbox against deliberate absolute paths. The default is always the full suite.
+``--staged`` maps every staged path through the input-ownership table below and runs only
+the tests those paths own:
 record paths (`INERT_PATH_PREFIXES`, Markdown outside a test's own directory) own no
 test, while a removed non-record path and any unregistered path own the full suite.
 Uncertainty always falls back to full. Every narrow lane prunes the record paths out of
@@ -1013,6 +1017,33 @@ def install_isolated_git_configuration(scratch_root, child_environment):
     child_environment["GIT_CONFIG_NOSYSTEM"] = "1"
 
 
+def install_isolated_scratch_tmpdir(scratch_root, child_environment):
+    """Point ``TMPDIR``/``TMP``/``TEMP`` at scratch state this run owns and destroys.
+
+    Every fixture that calls ``tempfile.mkdtemp()`` or ``tempfile.TemporaryDirectory()``
+    without an explicit ``dir=`` resolves through ``tempfile.gettempdir()``, which reads
+    these variables from its own process environment. Left inherited from the caller, a
+    killed run -- the ordinary way a developer stops a slow suite mid-flight -- scatters
+    its scratch Git repositories across the real system temp directory: one clone per test
+    method, hundreds per run, none named in a way that says which run left them or whether
+    they are safe to delete.
+
+    Redirecting them under this run's own scratch root does not make interruption safe --
+    a ``SIGKILL`` still skips every ``finally`` block and context-manager exit, so nothing
+    here can run in response to it. What it changes is where the debris lands: every child
+    process, and everything a child process spawns, inherits the same one scratch-relative
+    directory. A completed run's outer ``TemporaryDirectory`` still removes it as a single
+    recursive unit, exactly as before. An interrupted run leaves at most one predictable
+    ``agentfold-tests-*`` directory in the real temp root instead of hundreds of anonymous
+    ones, and a human (or the next run) can find and remove it with one ``rm -rf``.
+    """
+    isolated_tmp = scratch_root / "tmp"
+    isolated_tmp.mkdir()
+    location = str(isolated_tmp)
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        child_environment[name] = location
+
+
 def seal_bare_repository_view(destination, child_environment):
     """Block a projected root only when its files already form a bare repository."""
     check_environment = dict(child_environment)
@@ -1424,6 +1455,7 @@ def main(arguments=()):
         scratch_root = Path(scratch).resolve()
         validate_scratch_root(scratch_root, child_environment)
         install_isolated_git_configuration(scratch_root, child_environment)
+        install_isolated_scratch_tmpdir(scratch_root, child_environment)
         child_environment["GIT_CEILING_DIRECTORIES"] = str(scratch_root)
         test_cwd = scratch_root / "view"
         relative_tests = tuple(test.relative_to(REPO) for test in test_files)
