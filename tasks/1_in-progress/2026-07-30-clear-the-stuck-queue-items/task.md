@@ -1,10 +1,10 @@
 # Clear the four stuck queue items against real repository state
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from chat
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-clear-the-stuck-queue-items.md`
+**Queue actions:** none
 
 ## Goal
 
