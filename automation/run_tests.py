@@ -94,7 +94,9 @@ SERVICE_TEST_DEPENDENCIES = (
 )
 # Record paths: no test reads their content or their existence. The claim is enforced
 # twice — statically by InputOwnershipTests and dynamically by pruning them out of every
-# narrow lane's projection (`prune_inert_projection`).
+# narrow lane's projection (`prune_inert_projection`). A path registered in
+# INPUT_TEST_OWNERS above wins over these prefixes, which is how the queue templates
+# stay real test inputs while the rest of `templates/` remains inert.
 INERT_PATH_PREFIXES = (
     b"docs/",
     b"handbook/",
@@ -190,6 +192,17 @@ INPUT_TEST_OWNERS = (
     (
         b"automation/run_tests.py",
         ("automation/tests/test_run_tests.py",),
+    ),
+    # Not records: the copy-and-fill test copies every queue template, fills it, and
+    # requires the reconciler to accept the result, so a template edit is a real
+    # input to that test rather than a document nothing reads.
+    (
+        b"templates/queue/",
+        ("automation/tests/test_reconcile_queue.py",),
+    ),
+    (
+        b"templates/README.md",
+        ("automation/tests/test_reconcile_queue.py",),
     ),
 )
 # Any other path under these groups owns every discovered test in the group: only that
@@ -1146,12 +1159,31 @@ def remove_projected_entry(target):
     return removed
 
 
+def registered_input_path(relative):
+    """Whether INPUT_TEST_OWNERS claims this path as a real test input.
+
+    A path can sit under an inert prefix and still be something a test reads —
+    `templates/queue/` is Markdown that the copy-and-fill test copies, fills, and
+    feeds to the reconciler. The ownership table is the authority in both
+    directions, so pruning asks it rather than assuming the prefix decides.
+    """
+    encoded = os.fsencode(str(relative))
+    for entry, _names in INPUT_TEST_OWNERS:
+        if entry.endswith(b"/"):
+            if encoded.startswith(entry) and len(encoded) > len(entry):
+                return True
+        elif encoded == entry:
+            return True
+    return False
+
+
 def prune_inert_projection(view, test_files=(), repository=None):
     """Strip record paths out of a narrow lane's projection.
 
     No selected test may read a record path, so deleting them makes a future
     undeclared read fail instead of silently invalidating ``INPUT_TEST_OWNERS``.
-    A test's own directory keeps its Markdown fixtures.
+    A test's own directory keeps its Markdown fixtures, and so does any path the
+    ownership table registers as an input.
     """
     view = Path(view)
     if not view.is_dir():
@@ -1166,6 +1198,10 @@ def prune_inert_projection(view, test_files=(), repository=None):
         kept_directories.add(view / relative.parent)
     removed = 0
     for prefix in INERT_PATH_PREFIXES:
+        if any(entry.startswith(prefix) for entry, _names in INPUT_TEST_OWNERS):
+            # Part of this tree is a registered input, so the per-file walk below
+            # decides entry by entry instead of deleting the whole tree.
+            continue
         removed += remove_projected_entry(view / os.fsdecode(prefix.rstrip(b"/")))
     for name in INERT_ROOT_PATHS:
         removed += remove_projected_entry(view / os.fsdecode(name))
@@ -1183,8 +1219,15 @@ def prune_inert_projection(view, test_files=(), repository=None):
         ):
             continue
         for file_name in file_names:
-            if file_name.endswith(markdown_suffix):
-                removed += remove_projected_entry(current / file_name)
+            if not file_name.endswith(markdown_suffix):
+                continue
+            path = current / file_name
+            try:
+                if registered_input_path(path.relative_to(view)):
+                    continue
+            except ValueError:
+                pass
+            removed += remove_projected_entry(path)
     return removed
 
 

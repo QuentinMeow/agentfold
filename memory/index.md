@@ -43,4 +43,5 @@
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 
 ## known-issues
+- [A review outcome is an agent's attested reading of the human's sentence, not a proof](known-issues/2026-07-31-review-outcome-classification-is-attested.md) — Nothing mechanical verifies that a recorded Review outcome matches what the human actually wrote.
 - [install.py symlinks fail on Windows without developer mode](known-issues/install-symlinks-windows.md) — Agent-adapter symlinks need Windows developer mode or admin; otherwise install.py falls back with a warning

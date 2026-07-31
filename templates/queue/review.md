@@ -1,33 +1,46 @@
 <!--
-Filename: choose exactly one delivery prefix, then a kebab-case slug:
-- blocking-: a named current task, transition, or operation cannot proceed now.
-- future-blocking-: work may continue, but must stop at a named date, event, or transition.
-- non-blocking-: this message never stops work and names the safe unattended outcome.
-The filename prefix is canonical. Do not add a separate **Blocking:** field.
+This template is filled in for a `non-blocking-<slug>.md` filename — the delivery class
+that never stops work, and the one live timing may always escalate away from. To file
+`blocking-` or `future-blocking-` instead, swap the `If unanswered` line below for that
+class's fields; all three are shown once in `templates/README.md`. The filename prefix
+is canonical: never add a separate **Blocking:** field. Every field line here is real
+Markdown, so a filled copy of this file is a valid item exactly as it stands. Guidance
+that is not a field stays inside comments like this one, which the reconciler blanks
+before parsing and a filing agent may delete.
 -->
 
 # <The review judgment needed, one line>
 
-**Status:** <awaiting-artifact | waiting | folding>
+**Status:** waiting
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <approve, request a named change, or state another disposition>
 **Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
-**Resolution evidence:** `<non-queue path distinct from Review target>`
-<!-- For a provider assignment, add exactly one **External assignment:** <opaque
-stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
-Omit it otherwise. -->
-<!-- For an active provider source, add exactly one **External source:** <opaque
-versioned identity emitted by its adapter>, even when provider prose links here. -->
 **Why-you-might-care:** <one sentence explaining the practical consequence>
 **If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
-**Review target:** <pending | `repo/path` | [label](repo/path) | git:<full id or base...head> | one HTTPS URL/link>
-**Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
+**Resolution evidence:** `<non-queue path distinct from Review target>`
+**Review target:** `<repo-relative path to the exact file being judged>`
+**Review revision:** sha256:<64 hex digits of that file's bytes>
 **Reviewed revision:** ______
-**Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
+**Review outcome:** pending
+**If unanswered:** <the explicit safe outcome; this message will never stop work>
 
-<!-- awaiting-artifact uses pending target/revision. Waiting binds exactly one target:
-a local file or HTTPS artifact uses its sha256; a Git target repeats the identical
-git:<...> value as Review revision. Full context explains; it is not the target. -->
+<!-- `Reviewed revision` and `Review outcome` are the folding agent's to fill, never the
+human's. The agent copies `Review revision` into `Reviewed revision` and classifies the
+committed response in the one claim commit that moves the status from `waiting` to
+`folding`; both are write-once and cannot be recorded before the response exists.
+See `handbook/human-action-guide.md`. -->
+
+<!-- Optional fields, added only when they apply. For a provider assignment, exactly one
+**External assignment:** <opaque stable-artifact, role, actor-kind, and principal binding
+emitted by its adapter>. For an active provider source, exactly one **External source:**
+<opaque versioned identity emitted by its adapter>, even when provider prose links here. -->
+
+<!-- Other target kinds, instead of the local file above. A Git range uses
+**Review target:** git:<base>...<head> with an identical **Review revision:**. An HTTPS
+artifact uses one URL with a sha256 revision. Before the artifact exists, file the item
+with **Status:** awaiting-artifact and both target and revision literally `pending`, then
+publish the binding in one later commit that moves the status to waiting. Full context
+explains the judgment; it is never the target. -->
 
 <!-- approved accepts the bound revision and is response-terminal with no successor.
 Keep a future-blocking review folding and live through its boundary; approval may
@@ -49,20 +62,6 @@ boundary. Cleanup removes a task pursuit, restores a Git candidate to its base, 
 changes/removes a local target, then changes the distinct Resolution evidence. Legacy
 **Review outcome:** not-approved remains accepted as changes-requested. -->
 
-<!-- Replace this comment with exactly one block matching the filename:
-blocking-*:
-**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
-
-future-blocking-*:
-**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-**Until then:** <the explicit safe path while work continues>
-Dates are clock-checkable. An event/custom transition is agent-attested unless a
-controlled adapter validates and enforces its crossing.
-
-non-blocking-*:
-**If unanswered:** <the explicit safe outcome; this message will never stop work>
--->
-
 ## What you need to know
 
 <2–3 sentences from zero. Explain what changed or is proposed, why judgment is needed,
@@ -81,10 +80,9 @@ do not use unexplained approval shorthand.>
 
 **Your review:** ______
 
-<!-- Status-folder task paths move and are not durable context. When answering, copy
-Review revision into Reviewed revision. Git revisions must name locally available
-commit objects. If an unanswered waiting target becomes stale, retract it in one commit:
-set Status to awaiting-artifact, target/revision to pending, and keep response/reviewed
-blank with outcome pending. Publish the replacement in a later awaiting-artifact ->
-waiting commit. Neither lifecycle edge may add a response; the first response freezes
-the binding forever. -->
+<!-- Answering is one edit: replace the blank above with a sentence and commit while the
+status is still `waiting`. Nothing else on this page is yours to fill in, and a path you
+name in that sentence never has to exist. The first response freezes the binding forever.
+If an unanswered waiting target goes stale, retract it in one commit — status
+awaiting-artifact, target and revision pending, response and Reviewed revision blank,
+outcome pending — then republish in a later commit. Neither edge may add a response. -->

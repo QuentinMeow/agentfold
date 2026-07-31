@@ -1,43 +1,33 @@
 <!--
-Filename: choose exactly one delivery prefix, then a kebab-case slug:
-- blocking-: a named current task, transition, or operation cannot proceed now.
-- future-blocking-: work may continue, but must stop at a named date, event, or transition.
-- non-blocking-: this message never stops work and names the safe unattended outcome.
-The filename prefix is canonical. Do not add a separate **Blocking:** field.
+This template is filled in for a `non-blocking-<slug>.md` filename — the delivery class
+that never stops work, and the one live timing may always escalate away from. To file
+`blocking-` or `future-blocking-` instead, swap the `If unanswered` line below for that
+class's fields; all three are shown once in `templates/README.md`. The filename prefix
+is canonical: never add a separate **Blocking:** field. Every field line here is real
+Markdown, so a filled copy of this file is a valid item exactly as it stands. Guidance
+that is not a field stays inside comments like this one, which the reconciler blanks
+before parsing and a filing agent may delete.
 -->
 
 # <What you want, one line>
 
-**Status:** <open | in-repair>
+**Status:** open
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <the concrete action the receiving agent should take>
 **Full context:** [<complete source>](<repo-relative path>)
-<!-- For a provider assignment, add exactly one **External assignment:** <opaque
-stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
-Omit it otherwise. -->
-<!-- For an active provider source, add exactly one **External source:** <opaque
-versioned identity emitted by its adapter>, even when provider prose links here. -->
 **Resolution evidence:** `<durable file completion will create or change>`
-<!-- Add **Request kind:** task-pickup only for the canonical pickup request of one
-unclaimed backlog task. Other request kinds may define their own explicit value. -->
-<!-- A changes-requested review successor also adds **Supersedes:** `<old review path>`
-and **Follow-up review:** `<new human review path>`. The follow-up is a distinct
-awaiting-artifact judgment with **Depends on:** `<this request path>`; do not repeat
-this request's repair Action as the review Action. -->
-
-<!-- Replace this comment with exactly one block matching the filename:
-blocking-*:
-**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
-
-future-blocking-*:
-**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-**Until then:** <the explicit safe path while work continues>
-Dates are clock-checkable. An event/custom transition is agent-attested unless a
-controlled adapter validates and enforces its crossing.
-
-non-blocking-*:
 **If unanswered:** <the explicit safe outcome; this message will never stop work>
--->
+
+<!-- Optional fields, added only when they apply. Add **Request kind:** task-pickup only
+for the canonical pickup request of one unclaimed backlog task; other request kinds may
+define their own explicit value. For a provider assignment, exactly one
+**External assignment:** <opaque stable-artifact, role, actor-kind, and principal binding
+emitted by its adapter>. For an active provider source, exactly one **External source:**
+<opaque versioned identity emitted by its adapter>, even when provider prose links here.
+A changes-requested review successor also adds **Supersedes:** `<old review path>` and
+**Follow-up review:** `<new human review path>`. The follow-up is a distinct
+awaiting-artifact judgment with **Depends on:** `<this request path>`; do not repeat this
+request's repair Action as the review Action. -->
 
 ## What you need to know
 
