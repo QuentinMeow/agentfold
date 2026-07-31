@@ -84,6 +84,10 @@ _GIT_HEAD_OID = None
 _GIT_ARTIFACT_CACHE = {}
 _GIT_BLOB_CACHE = {}
 _GIT_CAT_FILE_PROCESS = None
+_GIT_RAW_CAT_FILE_PROCESS = None
+_GIT_RAW_READER_AVAILABLE = True
+_GIT_COMMIT_TREE_CACHE = {}
+_GIT_TREE_ENTRIES_CACHE = {}
 _GIT_STAGED_PARENTS_CACHE = None
 _GIT_STAGED_SIDE_COMMITS_CACHE = None
 _GIT_STAGED_SIDE_CREATION_CACHE = {}
@@ -156,6 +160,10 @@ GIT_RANGE_RE = re.compile(
     r"\.\.\.(?:[0-9a-f]{40}|[0-9a-f]{64}))$"
 )
 FULL_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+GIT_TREE_MODE_RE = re.compile(r"[0-7]{5,6}")
+# ls-tree prints a six-digit mode and the object kind a raw tree only implies.
+LS_TREE_KINDS = {"40000": "tree", "040000": "tree", "160000": "commit"}
+UNREAD_TREE_ENTRY = object()  # "ask Git directly", distinct from "absent"
 QUEUE_ITEM_RE = re.compile(
     r"^(blocking|future-blocking|non-blocking)-[a-z0-9][a-z0-9-]*\.md$"
 )
@@ -290,11 +298,14 @@ def scope_immutable_git_caches():
     so switching ``REPO`` (only tests do) discards the cached answers and the
     reader process opened against the old repository.
     """
-    global _GIT_IMMUTABLE_CACHE_REPO
+    global _GIT_IMMUTABLE_CACHE_REPO, _GIT_RAW_READER_AVAILABLE
     scope = str(REPO)
     if scope == _GIT_IMMUTABLE_CACHE_REPO:
         return
     _GIT_IMMUTABLE_CACHE_REPO = scope
+    _GIT_RAW_READER_AVAILABLE = True
+    _GIT_COMMIT_TREE_CACHE.clear()
+    _GIT_TREE_ENTRIES_CACHE.clear()
     _GIT_TREE_BLOB_ENTRY_CACHE.clear()
     _GIT_ANCESTRY_CACHE.clear()
     _GIT_MERGE_BASE_CACHE.clear()
@@ -367,9 +378,17 @@ def stop_git_snapshot_cache():
 
 
 def close_git_cat_file():
-    global _GIT_CAT_FILE_PROCESS
+    """Close every reusable cat-file reader this process holds open."""
+    global _GIT_CAT_FILE_PROCESS, _GIT_RAW_CAT_FILE_PROCESS
     process = _GIT_CAT_FILE_PROCESS
+    raw = _GIT_RAW_CAT_FILE_PROCESS
     _GIT_CAT_FILE_PROCESS = None
+    _GIT_RAW_CAT_FILE_PROCESS = None
+    close_git_reader(process)
+    close_git_reader(raw)
+
+
+def close_git_reader(process):
     if process is None:
         return
     try:
@@ -1158,12 +1177,174 @@ def mutated_queue_paths_from_name_status(data):
     return paths
 
 
+def read_raw_git_object(oid):
+    """Return one immutable object's kind and bytes, or None when unreadable.
+
+    The reader stays open for the whole process and ignores replacement refs,
+    matching the ``--no-replace-objects ls-tree`` queries it serves. Every
+    failure — a missing object, a reader that cannot start, a frame Git did not
+    finish — answers ``None`` instead of raising, so a caller can always fall
+    back to the Git query it would have run anyway.
+    """
+    global _GIT_RAW_CAT_FILE_PROCESS
+    if not _GIT_RAW_READER_AVAILABLE:
+        return None
+    if _GIT_RAW_CAT_FILE_PROCESS is None:
+        try:
+            _GIT_RAW_CAT_FILE_PROCESS = subprocess.Popen(
+                ["git", "--no-replace-objects", "cat-file", "--batch"],
+                cwd=REPO,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            disable_raw_git_reader()
+            return None
+    process = _GIT_RAW_CAT_FILE_PROCESS
+    try:
+        process.stdin.write(oid.encode("ascii") + b"\n")
+        process.stdin.flush()
+        header = process.stdout.readline().rstrip(b"\n").split()
+        if header[:1] != [oid.encode("ascii")] or len(header) != 3:
+            # Git answers an absent object with one framed `<oid> missing`
+            # line; anything else leaves the stream unusable.
+            if len(header) != 2:
+                disable_raw_git_reader()
+            return None
+        size = int(header[2])
+        payload = process.stdout.read(size)
+        if len(payload) != size or process.stdout.read(1) != b"\n":
+            disable_raw_git_reader()
+            return None
+    except (BrokenPipeError, OSError, ValueError):
+        disable_raw_git_reader()
+        return None
+    return header[1].decode("ascii", errors="replace"), payload
+
+
+def disable_raw_git_reader():
+    """Stop reading raw objects after the reader stopped framing answers."""
+    global _GIT_RAW_CAT_FILE_PROCESS, _GIT_RAW_READER_AVAILABLE
+    process = _GIT_RAW_CAT_FILE_PROCESS
+    _GIT_RAW_CAT_FILE_PROCESS = None
+    _GIT_RAW_READER_AVAILABLE = False
+    close_git_reader(process)
+
+
+def parse_raw_git_tree(payload, oid_width):
+    """Return a raw tree's name-to-(mode, object) map, or None if malformed."""
+    entries = {}
+    offset = 0
+    while offset < len(payload):
+        space = payload.find(b" ", offset)
+        nul = payload.find(b"\0", space + 1)
+        if space <= offset or nul < 0 or nul + 1 + oid_width > len(payload):
+            return None
+        mode = payload[offset:space].decode("ascii", errors="replace")
+        name = payload[space + 1:nul].decode("utf-8", errors="surrogateescape")
+        if not GIT_TREE_MODE_RE.fullmatch(mode) or not name \
+                or "/" in name or name in entries:
+            return None
+        entries[name] = mode, payload[nul + 1:nul + 1 + oid_width].hex()
+        offset = nul + 1 + oid_width
+    return entries
+
+
+def parse_raw_git_commit_tree(payload, oid_length):
+    """Return the tree a raw commit object names, or None if malformed.
+
+    ``tree`` is a commit's first header, and it is the only one read here.
+    Parent lists keep coming from ``git rev-list``, which honours grafts and a
+    shallow clone's boundary while a raw commit object does not.
+    """
+    header = payload.split(b"\n", 1)[0]
+    if not header.startswith(b"tree "):
+        return None
+    tree_oid = header[len(b"tree "):].decode("ascii", errors="replace")
+    if len(tree_oid) != oid_length or not FULL_GIT_OID_RE.fullmatch(tree_oid):
+        return None
+    return tree_oid
+
+
+def git_tree_entries(tree_oid):
+    """Return one cached raw tree's entries, or None when it cannot be read."""
+    entries = _GIT_TREE_ENTRIES_CACHE.get(tree_oid)
+    if entries is None:
+        read = read_raw_git_object(tree_oid)
+        if read is None or read[0] != "tree":
+            return None
+        entries = parse_raw_git_tree(read[1], len(tree_oid) // 2)
+        if entries is not None:
+            _GIT_TREE_ENTRIES_CACHE[tree_oid] = entries
+    return entries
+
+
+def object_root_tree(revision):
+    """Return the tree a captured commit or tree revision exposes."""
+    if revision in _GIT_COMMIT_TREE_CACHE:
+        return _GIT_COMMIT_TREE_CACHE[revision]
+    if revision in _GIT_TREE_ENTRIES_CACHE:
+        return revision
+    read = read_raw_git_object(revision)
+    if read is None:
+        return None
+    if read[0] == "tree":
+        entries = parse_raw_git_tree(read[1], len(revision) // 2)
+        if entries is None:
+            return None
+        _GIT_TREE_ENTRIES_CACHE[revision] = entries
+        return revision
+    if read[0] != "commit":
+        return None
+    tree_oid = parse_raw_git_commit_tree(read[1], len(revision))
+    if tree_oid is not None:
+        _GIT_COMMIT_TREE_CACHE[revision] = tree_oid
+    return tree_oid
+
+
+def object_path_entry(revision, path):
+    """Return one `ls-tree` entry read from cached raw Git objects.
+
+    Answers ``UNREAD_TREE_ENTRY`` whenever the reader cannot produce the answer
+    an ``ls-tree`` query would, so the caller runs that query unchanged: this
+    reader only makes an existing answer cheaper. It never decides one Git
+    could not, and never turns a readable repository into a snapshot error.
+    """
+    parts = str(path).split("/") if path else []
+    if not parts or not immutable_revision(revision) \
+            or any(part in ("", ".", "..") for part in parts):
+        return UNREAD_TREE_ENTRY
+    tree_oid = object_root_tree(revision)
+    for index, part in enumerate(parts):
+        entries = git_tree_entries(tree_oid) if tree_oid else None
+        if entries is None:
+            return UNREAD_TREE_ENTRY
+        entry = entries.get(part)
+        if entry is None:
+            return None
+        mode, oid = entry
+        kind = LS_TREE_KINDS.get(mode, "blob")
+        if index == len(parts) - 1:
+            return mode.zfill(6), kind, oid
+        if kind != "tree":
+            return None  # ls-tree cannot descend through a blob or a gitlink
+        tree_oid = oid
+    return UNREAD_TREE_ENTRY
+
+
 def git_tree_blob_entry(revision, path):
     """Return one exact tree blob as (mode, object), or None when absent."""
     scope_immutable_git_caches()
     cache_key = (revision, path)
     if cache_key in _GIT_TREE_BLOB_ENTRY_CACHE:
         return _GIT_TREE_BLOB_ENTRY_CACHE[cache_key]
+    found = object_path_entry(revision, path)
+    if found is not UNREAD_TREE_ENTRY:
+        entry = (found[0], found[2]) if found and found[1] == "blob" else None
+        if immutable_revision(revision):
+            _GIT_TREE_BLOB_ENTRY_CACHE[cache_key] = entry
+        return entry
     tree = subprocess.run(
         ["git", "--no-replace-objects", "ls-tree", "-z", revision, "--", path],
         cwd=REPO,
@@ -2405,6 +2586,11 @@ def git_tree_path_entry(revision, path):
     cacheable = _GIT_SNAPSHOT_CACHE_ACTIVE or immutable_revision(revision)
     if cacheable and cache_key in _GIT_TREE_PATH_ENTRY_CACHE:
         return _GIT_TREE_PATH_ENTRY_CACHE[cache_key]
+    found = object_path_entry(revision, path)
+    if found is not UNREAD_TREE_ENTRY:
+        if cacheable:
+            _GIT_TREE_PATH_ENTRY_CACHE[cache_key] = found
+        return found
     tree = subprocess.run(
         [
             "git", "--no-replace-objects", "ls-tree", "-z",

@@ -1495,6 +1495,108 @@ class ReconcileQueueTests(unittest.TestCase):
             finally:
                 RECONCILE.stop_git_snapshot_cache()
 
+    def drop_object_read_caches(self):
+        RECONCILE._GIT_TREE_PATH_ENTRY_CACHE.clear()
+        RECONCILE._GIT_TREE_BLOB_ENTRY_CACHE.clear()
+        RECONCILE._GIT_COMMIT_TREE_CACHE.clear()
+        RECONCILE._GIT_TREE_ENTRIES_CACHE.clear()
+
+    def tree_entry_answers(self, revision, path):
+        """Answer one tree question with the object reader on, then off.
+
+        `scope_immutable_git_caches` re-enables the reader whenever `REPO`
+        moves, so binding the scope has to happen before the flag is set.
+        """
+        answers = []
+        for available in (True, False):
+            RECONCILE.scope_immutable_git_caches()
+            self.drop_object_read_caches()
+            RECONCILE._GIT_RAW_READER_AVAILABLE = available
+            try:
+                answers.append((
+                    RECONCILE.git_tree_path_entry(revision, path),
+                    RECONCILE.git_tree_blob_entry(revision, path),
+                ))
+            except RECONCILE.GitSnapshotError as error:
+                answers.append(("GitSnapshotError", str(error)))
+            finally:
+                RECONCILE._GIT_RAW_READER_AVAILABLE = True
+        return answers
+
+    def test_cached_object_reads_match_ls_tree_for_every_entry_kind(self):
+        """The raw-object walk answers exactly what the ls-tree query answers."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "AGENTS.md", "# Contract\n")
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/notes/deep.md", "# Deep\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "seed")
+            commit = self.git(root, "rev-parse", "HEAD")
+            tree = self.git(root, "rev-parse", "HEAD^{tree}")
+            references = (commit, tree, "HEAD", "0" * 40)
+            paths = (
+                "AGENTS.md",              # a blob
+                "docs",                   # a tree, printed 040000 not 40000
+                "docs/notes",             # a nested tree
+                "docs/notes/deep.md",     # a nested blob
+                "docs/missing.md",        # absent beside a present sibling
+                "AGENTS.md/under-a-blob",  # ls-tree cannot descend a blob
+                "missing/deep.md",        # absent through an absent tree
+            )
+            for reference in references:
+                for path in paths:
+                    cached, plain = self.tree_entry_answers(reference, path)
+                    self.assertEqual(
+                        plain, cached, f"`{path}` at {reference}"
+                    )
+            RECONCILE.close_git_cat_file()
+
+    def test_unreadable_object_falls_back_instead_of_raising(self):
+        """A missing object degrades to the Git query, keeping Git's own error."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "AGENTS.md", "# Contract\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "seed")
+            RECONCILE.scope_immutable_git_caches()
+            self.drop_object_read_caches()
+            absent = "0" * 40
+            self.assertIsNone(RECONCILE.read_raw_git_object(absent))
+            self.assertIs(
+                RECONCILE.UNREAD_TREE_ENTRY,
+                RECONCILE.object_path_entry(absent, "AGENTS.md"),
+            )
+            # An absent object is a framed answer, not a broken reader.
+            self.assertTrue(RECONCILE._GIT_RAW_READER_AVAILABLE)
+            with self.assertRaises(RECONCILE.GitSnapshotError):
+                RECONCILE.git_tree_path_entry(absent, "AGENTS.md")
+            RECONCILE.close_git_cat_file()
+
+    def test_object_reader_never_supplies_commit_parents(self):
+        """Parents stay a rev-list answer, which honours grafts and shallowness."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "AGENTS.md", "# Contract\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "root")
+            first = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "AGENTS.md", "# Contract, revised\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "second")
+            second = self.git(root, "rev-parse", "HEAD")
+            RECONCILE.scope_immutable_git_caches()
+            self.drop_object_read_caches()
+            self.assertEqual([first], RECONCILE.revision_parents(second, "test"))
+            # A shallow clone's boundary is exactly this: the commit still names
+            # a parent Git will not walk to, and no reader may resurrect it.
+            (root / ".git" / "shallow").write_text(
+                f"{second}\n", encoding="ascii"
+            )
+            RECONCILE._GIT_REVISION_PARENTS_CACHE.clear()
+            self.assertEqual([], RECONCILE.revision_parents(second, "test"))
+            RECONCILE.close_git_cat_file()
+
     def test_open_action_cannot_be_replaced_in_place(self):
         with self.repo() as root:
             self.init_git(root)
