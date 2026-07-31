@@ -7332,18 +7332,26 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = list(RECONCILE.check_handover_queue_projection())
             self.assertEqual([], findings, self.messages(findings))
 
-    def activate_entry_version(self, root, version):
-        """Commit one history contract that activates an entry schema version."""
+    def activate_schemas(self, root, entry="v2", liveness=None):
+        """Commit one history contract activating the named handover schemas."""
         self.init_git(root)
         self.write(
             root,
             "history/AGENTS.md",
             "# History\n\n"
             "**Queue projection schema:** v1\n"
-            f"**Queue action-entry schema:** {version}\n",
+            f"**Queue action-entry schema:** {entry}\n"
+            + (
+                f"**Queue liveness schema:** {liveness}\n"
+                if liveness is not None
+                else ""
+            ),
         )
         self.git(root, "add", ".")
-        self.git(root, "commit", "-m", f"activate entry schema {version}")
+        self.git(
+            root, "commit", "-m",
+            f"activate entry {entry} liveness {liveness}",
+        )
 
     def write_human_action(
         self, root, rel, action, status=None, response=None
@@ -7377,9 +7385,9 @@ class ReconcileQueueTests(unittest.TestCase):
         ("non-blocking-review-answered", "waiting", "ship the strict lane"),
     )
 
-    def test_v3_handover_projects_only_unresolved_human_actions(self):
+    def test_liveness_v1_projects_only_unresolved_human_actions(self):
         with self.repo() as root:
-            self.activate_entry_version(root, "v3")
+            self.activate_schemas(root, liveness="v1")
             pending_rel = (
                 "message-queue/needs-human/reviews/"
                 "blocking-review-open-boundary.md"
@@ -7409,10 +7417,10 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = list(RECONCILE.check_handover_queue_projection())
             self.assertEqual([], findings, self.messages(findings))
 
-    def test_v3_handover_rejects_a_projected_resolved_human_action(self):
+    def test_liveness_v1_rejects_a_projected_resolved_human_action(self):
         for slug, status, response in self.RESOLVED_HUMAN_STATES:
             with self.subTest(status=status), self.repo() as root:
-                self.activate_entry_version(root, "v3")
+                self.activate_schemas(root, liveness="v1")
                 resolved_rel = (
                     f"message-queue/needs-human/reviews/{slug}.md"
                 )
@@ -7438,9 +7446,9 @@ class ReconcileQueueTests(unittest.TestCase):
                     for message in messages
                 ), messages)
 
-    def test_v3_handover_accepts_none_when_every_action_is_resolved(self):
+    def test_liveness_v1_accepts_none_when_every_action_is_resolved(self):
         with self.repo() as root:
-            self.activate_entry_version(root, "v3")
+            self.activate_schemas(root, liveness="v1")
             for slug, status, response in self.RESOLVED_HUMAN_STATES:
                 self.write_human_action(
                     root,
@@ -7457,7 +7465,7 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = list(RECONCILE.check_handover_queue_projection())
             self.assertEqual([], findings, self.messages(findings))
 
-    def test_v3_still_projects_an_unreadable_or_unknown_human_state(self):
+    def test_liveness_v1_still_projects_an_unreadable_or_unknown_state(self):
         cases = (
             ("absent status", None, None),
             ("unknown status", "parked", None),
@@ -7466,7 +7474,7 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         for label, status, response in cases:
             with self.subTest(state=label), self.repo() as root:
-                self.activate_entry_version(root, "v3")
+                self.activate_schemas(root, liveness="v1")
                 queue_rel = (
                     "message-queue/needs-human/reviews/"
                     "blocking-review-unknown-state.md"
@@ -7491,9 +7499,9 @@ class ReconcileQueueTests(unittest.TestCase):
                     for message in messages
                 ), messages)
 
-    def test_v3_handover_still_requires_every_unresolved_human_action(self):
+    def test_liveness_v1_still_requires_every_unresolved_human_action(self):
         with self.repo() as root:
-            self.activate_entry_version(root, "v3")
+            self.activate_schemas(root, liveness="v1")
             projected_rel = (
                 "message-queue/needs-human/reviews/"
                 "blocking-review-open-boundary.md"
@@ -7524,11 +7532,11 @@ class ReconcileQueueTests(unittest.TestCase):
                 "missing " + omitted_rel in message for message in messages
             ), messages)
 
-    def test_v2_handover_keeps_projecting_every_live_human_action(self):
+    def test_unmarked_liveness_keeps_projecting_every_live_human_action(self):
         """The narrowed rule must not reach records admitted under v1 or v2."""
         for version in ("v1", "v2"):
             with self.subTest(version=version), self.repo() as root:
-                self.activate_entry_version(root, version)
+                self.activate_schemas(root, entry=version)
                 resolved_rel = (
                     "message-queue/needs-human/reviews/"
                     "future-blocking-review-claimed.md"
@@ -7551,39 +7559,36 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
                 self.assertEqual([], findings, self.messages(findings))
 
-    def test_entry_schema_upgrade_to_v3_is_not_a_v2_downgrade(self):
+    def test_an_unrecognised_entry_version_does_not_narrow_liveness(self):
+        """Liveness lives in its own marker, so another branch's entry version
+        number cannot silently redefine which actions a record had to project."""
         with self.repo() as root:
-            self.init_git(root)
-            contract = self.write(
+            self.activate_schemas(root, entry="v9")
+            resolved_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-claimed.md"
+            )
+            self.write_human_action(
+                root, resolved_rel, "review the claimed boundary",
+                status="folding", response="approved",
+            )
+            handover = self.make_handover(
                 root,
-                "history/AGENTS.md",
-                "# History\n\n"
-                "**Queue projection schema:** v1\n"
-                "**Queue action-entry schema:** v2\n",
+                "2026-07-23-1200PDT-foreign-entry-version",
+                self.human_entry(resolved_rel, "review the claimed boundary"),
             )
             self.git(root, "add", ".")
-            self.git(root, "commit", "-m", "activate strict handovers")
-            base = self.git(root, "rev-parse", "HEAD")
 
-            contract.write_text(
-                "# History\n\n"
-                "**Queue projection schema:** v1\n"
-                "**Queue action-entry schema:** v3\n",
-                encoding="utf-8",
+            messages = self.messages(
+                RECONCILE.check_handover_queue_projection()
             )
-            self.git(root, "add", "history/AGENTS.md")
-            self.git(root, "commit", "-m", "upgrade to unresolved projection")
-            head = self.git(root, "rev-parse", "HEAD")
+            self.assertFalse(any(
+                "not live" in message or "was not live" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(handover.is_file())
 
-            with mock.patch.object(
-                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
-            ):
-                findings = list(
-                    RECONCILE.check_handover_queue_projection()
-                )
-            self.assertEqual([], findings, self.messages(findings))
-
-    def test_entry_schema_v3_is_sticky_after_activation(self):
+    def test_liveness_schema_is_sticky_after_activation(self):
         with self.repo() as root:
             self.init_git(root)
             contract = self.write(
@@ -7591,7 +7596,8 @@ class ReconcileQueueTests(unittest.TestCase):
                 "history/AGENTS.md",
                 "# History\n\n"
                 "**Queue projection schema:** v1\n"
-                "**Queue action-entry schema:** v3\n",
+                "**Queue action-entry schema:** v2\n"
+                "**Queue liveness schema:** v1\n",
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "activate unresolved projection")
@@ -7604,7 +7610,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.git(root, "add", "history/AGENTS.md")
-            self.git(root, "commit", "-m", "downgrade the entry schema")
+            self.git(root, "commit", "-m", "drop the liveness schema")
             head = self.git(root, "rev-parse", "HEAD")
 
             with mock.patch.object(
@@ -7614,7 +7620,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.check_handover_queue_projection()
                 )
             self.assertTrue(any(
-                "action-entry schema v3 was removed or downgraded" in message
+                "liveness schema v1 was removed or downgraded" in message
                 for message in messages
             ), messages)
 

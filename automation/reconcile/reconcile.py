@@ -224,10 +224,16 @@ HANDOVER_AGENT_LINK_RE = re.compile(
     r"(blocking|future-blocking|non-blocking)-[a-z0-9][a-z0-9-]*\.md"
     r"(?![A-Za-z0-9_.-])"
 )
-# Handover action-entry schema versions, oldest first. v3 adds state-aware
-# projection: only unresolved needs-human actions are projected (history/AGENTS.md).
-HANDOVER_ENTRY_VERSIONS = ("v1", "v2", "v3")
-UNRESOLVED_HUMAN_ENTRY_VERSION = "v3"
+# Handover action-entry schema versions, oldest first. This namespace versions
+# projection *syntax* only; which actions a projection must contain is versioned
+# separately below, so the two can move without colliding (history/AGENTS.md).
+HANDOVER_ENTRY_VERSIONS = ("v1", "v2")
+HANDOVER_ENTRY_FIELD = "Queue action-entry schema"
+# Handover liveness schema versions, oldest first. v1 projects only the
+# needs-human actions that still await the human.
+HANDOVER_LIVENESS_VERSIONS = ("v1",)
+HANDOVER_LIVENESS_FIELD = "Queue liveness schema"
+UNRESOLVED_HUMAN_LIVENESS_VERSION = "v1"
 # The needs-human status that binds nothing for the human to act on at all.
 QUEUE_UNBOUND_HUMAN_STATUS = "awaiting-artifact"
 # The needs-human statuses a committed human response resolves.
@@ -6197,23 +6203,40 @@ def projection_schema_activation_commits(
     return (), f"could not find a v1 {field} activation commit"
 
 
-def handover_action_entry_version():
+def handover_schema_version(field, versions):
+    """Return one declared handover schema version from the candidate contract."""
     contract = repo_artifact_bytes(REPO / "history" / "AGENTS.md")
     if contract is None:
         return None
     version = text_fields(
         contract.decode("utf-8")
-    ).get("Queue action-entry schema", "").strip()
-    return version if version in HANDOVER_ENTRY_VERSIONS else None
+    ).get(field, "").strip()
+    return version if version in versions else None
+
+
+def handover_action_entry_version():
+    return handover_schema_version(HANDOVER_ENTRY_FIELD, HANDOVER_ENTRY_VERSIONS)
+
+
+def handover_liveness_version():
+    return handover_schema_version(
+        HANDOVER_LIVENESS_FIELD, HANDOVER_LIVENESS_VERSIONS
+    )
+
+
+def schema_version_at_least(version, floor, versions):
+    """Compare two declared schema versions; an unknown one counts as older."""
+    if version not in versions or floor not in versions:
+        return False
+    return versions.index(version) >= versions.index(floor)
 
 
 def entry_version_at_least(version, floor):
-    """Compare two declared action-entry schema versions, unknown counting as older."""
-    if version not in HANDOVER_ENTRY_VERSIONS \
-            or floor not in HANDOVER_ENTRY_VERSIONS:
-        return False
-    return HANDOVER_ENTRY_VERSIONS.index(version) \
-        >= HANDOVER_ENTRY_VERSIONS.index(floor)
+    return schema_version_at_least(version, floor, HANDOVER_ENTRY_VERSIONS)
+
+
+def liveness_version_at_least(version, floor):
+    return schema_version_at_least(version, floor, HANDOVER_LIVENESS_VERSIONS)
 
 
 def handover_action_entry_enabled():
@@ -6226,8 +6249,8 @@ def history_service_present():
     return (REPO / "history").is_dir()
 
 
-def handover_action_entry_activations(version="v1"):
-    """Return committed entry-version activations, including merged branches."""
+def handover_schema_activations(field, version="v1"):
+    """Return committed activations of one schema version, including merges."""
     revision = committed_candidate_revision()
     if revision is None:
         return ()
@@ -6235,11 +6258,21 @@ def handover_action_entry_activations(version="v1"):
     for candidate_head in candidate_activation_heads(revision):
         found, _error = projection_schema_activation_commits(
             candidate_head,
-            field="Queue action-entry schema",
+            field=field,
             version=version,
         )
         activations.extend(found)
     return tuple(dict.fromkeys(activations))
+
+
+def handover_action_entry_activations(version="v1"):
+    """Return committed entry-version activations, including merged branches."""
+    return handover_schema_activations(HANDOVER_ENTRY_FIELD, version)
+
+
+def handover_liveness_activations(version="v1"):
+    """Return committed liveness-version activations, including merged branches."""
+    return handover_schema_activations(HANDOVER_LIVENESS_FIELD, version)
 
 
 def handover_projection_activations():
@@ -6257,12 +6290,12 @@ def handover_projection_activations():
     return tuple(dict.fromkeys(activations))
 
 
-def handover_action_entry_version_for(rel):
-    """Return the highest entry schema governing this handover's creation."""
-    current_version = handover_action_entry_version()
+def handover_schema_version_for(rel, field, versions):
+    """Return the highest version of one schema governing a handover's creation."""
+    current_version = handover_schema_version(field, versions)
     activation_map = {
-        version: handover_action_entry_activations(version)
-        for version in HANDOVER_ENTRY_VERSIONS
+        version: handover_schema_activations(field, version)
+        for version in versions
     }
     if current_version is None and not any(activation_map.values()):
         return None, None
@@ -6274,11 +6307,8 @@ def handover_action_entry_version_for(rel):
                 return None, None
             version = text_fields(decode_utf8_artifact(
                 contract, f"`history/AGENTS.md` at {created_at}"
-            )).get("Queue action-entry schema", "").strip()
-            return (
-                version if version in HANDOVER_ENTRY_VERSIONS else None,
-                None,
-            )
+            )).get(field, "").strip()
+            return version if version in versions else None, None
         return current_version, None
     created_at, creation_error = handover_creation_commit(rel)
     if creation_error:
@@ -6290,12 +6320,12 @@ def handover_action_entry_version_for(rel):
     )
     candidate = _GIT_HEAD_OID or range_head
     governed_versions = []
-    for version in HANDOVER_ENTRY_VERSIONS:
+    for version in versions:
         activations = activation_map[version]
         if not activations:
             activations, activation_error = projection_schema_activation_commits(
                 candidate,
-                field="Queue action-entry schema",
+                field=field,
                 version=version,
             )
             if activation_error and current_version == version:
@@ -6313,6 +6343,20 @@ def handover_action_entry_version_for(rel):
         max(governed_versions, key=lambda value: int(value[1:]))
         if governed_versions else None,
         None,
+    )
+
+
+def handover_action_entry_version_for(rel):
+    """Return the highest entry schema governing this handover's creation."""
+    return handover_schema_version_for(
+        rel, HANDOVER_ENTRY_FIELD, HANDOVER_ENTRY_VERSIONS
+    )
+
+
+def handover_liveness_version_for(rel):
+    """Return the highest liveness schema governing this handover's creation."""
+    return handover_schema_version_for(
+        rel, HANDOVER_LIVENESS_FIELD, HANDOVER_LIVENESS_VERSIONS
     )
 
 
@@ -7116,6 +7160,22 @@ def check_handover_queue_projection():
                 f"restore **Queue action-entry schema:** {highest_activated} "
                 "or upgrade it further while history remains",
             )
+    liveness_version_now = handover_liveness_version()
+    activated_liveness_versions = [
+        version for version in HANDOVER_LIVENESS_VERSIONS
+        if handover_liveness_activations(version)
+    ]
+    if activated_liveness_versions:
+        highest_liveness = activated_liveness_versions[-1]
+        if not liveness_version_at_least(liveness_version_now, highest_liveness):
+            yield Finding(
+                "handover-queue-projection",
+                Path("history/AGENTS.md"),
+                f"Queue liveness schema {highest_liveness} was removed "
+                "or downgraded after activation",
+                f"restore **Queue liveness schema:** {highest_liveness} "
+                "or upgrade it further while history remains",
+            )
     if not handover_projection_enabled() and not projection_activations:
         return
     reported_mutations = set()
@@ -7212,12 +7272,24 @@ def check_handover_queue_projection():
                     + strict_error,
                     "preserve the schema activation and handover creation commits",
                 )
-            if entry_version_at_least(
-                entry_version, UNRESOLVED_HUMAN_ENTRY_VERSION
+            liveness_version, liveness_error = handover_liveness_version_for(rel)
+            if liveness_error:
+                yield Finding(
+                    "handover-queue-projection",
+                    rel,
+                    "could not verify liveness schema activation: "
+                    + liveness_error,
+                    "preserve the schema activation and handover creation commits",
+                )
+            if liveness_version_at_least(
+                liveness_version, UNRESOLVED_HUMAN_LIVENESS_VERSION
             ):
-                # Only handovers governed by the state-aware version project the
+                # Only handovers governed by the liveness schema project the
                 # narrowed set; every older record keeps the liveness rule it was
                 # written and admitted under (history/AGENTS.md immutability).
+                # This is a separate marker from the entry schema on purpose:
+                # projection syntax and projected membership version apart, and
+                # an in-flight branch already owns entry-schema version numbers.
                 live_human = unresolved_human_queue_paths(rel, live_human)
             prior_incarnation, incarnation_error = (
                 prior_governed_v1_handover_incarnation(rel)

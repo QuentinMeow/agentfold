@@ -37,6 +37,11 @@ rule unconditionally would turn correct historical records into findings, which 
 contract forbids: "A rejecting grammar expansion requires a new schema version instead of
 retroactively changing immutable records."
 
+### Option D — version the rule inside the existing action-entry schema (rejected on evidence)
+
+Tried first, then withdrawn: the version number it needed is already claimed on an
+unmerged branch. See "The immutability mechanism" below.
+
 ## Chosen
 
 **The state split.** A `needs-human` item is *unresolved* — and therefore projected —
@@ -57,8 +62,8 @@ Everything else stays projected — the rule **fails open**:
 - `**Status:**` absent, empty, or an unrecognised value → projected.
 - The item cannot be read or decoded at the creation snapshot → projected.
 
-The second bullet is why `folding` is not treated as resolved on its own: a `folding`
-claim with no committed response contradicts its own meaning, and the safe reading of a
+The first bullet is why `folding` alone does not resolve an item: a `folding` claim with
+no committed response contradicts its own meaning, and the safe reading of a
 self-contradictory item is that its owner should still see it.
 
 **Which way this errs: permissive.** Only the three states above drop out, and each is
@@ -76,22 +81,38 @@ a *stalled agent action*, not a pending human one, and the honest fix is a stale
 finding against the queue item rather than permanent noise in a human inbox. It is not in
 this task's scope — see "Deliberately not done".
 
-**The immutability mechanism.** `history/AGENTS.md` already carries a
+**The immutability mechanism.** `history/AGENTS.md` already carried a
 `**Queue action-entry schema:**` marker, and `handover_action_entry_version_for()` already
-resolves the highest version whose activation commit is an ancestor of a given handover's
-*creation* commit. The new liveness rule is therefore added as **v3**:
+resolved the highest version whose activation commit is an ancestor of a given handover's
+*creation* commit. That machinery is exactly right; the version *namespace* was not.
 
-- Handovers created before the v3 activation resolve to v1/v2 and keep the old path-only
-  liveness, byte for byte.
-- Handovers created at or after it resolve to v3 and must project only unresolved items.
+The rule ships under a **new, separate marker**, `**Queue liveness schema:** v1`:
+
+- Handovers created before its activation carry no liveness marker and keep the old
+  path-only liveness, byte for byte.
+- Handovers created at or after it must project only unresolved items.
 - If the version cannot be resolved (an error path), the code falls back to the old
   behavior, so a failure can never invent retroactive redness.
 
-The existing "sticky schema" guard was generalised so activating v3 is an upgrade rather
-than a v2 downgrade, and so a future v4 needs no further edit there.
+The first attempt reused the action-entry namespace and called the rule `v3`. Measurement
+caught that as a real defect before it shipped: the unmerged branch
+task/2026-07-23-first-class-message-queue **already declares
+`Queue action-entry schema: v3`** for its own in-flight meaning. Because `main`'s
+reconciler did not recognise `v3`, that branch's handovers had been resolving to the
+highest *recognised* version (v2); teaching `main` that `v3` means "unresolved only"
+silently changed one of those records' verdicts. It happened to go greener, which is luck,
+not safety — a record that projected a resolved action would have gone red instead.
 
-**Where the rule lives.** In `history/AGENTS.md`, immediately beside the schema markers
-that version it. That file already owned the sentence the change replaces ("exactly
+Two lessons are baked into the shipped shape. Syntax and membership are genuinely
+different dimensions and now version independently, so neither can move the other. And a
+schema version number is a shared namespace across every in-flight branch, not just the
+one in front of you: claiming the next integer is a merge conflict waiting to happen.
+
+The "sticky schema" guard was generalised over both markers, so removing or downgrading
+either after activation is a finding and adding a future version needs no edit there.
+
+**Where the rule lives.** In `history/AGENTS.md`, immediately beside the schema marker
+that versions it. That file already owned the sentence the change replaces ("exactly
 project all live `message-queue/needs-human/` actions"), and a versioned rule has to sit
 with its version marker or the two can be changed independently.
 `templates/handover.md` (schema for the `Needs your attention` section) and the root

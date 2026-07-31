@@ -4,10 +4,12 @@
       handover in `history/` and store the finding set (`tmp/before.json`).
 - [x] 2. Add the liveness predicate to `reconcile.py`: `human_action_unresolved()` plus a
       creation-snapshot reader, both failing open on anything unreadable.
-- [x] 3. Add `v3` to the handover action-entry schema versions and generalise the sticky
-      downgrade guard so activating v3 is an upgrade, not a v2 removal.
+- [x] 3. Version the rule under its own `**Queue liveness schema:**` marker, generalising
+      the activation resolver and sticky downgrade guard over both markers. (First
+      attempt reused `action-entry v3`; the sweep in step 7 caught that an unmerged
+      branch already owns that number, so the rule moved to its own marker.)
 - [x] 4. Filter the creation-snapshot human queue through the predicate, but only for
-      handovers governed by v3.
+      handovers governed by the liveness schema.
 - [x] 5. Move the definition of the projected set into `history/AGENTS.md` next to the
       schema markers; point `templates/handover.md` and the root `AGENTS.md` chat-reply
       sentence at it without restating the states.

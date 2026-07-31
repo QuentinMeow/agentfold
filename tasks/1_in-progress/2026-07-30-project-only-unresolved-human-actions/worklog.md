@@ -20,15 +20,27 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `waiting` that already carries a concrete response. Everything else — including a
   missing or unrecognised `**Status:**` — stays projected. `design.md` records why this
   errs permissive rather than strict.
-- The hard constraint was immutability, and the answer was already in the repository:
-  the `**Queue action-entry schema:**` marker plus `handover_action_entry_version_for()`
-  resolve a version from a handover's *creation* commit. The rule became **v3**, so
-  records admitted under v1 or v2 keep the liveness they were written against.
+- Tightened the split once more before finishing: `folding` alone no longer resolves an
+  item; `folding` **plus** the committed response does. A claim edge cannot add a
+  response, so a `folding` item carrying none contradicts itself, and a self-contradictory
+  item keeps its owner's attention. This changed nothing on the live queue and made the
+  predicate one sentence shorter.
+- The hard constraint was immutability, and the mechanism was already in the repository:
+  a schema marker in `history/AGENTS.md` plus a resolver that reads it from a handover's
+  *creation* commit. The rule ships under a new `**Queue liveness schema:** v1` marker, so
+  records written before it keep the liveness they were admitted under.
 - Measured before and after rather than asserting it: a sweep re-ran the projection check
   at the creation commit of all 67 handovers reachable from `--all`, once with the old
-  module and once with the new one. Identical finding sets. The 8 findings in both runs
-  belong to one handover on the unmerged task/2026-07-23-first-class-message-queue
-  branch and predate this work — the reconciler at main never reaches that commit.
+  module and once with the new one.
+- **The measurement earned its cost.** The first attempt versioned the rule as
+  `Queue action-entry schema: v3`, and the sweep came back 8 findings before, 6 after —
+  one handover's verdict had changed. The cause: the unmerged branch
+  task/2026-07-23-first-class-message-queue already declares `action-entry schema v3`
+  for its own meaning, and `main` had been treating that value as unrecognised. Teaching
+  `main` a meaning for `v3` retroactively redefined that branch's records. It went greener
+  by luck; a record projecting a resolved action would have gone red. Moving the rule to
+  its own marker restored that commit to its original 8 findings, verified directly by
+  running the pre-change and post-change modules side by side at that exact commit.
 - The measured win on the live queue is one item of eight: the approved detector-failure
   review that had been re-asked since 2026-07-24. The other seven are genuinely `waiting`
   with no response. The value is that the list is now *trustworthy*, not that it is short.

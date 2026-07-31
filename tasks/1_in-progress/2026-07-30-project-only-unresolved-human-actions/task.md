@@ -21,21 +21,20 @@ retroactively invalidating a single already-committed handover.
 
 ## Acceptance criteria
 
-- [ ] WHEN a `needs-human` item is `folding`, `awaiting-artifact`, or `waiting` with a
+- [x] WHEN a `needs-human` item is `awaiting-artifact`, or is `waiting`/`folding` with a
       concrete committed `**Your answer:**`/`**Your review:**`, THE RECONCILER SHALL
       treat it as resolved and reject a new handover that projects it.
-- [ ] WHEN a `needs-human` item is `waiting` with no concrete response, or its state is
-      absent, malformed, or unreadable, THE RECONCILER SHALL still require it to be
-      projected.
-- [ ] WHEN every live `needs-human` item is resolved, THE RECONCILER SHALL accept a
+- [x] WHEN a `needs-human` item has no concrete response, or its state is absent,
+      malformed, or unreadable, THE RECONCILER SHALL still require it to be projected.
+- [x] WHEN every live `needs-human` item is resolved, THE RECONCILER SHALL accept a
       handover whose `Needs your attention` section is exactly `None.`
-- [ ] The rule is gated by a new `**Queue action-entry schema:** v3` activation, so no
+- [x] The rule is gated by a new `**Queue liveness schema:** v1` activation, so no
       handover created before that activation changes verdict.
-- [ ] Re-running the projection check at the creation commit of every handover in
+- [x] Re-running the projection check at the creation commit of every handover in
       `history/` produces the identical finding set before and after the change.
-- [ ] `templates/handover.md` and the root `AGENTS.md` chat-reply sentence name the same
+- [x] `templates/handover.md` and the root `AGENTS.md` chat-reply sentence name the same
       set, defined in exactly one place.
-- [ ] The full test suite passes and `automation/reconcile/reconcile.py --check` reports
+- [x] The full test suite passes and `automation/reconcile/reconcile.py --check` reports
       0 findings.
 
 ## Links

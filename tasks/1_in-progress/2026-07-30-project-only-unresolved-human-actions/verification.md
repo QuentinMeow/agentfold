@@ -45,15 +45,14 @@ PASS automation/tests/test_run_tests.py
 PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 11/11 files passed
-test elapsed: 121.84s
+test elapsed: 104.07s
 ```
 
 ## Reconciler queue tests, unsharded
 
 ```
 $ python3 -m unittest automation.tests.test_reconcile_queue
-Ran 311 tests in 201.428s
-
+Ran 311 tests in 94.643s
 OK
 ```
 
@@ -61,26 +60,26 @@ The nine tests this task added, by name:
 
 ```
 $ python3 -m unittest automation.tests.test_reconcile_queue -v 2>&1 \
-    | grep -E "^test_(v3|v2|entry_schema|unresolved)"
-test_entry_schema_upgrade_to_v3_is_not_a_v2_downgrade (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_entry_schema_v3_is_sticky_after_activation (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+    | grep -E "^test_(liveness|unmarked_liveness|an_unrecognised|unresolved_human_state)"
+test_an_unrecognised_entry_version_does_not_narrow_liveness (automation.tests.test_reconcile_queue.ReconcileQueueTests)
+test_liveness_schema_is_sticky_after_activation (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_liveness_v1_accepts_none_when_every_action_is_resolved (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_liveness_v1_projects_only_unresolved_human_actions (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_liveness_v1_rejects_a_projected_resolved_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_liveness_v1_still_projects_an_unreadable_or_unknown_state (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_liveness_v1_still_requires_every_unresolved_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
+test_unmarked_liveness_keeps_projecting_every_live_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests)
 test_unresolved_human_state_predicate_fails_open (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_v2_handover_keeps_projecting_every_live_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests)
-test_v3_handover_accepts_none_when_every_action_is_resolved (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_v3_handover_projects_only_unresolved_human_actions (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_v3_handover_rejects_a_projected_resolved_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_v3_handover_still_requires_every_unresolved_human_action (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
-test_v3_still_projects_an_unreadable_or_unknown_human_state (automation.tests.test_reconcile_queue.ReconcileQueueTests) ... ok
 ```
 
-(`test_v2_handover_keeps_projecting_every_live_human_action` prints its `ok` on the
-following line because its subtests emit their own line first; the run above is `OK`
-with no failures.)
+(Two of them print their `ok` on the following line because their subtests emit a line
+first; the run above is `OK` with no failures.)
 
 ## Effect on the repository's own queue
 
 `tmp/live_split.py` loads the reconciler as a module and partitions the live
-`needs-human` queue with the new predicate. Its source is at the end of this file.
+`needs-human` queue with the new predicate. Its source is at the end of this file. The
+split is identical before and after the `folding`-without-response refinement.
 
 ```
 $ python3 tmp/live_split.py
@@ -155,13 +154,95 @@ total findings across 67 creation events: 8
 wrote tmp/before.json
 ```
 
-Those eight are pre-existing and unrelated: commit `4d26cf3` lives only on the unmerged
-branch task/2026-07-23-first-class-message-queue, so the reconciler running at `main`
-never reaches it. This sweep is deliberately wider than the reconciler's own recheck.
+Those eight are pre-existing and unrelated to this task: commit `4d26cf3` lives only on
+the unmerged branch task/2026-07-23-first-class-message-queue, so the reconciler running
+at `main` never reaches it. This sweep is deliberately wider than the reconciler's own
+recheck, which is what made the next result visible.
 
-After (this branch):
+### The run that caught a real defect
 
-TO_BE_FILLED_AFTER
+An intermediate version of this change versioned the rule as
+`**Queue action-entry schema:** v3`. Its sweep returned **6**, not 8 — one already-committed
+handover had changed verdict:
+
+```
+$ python3 -c "import json;b=json.load(open('tmp/before.json'));a=json.load(open('tmp/after.json'));..."
+DIFF history/conversations/2026-07-26-1158PDT-human-action-ux/handover.md@4d26cf30c50c2c8116353b54208870fd210992ef
+  only-before: ...|new handover is not an exact projection of the live human queue: ...
+  only-before: ...|new handover human entries are not in canonical timing-and-filena...
+```
+
+The cause, read straight out of Git:
+
+```
+$ git show 4d26cf30:history/AGENTS.md | sed -n '2,3p'
+**Queue projection schema:** v1
+**Queue action-entry schema:** v3
+```
+
+That unmerged branch already declares `action-entry schema v3` for its own meaning.
+`main` had been treating the value as unrecognised; giving it a meaning redefined that
+branch's records. `tmp/probe_old.py` loads the pre-change and post-change modules side by
+side and evaluates that exact commit under both, which is how the fix was confirmed:
+
+```
+$ python3 tmp/probe_old.py
+--- pre-change
+  handover_action_entry_version(): None
+  handover_action_entry_version_for(): ('v2', None)
+  findings: 8
+--- post-change
+  handover_action_entry_version(): None
+  handover_action_entry_version_for(): ('v2', None)
+  findings: 8
+```
+
+(Before the fix the same probe printed `v3`/`('v3', None)`/`findings: 6` for the
+post-change module.) The rule now lives under its own `**Queue liveness schema:**` marker,
+which no other branch claims.
+
+After (this branch, final code at `747a1e6`):
+
+```
+$ python3 tmp/sweep_history.py tmp/after.json
+747a1e6 Keep a folding claim without its committed response projected
+handover creation events: 67
+  ...10/67 (2s)
+  ...20/67 (56s)
+  ...30/67 (113s)
+  ...40/67 (185s)
+  ...50/67 (300s)
+  RED history/conversations/2026-07-26-1158PDT-human-action-ux/handover.md @ 4d26cf30
+      handover-queue-projection|...|Needs your attention entry 1 `...guardrail-authority-boundary.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|Needs your attention entry 2 `...layered-development-workspace.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|Needs your attention entry 3 `...revised-assurance-profile-scope-and-egress.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|Needs your attention entry 4 `...sensitive-data-recovery.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|Needs your attention entry 5 `...test-runner-git-environment-isolation.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|Needs your attention entry 6 `...template-first-explanation.md` must contain exactly one **Why-you-might-care:**
+      handover-queue-projection|...|new handover is not an exact projection of the live human queue: missing ...rereview-human-action-files.md, ...detector-failure-state.md, ...first-class-message-queue.md
+      handover-queue-projection|...|new handover human entries are not in canonical timing-and-filename order
+  ...60/67 (578s)
+total findings across 67 creation events: 8
+wrote tmp/after.json
+```
+
+(The eight finding lines are elided at `|...|` here only to keep this file readable; the
+JSON compared below holds them in full.)
+
+The two JSON snapshots are compared field by field rather than by eyeball:
+
+```
+$ python3 tmp/diff_sweeps.py
+creation events compared: 67 67
+identical event keys: True
+identical finding sets: True
+total findings before: 8
+total findings after : 8
+events whose findings changed: 0
+```
+
+**8 before, 8 after, zero events changed.** No already-committed handover gained or lost a
+finding.
 
 ## Scripts used above
 
@@ -281,4 +362,76 @@ def main():
 
 
 main()
+```
+
+`tmp/probe_old.py` — evaluates one commit under both modules at once. The pre-change copy
+comes from `git show 6cd2de9:automation/reconcile/reconcile.py > tmp/oldmod/automation/reconcile/reconcile.py`;
+its path constants are repointed at the real repository so both modules read the same Git
+objects.
+
+```python
+import importlib.util
+import pathlib
+import sys
+
+REV = "4d26cf30c50c2c8116353b54208870fd210992ef"
+REL = pathlib.Path("history/conversations/2026-07-26-1158PDT-human-action-ux/handover.md")
+REPO = pathlib.Path(".").resolve()
+
+sys.path.insert(0, str(REPO / "automation"))
+spec = importlib.util.spec_from_file_location(
+    "reconcile_old", REPO / "automation/reconcile/reconcile.py")
+R = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(R)
+
+old_path = REPO / "tmp/oldmod/automation/reconcile/reconcile.py"
+old_spec = importlib.util.spec_from_file_location("reconcile_pre", old_path)
+OLD = importlib.util.module_from_spec(old_spec)
+old_spec.loader.exec_module(OLD)
+OLD.REPO = REPO
+OLD.QUEUE = REPO / "message-queue"
+OLD.RETRIES = REPO / "message-queue" / "needs-agent" / "retries"
+OLD.TASKS = REPO / "tasks"
+OLD.CONVERSATIONS = REPO / "history" / "conversations"
+OLD.MEMORY = REPO / "memory"
+OLD.CHANGE_RANGE = None
+
+for name, module in (("pre-change", OLD), ("post-change", R)):
+    module.start_git_snapshot_cache()
+    module._HANDOVER_HISTORY_RECHECK_ACTIVE = True
+    try:
+        with module.git_revision_candidate(REV):
+            print(f"--- {name}")
+            print("  handover_action_entry_version():",
+                  module.handover_action_entry_version())
+            print("  handover_action_entry_version_for():",
+                  module.handover_action_entry_version_for(REL))
+            findings = [
+                f.message for f in module.check_handover_queue_projection()
+                if str(f.subject) == str(REL)
+            ]
+            print(f"  findings: {len(findings)}")
+            for message in findings:
+                print("   ", message[:150])
+    finally:
+        module.stop_git_snapshot_cache()
+```
+
+`tmp/diff_sweeps.py`:
+
+```python
+import json
+import pathlib
+
+before = json.loads(pathlib.Path("tmp/before.json").read_text())
+after = json.loads(pathlib.Path("tmp/after.json").read_text())
+print("creation events compared:", len(before), len(after))
+print("identical event keys:", set(before) == set(after))
+print("identical finding sets:", before == after)
+print("total findings before:", sum(len(v) for v in before.values()))
+print("total findings after :", sum(len(v) for v in after.values()))
+changed = [k for k in before if before[k] != after.get(k)]
+print("events whose findings changed:", len(changed))
+for key in changed:
+    print("  ", key)
 ```
