@@ -4,7 +4,7 @@
 **Filed:** 2026-07-30, by claude, from chat — the owner reported the repeated ask
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-project-unresolved-actions-in-provider-bodies.md`
 
 ## Goal
 

@@ -1,7 +1,7 @@
 # history/ — conversation record
 
 **Queue projection schema:** v1
-**Queue action-entry schema:** v2
+**Queue action-entry schema:** v3
 
 One folder per conversation/session that did work:
 `conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
@@ -20,10 +20,10 @@ and the handover links there. End-of-session ritual: root `AGENTS.md`;
 The repository-local schema field above activates checking without imposing an
 AgentFold date or retained legacy folder on forks. Existing unmarked records remain
 records; every newly added handover must declare `**Queue projection:** v1` and exactly
-project all live `message-queue/needs-human/` actions in filename-timing order. It never
-originates an ask. Resolved targets may later disappear because git history archives
-past delivery. Range-based checks evaluate the handover and queue together at the
-handover's creation commit, so later queue additions or resolutions never rewrite it.
+project the `message-queue/needs-human/` actions its entry version selects, in
+filename-timing order. It never originates an ask. Resolved targets may later disappear
+because git history archives past delivery. Range-based checks evaluate the handover and
+queue together at its creation commit, so later additions or resolutions never rewrite it.
 Once committed, v1 handover bytes are immutable; record corrections in a new handover.
 `Next steps` is `None.` or links assigned work to live `needs-agent/` items; it never
 originates a cross-session action.
@@ -31,17 +31,21 @@ originates a cross-session action.
 The action-entry marker independently versions strict projection syntax. Version 1
 freezes the structural entry contract that existing records passed when they were
 created. Version 2 keeps that structure and adds raw-HTML and action-origin checks.
+Version 3 keeps both and selects only **unresolved** human actions: one awaits its owner
+while `Status: waiting` carries no concrete `**Your answer:**` or `**Your review:**`
+value, whereas `folding`, `awaiting-artifact`, and any committed response are an agent's
+turn; an unreadable or unrecognised state stays projected. Every projection of pending
+human action — this section and the chat reply the root contract requires — is that set.
 Each post-activation entry is one top-level bullet whose first content is
 `[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
-` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both values
-from that queue snapshot, and project the complete queue in timing-then-path order.
-Agent entries contain only the link and may project just work assigned here. The
-creation/admission edge selects the highest active version; parallel history joined
-with an activation uses that version. A rejecting grammar expansion requires a new
-schema version instead of retroactively changing immutable records. Both schema markers
-are sticky while `history/` remains. Queue-projection adoption freezes every existing
-handover path, including an unmarked legacy record: delete it when retention permits,
-but never edit or rename it; corrections use a new conversation path.
+` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both from that
+snapshot, in timing-then-path order; agent entries hold only the link and may project
+just work assigned here. The creation/admission edge selects the highest active version;
+parallel history joined with an activation uses that version. A rejecting grammar
+expansion requires a new schema version instead of retroactively changing immutable
+records. Both schema markers are sticky while `history/` remains. Queue-projection adoption
+freezes every existing handover path, including an unmarked legacy record: delete it when
+retention permits, but never edit or rename it; corrections use a new conversation path.
 
 ## Other files in a conversation folder (optional)
 

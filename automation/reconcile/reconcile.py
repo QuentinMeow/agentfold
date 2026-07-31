@@ -224,6 +224,13 @@ HANDOVER_AGENT_LINK_RE = re.compile(
     r"(blocking|future-blocking|non-blocking)-[a-z0-9][a-z0-9-]*\.md"
     r"(?![A-Za-z0-9_.-])"
 )
+# Handover action-entry schema versions, oldest first. v3 adds state-aware
+# projection: only unresolved needs-human actions are projected (history/AGENTS.md).
+HANDOVER_ENTRY_VERSIONS = ("v1", "v2", "v3")
+UNRESOLVED_HUMAN_ENTRY_VERSION = "v3"
+# Statuses whose next actor is an agent, so the item no longer awaits its owner.
+QUEUE_AGENT_TURN_STATUSES = frozenset({"awaiting-artifact", "folding"})
+
 RETRY_GENERATOR = "reconcile.py/v1"
 RETRY_PROJECTION_START = "<!-- reconcile:projection:start -->"
 RETRY_PROJECTION_END = "<!-- reconcile:projection:end -->"
@@ -6195,7 +6202,16 @@ def handover_action_entry_version():
     version = text_fields(
         contract.decode("utf-8")
     ).get("Queue action-entry schema", "").strip()
-    return version if version in {"v1", "v2"} else None
+    return version if version in HANDOVER_ENTRY_VERSIONS else None
+
+
+def entry_version_at_least(version, floor):
+    """Compare two declared action-entry schema versions, unknown counting as older."""
+    if version not in HANDOVER_ENTRY_VERSIONS \
+            or floor not in HANDOVER_ENTRY_VERSIONS:
+        return False
+    return HANDOVER_ENTRY_VERSIONS.index(version) \
+        >= HANDOVER_ENTRY_VERSIONS.index(floor)
 
 
 def handover_action_entry_enabled():
@@ -6244,7 +6260,7 @@ def handover_action_entry_version_for(rel):
     current_version = handover_action_entry_version()
     activation_map = {
         version: handover_action_entry_activations(version)
-        for version in ("v1", "v2")
+        for version in HANDOVER_ENTRY_VERSIONS
     }
     if current_version is None and not any(activation_map.values()):
         return None, None
@@ -6257,7 +6273,10 @@ def handover_action_entry_version_for(rel):
             version = text_fields(decode_utf8_artifact(
                 contract, f"`history/AGENTS.md` at {created_at}"
             )).get("Queue action-entry schema", "").strip()
-            return version if version in {"v1", "v2"} else None, None
+            return (
+                version if version in HANDOVER_ENTRY_VERSIONS else None,
+                None,
+            )
         return current_version, None
     created_at, creation_error = handover_creation_commit(rel)
     if creation_error:
@@ -6269,7 +6288,7 @@ def handover_action_entry_version_for(rel):
     )
     candidate = _GIT_HEAD_OID or range_head
     governed_versions = []
-    for version in ("v1", "v2"):
+    for version in HANDOVER_ENTRY_VERSIONS:
         activations = activation_map[version]
         if not activations:
             activations, activation_error = projection_schema_activation_commits(
@@ -6612,8 +6631,8 @@ def handover_creation_state(handover, rel):
     return artifact.stdout, live_human, live_agent, None
 
 
-def handover_queue_fields_at_creation(rel, queue_path, required):
-    """Read projection fields from the handover's immutable creation snapshot."""
+def handover_queue_text_at_creation(rel, queue_path):
+    """Read one queue item from the handover's immutable creation snapshot."""
     if CHANGE_RANGE is None:
         created_at = staged_side_creation_commit(rel.as_posix())
         artifact = (
@@ -6628,9 +6647,47 @@ def handover_queue_fields_at_creation(rel, queue_path, required):
         artifact = git_artifact_bytes_at(created_at, queue_path)
     if artifact is None:
         return None, f"`{queue_path}` is absent from the creation snapshot"
-    text = decode_utf8_artifact(
+    return decode_utf8_artifact(
         artifact, f"`{queue_path}` in the handover creation snapshot"
-    )
+    ), None
+
+
+def human_action_unresolved(text):
+    """Return whether a needs-human item still owes its owner an action.
+
+    Only the three states the queue contract hands to an agent resolve an item:
+    ``folding`` (an agent has claimed the committed, immutable response),
+    ``awaiting-artifact`` (nothing is bound yet for the human to judge), and
+    ``waiting`` that already carries a concrete committed response. Everything
+    else — an absent, empty, or unrecognised ``**Status:**``, a blank response
+    placeholder, or text that could not be read at all — stays unresolved, so a
+    malformed item is repeated to its owner rather than silently withheld.
+    """
+    if text is None:
+        return True
+    status = text_fields(text).get("Status", "").strip().strip("`")
+    if status in QUEUE_AGENT_TURN_STATUSES:
+        return False
+    if status != "waiting":
+        return True
+    return first_concrete_response(human_response_fields(text)) is None
+
+
+def unresolved_human_queue_paths(rel, paths):
+    """Keep only the creation-snapshot human actions that still await the human."""
+    unresolved = set()
+    for path in sorted(paths):
+        text, read_error = handover_queue_text_at_creation(rel, path)
+        if read_error or human_action_unresolved(text):
+            unresolved.add(path)
+    return unresolved
+
+
+def handover_queue_fields_at_creation(rel, queue_path, required):
+    """Read projection fields from the handover's immutable creation snapshot."""
+    text, read_error = handover_queue_text_at_creation(rel, queue_path)
+    if read_error:
+        return None, read_error
     counts = field_counts(text)
     got = text_fields(text)
     projected = {}
@@ -7027,9 +7084,11 @@ def check_handover_queue_projection():
     if not history_service_present():
         return
     projection_activations = handover_projection_activations()
-    entry_v1_activations = handover_action_entry_activations("v1")
-    entry_v2_activations = handover_action_entry_activations("v2")
     entry_version_now = handover_action_entry_version()
+    activated_entry_versions = [
+        version for version in HANDOVER_ENTRY_VERSIONS
+        if handover_action_entry_activations(version)
+    ]
     if projection_activations \
             and not handover_projection_enabled():
         yield Finding(
@@ -7038,20 +7097,17 @@ def check_handover_queue_projection():
             "Queue projection schema v1 was removed after activation",
             "restore **Queue projection schema:** v1 while history remains",
         )
-    if entry_v2_activations and entry_version_now != "v2":
-        yield Finding(
-            "handover-queue-projection",
-            Path("history/AGENTS.md"),
-            "Queue action-entry schema v2 was removed or downgraded after activation",
-            "restore **Queue action-entry schema:** v2 while history remains",
-        )
-    elif entry_v1_activations and entry_version_now not in {"v1", "v2"}:
-        yield Finding(
-            "handover-queue-projection",
-            Path("history/AGENTS.md"),
-            "Queue action-entry schema v1 was removed after activation",
-            "restore **Queue action-entry schema:** v1 or upgrade to v2",
-        )
+    if activated_entry_versions:
+        highest_activated = activated_entry_versions[-1]
+        if not entry_version_at_least(entry_version_now, highest_activated):
+            yield Finding(
+                "handover-queue-projection",
+                Path("history/AGENTS.md"),
+                f"Queue action-entry schema {highest_activated} was removed "
+                "or downgraded after activation",
+                f"restore **Queue action-entry schema:** {highest_activated} "
+                "or upgrade it further while history remains",
+            )
     if not handover_projection_enabled() and not projection_activations:
         return
     reported_mutations = set()
@@ -7148,6 +7204,13 @@ def check_handover_queue_projection():
                     + strict_error,
                     "preserve the schema activation and handover creation commits",
                 )
+            if entry_version_at_least(
+                entry_version, UNRESOLVED_HUMAN_ENTRY_VERSION
+            ):
+                # Only handovers governed by the state-aware version project the
+                # narrowed set; every older record keeps the liveness rule it was
+                # written and admitted under (history/AGENTS.md immutability).
+                live_human = unresolved_human_queue_paths(rel, live_human)
             prior_incarnation, incarnation_error = (
                 prior_governed_v1_handover_incarnation(rel)
             )

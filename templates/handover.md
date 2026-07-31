@@ -23,8 +23,9 @@ no shorthand invented mid-session.>
 
 ## Needs your attention
 
-<This is a projection of every open `message-queue/needs-human/` item, not a place to
-originate an ask. Use one top-level bullet per live item, ordered by `blocking-`,
+<This is a projection of the `message-queue/needs-human/` items that still await the
+human — `history/AGENTS.md` defines which states those are — and never a place to
+originate an ask. Use one top-level bullet per such item, ordered by `blocking-`,
 `future-blocking-`, `non-blocking-`, then queue path. The bullet's first content is
 `[<the queue item's exact Action text>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)`.
 That is the bullet's only link. Append exactly
@@ -32,7 +33,8 @@ That is the bullet's only link. Append exactly
 copying both values from the same queue snapshot with only whitespace reflow allowed.
 No other prose can appear. The relative link must resolve to the exact live queue
 file. Repeat this section verbatim in the final chat reply. Write `None.` when no
-human items are open.>
+human item is awaiting the human — an item an agent has claimed or already has a
+committed answer for is resolved, so it belongs here in neither file nor chat.>
 
 ## Dead ends
 

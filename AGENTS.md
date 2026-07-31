@@ -57,10 +57,12 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
 3. Before assigning any human action or durable cross-session agent action, create its
    canonical queue item from `templates/queue/`. PRs, issues, chat, tasks, and handovers
    only summarize and link that item; an answer heard in chat is transcribed before use.
-4. End every reply to the human with one entry per open `needs-human/` item you filed
-   or noticed — a clickable link to the item plus enough context to act from the reply
-   alone, never a bare name (format: the "Needs your attention" section of
-   `templates/handover.md`). Chat is the human's only push channel.
+4. End every reply to the human with one entry per `needs-human/` item still awaiting
+   them — a clickable link plus enough context to act from the reply alone, never a bare
+   name. The set and the format are the handover's "Needs your attention" section
+   (`history/AGENTS.md`, `templates/handover.md`): an item an agent has claimed, or that
+   already carries a committed answer, is resolved and is not re-asked. Chat is the
+   human's only push channel.
 
 ## Task lifecycle
 
