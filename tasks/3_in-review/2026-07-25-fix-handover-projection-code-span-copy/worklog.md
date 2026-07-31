@@ -31,3 +31,22 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   gate requires `needs-human` paths. Both admission jobs failed within seconds of the
   `opened` event on the already-filed `merge_commit_sha` race, and all four checks passed
   after an `edited` event recomputed the candidate.
+
+## 2026-07-31 — clear-the-stuck-queue-items (claude)
+
+- The task had been pinned at `1_in-progress` since 2026-07-26, not by unfinished work but
+  by its `Queue actions` link to a request whose own repair had already merged. The
+  deletion gate compared the declared evidence across the deletion edge only, and evidence
+  that merged earlier is byte-identical on both sides.
+- Task 2026-07-30-admit-evidence-that-landed-earlier widened that comparison. The request
+  was deleted and this record's backlink dropped in one commit, with no evidence file in
+  the edit and the whole reconciler at 0 findings.
+- Audited this task before advancing it rather than assuming completion. `6d4e337` is an
+  ancestor of `main` and carries the trailer naming this task; all three `Done when` clauses
+  of the deleted request hold on `main` — the repaired comparison, six regression tests
+  that pass today, and the blocked handover committed at
+  `history/conversations/2026-07-25-1140PDT-fold-edge-graph-decisions-and-ship-stage-0/` in
+  `b0d0971`, also an ancestor of `main`. `design.md` carries the complete `## Core fit`
+  receipt and every `plan.md` step is checked off.
+- Advanced to `3_in-review` and then to `4_done`, one lifecycle edge per commit. The
+  transcripts are in task 2026-07-30-clear-the-stuck-queue-items.
