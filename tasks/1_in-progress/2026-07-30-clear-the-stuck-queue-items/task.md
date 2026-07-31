@@ -29,9 +29,9 @@ request 14.
 `Blocks at: transition:merge task:<id>` boundaries whose bound Git ranges are already
 ancestors of `main`:
 
-- `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`
-- `message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md`
-- `message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md`
+- message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md
+- message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md
+- message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md
 
 Each is `waiting` with `Review outcome: pending` and a blank response slot, and each names a
 task now sitting in `tasks/3_in-review/` whose code is on `main`. Git evidence cannot

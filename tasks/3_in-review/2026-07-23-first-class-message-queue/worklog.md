@@ -865,3 +865,25 @@
 - PRs #8 and #10 subsequently merged into PR #7's already-merged head branch as
   `d515d28` and `7fa18ca`; their hardened replacements reached main through PRs #11
   and #12.
+
+## 2026-07-31 — clear-the-stuck-queue-items (claude)
+
+- Measured the merge boundary instead of re-deriving it from records. The reviewed head
+  `d7eefcee521ad319bbf428c796c96740833f2a17` is an ancestor of `main`, and its merge commit
+  `2372e48` is too. Replaying the crossing with `--check --at-transition merge` reports this
+  task's review as an unresolved future-blocking action, which is the repository proving
+  its own gate was crossed rather than an inference from provider records.
+- Established that no later answer can close the item. A merge-bound approval is fresh only
+  when the active base equals the reviewed base at a real merge; with the merge already in
+  `main`, there is no candidate left for it to authorize. Measured on a disposable clone: a
+  synthetic response plus a status-only folding claim still leaves the boundary unresolved,
+  and supplying the exact reviewed range fails because the captured candidate is not that
+  head.
+- Established that the item may not simply be deleted either. Staging its deletion is
+  refused with "human action was not committed as folding with a concrete response", and it
+  additionally turns this record's acceptance-criteria link back into an unqueued human
+  action — the repository refusing to let the ask disappear.
+- Left the review live, unanswered, and byte-identical. The disposition is a judgment that
+  was never given, so it was filed as one canonical item under
+  `message-queue/needs-human/decisions/`, now linked from `Queue actions`, rather than
+  decided here. This task stays in `3_in-review` until that item is folded.

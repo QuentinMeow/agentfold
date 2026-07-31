@@ -5,7 +5,7 @@
 **Filed:** 2026-07-24, by codex, from linked-worktree corruption observed during the layered workspace research session
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md`
+**Queue actions:** `message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md`; `message-queue/needs-human/decisions/future-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
 
 ## Goal
 

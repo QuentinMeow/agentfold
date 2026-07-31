@@ -182,3 +182,21 @@
 - The existing review remains bound to immutable candidate
   `25d0325...fd2374d`. Its human review field remains unanswered, so the task stays
   in review even though the provider boundary was crossed.
+
+## 2026-07-31 — clear-the-stuck-queue-items (claude)
+
+- Confirmed the crossing from Git rather than from provider records. The reviewed head
+  `fd2374d99796300ed4325c2961e696092c17875e` is an ancestor of `main`, as is its merge
+  commit `d87b755`. Replaying with `--check --at-transition merge` reports this task's
+  review as an unresolved future-blocking action.
+- Measured what an answer would now buy, on a disposable clone: a synthetic approval
+  committed as a response and then claimed with a status-only folding edge still leaves the
+  boundary unresolved, because a merge-bound approval needs an active base to head range at
+  a real merge. Supplying the exact reviewed range instead fails outright, since the
+  captured candidate is not that head. The merge is in the past and cannot be re-gated.
+- Confirmed the item cannot be deleted either: staging its deletion is refused for having no
+  committed folding claim with a concrete response.
+- Left the review live, unanswered, and byte-identical. One canonical item under
+  `message-queue/needs-human/decisions/`, now linked from `Queue actions`, carries the
+  disposition choice for this review and the two others in the same state. This task stays
+  in `3_in-review` until that item is folded.

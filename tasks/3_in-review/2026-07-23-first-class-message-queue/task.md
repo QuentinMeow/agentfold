@@ -5,7 +5,7 @@
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`; `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`; `message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md`; `message-queue/needs-human/decisions/future-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
 
 ## Goal
 
