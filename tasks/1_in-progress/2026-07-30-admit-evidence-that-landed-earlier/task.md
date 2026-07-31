@@ -12,7 +12,8 @@
 in an item's `Resolution evidence` to differ between the deletion commit and its immediate
 parent. The window is exactly one commit wide, so work that merged earlier is byte-identical
 on both sides and the item can never be deleted honestly.
-`message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md`
+The request
+message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md
 has been in that state since 2026-07-26: its repair merged in `6d4e337`, before the deletion
 could be attempted, and the task that would clear it is pinned by it.
 
