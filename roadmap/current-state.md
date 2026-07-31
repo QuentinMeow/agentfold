@@ -70,6 +70,15 @@ What is true today, mapped to the desired-state lines.
   main; their still-unanswered human review items are now bound to immutable ranges
   without treating those provider merges as review answers. PRs #8 and #10 landed on
   PR #7's already-merged branch and were superseded by the hardened main recoveries.
+- **Stuck queue state (2026-07-31)**: the agent request whose repair merged before its
+  deletion could be attempted is resolved, and its task
+  (`2026-07-25-fix-handover-projection-code-span-copy`) is done. The three merge reviews
+  whose ranges are already ancestors of main are measured, not forced: replaying
+  `--at-transition merge` reports all three unresolved, a fresh approval cannot satisfy a
+  merge that already happened, and deletion is refused. They stay live and unanswered, with
+  one canonical item under `message-queue/needs-human/decisions/` carrying their
+  disposition; their three tasks stay in `tasks/3_in-review/` with the measurement recorded
+  in each worklog.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
 - **Design review (2026-07-22)**: a full grill of the harness — report in
