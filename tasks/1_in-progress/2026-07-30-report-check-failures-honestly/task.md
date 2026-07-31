@@ -1,10 +1,10 @@
 # Make the reconciler report its own failures honestly
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (worktree agent-a08cc597c4b8c87c6)
 **Filed:** 2026-07-30, by claude, from a reconciler audit that reproduced four defects
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-report-check-failures-honestly.md`
+**Queue actions:** none
 
 ## Goal
 
