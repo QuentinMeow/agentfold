@@ -107,14 +107,9 @@ queue-action leaves per `message-queue/AGENTS.md`'s routing table), not the bare
 
 ## Core fit
 
-**Agent substitution:** pass — the fix is pure Python stdlib logic inside a repository-
-tracked check; no agent-specific behavior.
-**Provider substitution:** not-applicable — no provider is involved.
-**Repository substitution:** pass — the known-prefix test reads the adopting
-repository's own tracked top level; nothing is hardcoded to AgentFold's specific
-folder names.
-**User-global writes:** none.
-**Why AgentFold core:** `check_links` is a tracked repository invariant enforced by the
-pre-commit hook for every adopter; the fix belongs in the same file for the same
-reason the original check does.
-**Thin adapter:** none; policy-free logic change to an existing core check.
+**Agent substitution:** pass — pure Python stdlib logic inside a tracked check; no agent-specific behavior anywhere in the change.
+**Provider substitution:** not-applicable — no provider is involved in a link-existence check.
+**Repository substitution:** pass — the known-prefix test reads the adopting repository's own tracked top level at run time; nothing is hardcoded to AgentFold's specific folder names.
+**User-global writes:** none
+**Why AgentFold core:** `check_links` is a tracked repository invariant enforced by the pre-commit hook for every adopter of this harness; a false positive in it blocks every adopter's commits the same way, so the fix belongs in the same core file as the original check.
+**Thin adapter:** none

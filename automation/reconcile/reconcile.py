@@ -216,8 +216,26 @@ RETRY_PROJECTION_END = "<!-- reconcile:projection:end -->"
 
 # Link check: backticked or markdown-linked repo paths with >= 2 segments.
 BACKTICK_RE = re.compile(r"`([^`\s]+/[^`\s]+)`")
-LINK_SKIP_PREFIXES = ("http", "tmp/", "private/", ".")
+# Anchored: an unanchored "http" or "." also matched `httpd/...` or any dotfile
+# path, so a genuinely broken link starting either way silently passed. A leading
+# "./" is not skipped: pathlib normalizes it away, so `./handbook/x.md` still
+# resolves and checks exactly like `handbook/x.md`. A leading "../" stays skipped
+# on purpose: read from the repository root (what the checks below actually do)
+# it names a path outside the repository, and Git itself refuses that pathspec —
+# `git ls-files -- ../x` fails with "is outside repository", which would abort
+# the whole reconciler rather than report one broken link. Resolving it correctly
+# needs the citing file's own directory, which no case here currently exercises.
+LINK_SKIP_PREFIXES = ("http://", "https://", "tmp/", "private/", "../")
 LINK_SKIP_DIRS = {"templates", "history", "tmp"}  # + memory/decisions (records)
+# A bare slash also shows up in ordinary prose (`24/7`, `and/or`, `s/foo/bar/`),
+# which otherwise matches the same shape as a repository path and reports every
+# such sentence as broken. A candidate only counts as a path claim when it either
+# names a known file type or starts under an entry that already exists in the
+# repository — real paths overwhelmingly satisfy one of the two.
+LINK_PATH_EXTENSIONS = {
+    ".md", ".py", ".sh", ".txt", ".json", ".yml", ".yaml", ".toml", ".cfg",
+    ".ini", ".js", ".ts", ".html", ".css",
+}
 
 
 class Finding:
@@ -7286,7 +7304,8 @@ def anchor_slugs(headings):
     """Return GitHub heading anchors, numbering repeats in document order."""
     taken, slugs = {}, []
     for heading in headings:
-        base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        label = MARKDOWN_LINK_RE.sub(lambda m: m.group("label"), heading)
+        base = re.sub(r"[^\w\- ]", "", label.lower()).replace(" ", "-")
         slug = base
         while slug in taken:
             taken[base] += 1
@@ -7358,6 +7377,22 @@ def check_links():
                     "resolves differently on each machine",
                 )
                 continue
+            if cand.startswith(("message-queue/needs-human/", "message-queue/needs-agent/")):
+                # A queue action is resolved by deleting its file
+                # (`message-queue/AGENTS.md`), so any citation of one — from a
+                # design doc's evidence trail, not only from the queue's own
+                # predeclared fields above — names history, not a live link.
+                continue
+            if PurePosixPath(cand).suffix not in LINK_PATH_EXTENSIONS:
+                top = cand.split("/", 1)[0]
+                # Tracked content only, matching `repo_artifact_bytes` — otherwise
+                # VCS-internal paths such as `.git/objects` would count as a known
+                # prefix just because that directory happens to exist on disk.
+                known_top = bool(git_index_entries(top)) if (REPO / ".git").exists() \
+                    else (REPO / top).exists()
+                if not known_top:
+                    continue  # ordinary prose (`24/7`, `and/or`): no known
+                              # extension and no real top-level entry to root it
             try:
                 root_target = REPO / cand
                 local_target = (md.parent / cand).resolve()

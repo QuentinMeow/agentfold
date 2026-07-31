@@ -233,8 +233,15 @@ def _semantic_text(text, preserve_visible_html=False):
 
 
 def semantic_text(text):
-    """Blank constructs that cannot supply structural Markdown evidence."""
-    return _semantic_text(text)
+    """Blank constructs that cannot supply structural Markdown evidence.
+
+    Four-space/tab indented code lines are blanked too, via `strip_indented_code`,
+    for the same reason fences and raw HTML are: an example path or field inside one
+    must not satisfy a structural check. This runs after fence/HTML blanking, so a
+    fenced block nested in a list item — whose content lines are already blank by
+    then — is unaffected; only genuine indented-code lines change.
+    """
+    return strip_indented_code(_semantic_text(text))
 
 
 def _line_endings_only(value):
