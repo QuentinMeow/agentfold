@@ -1,10 +1,10 @@
 # Let a queue item be resolved by the work that already landed for its task
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-30, by claude, from chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-admit-evidence-that-landed-earlier.md`
+**Queue actions:** none
 
 ## Goal
 
