@@ -17,13 +17,10 @@ anything.
    human action and every agent action that must survive this session using
    `templates/queue/` and `message-queue/AGENTS.md`; delete resolved items in the
    resolving commit.
-3. **Delivery timing**: name each live item `blocking-<slug>.md` when named work cannot
-   proceed now, `future-blocking-<slug>.md` when work may continue only until a stated
-   date/event/transition, or `non-blocking-<slug>.md` when it never stops work. A human
-   item briefly distinguishes the choices, gives a concrete example, states the safe
-   result if unattended (remaining stopped is valid), and links the full context.
-   Describe arbitrary event/transition/operation evidence as agent-attested unless a
-   controlled adapter supplies hard assurance.
+3. **Delivery timing**: give each live item the filename prefix its real timing earns —
+   `message-queue/AGENTS.md` owns the prefixes and their meanings. A human item briefly
+   distinguishes the choices, gives a concrete example, states the safe result if
+   unattended (remaining stopped is valid), and links the full context.
 4. **Memory**: a decision folded → ADR in `memory/decisions/`; a failure understood →
    lesson in `memory/lessons/<area>/` (merge into an existing lesson first —
    `memory/AGENTS.md`); then `reconcile.py --fix-index`.

@@ -4,8 +4,10 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
 
 ## Ground rules
 
-- **One focused change per PR.** Branch `task/<task-id>` for tracked work, or
-  `<type>/<slug>` (`feature|fix|docs|chore`) for small untracked fixes.
+- **One focused change per PR.** Branch `task/<task-id>` for tracked work; live
+  coordination writes go straight to `main` with a `harness:` prefix. Those are the only
+  two lanes `handbook/git-workflow.md` defines — a separate branch lane for small
+  untracked fixes is not one of them until the backlog task that scopes it lands.
 - **Commit messages**: imperative subject ≤ 72 chars saying *what*; body saying *why*;
   include the task id when one exists. Full conventions: `handbook/git-workflow.md`.
 - **Schemas live in `templates/`** — a PR that changes a file format changes the
@@ -18,7 +20,7 @@ AgentFold dogfoods itself: contributions follow the same workflow the repo teach
   (`handbook/principles/provenance-over-position.md`).
 - **Core changes prove they belong here.** Core diffs use a task that completes
   `templates/task/design.md`; hooks and CI enforce that receipt. Independent core-fit
-  review is manual by default until guard modes are configurable. After a reviewer is
+  review is always invoked by hand — nothing schedules it. After a reviewer is
   explicitly invoked, `automation/check_core_scope.py --require-review` validates its
   revision-bound receipt; the command does not spawn a reviewer. The small untracked-fix
   branch convention applies outside core only; personal setup and

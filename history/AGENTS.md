@@ -8,7 +8,7 @@ One folder per conversation/session that did work:
 `conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
 plus timezone abbreviation** (e.g. `2026-07-22-0014PDT-fix-cli-crash`; use `UTC` if
 your zone has no letter abbreviation). Every folder **must** contain a `handover.md`
-— the reconciler files a repair item for any that doesn't.
+— missing one is a blocking reconciler finding; only `--file-retries` would queue it.
 
 ## handover.md (schema: `templates/handover.md`)
 

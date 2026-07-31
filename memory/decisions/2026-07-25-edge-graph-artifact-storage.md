@@ -5,6 +5,7 @@
 **Decided-by:** human (explicit queue answer recorded in commit 5d315f9, claimed in 1a54c4c)
 **Description:** Amends N6 of the edge-graph architecture decision: no generated graph projection is committed, gated, or ignored, so the six Stage 3 mechanisms are not built for a graph measured at 17 of 172 in-scope files (9.9%, about one tenth), and committing is recorded as not implemented rather than rejected, returning when declared edges exceed 100 and span more than half the in-scope files or when rendered in-edges become part of a real review workflow
 **Review-by:** 2027-03-22
+**Amends:** `memory/decisions/2026-07-25-markdown-edge-graph-architecture.md` — N6, committing the generated graph file; N1-N4 and N7-N8 stand
 
 ## Context
 

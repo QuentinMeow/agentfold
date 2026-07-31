@@ -8,5 +8,6 @@ than it is written.
 - Every document here is self-contained: restate a concept in one sentence, then link.
   Never use coded cross-references ("see §6b") — use descriptive links.
 - Operating docs (`collaboration-modes.md`, `git-workflow.md`, `decision-guide.md`,
-  `naming-conventions.md`, `adoption-guide.md`) may be improved freely, but behavior
-  rules stated in the root `AGENTS.md` win over anything written here.
+  `naming-conventions.md`, `adoption-guide.md`) may be improved freely. Contract
+  precedence is stated once, in the root `AGENTS.md` boot sequence; this folder does not
+  restate or invert it.

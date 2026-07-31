@@ -1,9 +1,10 @@
 # reviews/ — your judgment
 
 Named judgments over a diff, artifact, claim, or proposed boundary. Reviews are not
-implicitly optional: the filename declares whether review blocks now, blocks at a
-future boundary, or never blocks. Each item explains possible dispositions, shows a
-concrete difference, links the full source, and states what happens without review.
+implicitly optional: the filename declares the review's delivery timing, and
+`message-queue/AGENTS.md` owns what each prefix means. Each item explains possible
+dispositions, shows a concrete difference, links the full source, and states what
+happens without review.
 The target and immutable revision are separate from explanatory context. Use
 `Status: awaiting-artifact` plus pending target/revision until the artifact exists.
 A local file or HTTPS artifact binds to its SHA-256; a commit or diff repeats its full

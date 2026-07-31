@@ -5,6 +5,7 @@
 **Decided-by:** human (2026-07-25 review of `docs/designs/markdown-edge-graph-decisions.md` at sha256:f66ef620df17a07499d9389df1626f3ea01b00cf7a9cc9321e91d006976c27af, approved with two named modifications; response recorded in commit 2abead8)
 **Description:** The edge-graph architecture is approved: mine git co-change before building the schema, join it three ways, keep a decision ledger, reinstate graph-only references, commit the generated artifact, offer three per-folder freshness modes defaulting to a 7-day window, cap edges per file with a justified exception, and add discharged-by-filing as a third gate state
 **Review-by:** 2027-02-22
+**Amended-by:** `memory/decisions/2026-07-25-edge-graph-artifact-storage.md` (N6, committing the generated graph file); `memory/decisions/2026-07-25-edge-graph-freshness-modes-after-measurement.md` (the `each-run` third of N5)
 
 ## Context
 
