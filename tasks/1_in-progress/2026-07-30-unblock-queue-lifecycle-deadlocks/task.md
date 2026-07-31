@@ -1,10 +1,10 @@
 # Give claimed agent queue items and generated retries a legal way out
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-07-30, worktree agent-a18777fee83777726)
 **Filed:** 2026-07-30, by claude, from an audit of the queue lifecycle checks in `automation/reconcile/reconcile.py`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-unblock-queue-lifecycle-deadlocks.md`
+**Queue actions:** none
 
 ## Goal
 
