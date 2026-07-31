@@ -30,19 +30,19 @@ deterministic staleness from Git dates, stays unclaimed in backlog.
 
 ## Acceptance criteria
 
-- [ ] An invalid-UTF-8 Markdown file, staged or untracked, exits 2 with one line naming
+- [x] An invalid-UTF-8 Markdown file, staged or untracked, exits 2 with one line naming
       the file, no traceback, and every finding found before it still printed
-- [ ] A `tasks/4_done/` id with an impossible calendar date produces no exception and
+- [x] A `tasks/4_done/` id with an impossible calendar date produces no exception and
       does not suppress the freshness comparison against valid ids
-- [ ] A staged `**Collaboration mode:**` violation is still reported when the worktree
+- [x] A staged `**Collaboration mode:**` violation is still reported when the worktree
       copy of `AGENTS.md` is deleted
-- [ ] The same worktree-gate pattern is audited at `check_stale_queue`,
+- [x] The same worktree-gate pattern is audited at `check_stale_queue`,
       `check_roadmap_fresh`, and `check_memory_index`, and every site that reproduces is
       fixed and covered by a test
-- [ ] An expired `Review-by:` and an aged queue item report visibly but exit 0, while a
+- [x] An expired `Review-by:` and an aged queue item report visibly but exit 0, while a
       missing required field still exits 1 exactly as today
-- [ ] Every emitted check id is a `CHECKS` key, so retry garbage collection can reach it
-- [ ] A regression test exists for each defect and the full suite passes
+- [x] Every emitted check id is a `CHECKS` key, so retry garbage collection can reach it
+- [x] A regression test exists for each defect and the full suite passes
 
 ## Links
 
