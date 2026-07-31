@@ -1,8 +1,8 @@
-# Single-source the queue delivery-prefix rule out of the five queue templates
+# Single-source the queue delivery-prefix rule out of every live contract that restates it
 
 **Claimed-by:** unclaimed
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
-**Parent:** none
+**Parent:** 2026-07-31-collapse-restated-contract-rules
 **Repository scope:** core
 **Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-single-source-queue-prefix-rule.md`
 
@@ -30,12 +30,33 @@ was left behind and still reads "- future-blocking-: work may continue, but must
 named date, event, or transition." Two lines of the same file disagree about the same rule,
 in five files at once, right now.
 
-The correct repair is **deletion, not declaration**. Replacing the restated comment with a
-link to the routing section of the owning contract single-sources the rule, removes all
-four sibling copies along with the original, and brings the reference inside `link-check`'s
-reach — where the heading-anchor validation added by the Stage 0 mining task then keeps the
-heading honest. Recording the coupling as a declared edge would instead preserve the
-duplication and add a permanent maintenance duty on top of it.
+## Scope widened 2026-07-31
+
+The five templates were counted, not surveyed. A repository-wide pass found the same rule
+restated in **thirteen live contracts**, not five: the five templates,
+`templates/README.md`, `handbook/human-action-guide.md`, `handbook/collaboration-modes.md`,
+`handbook/decision-guide.md`, the four `skills/*/SKILL.md` files, and
+`message-queue/needs-human/reviews/README.md`. Every one of those is in scope now.
+
+Four further sites were surveyed and deliberately left alone, because deleting them would
+cost meaning rather than remove duplication: `handbook/naming-conventions.md` owns the
+queue-item *filename grammar* and lists the prefixes without defining them; root
+`AGENTS.md` carries a one-clause guardrail summary plus a link, which is the pattern
+`handbook/AGENTS.md` prescribes; `README.md` and `roadmap/current-state.md` use the
+prefixes as vocabulary in a mode table and a state description; and
+`memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md` states them as the
+record of what was decided, which the immutability guardrail forbids editing.
+
+One correction to the original acceptance criteria below: **adding a link inside
+`templates/` does not bring it inside `link-check`'s reach.** `LINK_SKIP_DIRS` in
+`automation/reconcile/reconcile.py` is `{"templates", "history"}`, so the whole folder is
+skipped before any candidate is examined. The link is worth writing for the reader, but it
+is not a checked claim, and this task must not assert that it is.
+
+The correct repair is **deletion, not declaration**. Replacing each restatement with a
+link to the routing section of the owning contract single-sources the rule and removes the
+sibling copies along with the original. Recording the coupling as a declared edge would
+instead preserve the duplication and add a permanent maintenance duty on top of it.
 
 The owning text is already complete. `message-queue/AGENTS.md` lines 16 through 20 give
 the three prefix meanings under `## Routing: three independent axes`, and lines 22 through
@@ -51,18 +72,27 @@ repository is identical before and after.
 
 ## Acceptance criteria
 
-- [ ] The delivery-prefix definitions appear in exactly one tracked file. Verified by
-      `grep -rn "future-blocking-: " templates/` returning no matches, and by
-      `grep -rln "future-blocking" message-queue/AGENTS.md` returning that one path
-- [ ] Each of the five templates names `message-queue/AGENTS.md` at least once, so the
-      reference is inside `link-check`'s reach rather than invisible to it
+- [ ] The delivery-prefix definitions appear in exactly one live contract. Verified by
+      `grep -rn "future-blocking-: " templates/` returning no matches, and by every
+      remaining definition of the three prefixes sitting in `message-queue/AGENTS.md`
+- [ ] Each of the thirteen restating files names `message-queue/AGENTS.md` at the point
+      where it used to restate the rule, so a reader lands on the owner in one hop.
+      `templates/` is exempt from `link-check`, so those five links are verified by
+      reading, not by the reconciler
 - [ ] No rule is lost, only relocated: the three prefix meanings, the "filename is
       canonical" rule, the "no separate `**Blocking:**` field" rule, and the kebab-slug
       filename grammar all remain readable from `message-queue/AGENTS.md` and
       `handbook/naming-conventions.md`, and `verification.md` records the before-and-after
       text of each rule so a reader can confirm none was dropped
-- [ ] `message-queue/AGENTS.md` stays within its 60-line `agents-budget` ceiling and
-      `handbook/naming-conventions.md` gains no rule it did not already state
+- [ ] `message-queue/AGENTS.md` stays within its 60-line `agents-budget` ceiling — it sits
+      at exactly 60 today, so the canonical statement must be the text already there and
+      not one added line — and `handbook/naming-conventions.md` gains no rule it did not
+      already state
+- [ ] Nothing carried only by a restatement is dropped. The gardener-specific "normally
+      the deletion boundary", the panel-specific "normally do not merge", the
+      handover-specific "remaining stopped is valid", and the template-local rule that
+      each file ships all three timing blocks and keeps one all survive in their own
+      files, and `verification.md` shows each before and after
 - [ ] `python3 automation/reconcile/reconcile.py --check` exits 0, and it reports the same
       findings on this repository after the change as before it, with both runs recorded in
       `verification.md`
