@@ -48,6 +48,7 @@ boundary gates.
 - The design that measured the choice space, landed separately on main:
   docs/designs/queue-resolution-order-independence.md
 - The governing decision the rule still serves: `memory/decisions/2026-07-23-queue-resolution-is-git-evidence.md`
-- The stuck item: `message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md`
+- The stuck item, named unquoted because resolving it deletes it:
+  message-queue/needs-agent/requests/blocking-repair-handover-projection-code-span-copy.md
 - Stack base task `2026-07-30-cache-reconciler-git-object-reads`, whose `cat-file --batch`
   reader this task reuses inside `task_ids_linking_queue_at`
