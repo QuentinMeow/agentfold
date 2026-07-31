@@ -1,10 +1,10 @@
 # Let a human answer a queue item in one edit, and make every queue template copy-valid
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-31, by claude, from chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-let-a-human-answer-in-one-edit.md`
+**Queue actions:** none
 
 ## Goal
 
