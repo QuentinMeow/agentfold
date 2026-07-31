@@ -43,6 +43,10 @@ tests: 11/11 files passed
 test elapsed: 78.89s
 ```
 
+Trimmed: the runner prints its inert-probe and lane preamble above these lines. Re-run
+from the committed tree, the same 11/11 pass in 83.66s — suite timing on this host moves
+by several seconds run to run and is not a claim this change makes.
+
 ## Per-path `ls-tree` spawns: 102 become 0
 
 spawncount.py, one cold process each, main's `reconcile.py` then this branch's.
@@ -187,39 +191,55 @@ $ cd tmp/shallow && git rev-parse --is-shallow-repository
 true
 ```
 
-Main's `reconcile.py`, then this branch's copied over it, then the same pair with a
-staged queue deletion so `queue-resolution` actually runs its deletion path:
+The clone's HEAD carries main's `reconcile.py`. This is what it reports there — three
+pre-existing findings for review revisions a depth-1 clone cannot resolve:
 
 ```
-$ python3 automation/reconcile/reconcile.py --check          # main's version
-[queue-schema] ...future-blocking-review-first-class-message-queue.md: **Review revision:** is not a reviewable Git artifact: 00690e89b53573aff4ca90929cc96852d00f7293 is unavailable; d7eefcee521ad319bbf428c796c96740833f2a17 is unavailable
-[queue-schema] ...future-blocking-review-layered-development-workspace.md: **Review revision:** is not a reviewable Git artifact: d87b755e6259101bf76b0a2783b35dfb3f163fb0 is unavailable; 8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b is unavailable
-[queue-schema] ...future-blocking-review-test-runner-git-environment-isolation.md: **Review revision:** is not a reviewable Git artifact: 25d03257b5ee61753fa9bada609722c4e84a8064 is unavailable; fd2374d99796300ed4325c2961e696092c17875e is unavailable
+$ python3 automation/reconcile/reconcile.py --check ; echo "EXIT_MAIN=$?"
+[queue-schema] message-queue/needs-human/reviews/future-blocking-review-first-class-message-queue.md: **Review revision:** is not a reviewable Git artifact: 00690e89b53573aff4ca90929cc96852d00f7293 is unavailable; d7eefcee521ad319bbf428c796c96740833f2a17 is unavailable
+    fix: use available literal commit ids with a shared history
+[queue-schema] message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md: **Review revision:** is not a reviewable Git artifact: d87b755e6259101bf76b0a2783b35dfb3f163fb0 is unavailable; 8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b is unavailable
+    fix: use available literal commit ids with a shared history
+[queue-schema] message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md: **Review revision:** is not a reviewable Git artifact: 25d03257b5ee61753fa9bada609722c4e84a8064 is unavailable; fd2374d99796300ed4325c2961e696092c17875e is unavailable
+    fix: use available literal commit ids with a shared history
 reconcile: 3 finding(s)
 EXIT_MAIN=1
+```
 
-$ cp <this branch>/automation/reconcile/reconcile.py automation/reconcile/reconcile.py
-$ python3 automation/reconcile/reconcile.py --check
-... the same three findings ...
+This branch's `reconcile.py` copied over it prints the same three findings, in the same
+order, with the same fixes — only the trailing summary is repeated here:
+
+```
+$ cp <this worktree>/automation/reconcile/reconcile.py automation/reconcile/reconcile.py
+$ python3 automation/reconcile/reconcile.py --check ; echo "EXIT_CACHED=$?"
+[... the identical three findings ...]
 reconcile: 3 finding(s)
 EXIT_CACHED=1
+```
 
+Staging a queue deletion makes `queue-resolution` actually run its deletion path, which
+is the code the discarded branch changed. This branch's version, then main's on the same
+staged state:
+
+```
 $ git rm -q message-queue/needs-agent/requests/non-blocking-build-the-stage-2-edge-schema.md
-$ python3 automation/reconcile/reconcile.py --check          # this branch's version
-... the same three, plus ...
+$ python3 automation/reconcile/reconcile.py --check ; echo "EXIT_CACHED_WITH_DELETION=$?"
+[... the identical three queue-schema findings ...]
 [queue-resolution] message-queue/needs-agent/requests/non-blocking-build-the-stage-2-edge-schema.md: deleted unresolved queue item: agent action was not committed as in-repair before deletion
     fix: commit the required claim/response evidence before deleting it
 reconcile: 4 finding(s)
 EXIT_CACHED_WITH_DELETION=1
 
 $ git checkout HEAD -- automation/reconcile/reconcile.py
-$ python3 automation/reconcile/reconcile.py --check          # main's version
-... byte-identical four findings ...
+$ python3 automation/reconcile/reconcile.py --check ; echo "EXIT_MAIN_WITH_DELETION=$?"
+[... the identical four findings ...]
 reconcile: 4 finding(s)
 EXIT_MAIN_WITH_DELETION=1
 ```
 
 Four scenarios, identical findings, exit 1 every time. No `exit 2`, no silenced checks.
+Lines in square brackets are elisions of output already printed verbatim above; every
+other line is exactly what the command printed.
 
 The discarded branch's version, installed in the same clone, raises out of the same
 repository state — this is the mechanism that becomes `exit 2` with zero findings once a
