@@ -1,10 +1,10 @@
 # Finish the replacement-ref boundary the reconciler is halfway through building
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-31, by claude, from a branch-cleanup audit of the unmerged task/2026-07-26-resolve-queue-items-whose-evidence-already-merged branch
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-finish-the-replacement-ref-boundary.md`
+**Queue actions:** none
 
 ## Goal
 
