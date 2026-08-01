@@ -36,3 +36,47 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `test_main_caches_repeated_git_snapshot_reads` matched the HEAD-tree spawn by its bare
   prefix and now matches the hardened one; it still asserts exactly one spawn.
 - Full suite 11/11 files, reconciler 0 findings.
+
+## 2026-07-31 — repair the adversarially reviewed boundary (claude)
+
+An adversarial review of the session above confirmed the vulnerability and the tests but
+filed four defects. All four reproduced; all four are fixed. Real transcripts in
+`verification.md`.
+
+- The guard was leakier than the previous session claimed. It walked `ast.List` nodes and
+  matched element 0 against the literal `"git"`, so six spellings were appended to
+  `reconcile.py` at `4ffa8e3` and the guard stayed green on every one: a tuple argument
+  list, `[_GIT_BIN, ...]` with `_GIT_BIN = "git"`, an f-string with `shell=True`,
+  `[_GIT_BIN] + [...]`, `os.popen`, and `list((...))`. Rewritten to start at the spawn
+  call sites; all six now fail it, each with its source text.
+- Measured before designing, which changed the design. The obvious fix — reject any
+  argument list that is not a literal — was wrong: three call sites in `reconcile.py` and
+  three in `run_tests.py` legitimately build a command in a local variable, and one is
+  `[sys.executable, ...]`, not Git at all. So the scan resolves names bound by plain
+  assignment (mutated only by `append`/`extend`, which cannot touch the head) and
+  resolves the program at position 0 to the set of strings it can be.
+- The boundary really did stop at the reconciler. Worst of the three: on `4ffa8e3`,
+  `check_core_scope.py` returned **zero findings** for a core-fit review that was stale
+  by a real `automation/` change and a rewritten task input, because
+  `git replace -f $REVIEWED $CURRENT` answered its `rev-parse`, `merge-base`, `diff` and
+  `ls-tree` reads at once. That is the core-admission gate defeated end to end, not one
+  check bypassed.
+- Second worst: `run_tests.py --staged` read the staged diff bare, so pointing HEAD at a
+  commit that already held the staged code but an older record left the hook seeing one
+  record path and selecting **no tests at all** for a staged code change. An emptied diff
+  falls back to the full suite, which is why the exploit has to forge a *narrow* diff
+  rather than an empty one — worth knowing before writing that regression.
+- `check_action_projection.py` was not on the review's list but is on the guard's: five of
+  its six reads passed the flag at the call site and one did not, which is the fragility
+  the guard exists to remove. Hardened in `git_output` and the redundant per-call flags
+  dropped.
+- Judgement call recorded: `git fetch` in `.github/workflows/harness.yml` stays bare. It
+  moves objects over the network and decides nothing, and the workflow scan allowlists it
+  by name rather than by silence.
+- Python floor bit once. `ast.get_source_segment` is 3.8+, and `python3` here is 3.7.6
+  while CI takes the runner default, so the guard falls back to the whole source line.
+  Both forms are diagnosable, and the docstring says which is which.
+- Registering `automation/check_core_scope.py` and `automation/run_tests.py` as inputs of
+  `test_reconcile_queue.py` is what makes the guard re-run when either changes; the
+  matching assertions in `test_run_tests.py` moved with them.
+- Full suite 11/11 files, reconciler 0 findings.

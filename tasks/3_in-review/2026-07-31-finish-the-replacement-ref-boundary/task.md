@@ -48,6 +48,20 @@ guard against the gap reopening.
 - [x] `verification.md` records the real before-and-after output of each regression on an unmodified tree first.
 - [x] The creation-baseline rule, `ordinary_request_resolution_evidence_problem`, and the 24 evidence-lineage tests are NOT ported — they were rejected by measurement.
 
+### Added after adversarial review — the boundary is not the reconciler's alone
+
+The title claims the boundary is finished, so it has to cover every gate a repository
+state can point at a chosen revision, not only the reconciler.
+
+- [x] WHEN `check_core_scope.py` resolves, compares, or walks a reviewed revision, THE SYSTEM SHALL read through `--no-replace-objects`, so a blob cannot pass its "is this a commit" test and a stale core-fit review cannot report clean.
+- [x] WHEN `run_tests.py --staged` reads the staged diff against HEAD, THE SYSTEM SHALL read through `--no-replace-objects`, so a replacement entry cannot choose which tests the pre-commit hook runs.
+- [x] `check_action_projection.py` hardens in its `git_output` helper rather than at each caller, so a new caller cannot forget the flag.
+- [x] The merge and push adapters in `.github/workflows/harness.yml` read `cat-file -e` and `merge-base` through the flag, matching the hardened blocks already in that file; `git fetch` is the one subcommand that may stay bare, and a test holds that line.
+- [x] The source-level guard scans all four gates, starts at the spawn call sites rather than at list literals, and catches an argument list written as a tuple, as a name bound to `"git"`, as a shell string, as a concatenation, through `os.popen`, or through `list(...)`.
+- [x] The guard's starred rule applies in argument position only, so an ordinary `[*CONSTANT, "x"]` elsewhere in a scanned file is not a security failure, and every finding carries its source text.
+- [x] The test docstring states what the guard cannot see instead of claiming total coverage, and `design.md` states what is and is not covered.
+- [x] Each new exploit is reproduced against the unfixed file first, with the real output in `verification.md`, and a regression covers each one.
+
 ## Links
 
 - Rejected sibling rule: `docs/designs/queue-resolution-order-independence.md`

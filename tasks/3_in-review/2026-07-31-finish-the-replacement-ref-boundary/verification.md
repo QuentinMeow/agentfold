@@ -2,13 +2,31 @@
 
 **Verified:** 2026-07-31 by claude
 
+**Verified:** 2026-07-31 by claude (second session, after adversarial review)
+
 Only commands actually run and their real output. Every "before" transcript below was
-produced against the UNMODIFIED reconciler: the regressions were written first, then run
-with `automation/reconcile/reconcile.py` restored to the tree at the claim commit
-(`git stash push -- automation/reconcile/reconcile.py`, run, `git stash pop`), so the
-tests are the same bytes that later pass. The only edit to any transcript is that the
-absolute worktree path in traceback lines is shortened to `...`, and the long `-m unittest`
-argument lists are wrapped with `\`.
+produced against the UNMODIFIED source: the regressions were written first, then run with
+the file under test restored to its pre-fix bytes, so the tests are the same bytes that
+later pass. The first session used `git stash push -- automation/reconcile/reconcile.py`,
+run, `git stash pop`; the second used `git show 4ffa8e3:<path> > <path>`, run,
+`git checkout HEAD -- <path>`.
+
+**Every edit made to any transcript on this page, exhaustively:**
+
+1. The absolute worktree path in traceback lines is shortened to `...` (first session
+   only; the second session's commands were run from the repository root, so its
+   tracebacks already carry repository-relative paths).
+2. Long `-m unittest` argument lists are wrapped with `\`.
+3. Where output is cut, the cut is marked `[elided: <what>]` on its own line and never
+   with a bare `...`. One transcript below predates that rule: the first session's
+   full-suite block used a bare `...`, hiding the runner's own self-check blocks and the
+   selected-file list. The adversarial reviewer, reading the untruncated output, reported
+   the largest of them as `test_probe.py`'s `Ran 65 tests … OK (skipped=1)`; that number
+   is the reviewer's observation, not one this session re-measured, and the marker says
+   so. The line is now marked and its content named rather than rewritten.
+
+Nothing else is changed, reordered, or reconstructed. A `...` inside a Python
+`AssertionError` diff is unittest's own abbreviation, not an edit.
 
 ## Before — the six replacement-ref regressions on the unmodified reconciler
 
@@ -301,7 +319,10 @@ constant.
 $ python3 automation/run_tests.py
 test lane: full
 test reason: full suite requested
-...
+[elided: the selected-file list, and the runner's own test_git_init_probe / test_first /
+ test_second / test_probe self-check blocks. This session did not re-measure that run;
+ the adversarial reviewer reported the test_probe block as "Ran 65 tests ... OK
+ (skipped=1)".]
 PASS automation/tests/test_check_action_projection.py
 PASS automation/tests/test_check_core_scope.py
 PASS automation/tests/test_collect_github_review_actions.py
@@ -330,7 +351,489 @@ $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 finding(s)
 ```
 
+---
+
+# Second session — repairing the four adversarial-review findings
+
+Everything below was run at the repository root of this worktree. The pre-fix bytes are
+those of `4ffa8e3`, the tip the first session left; the fix commit is `df2dac6`.
+
+## Finding 1 — the six spellings that slipped past the list-literal guard
+
+The old guard, plus all six bypasses live in the file it scans. `git archive` reproduces
+the pre-fix tree, and `bypass.py` holds the six spellings verbatim:
+
+```python
+import os
+
+_GIT_BIN = "git"
+
+
+def bypass_tuple(oid):
+    return subprocess.run(("git", "cat-file", "-p", oid), cwd=REPO)
+
+
+def bypass_name(oid):
+    return subprocess.run([_GIT_BIN, "cat-file", "-p", oid], cwd=REPO)
+
+
+def bypass_shell(oid):
+    return subprocess.run(f"git cat-file -p {oid}", shell=True, cwd=REPO)
+
+
+def bypass_concat(oid):
+    return subprocess.run([_GIT_BIN] + ["show", oid], cwd=REPO)
+
+
+def bypass_popen(oid):
+    return os.popen("git cat-file -p " + oid).read()
+
+
+def bypass_list_call(oid):
+    return subprocess.run(list(("git", "cat-file", "-p", oid)), cwd=REPO)
+```
+
+```
+$ mkdir -p tmp/guard-probe
+$ git archive 4ffa8e3 automation | tar -x -C tmp/guard-probe
+$ cat tmp/guard-probe/bypass.py >> tmp/guard-probe/automation/reconcile/reconcile.py
+$ python3 tmp/guard-probe/automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_git_object_reads_bypass_replacements_except_stable_allowlist
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.349s
+
+OK
+```
+
+Green, with all six bypasses present. The same six against the new guard, in a tree that
+is otherwise the current `automation/`:
+
+```
+$ mkdir -p tmp/guard-probe-new
+$ cp -R automation tmp/guard-probe-new/automation
+$ cat tmp/guard-probe/bypass.py >> tmp/guard-probe-new/automation/reconcile/reconcile.py
+$ python3 tmp/guard-probe-new/automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+
+======================================================================
+FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main__.ReconcileQueueTests) (module='automation/reconcile/reconcile.py')
+Every Git spawn these four gates make is readable, and reads honestly.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "tmp/guard-probe-new/automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+AssertionError: Lists differ: [] != [(7710, 'bare Git read: git cat-file -p <e[852 chars]O)')]
+
+Second list contains 7 additional elements.
+First extra element 0:
+(7710, 'bare Git read: git cat-file -p <expr>', 'return subprocess.run(("git", "cat-file", "-p", oid), cwd=REPO)')
+
+Diff is 981 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 1 test in 15.823s
+
+FAILED (failures=1)
+```
+
+`unittest` abbreviates the list, so the same findings printed in full — seven findings
+for six spellings, because the shell case trips two rules:
+
+```
+$ python3 tmp/guard-probe-new/report.py
+automation/reconcile/reconcile.py:7710  bare Git read: git cat-file -p <expr>
+    return subprocess.run(("git", "cat-file", "-p", oid), cwd=REPO)
+automation/reconcile/reconcile.py:7714  bare Git read: git cat-file -p <expr>
+    return subprocess.run([_GIT_BIN, "cat-file", "-p", oid], cwd=REPO)
+automation/reconcile/reconcile.py:7718  subprocess.run runs a shell command line
+    return subprocess.run(f"git cat-file -p {oid}", shell=True, cwd=REPO)
+automation/reconcile/reconcile.py:7718  subprocess.run takes an argument list this scan cannot read
+    return subprocess.run(f"git cat-file -p {oid}", shell=True, cwd=REPO)
+automation/reconcile/reconcile.py:7722  subprocess.run takes an argument list this scan cannot read
+    return subprocess.run([_GIT_BIN] + ["show", oid], cwd=REPO)
+automation/reconcile/reconcile.py:7726  os.popen takes an argument list this scan cannot read
+    return os.popen("git cat-file -p " + oid).read()
+automation/reconcile/reconcile.py:7730  subprocess.run takes an argument list this scan cannot read
+    return subprocess.run(list(("git", "cat-file", "-p", oid)), cwd=REPO)
+```
+
+`report.py` is nine lines of throwaway under the git-ignored `tmp/`: it loads the probe
+tree's own test module and prints `unhardened_git_spawns(...)` for each guarded module
+without unittest's abbreviation. Both probe trees were deleted after these runs.
+
+All six are also covered by
+`test_the_git_spawn_guard_catches_every_known_bypass_spelling`, one `subTest` each, so
+the closure is a permanent regression rather than a one-off probe.
+
+## Finding 2 — the sibling gates
+
+### `check_core_scope.py`, reverted to its pre-fix bytes
+
+```
+$ git show 4ffa8e3:automation/check_core_scope.py > automation/check_core_scope.py
+$ python3 automation/tests/test_check_core_scope.py \
+    CoreScopeTests.test_replace_ref_cannot_pass_a_blob_as_the_reviewed_core_commit \
+    CoreScopeTests.test_replace_ref_cannot_hide_a_stale_core_fit_review
+FF
+======================================================================
+FAIL: test_replace_ref_cannot_pass_a_blob_as_the_reviewed_core_commit (__main__.CoreScopeTests)
+A `refs/replace/*` entry must not turn a blob into a reviewed commit.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_check_core_scope.py", line 789, in test_replace_ref_cannot_pass_a_blob_as_the_reviewed_core_commit
+    self.assertEqual(without_replace, with_replace)
+AssertionError: Lists differ: ["reviewed revision '90db16de6c0119c0c924c[52 chars]ory"] != ['reviewed revision 90db16de6c0119c0c924c8[50 chars]a42']
+
+First differing element 0:
+"reviewed revision '90db16de6c0119c0c924c[51 chars]tory"
+'reviewed revision 90db16de6c0119c0c924c8[49 chars]5a42'
+
+- ["reviewed revision '90db16de6c0119c0c924c80d206b1e80bc3d2331' is not a commit "
+?  ^                  -                                        -         ^^^^^^^^^
+
++ ['reviewed revision 90db16de6c0119c0c924c80d206b1e80bc3d2331 is not an '
+?  ^                                                                   ^^^
+
+-  'in this repository']
++  'ancestor of 5ec90e4e5a42']
+
+======================================================================
+FAIL: test_replace_ref_cannot_hide_a_stale_core_fit_review (__main__.CoreScopeTests)
+The whole gate, not one check: a stale review must stay stale.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_check_core_scope.py", line 843, in test_replace_ref_cannot_hide_a_stale_core_fit_review
+    self.assertEqual(without_replace, with_replace)
+AssertionError: Lists differ: ['core-fit review for 004b15139639 is stal[59 chars].md'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'core-fit review for 004b15139639 is stale; later bound changes: automation/tool.py, task input task.md'
+
++ []
+- ['core-fit review for 004b15139639 is stale; later bound changes: '
+-  'automation/tool.py, task input task.md']
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.102s
+
+FAILED (failures=2)
+```
+
+Read the first failure carefully: the blob's verdict *changes* from "is not a commit" to
+"is not an ancestor". The type test and the full-object-id equality test both passed for
+a blob, exactly as the review reported. The Git behaviour underneath it, from the probe
+that found it:
+
+```
+[1] before replace: git rev-parse --verify $BLOB^{commit}
+    rc=128 out='' err='error: 90db16de6c0119c0c924c80d206b1e80bc3d2331^{commit}: expected commit type, but the object dereferences to blob type\nfatal: Needed a single revision'
+
+[3] after: git replace -f $BLOB $BASE
+    bare  git rev-parse --verify $BLOB^{commit}: rc=0 out='90db16de6c0119c0c924c80d206b1e80bc3d2331' err=''
+    hard  git --no-replace-objects rev-parse ...: rc=128 out='' err='error: 90db16de6c0119c0c924c80d206b1e80bc3d2331^{commit}: expected commit type, but the object dereferences to blob type\nfatal: Needed a single revision'
+```
+
+The second failure is the whole gate falling over, not one check: a core-fit review that
+is stale by a real `automation/` change *and* a rewritten task input returns `[]` — zero
+findings — once `git replace -f $REVIEWED $CURRENT` is in place.
+
+With the fix restored, both pass:
+
+```
+$ git checkout HEAD -- automation/check_core_scope.py
+$ python3 automation/tests/test_check_core_scope.py \
+    CoreScopeTests.test_replace_ref_cannot_pass_a_blob_as_the_reviewed_core_commit \
+    CoreScopeTests.test_replace_ref_cannot_hide_a_stale_core_fit_review
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.983s
+
+OK
+```
+
+### `run_tests.py`, reverted to its pre-fix bytes
+
+```
+$ git show 4ffa8e3:automation/run_tests.py > automation/run_tests.py
+$ python3 automation/tests/test_run_tests.py \
+    StagedTestSelectionTests.test_replace_ref_cannot_swap_the_staged_diff_for_a_record_only_one \
+    StagedTestSelectionTests.test_cli_addition_selects_only_the_cli_test
+FF
+======================================================================
+FAIL: test_replace_ref_cannot_swap_the_staged_diff_for_a_record_only_one (__main__.StagedTestSelectionTests)
+A `refs/replace/*` entry must not choose the pre-commit test lane.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_run_tests.py", line 589, in test_replace_ref_cannot_swap_the_staged_diff_for_a_record_only_one
+    "a replacement entry chose which tests the hook runs",
+AssertionError: Tuples differ: (PosixPath('/var/folders/9g/nnmcgvqd5kvc99[83 chars]y'),) != ()
+
+First tuple contains 1 additional elements.
+First extra element 0:
+PosixPath('/var/folders/9g/nnmcgvqd5kvc99gqpbv1d1kr0000gn/T/tmpjsdnwh2g/repository/services/quote-cli/tests/test_quote_cli.py')
+
+- (PosixPath('/var/folders/9g/nnmcgvqd5kvc99gqpbv1d1kr0000gn/T/tmpjsdnwh2g/repository/services/quote-cli/tests/test_quote_cli.py'),)
++ () : a replacement entry chose which tests the hook runs
+
+======================================================================
+FAIL: test_cli_addition_selects_only_the_cli_test (__main__.StagedTestSelectionTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_run_tests.py", line 78, in test_cli_addition_selects_only_the_cli_test
+    "the staged diff compares the index against a committed tree, so a "
+AssertionError: Lists differ: ['git', '--no-replace-objects', 'diff', '--cached', '--name-status', '-z', '-M'] != ['git', 'diff', '--cached', '--name-status', '-z', '-M']
+
+First differing element 1:
+'--no-replace-objects'
+'diff'
+
+First list contains 1 additional elements.
+First extra element 6:
+'-M'
+
+- ['git', '--no-replace-objects', 'diff', '--cached', '--name-status', '-z', '-M']
+?         ------------------------
+
++ ['git', 'diff', '--cached', '--name-status', '-z', '-M'] : the staged diff compares the index against a committed tree, so a `refs/replace/*` entry must not be able to answer it
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.416s
+
+FAILED (failures=2)
+```
+
+The empty tuple is the exploit: a real, unreviewed `services/quote-cli/quote_cli.py`
+change is staged, and the hook selects **no test at all**. The direct probe that measured
+the lane, before and after the same replacement entry:
+
+```
+[honest] lane='staged' reason='every staged path maps to its registered test owners' tests=('test_quote_cli.py',)
+         git diff --cached ...: 'M\x00services/quote-cli/quote_cli.py\x00'
+[forged] lane='staged' reason='every staged path is a record path no test reads' tests=()
+         git diff --cached ...: 'M\x00tasks/1_in-progress/2026-07-31-probe/task.md\x00'
+         git --no-replace-objects diff --cached ...: 'M\x00services/quote-cli/quote_cli.py\x00'
+```
+
+An *emptied* diff is not the exploit: that path falls back to the full suite
+(`reason='staged diff empty or malformed'`), which is why the regression forges a narrow
+diff rather than an empty one.
+
+### The guard over all four pre-fix gates, and the workflow
+
+```
+$ git show 4ffa8e3:automation/check_core_scope.py > automation/check_core_scope.py
+$ git show 4ffa8e3:automation/run_tests.py > automation/run_tests.py
+$ git show 4ffa8e3:automation/check_action_projection.py > automation/check_action_projection.py
+$ git show 4ffa8e3:.github/workflows/harness.yml > .github/workflows/harness.yml
+$ python3 automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object \
+    ReconcileQueueTests.test_the_provider_workflow_reads_git_the_same_way_the_gates_do
+F
+======================================================================
+FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main__.ReconcileQueueTests) (module='automation/check_action_projection.py')
+Every Git spawn these four gates make is readable, and reads honestly.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+AssertionError: Lists differ: [] != [(1652, 'bare Git read: git <expr>', 'result = subprocess.run(')]
+
+Second list contains 1 additional elements.
+First extra element 0:
+(1652, 'bare Git read: git <expr>', 'result = subprocess.run(')
+
+- []
++ [(1652, 'bare Git read: git <expr>', 'result = subprocess.run(')]
+
+======================================================================
+FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main__.ReconcileQueueTests) (module='automation/check_core_scope.py')
+Every Git spawn these four gates make is readable, and reads honestly.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+AssertionError: Lists differ: [] != [(81, 'bare Git read: git <expr>', 'result[199 chars]n(')]
+
+Second list contains 3 additional elements.
+First extra element 0:
+(81, 'bare Git read: git <expr>', 'result = subprocess.run(')
+
+- []
++ [(81, 'bare Git read: git <expr>', 'result = subprocess.run('),
++  (464,
++   'bare Git read: git rev-parse --verify <expr>',
++   'resolved = subprocess.run('),
++  (477,
++   'bare Git read: git merge-base --is-ancestor <expr> <expr>',
++   'ancestry = subprocess.run(')]
+
+======================================================================
+FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main__.ReconcileQueueTests) (module='automation/run_tests.py')
+Every Git spawn these four gates make is readable, and reads honestly.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+AssertionError: Lists differ: [] != [(578, 'bare Git read: git diff --cached -[42 chars]n(')]
+
+Second list contains 1 additional elements.
+First extra element 0:
+(578, 'bare Git read: git diff --cached --name-status -z -M', 'diff = subprocess.run(')
+
+- []
++ [(578,
++   'bare Git read: git diff --cached --name-status -z -M',
++   'diff = subprocess.run(')]
+
+======================================================================
+FAIL: test_the_provider_workflow_reads_git_the_same_way_the_gates_do (__main__.ReconcileQueueTests)
+The shell half of the boundary, which the AST guard cannot see.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "automation/tests/test_reconcile_queue.py", line 11641, in test_the_provider_workflow_reads_git_the_same_way_the_gates_do
+    self.assertEqual([], bare)
+AssertionError: Lists differ: [] != [(47, 'cat-file'), (50, 'cat-file'), (70, [45 chars]le')]
+
+Second list contains 5 additional elements.
+First extra element 0:
+(47, 'cat-file')
+
+- []
++ [(47, 'cat-file'),
++  (50, 'cat-file'),
++  (70, 'merge-base'),
++  (76, 'cat-file'),
++  (79, 'cat-file')]
+
+----------------------------------------------------------------------
+Ran 2 tests in 27.665s
+
+FAILED (failures=4)
+```
+
+`reconcile.py` is absent from that list because the first session already hardened it —
+the guard names exactly the four holes the review reported, at exactly the lines it
+reported (`.github/workflows/harness.yml` 47, 50, 70, 76, 79), plus
+`check_action_projection.py:1652`, which the review did not name and which the guard
+found on its own. The `'result = subprocess.run('` source text is the Python 3.7
+fallback: `ast.get_source_segment` needs 3.8, and the interpreter here is 3.7.6.
+
+All four files restored:
+
+```
+$ git checkout HEAD -- automation/check_core_scope.py automation/run_tests.py automation/check_action_projection.py .github/workflows/harness.yml
+$ git status --short
+```
+
+(no output — the tree matches `df2dac6`)
+
+## Finding 3 — the ordinary starred list the old guard rejected
+
+`ordinary.py` holds the two lines, with no Git anywhere in them:
+
+```python
+ORDINARY_HEADERS = ("Status", "Blocks now")
+
+
+def ordinary_rows():
+    return [*ORDINARY_HEADERS, "note"]
+```
+
+Appended to the pre-fix reconciler in a freshly re-extracted probe tree:
+
+```
+$ rm -rf tmp/guard-probe/automation
+$ git archive 4ffa8e3 automation | tar -x -C tmp/guard-probe
+$ cat tmp/guard-probe/ordinary.py >> tmp/guard-probe/automation/reconcile/reconcile.py
+$ python3 tmp/guard-probe/automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_git_object_reads_bypass_replacements_except_stable_allowlist
+F
+======================================================================
+FAIL: test_git_object_reads_bypass_replacements_except_stable_allowlist (__main__.ReconcileQueueTests)
+Every Git object read stays outside `refs/replace/*`.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "tmp/guard-probe/automation/tests/test_reconcile_queue.py", line 11173, in test_git_object_reads_bypass_replacements_except_stable_allowlist
+    self.assertEqual([], unsafe)
+AssertionError: Lists differ: [] != [(7708, '*<not RAW_GIT>')]
+
+Second list contains 1 additional elements.
+First extra element 0:
+(7708, '*<not RAW_GIT>')
+
+- []
++ [(7708, '*<not RAW_GIT>')]
+
+----------------------------------------------------------------------
+Ran 1 test in 0.232s
+
+FAILED (failures=1)
+```
+
+The same lines against the new guard:
+
+```
+$ rm -rf tmp/guard-probe-new/automation
+$ cp -R automation tmp/guard-probe-new/automation
+$ cat tmp/guard-probe/ordinary.py >> tmp/guard-probe-new/automation/reconcile/reconcile.py
+$ python3 tmp/guard-probe-new/automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+.
+----------------------------------------------------------------------
+Ran 1 test in 23.114s
+
+OK
+```
+
+Covered permanently by `test_the_git_spawn_guard_leaves_ordinary_starred_lists_alone`,
+which also asserts that a splat the scan *cannot* fold in argument position —
+`[*prefix, "cat-file", "-p", oid]` — is still reported, with its source text.
+
+## Finding 4 — the elision disclosure
+
+Fixed at the top of this file rather than here: every edit to every transcript is now
+enumerated, the first session's bare `...` is marked `[elided: ...]`, and what it hid is
+named. Nothing was rewritten to make it true.
+
+## Second session — full suite and reconciler
+
+```
+$ python3 automation/run_tests.py
+[elided: the lane header, the selected-file list, and the runner's own
+ test_git_init_probe / test_first / test_second / test_probe self-check blocks, the last
+ of which reported "Ran 66 tests in 9.176s / OK (skipped=1)"]
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 61.05s
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+```
+
+Tests changed for expectation rather than behaviour, both because the argument list they
+match is now the hardened one:
+`test_cli_addition_selects_only_the_cli_test` (the staged diff) and
+`test_github_adapter_handles_root_push_and_always_runs_tests` (the workflow's
+`cat-file -e`). Both still assert what they always asserted.
+
 ## Review verdicts (when a review was explicitly run)
 
 No independent review was invoked: `--require-review` was not selected, and this task's
-collaboration mode (`async`) gates on tests plus the reconciler.
+collaboration mode (`async`) gates on tests plus the reconciler. The adversarial review
+that produced the four findings above was invoked by the orchestrator, not through
+`--require-review`, so it is recorded here as the reason for the second session rather
+than as a revision-bound receipt.

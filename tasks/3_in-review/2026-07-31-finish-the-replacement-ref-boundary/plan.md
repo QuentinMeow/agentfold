@@ -25,3 +25,23 @@ Small verifiable steps, each with a named artifact or check. Checked off as comp
       `reconcile.py --check`.
 - [x] 10. Append the session entry to `worklog.md` and `git mv` the task to
       `tasks/3_in-review/`.
+
+Added after adversarial review found the boundary unfinished and the guard leaky:
+
+- [x] 11. Reproduce the review's four findings first: the six spellings that slip past the
+      list-literal guard, the blob-as-commit and stale-review exploits in
+      `check_core_scope.py`, the staged-lane exploit in `run_tests.py`, and the ordinary
+      starred list the guard wrongly rejects. Capture every real transcript.
+- [x] 12. Harden `check_core_scope.py` at its `git` helper plus its two direct spawns,
+      `run_tests.py` at the staged diff, `check_action_projection.py` at its `git_output`
+      helper, and the merge/push adapters in `.github/workflows/harness.yml`.
+- [x] 13. Replace the guard with a call-site scan over all four gates: fold every spawn's
+      argument list to constant tokens, resolve the program, report what cannot be read,
+      and apply the starred rule in argument position only.
+- [x] 14. Register `automation/check_core_scope.py` and `automation/run_tests.py` in
+      `INPUT_TEST_OWNERS` for `test_reconcile_queue.py`, which now reads them.
+- [x] 15. Add a regression per closed spelling, per new exploit, and for the workflow;
+      prove each fails against the pre-fix bytes at `4ffa8e3`.
+- [x] 16. Correct the overclaim in `design.md` and the guard docstring, extend the
+      `task.md` acceptance criteria to the sibling gates, and extend `verification.md`
+      including its elision disclosure.
