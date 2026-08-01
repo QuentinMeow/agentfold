@@ -1886,6 +1886,46 @@ class RunTestsIsolationTests(unittest.TestCase):
                 self.assertEqual(0, seen.returncode, f"{key}: {seen.stderr}")
                 self.assertEqual(expected, seen.stdout.strip(), key)
 
+    def test_isolated_scratch_tmpdir_redirects_child_fixture_repositories(self):
+        """A killed run must leave at most one named directory, not hundreds.
+
+        Every repository fixture a test builds calls ``tempfile.mkdtemp()`` or
+        ``tempfile.TemporaryDirectory()`` with no ``dir=``, which resolves through
+        ``tempfile.gettempdir()`` in that child process. Proving the dict carries the
+        right keys is not enough -- a child process must actually honor them. Spawning
+        real Python and asking it where fresh temp state lands is the only proof that
+        a killed worker's fixture directories end up under this run's own scratch root
+        instead of scattered anonymously across the real system temp directory.
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_root = Path(scratch).resolve()
+            child_environment = dict(os.environ)
+            RUN_TESTS.install_isolated_scratch_tmpdir(scratch_root, child_environment)
+
+            for name in ("TMPDIR", "TMP", "TEMP"):
+                self.assertEqual(
+                    str(scratch_root / "tmp"),
+                    child_environment[name],
+                    f"{name} must point inside this run's own scratch root",
+                )
+            self.assertTrue((scratch_root / "tmp").is_dir())
+
+            seen = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import tempfile; print(tempfile.mkdtemp())",
+                ],
+                env=child_environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            self.assertEqual(0, seen.returncode, seen.stderr)
+            created = Path(seen.stdout.strip())
+            self.assertEqual(scratch_root / "tmp", created.parent)
+            shutil.rmtree(str(created))
+
     def test_main_passes_the_isolated_environment_to_each_test(self):
         child_environment = {
             "PATH": os.environ.get("PATH", ""),
@@ -1964,6 +2004,12 @@ class RunTestsIsolationTests(unittest.TestCase):
             str(scratch_root / "git-xdg-config"),
             child_environment["XDG_CONFIG_HOME"],
         )
+        for name in ("TMPDIR", "TMP", "TEMP"):
+            self.assertEqual(
+                str(scratch_root / "tmp"),
+                child_environment[name],
+                f"{name} must redirect fixture scratch dirs under the run's own root",
+            )
         self.assertEqual(
             os.environ.get("PATH", ""),
             child_environment["PATH"],
