@@ -208,3 +208,19 @@
 - Bound the existing human review item to the admitted candidate without treating the
   provider merge event as an answer. The task remains in review until that explicit
   human disposition is folded.
+
+## 2026-07-31 — clear-the-stuck-queue-items (claude)
+
+- Confirmed the crossing from Git. The reviewed head
+  `8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b` is an ancestor of `main`, as is its merge
+  commit `c9f5244`. Replaying with `--check --at-transition merge` reports this task's
+  review as an unresolved future-blocking action.
+- Measured, on a disposable clone, that a fresh approval no longer helps: a merge-bound
+  approval is only fresh at a merge whose active base equals the reviewed base, and that
+  merge is already in `main`. Deletion is refused as well, for having no committed folding
+  claim with a concrete response.
+- Left the review live, unanswered, and byte-identical. Its reviewed range is also the base
+  of the layered-workspace candidate, so its disposition and the isolation review's are
+  entangled and belong in one place. That place is one canonical item under
+  `message-queue/needs-human/decisions/`, now linked from `Queue actions`. This task stays
+  in `3_in-review` until that item is folded.
