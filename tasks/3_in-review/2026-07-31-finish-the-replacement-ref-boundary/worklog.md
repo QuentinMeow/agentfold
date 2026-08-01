@@ -79,4 +79,9 @@ filed four defects. All four reproduced; all four are fixed. Real transcripts in
 - Registering `automation/check_core_scope.py` and `automation/run_tests.py` as inputs of
   `test_reconcile_queue.py` is what makes the guard re-run when either changes; the
   matching assertions in `test_run_tests.py` moved with them.
+- Measured the guard's own cost rather than assuming it, because it runs in the
+  pre-commit lane: the first working version took 28.7s for one test, since resolving a
+  name walked the whole 6,000-line module and it asked about dozens of names. Resolving
+  every name in a scope in one walk and memoizing the map on the scope node gives
+  identical findings in 3.0s for all six guard tests.
 - Full suite 11/11 files, reconciler 0 findings.

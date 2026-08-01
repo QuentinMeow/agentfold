@@ -1,8 +1,6 @@
 # Verification — Finish the replacement-ref boundary the reconciler is halfway through building
 
-**Verified:** 2026-07-31 by claude
-
-**Verified:** 2026-07-31 by claude (second session, after adversarial review)
+**Verified:** 2026-07-31 by claude, and again 2026-07-31 by claude after adversarial review
 
 Only commands actually run and their real output. Every "before" transcript below was
 produced against the UNMODIFIED source: the regressions were written first, then run with
@@ -401,7 +399,7 @@ $ python3 tmp/guard-probe/automation/tests/test_reconcile_queue.py \
     ReconcileQueueTests.test_git_object_reads_bypass_replacements_except_stable_allowlist
 .
 ----------------------------------------------------------------------
-Ran 1 test in 0.349s
+Ran 1 test in 0.160s
 
 OK
 ```
@@ -421,7 +419,7 @@ FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main
 Every Git spawn these four gates make is readable, and reads honestly.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "tmp/guard-probe-new/automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+  File "tmp/guard-probe-new/automation/tests/test_reconcile_queue.py", line 11625, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
     unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
 AssertionError: Lists differ: [] != [(7710, 'bare Git read: git cat-file -p <e[852 chars]O)')]
 
@@ -432,7 +430,7 @@ First extra element 0:
 Diff is 981 characters long. Set self.maxDiff to None to see it.
 
 ----------------------------------------------------------------------
-Ran 1 test in 15.823s
+Ran 1 test in 1.340s
 
 FAILED (failures=1)
 ```
@@ -636,7 +634,7 @@ FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main
 Every Git spawn these four gates make is readable, and reads honestly.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+  File "automation/tests/test_reconcile_queue.py", line 11625, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
     unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
 AssertionError: Lists differ: [] != [(1652, 'bare Git read: git <expr>', 'result = subprocess.run(')]
 
@@ -652,7 +650,7 @@ FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main
 Every Git spawn these four gates make is readable, and reads honestly.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+  File "automation/tests/test_reconcile_queue.py", line 11625, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
     unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
 AssertionError: Lists differ: [] != [(81, 'bare Git read: git <expr>', 'result[199 chars]n(')]
 
@@ -674,7 +672,7 @@ FAIL: test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object (__main
 Every Git spawn these four gates make is readable, and reads honestly.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "automation/tests/test_reconcile_queue.py", line 11606, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+  File "automation/tests/test_reconcile_queue.py", line 11625, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
     unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
 AssertionError: Lists differ: [] != [(578, 'bare Git read: git diff --cached -[42 chars]n(')]
 
@@ -692,7 +690,7 @@ FAIL: test_the_provider_workflow_reads_git_the_same_way_the_gates_do (__main__.R
 The shell half of the boundary, which the AST guard cannot see.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "automation/tests/test_reconcile_queue.py", line 11641, in test_the_provider_workflow_reads_git_the_same_way_the_gates_do
+  File "automation/tests/test_reconcile_queue.py", line 11660, in test_the_provider_workflow_reads_git_the_same_way_the_gates_do
     self.assertEqual([], bare)
 AssertionError: Lists differ: [] != [(47, 'cat-file'), (50, 'cat-file'), (70, [45 chars]le')]
 
@@ -708,7 +706,7 @@ First extra element 0:
 +  (79, 'cat-file')]
 
 ----------------------------------------------------------------------
-Ran 2 tests in 27.665s
+Ran 2 tests in 1.611s
 
 FAILED (failures=4)
 ```
@@ -767,7 +765,7 @@ First extra element 0:
 + [(7708, '*<not RAW_GIT>')]
 
 ----------------------------------------------------------------------
-Ran 1 test in 0.232s
+Ran 1 test in 1.781s
 
 FAILED (failures=1)
 ```
@@ -782,7 +780,7 @@ $ python3 tmp/guard-probe-new/automation/tests/test_reconcile_queue.py \
     ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
 .
 ----------------------------------------------------------------------
-Ran 1 test in 23.114s
+Ran 1 test in 4.476s
 
 OK
 ```
@@ -796,6 +794,43 @@ which also asserts that a splat the scan *cannot* fold in argument position —
 Fixed at the top of this file rather than here: every edit to every transcript is now
 enumerated, the first session's bare `...` is marked `[elided: ...]`, and what it hid is
 named. Nothing was rewritten to make it true.
+
+## Second session — the guard's own cost, measured
+
+The scan runs in the pre-commit lane whenever any of the four gates changes, so it was
+timed rather than assumed. The first working version resolved each name by walking the
+enclosing scope on demand, which meant walking the whole 6,000-line reconciler module
+once per distinct name it asked about:
+
+```
+$ time python3 automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+Ran 1 test in 28.716s
+OK
+python3 automation/tests/test_reconcile_queue.py  28.22s user 0.58s system 97% cpu 29.600 total
+```
+
+Resolving every name in a scope in one walk and memoizing that map on the scope node
+gives the same findings — the four-gate transcript above is byte-identical apart from the
+elapsed line — for:
+
+```
+$ time python3 automation/tests/test_reconcile_queue.py \
+    ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object \
+    ReconcileQueueTests.test_the_git_spawn_guard_catches_every_known_bypass_spelling \
+    ReconcileQueueTests.test_the_git_spawn_guard_still_reads_the_shapes_the_gates_use \
+    ReconcileQueueTests.test_the_git_spawn_guard_leaves_ordinary_starred_lists_alone \
+    ReconcileQueueTests.test_every_gate_names_the_same_checked_hardening_prefix \
+    ReconcileQueueTests.test_the_provider_workflow_reads_git_the_same_way_the_gates_do
+......
+----------------------------------------------------------------------
+Ran 6 tests in 3.037s
+
+OK
+python3 automation/tests/test_reconcile_queue.py  3.56s user 0.15s system 98% cpu 3.768 total
+```
+
+Six tests in 3.0s, against one test in 28.7s.
 
 ## Second session — full suite and reconciler
 
@@ -816,7 +851,7 @@ PASS automation/tests/test_run_tests.py
 PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 11/11 files passed
-test elapsed: 61.05s
+test elapsed: 61.34s
 ```
 
 ```

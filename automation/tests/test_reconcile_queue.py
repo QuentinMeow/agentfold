@@ -256,28 +256,47 @@ def guard_name_values(name, scope):
     A name is readable only when every binding of it is a plain assignment and the
     only methods called on it are `append` and `extend`, which can add to the tail
     of a list but can never change the program at its head.
+
+    One walk of the scope answers for every name in it, and the answer is memoized
+    on the scope node. Resolving a module-level name walks the whole module body,
+    and these files ask about dozens of names, so without this the scan costs half
+    a minute instead of a second.
     """
-    values = []
-    bindings = 0
+    memo = getattr(scope, "_guard_name_values", None)
+    if memo is None:
+        memo = guard_scope_name_values(scope)
+        scope._guard_name_values = memo
+    return memo.get(name, [])
+
+
+def guard_scope_name_values(scope):
+    """Resolve every name bound in one scope, in a single walk of it."""
+    values = {}
+    bindings = {}
+    unreadable = set()
     for node in guard_scope_nodes(scope):
-        if isinstance(node, ast.Name) and node.id == name \
-                and isinstance(node.ctx, (ast.Store, ast.Del)):
-            bindings += 1
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bindings[node.id] = bindings.get(node.id, 0) + 1
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    values.append(node.value)
+                if isinstance(target, ast.Name):
+                    values.setdefault(target.id, []).append(node.value)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == name
             and node.func.attr not in ("append", "extend")
         ):
-            return None
-    if bindings != len(values):
-        return None
-    return values
+            unreadable.add(node.func.value.id)
+    resolved = {}
+    for name, count in bindings.items():
+        bound = values.get(name, [])
+        resolved[name] = (
+            None if name in unreadable or count != len(bound) else bound
+        )
+    for name in unreadable:
+        resolved[name] = None
+    return resolved
 
 
 def guard_argv_shapes(node, scope, module_scope, depth=0):
