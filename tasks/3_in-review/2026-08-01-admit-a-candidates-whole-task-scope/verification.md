@@ -356,6 +356,76 @@ test elapsed: 53.41s
 The commit that adds this section is the only one after `373ed00b`, and it touches this file
 alone.
 
+## 7. Re-verified after rebasing the branch onto `main`
+
+Sections 1 to 6 were recorded while this branch was based on
+`025de49cbd6cf11adaa54d70590870f3bf17cdab`, the tip of
+harness/2026-07-31-fold-answered-queue-review. That branch is not on `main`, and this
+change is what unblocks it, so the branch was rebased directly onto
+`88117705c64caa7fe691e485937bc6ceece069f5` — the merge of pull request 43 into `main` — so
+it can land first. The commit ids named in sections 1 to 6 (`6bcf9012`, `373ed00b`,
+`5095682`) are the pre-rebase ones and no longer exist on this branch; every command they
+record was really run at the time, and the rebase re-runs below repeat the whole gate on
+the new base.
+
+Two conflicts were resolved during the rebase, both against `main` rather than against the
+old base: `automation/AGENTS.md` (main's severity-tier clause in the first bullet plus this
+branch's rewrapped queue-checks bullet — still exactly 60 lines), and
+`roadmap/current-state.md` (this branch's task-scope entry kept; the human-attention entry
+that belongs to harness/2026-07-31-fold-answered-queue-review dropped, because it arrives
+with that branch). The session handover's `Needs your attention` section was rewritten in
+the commit that creates it, because the live human queue on `main` differs from the live
+human queue on the old base.
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+
+$ python3 automation/reconcile/reconcile.py --check \
+    --branch task/2026-08-01-admit-a-candidates-whole-task-scope \
+    --range 88117705c64caa7fe691e485937bc6ceece069f5...2355eb177aec31712fa3e8907a33901f23c38d40
+reconcile: 0 blocking finding(s)
+
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge \
+    --branch task/2026-08-01-admit-a-candidates-whole-task-scope \
+    --range 88117705c64caa7fe691e485937bc6ceece069f5...2355eb177aec31712fa3e8907a33901f23c38d40
+reconcile: 0 blocking finding(s)
+
+$ python3 automation/check_core_scope.py \
+    --range 88117705c64caa7fe691e485937bc6ceece069f5...2355eb177aec31712fa3e8907a33901f23c38d40 \
+    --branch task/2026-08-01-admit-a-candidates-whole-task-scope
+core-scope: pass (6 core path(s), task 2026-08-01-admit-a-candidates-whole-task-scope; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/run_tests.py
+[... 22 lines of per-shard lane/selection output elided ...]
+Ran 66 tests in 9.605s
+
+OK (skipped=1)
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+test elapsed: 0.01s
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 57.83s
+```
+
+The suite ran 66 tests here against 65 in section 5, because `main` gained a test between
+`025de49` and `8811770`. Every command in this section ran on the tree of
+`2355eb177aec31712fa3e8907a33901f23c38d40` plus this section itself, which is a record path
+no test reads; the commit that adds this section touches only this file and the worklog.
+
 ## Not verified
 
 - The hosted workflow was not re-run. Every replay above runs the same gate with the same
