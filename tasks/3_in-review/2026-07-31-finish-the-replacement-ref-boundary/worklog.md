@@ -24,6 +24,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `d9762aa` introduced it only to preserve what those call sites did bare before the
   refactor — it was never a decision. Deleting the keyword is what makes the source-level
   guard total, because a keyword argument is invisible to a scan over argument lists.
+- Shape note: the 07-26 branch covered "forging a review object" and "forging ancestry" in
+  one method and spent its sixth `test_replace_ref_cannot_*` name on the rejected rule.
+  Here they are two methods, so the six names match the six exploits the acceptance
+  criteria list, with none of them the rejected one.
 - Did not port, as the task required: the creation-baseline rule,
   `ordinary_request_resolution_evidence_problem`, its
   `test_replace_ref_cannot_change_ordinary_request_resolution_verdict` regression, and the

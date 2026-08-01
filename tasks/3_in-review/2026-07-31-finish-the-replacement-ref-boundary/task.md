@@ -41,12 +41,12 @@ guard against the gap reopening.
 
 ## Acceptance criteria
 
-- [ ] WHEN the reconciler launches its `cat-file --batch` reader, THE SYSTEM SHALL pass `--no-replace-objects`.
-- [ ] The remaining bare object reads on `main` — `git_object_kind`, `handover_creation_state`, `handover_current_incarnation_text`, `staged_deleted_queue_paths`, `staged_mutated_queue_paths`, `staged_mutated_handover_paths`, `task_ids_changed_on_edge`, and `task_artifact_renames_on_edge` — all read through the hardened form.
-- [ ] The six `test_replace_ref_cannot_*` regressions from the 07-26 branch pass on `main`: forging a review object, forging ancestry, forging synthetic-candidate parents, hiding staged admission changes, hiding a new handover, and changing a handover or staged blob baseline.
-- [ ] A source-level guard fails the suite when any new bare `["git", ...]` invocation is added outside a small index/worktree-only allowlist, so the gap cannot silently reopen.
-- [ ] `verification.md` records the real before-and-after output of each regression on an unmodified tree first.
-- [ ] The creation-baseline rule, `ordinary_request_resolution_evidence_problem`, and the 24 evidence-lineage tests are NOT ported — they were rejected by measurement.
+- [x] WHEN the reconciler launches its `cat-file --batch` reader, THE SYSTEM SHALL pass `--no-replace-objects`.
+- [x] The remaining bare object reads on `main` — `git_object_kind`, `handover_creation_state`, `handover_current_incarnation_text`, `staged_deleted_queue_paths`, `staged_mutated_queue_paths`, `staged_mutated_handover_paths`, `task_ids_changed_on_edge`, and `task_artifact_renames_on_edge` — all read through the hardened form.
+- [x] The six `test_replace_ref_cannot_*` regressions from the 07-26 branch pass on `main`: forging a review object, forging ancestry, forging synthetic-candidate parents, hiding staged admission changes, hiding a new handover, and changing a handover or staged blob baseline.
+- [x] A source-level guard fails the suite when any new bare `["git", ...]` invocation is added outside a small index/worktree-only allowlist, so the gap cannot silently reopen.
+- [x] `verification.md` records the real before-and-after output of each regression on an unmodified tree first.
+- [x] The creation-baseline rule, `ordinary_request_resolution_evidence_problem`, and the 24 evidence-lineage tests are NOT ported — they were rejected by measurement.
 
 ## Links
 
