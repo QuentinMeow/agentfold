@@ -3,88 +3,81 @@ Filename: choose exactly one delivery prefix, then a kebab-case slug:
 - blocking-: a named current task, transition, or operation cannot proceed now.
 - future-blocking-: work may continue, but must stop at a named date, event, or transition.
 - non-blocking-: this message never stops work and names the safe unattended outcome.
-The filename prefix is canonical. Do not add a separate **Blocking:** field.
+The filename prefix is canonical. Do not add a separate Blocking field.
+
+Before you file, check all nine. Lifecycle law lives in handbook/human-action-guide.md.
+1. The title is a question the owner can answer without knowing this repository.
+2. Exactly three fields above the first heading: Action, Why this matters, If you do nothing.
+3. Today / What this would change / What this does not decide are true and specific.
+4. Two or more choices, each with a cost and a concrete *Example consequence:*.
+5. The axis sentence opens Your choices and says what the choices differ on.
+6. Recommendation names one choice shown; its counter-case sits beside it.
+7. No machine field, hash, or token appears above the answer line.
+8. The source is linked once in the prose; For the record keeps the machine copies.
+9. Under 700 words before the answer. Cut background, not choices.
 -->
 
-# <The review judgment needed, one line>
+# <The question the owner can answer, in plain English>
 
-**Status:** <awaiting-artifact | waiting | folding>
-**Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
-**Action:** <approve, request a named change, or state another disposition>
-**Full context:** [<stable design, ADR, or evidence>](<repo-relative path>)
-**Resolution evidence:** `<non-queue path distinct from Review target>`
-<!-- For a provider assignment, add exactly one **External assignment:** <opaque
-stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
-Omit it otherwise. -->
-<!-- For an active provider source, add exactly one **External source:** <opaque
-versioned identity emitted by its adapter>, even when provider prose links here. -->
-**Why-you-might-care:** <one sentence explaining the practical consequence>
-**If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
-**Review target:** <pending | `repo/path` | [label](repo/path) | git:<full id or base...head> | one HTTPS URL/link>
-**Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
-**Reviewed revision:** ______
-**Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
-
-<!-- awaiting-artifact uses pending target/revision. Waiting binds exactly one target:
-a local file or HTTPS artifact uses its sha256; a Git target repeats the identical
-git:<...> value as Review revision. Full context explains; it is not the target. -->
-
-<!-- approved accepts the bound revision and is response-terminal with no successor.
-Keep a future-blocking review folding and live through its boundary; approval may
-satisfy the boundary only while fresh. A task start/review/complete boundary reviews
-one stable local artifact; its task must remain past the exact receipt transition.
-A merge boundary instead reviews git:<base>...<head>; only queue tail commits stay
-fresh, and cleanup needs its receipt-carrying merge in the already-admitted target.
-Dates close when reached. Named events/custom transitions first escalate to blocking;
-custom operations are already blocking. Without a controlled adapter, changed
-Resolution evidence is only agent attestation, not independent or hard proof.
-changes-requested preserves the boundary. Before deleting, add **Successor action:**
-`<new needs-agent queue path>` here. That new same-timing open action owns the repair
-in Action, keeps Full context, predeclares non-queue Resolution evidence, and points
-back with Supersedes. It must also link one distinct same-timing **Follow-up review:**
-that is newly awaiting-artifact, points back with Supersedes, and names the repair in
-Depends on. The follow-up Action is the later judgment, never a copy of the repair.
-rejected declines the proposal and abandoned ends pursuit; neither authorizes a
-boundary. Cleanup removes a task pursuit, restores a Git candidate to its base, or
-changes/removes a local target, then changes the distinct Resolution evidence. Legacy
-**Review outcome:** not-approved remains accepted as changes-requested. -->
-
-<!-- Replace this comment with exactly one block matching the filename:
-blocking-*:
-**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
-
-future-blocking-*:
-**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-**Until then:** <the explicit safe path while work continues>
-Dates are clock-checkable. An event/custom transition is agent-attested unless a
-controlled adapter validates and enforces its crossing.
-
-non-blocking-*:
-**If unanswered:** <the explicit safe outcome; this message will never stop work>
--->
+**Action:** <one imperative sentence; handovers copy this verbatim as the link label>
+**Why this matters:** <one sentence of consequence in the world, not in the repository>
+**If you do nothing:** <one sentence: what stops, and what safely continues>
 
 ## What you need to know
 
-<2–3 sentences from zero. Explain what changed or is proposed, why judgment is needed,
-and what the review can affect. This summary must stand alone; the Full context link
-supplies depth rather than missing prerequisites.>
+**Today:** <what actually happens now — say "nothing is implemented" when that is true>
+**What this would change:** <the delta being judged, stated as a proposal>
+**What this does not decide:** <adjacent things a reader will assume are in scope>
 
-## Differences
+<One or two short value-neutral paragraphs from zero context. Link the source exactly
+once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
+alone: the reader should be able to answer without opening anything.>
 
-<Describe the meaningful review dispositions and what each causes. For example, explain
-the difference between accepting the current boundary and requesting a specific change;
-do not use unexplained approval shorthand.>
+## Your choices
 
-## Example
+<One sentence naming the axis the choices differ on. Not a restatement of them.>
 
-<One small scenario showing the practical consequence of two different review outcomes.>
+### Approve
+<What this accepts, and the state the repository enters. Name at least one cost.>
+*Example consequence:* <a concrete scenario of life after this answer>
+
+### Request changes
+<The boundary stays closed; an agent repairs the named thing, publishes one exact
+revision, and a fresh review returns to the owner. Name at least one cost.>
+*Example consequence:* <a concrete scenario of life after this answer>
+
+### Reject
+<Only if declining is genuinely available. If it is not, drop this heading and say so
+in the axis sentence — never pad an outcome nobody would pick.>
+*Example consequence:* <a concrete scenario of life after this answer>
+
+## What I recommend
+
+**Recommendation:** <exactly one of the choices above> — <one sentence why>
+**Strongest case against this:** <the best argument for a different answer>
+**Confidence:** <high | medium | low> — <what you checked, and what you did not>
+
+Answer in plain words — one sentence is enough. You do not need to copy anything or use
+particular vocabulary; the agent that folds your answer does the bookkeeping and will
+show you how it read your words before acting.
 
 **Your review:** ______
 
-<!-- Status-folder task paths move and are not durable context. When answering, copy
-Review revision into Reviewed revision. Git revisions must name locally available
-commit objects. If an unanswered waiting target becomes stale, retract it in one commit:
-set Status to awaiting-artifact, target/revision to pending, and keep response/reviewed
-blank with outcome pending. Publish the replacement in a later awaiting-artifact ->
-waiting commit. Neither lifecycle edge may add a response; the first response freezes
-the binding forever. -->
+## For the record
+
+Bookkeeping the reconciler reads. Nothing here needs you.
+
+**Status:** <awaiting-artifact | waiting | folding>
+**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
+**Full context:** `<repo-relative path to the durable source>`
+**Resolution evidence:** `<non-queue path distinct from Review target>`
+**Review target:** <pending | `repo/path` | git:<full id or base...head> | one HTTPS link>
+**Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
+**Reviewed revision:** ______
+**Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
+<!-- Then exactly one timing field matching the filename:
+blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
+future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+non-blocking-* -> neither; If you do nothing above is the unattended outcome.
+Add External assignment / External source only for a provider binding. On a
+changes-requested resolution add Successor action and Follow-up review here. -->

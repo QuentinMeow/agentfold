@@ -28,8 +28,10 @@ originate an ask. Use one top-level bullet per live item, ordered by `blocking-`
 `future-blocking-`, `non-blocking-`, then queue path. The bullet's first content is
 `[<the queue item's exact Action text>](../../../message-queue/needs-human/<kind>/<prefixed-name>.md)`.
 That is the bullet's only link. Append exactly
-` — Why-you-might-care: <copied field> || If-you-do-nothing: <copied field>`,
+` — Why this matters: <copied field> — If you do nothing: <copied field>`,
 copying both values from the same queue snapshot with only whitespace reflow allowed.
+An item still written in the pre-rename spelling supplies those same two values; the
+suffix labels come from the entry schema in `history/AGENTS.md`, never from the item.
 No other prose can appear. The relative link must resolve to the exact live queue
 file. Repeat this section verbatim in the final chat reply. Write `None.` when no
 human items are open.>

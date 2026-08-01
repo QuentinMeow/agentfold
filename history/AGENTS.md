@@ -1,7 +1,7 @@
 # history/ — conversation record
 
 **Queue projection schema:** v1
-**Queue action-entry schema:** v2
+**Queue action-entry schema:** v3
 
 One folder per conversation/session that did work:
 `conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
@@ -31,10 +31,13 @@ originates a cross-session action.
 The action-entry marker independently versions strict projection syntax. Version 1
 freezes the structural entry contract that existing records passed when they were
 created. Version 2 keeps that structure and adds raw-HTML and action-origin checks.
+Version 3 keeps both and renames only the two suffix labels it renders.
 Each post-activation entry is one top-level bullet whose first content is
 `[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
-` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both values
-from that queue snapshot, and project the complete queue in timing-then-path order.
+` — Why this matters: <field> — If you do nothing: <field>` under v3 and
+` — Why-you-might-care: <field> || If-you-do-nothing: <field>` under v1/v2, copying both
+values from that queue snapshot whichever spelling the item itself uses, and project the
+complete queue in timing-then-path order.
 Agent entries contain only the link and may project just work assigned here. The
 creation/admission edge selects the highest active version; parallel history joined
 with an activation uses that version. A rejecting grammar expansion requires a new

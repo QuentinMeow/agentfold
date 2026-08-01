@@ -3,64 +3,72 @@ Filename: choose exactly one delivery prefix, then a kebab-case slug:
 - blocking-: a named current task, transition, or operation cannot proceed now.
 - future-blocking-: work may continue, but must stop at a named date, event, or transition.
 - non-blocking-: this message never stops work and names the safe unattended outcome.
-The filename prefix is canonical. Do not add a separate **Blocking:** field.
+The filename prefix is canonical. Do not add a separate Blocking field.
+
+Before you file, check all nine. Lifecycle law lives in handbook/human-action-guide.md.
+1. The title is a question the owner can answer without knowing this repository.
+2. Exactly three fields above the first heading: Action, Why this matters, If you do nothing.
+3. Today / What this would change / What this does not decide are true and specific.
+4. Two or more choices, each with a cost and a concrete *Example consequence:*.
+5. The axis sentence opens Your choices and says what the choices differ on.
+6. Recommendation names one choice shown; its counter-case sits beside it.
+7. No machine field, hash, or token appears above the answer line.
+8. The source is linked once in the prose; For the record keeps the machine copies.
+9. Under 700 words before the answer. Cut background, not choices.
 -->
 
-# <The decision, one sentence, answerable in a word or two>
+# <The question the owner can answer, in plain English>
 
-**Status:** <waiting | folding>
-**Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
-**Action:** <choose one option, or state another choice>
-**Full context:** [<complete source>](<repo-relative path>)
-<!-- For a provider assignment, add exactly one **External assignment:** <opaque
-stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
-Omit it otherwise. -->
-<!-- For an active provider source, add exactly one **External source:** <opaque
-versioned identity emitted by its adapter>, even when provider prose links here. -->
-**Why-you-might-care:** <one sentence explaining the practical consequence>
-**If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
-**Resolution evidence:** `<durable file that folding this answer will change>`
-
-<!-- Replace this comment with exactly one block matching the filename:
-blocking-*:
-**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
-
-future-blocking-*:
-**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-**Until then:** <the explicit safe path while work continues>
-Dates are clock-checkable. An event/custom transition is agent-attested unless a
-controlled adapter validates and enforces its crossing.
-
-non-blocking-*:
-**If unanswered:** <the explicit safe outcome; this message will never stop work>
--->
+**Action:** <one imperative sentence; handovers copy this verbatim as the link label>
+**Why this matters:** <one sentence of consequence in the world, not in the repository>
+**If you do nothing:** <one sentence: what stops, and what safely continues>
 
 ## What you need to know
 
-<2–3 sentences from zero — no domain expertise assumed. What part of the system,
-why the choice came up now, and what the answer will change. This summary must stand
-alone; the Full context link supplies depth rather than missing prerequisites.>
+**Today:** <what actually happens now — say "nothing is implemented" when that is true>
+**What this would change:** <the delta being judged, stated as a proposal>
+**What this does not decide:** <adjacent things a reader will assume are in scope>
 
-## Differences
+<One or two short value-neutral paragraphs from zero context. Link the source exactly
+once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
+alone: the reader should be able to answer without opening anything.>
 
-<Compare the meaningful alternatives in plain language. Name the trade-off or boundary
-that changes; do not merely repeat the option labels.>
+## Your choices
 
-## Options
+<One sentence naming the axis the choices differ on. Not a restatement of them.>
 
 ### Option A — <short name>
-<What it means in plain language.>
-*Example consequence:* <concrete scenario of life after choosing A.>
+<What this accepts, and the state the repository enters. Name at least one cost.>
+*Example consequence:* <a concrete scenario of life after this answer>
 
 ### Option B — <short name>
-<Same shape.>
-*Example consequence:* <concrete scenario.>
+<Same shape. Two choices is the minimum; never pad an outcome nobody would pick.>
+*Example consequence:* <a concrete scenario of life after this answer>
 
-## Recommendation
+## What I recommend
 
-<A or B, one sentence why.>
+**Recommendation:** <exactly one of the choices above> — <one sentence why>
+**Strongest case against this:** <the best argument for a different answer>
+**Confidence:** <high | medium | low> — <what you checked, and what you did not>
+
+Answer in plain words — one sentence is enough. You do not need to copy anything or use
+particular vocabulary; the agent that folds your answer does the bookkeeping and will
+show you how it read your words before acting.
 
 **Your answer:** ______
 
-<!-- A concrete response is immutable. If it is a counter-question, fold the answer into
-Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->
+## For the record
+
+Bookkeeping the reconciler reads. Nothing here needs you.
+
+**Status:** <waiting | folding>
+**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
+**Full context:** `<repo-relative path to the durable source>`
+**Resolution evidence:** `<durable non-queue file that folding this answer will change>`
+<!-- Then exactly one timing field matching the filename:
+blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
+future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+non-blocking-* -> neither; If you do nothing above is the unattended outcome.
+Add External assignment / External source only for a provider binding. A concrete
+response is immutable: if it is a counter-question, fold the answer into Resolution
+evidence and create a same-timing successor naming this path in Supersedes. -->
