@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-30
+**Last-updated:** 2026-07-31
 
 What is true today, mapped to the desired-state lines.
 
@@ -115,6 +115,20 @@ What is true today, mapped to the desired-state lines.
   with corrected context, because a live queue item's action text cannot be edited in
   place. The Stage 0 transcripts are still owed, and mining also surfaced a live drift
   plus a fivefold restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
+- **Human-attention format (2026-07-31)**: the owner's review of the first-class
+  message-queue contract is resolved. The contract was accepted and its presentation was
+  answered `changes-requested` on 2026-07-26 — the files "read like a database record",
+  putting machine bookkeeping ahead of the question and leaving past, current, and
+  proposed behavior undistinguished. That response had been committed only onto
+  the task/2026-07-23-first-class-message-queue branch, a branch never pushed and 77 commits behind
+  `main`, so every copy reachable from `main` still read `pending` and handovers kept
+  re-asking a question already answered. The response is now transcribed byte-exactly onto
+  main-line, the review is folded, and the repair it demanded is live as
+  `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md` with
+  its promised re-review. An action-first format is designed but not adopted: the
+  implementation on that stale branch is design input only, because its 1,849-line
+  `automation/markdown_semantics.py` rewrite was blocked by its own adversarial parser lens
+  three times and never tested against the current reconciler.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
