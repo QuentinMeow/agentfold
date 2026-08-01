@@ -51,6 +51,13 @@ from markdown_semantics import (
 REPO = Path(__file__).resolve().parents[2]
 TODAY = datetime.datetime.now(datetime.timezone.utc).date()
 
+# Every read of a Git object goes through this prefix, so a `refs/replace/*`
+# entry cannot substitute a forged commit, tree, or blob for the real one this
+# checker was asked about. Only commands that read the index or the worktree,
+# or that resolve a location, may be spelled bare — a source-level guard in
+# `automation/tests/test_reconcile_queue.py` holds that line.
+RAW_GIT = ("git", "--no-replace-objects")
+
 QUEUE = REPO / "message-queue"
 RETRIES = QUEUE / "needs-agent" / "retries"
 TASKS = REPO / "tasks"
@@ -512,7 +519,7 @@ def load_git_head_snapshot():
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", _GIT_HEAD_OID):
         raise GitSnapshotError("Git HEAD did not resolve to a full object ID")
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "-z", _GIT_HEAD_OID],
+        [*RAW_GIT, "ls-tree", "-r", "--name-only", "-z", _GIT_HEAD_OID],
         cwd=REPO,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -605,7 +612,7 @@ def git_head_paths(prefix):
             prefix,
         ))
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
+        [*RAW_GIT, "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -642,7 +649,7 @@ def validate_range_candidate(change_range):
             )
     if _GIT_HEAD_OID != range_head:
         ancestry = subprocess.run(
-            ["git", "rev-list", "--parents", "-n", "1", _GIT_HEAD_OID],
+            [*RAW_GIT, "rev-list", "--parents", "-n", "1", _GIT_HEAD_OID],
             cwd=REPO,
             text=True,
             stdout=subprocess.PIPE,
@@ -662,7 +669,7 @@ def validate_range_candidate(change_range):
                 "base+head synthetic merge"
             )
     staged = subprocess.run(
-        ["git", "diff-index", "--cached", "--quiet", _GIT_HEAD_OID, "--"],
+        [*RAW_GIT, "diff-index", "--cached", "--quiet", _GIT_HEAD_OID, "--"],
         cwd=REPO,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -902,7 +909,9 @@ def git_blob_bytes(oid):
     Blob bytes are what their object ID says they are, so the reader stays open
     across reconciler invocations and every caller — index reads and historical
     tree reads alike — pays one ``fork``/``exec`` per repository instead of one
-    ``git show`` per artifact.
+    ``git show`` per artifact. Every cached object read funnels through this one
+    process, so it is launched outside ``refs/replace/*``: a replacement entry
+    here would substitute forged bytes for every artifact the checker reads.
     """
     global _GIT_CAT_FILE_PROCESS
     if not oid:
@@ -913,7 +922,7 @@ def git_blob_bytes(oid):
     if _GIT_CAT_FILE_PROCESS is None:
         try:
             _GIT_CAT_FILE_PROCESS = subprocess.Popen(
-                ["git", "cat-file", "--batch"],
+                [*RAW_GIT, "cat-file", "--batch"],
                 cwd=REPO,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -1302,7 +1311,7 @@ def candidate_activation_heads(head):
     return (head,) if head else ()
 
 
-def git_merge_base_result(base, head, replace_objects=False):
+def git_merge_base_result(base, head):
     """Return (returncode, stdout, stderr) for one merge-base question.
 
     A merge base of two full object IDs is a fact about immutable history, so a
@@ -1310,16 +1319,12 @@ def git_merge_base_result(base, head, replace_objects=False):
     objects they could not reach may still arrive.
     """
     scope_immutable_git_caches()
-    cache_key = (replace_objects, base, head)
+    cache_key = (base, head)
     cacheable = immutable_revision(base) and immutable_revision(head)
     if cacheable and cache_key in _GIT_MERGE_BASE_CACHE:
         return _GIT_MERGE_BASE_CACHE[cache_key]
-    command = ["git"]
-    if not replace_objects:
-        command.append("--no-replace-objects")
-    command.extend(["merge-base", base, head])
     common = subprocess.run(
-        command,
+        [*RAW_GIT, "merge-base", base, head],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -1368,7 +1373,7 @@ def git_object_kind(object_id):
     if cacheable and object_id in _GIT_OBJECT_KIND_CACHE:
         return _GIT_OBJECT_KIND_CACHE[object_id]
     result = subprocess.run(
-        ["git", "cat-file", "-t", object_id],
+        [*RAW_GIT, "cat-file", "-t", object_id],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -1405,7 +1410,7 @@ def git_repository_path(name):
     return resolved
 
 
-def git_ancestry_probe(ancestor, descendant, replace_objects=False):
+def git_ancestry_probe(ancestor, descendant):
     """Answer one ancestry question, reusing settled object-ID comparisons.
 
     Whether one commit reaches another is a fact about immutable history, so a
@@ -1413,16 +1418,12 @@ def git_ancestry_probe(ancestor, descendant, replace_objects=False):
     Errors are never cached: an object can still arrive later.
     """
     scope_immutable_git_caches()
-    cache_key = (replace_objects, ancestor, descendant)
+    cache_key = (ancestor, descendant)
     cacheable = immutable_revision(ancestor) and immutable_revision(descendant)
     if cacheable and cache_key in _GIT_ANCESTRY_CACHE:
         return _GIT_ANCESTRY_CACHE[cache_key]
-    command = ["git"]
-    if not replace_objects:
-        command.append("--no-replace-objects")
-    command.extend(["merge-base", "--is-ancestor", ancestor, descendant])
     relationship = subprocess.run(
-        command,
+        [*RAW_GIT, "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=REPO,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -1514,7 +1515,7 @@ def staged_deleted_queue_paths(parent):
         return []
     deleted = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=DR", parent, "--", "message-queue",
         ],
         cwd=REPO,
@@ -1534,7 +1535,7 @@ def staged_mutated_queue_paths(parent):
         return []
     changed = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=MRT", parent, "--", "message-queue",
         ],
         cwd=REPO,
@@ -1724,7 +1725,7 @@ def staged_mutated_handover_paths(parent):
         return []
     changed = subprocess.run(
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=MRT", parent, "--",
             "history/conversations",
         ],
@@ -4478,7 +4479,7 @@ def git_review_revision_problems(revision):
             problems.append(f"{object_id} is {kind}, not a commit")
     if len(object_ids) == 2 and not problems:
         returncode, _common, _detail = git_merge_base_result(
-            object_ids[0], object_ids[1], replace_objects=True
+            object_ids[0], object_ids[1]
         )
         if returncode:
             problems.append("base and head have no merge base")
@@ -4509,13 +4510,13 @@ def task_ids_from_change_range(change_range):
     if change_range.startswith("root:"):
         head = change_range[len("root:"):]
         changed_command = [
-            "git", "ls-tree", "-r", "--name-only", head, "--", "tasks",
+            *RAW_GIT, "ls-tree", "-r", "--name-only", head, "--", "tasks",
         ]
         log_range = head
     else:
         base, head = change_range.split("...", 1)
         changed_command = [
-            "git", "diff", "--no-renames", "--name-only",
+            *RAW_GIT, "diff", "--no-renames", "--name-only",
             change_range, "--", "tasks",
         ]
         log_range = f"{base}..{head}"
@@ -4536,7 +4537,7 @@ def task_ids_from_change_range(change_range):
                     and TASK_ID_RE.fullmatch(parts[2]):
                 task_ids.add(parts[2])
     messages = subprocess.run(
-        ["git", "log", "--format=%B", log_range],
+        [*RAW_GIT, "log", "--format=%B", log_range],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -5159,7 +5160,7 @@ def task_ids_changed_on_edge(parent, revision):
     """Return logical task ids touched on one exact Git/index edge."""
     command = (
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=ADMRT", parent, "--",
         ]
         if revision is None else
@@ -5382,7 +5383,7 @@ def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
         [
-            "git", "diff", "--cached", "--name-status", "-z", "-M",
+            *RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M",
             "--diff-filter=R", parent, "--", "tasks",
         ]
         if revision is None else
@@ -5830,11 +5831,13 @@ def newly_added_handovers():
         )
     elif CHANGE_RANGE and CHANGE_RANGE.startswith("root:"):
         command = [
-            "git", "ls-tree", "-r", "--name-only",
+            *RAW_GIT, "ls-tree", "-r", "--name-only",
             CHANGE_RANGE[len("root:"):], "--", "history/conversations",
         ]
     else:
-        command = ["git", "diff", "--no-renames", "--name-only", "--diff-filter=A"]
+        command = [
+            *RAW_GIT, "diff", "--no-renames", "--name-only", "--diff-filter=A",
+        ]
         command.append(CHANGE_RANGE if CHANGE_RANGE else "--cached")
         command.extend(["--", "history/conversations"])
     if CHANGE_RANGE is not None:
@@ -5860,12 +5863,10 @@ def newly_added_handovers():
             paths.add(candidate)
     if CHANGE_RANGE and not CHANGE_RANGE.startswith("root:"):
         base, head = CHANGE_RANGE.split("...", 1)
-        returncode, common, detail = git_merge_base_result(
-            base, head, replace_objects=True
-        )
+        returncode, common, detail = git_merge_base_result(base, head)
         tree = subprocess.run(
             [
-                "git", "ls-tree", "-r", "--name-only", head, "--",
+                *RAW_GIT, "ls-tree", "-r", "--name-only", head, "--",
                 "history/conversations",
             ],
             cwd=REPO,
@@ -5902,9 +5903,7 @@ def newly_added_handovers():
             if not creation:
                 return set(), latest.stderr.strip() \
                     or f"could not find current creation commit for {candidate}"
-            returncode, _detail = git_ancestry_probe(
-                creation, boundary, replace_objects=True
-            )
+            returncode, _detail = git_ancestry_probe(creation, boundary)
             if returncode != 0:
                 paths.add(candidate)
     if CHANGE_RANGE:
@@ -6076,7 +6075,7 @@ def handover_creation_state(handover, rel):
         return None, None, None, creation_error
 
     artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
+        [*RAW_GIT, "show", f"{created_at}:{rel.as_posix()}"],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
@@ -6085,7 +6084,7 @@ def handover_creation_state(handover, rel):
     )
     tree = subprocess.run(
         [
-            "git", "ls-tree", "-r", "-z", created_at, "--",
+            *RAW_GIT, "ls-tree", "-r", "-z", created_at, "--",
             "message-queue",
         ],
         cwd=REPO,
@@ -6174,7 +6173,7 @@ def handover_current_incarnation_text(rel):
     if not created_at:
         return None, history.stderr.strip() or "could not find creation commit"
     artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
+        [*RAW_GIT, "show", f"{created_at}:{rel.as_posix()}"],
         cwd=REPO,
         text=True,
         stdout=subprocess.PIPE,
