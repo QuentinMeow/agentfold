@@ -313,6 +313,49 @@ $ wc -l automation/AGENTS.md
       60 automation/AGENTS.md
 ```
 
+## 6. Re-run on the finished tree
+
+Section 5 was recorded at `6bcf9012`, the commit that carries the code change. Repeated at
+`373ed00b`, after the records, the roadmap entry and the handover were added — only record
+paths changed between the two:
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ python3 automation/check_core_scope.py \
+    --range 025de49cbd6cf11adaa54d70590870f3bf17cdab...373ed00b426786604d82bc27838e6d66cd9e8a36 \
+    --branch task/2026-08-01-admit-a-candidates-whole-task-scope
+core-scope: pass (6 core path(s), task 2026-08-01-admit-a-candidates-whole-task-scope; independent review manual; not invoked)
+
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge \
+    --branch task/2026-08-01-admit-a-candidates-whole-task-scope \
+    --range 025de49cbd6cf11adaa54d70590870f3bf17cdab...373ed00b426786604d82bc27838e6d66cd9e8a36
+reconcile: 0 finding(s)
+
+$ python3 automation/run_tests.py
+[... 22 lines of per-shard lane/selection output elided ...]
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+test elapsed: 0.01s
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 53.41s
+```
+
+The commit that adds this section is the only one after `373ed00b`, and it touches this file
+alone.
+
 ## Not verified
 
 - The hosted workflow was not re-run. Every replay above runs the same gate with the same
