@@ -44,6 +44,10 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - `main` is always green: reconciler clean, tests passing.
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
+- Filing an action is not crossing its boundary. A merge boundary skips an unanswered
+  action the range itself filed — otherwise the reciprocal task link the reconciler
+  requires would strand every `transition:*` action the moment it was written — and it
+  is reported at every later boundary it reaches. An answered one is never skipped.
 - A terminal human response does not erase a future merge dependency. Keep its
   `future-blocking-*` review folding and live; fresh approval of `git:<base>...<head>`
   satisfies merge only on that base with queue-only lifecycle commits afterward. The
@@ -53,11 +57,13 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   controlled adapter supplying the authentic target base and enforcing its ref policy.
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
-  one top-level entry and one queue link per action, including every live human path
-  in the task's `Queue actions`. A `task/<id>` branch declares its task and is checked
-  against changed task records and `task:` commit tokens between the trusted base and
-  immutable candidate; another branch is bound from that same evidence. Missing,
-  conflicting, or ambiguous scope fails closed. External assignments retain direction:
+  one top-level entry and one queue link per action, including every live human path in
+  the `Queue actions` of every task in scope. Scope is the set of tasks the candidate
+  carries, read from changed task records and `task:` commit tokens between the trusted
+  base and immutable candidate; several is ordinary, because a reciprocal queue link, a
+  filed follow-up, and a claimed child each edit a second task record. A `task/<id>`
+  branch declares one member of that set and fails closed when the candidate carries no
+  evidence of it. Missing scope fails closed. External assignments retain direction:
   a human reviewer or assignee requires a distinct task-owned `needs-human/` link,
   while an assigned agent or bot requires a distinct task-owned `needs-agent/` link.
   Each linked item must copy the adapter's opaque provider/stable-artifact/role/
