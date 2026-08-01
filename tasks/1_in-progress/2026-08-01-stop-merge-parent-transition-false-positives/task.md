@@ -41,28 +41,28 @@ lineage did not take that step is not a lifecycle step for that task at all.
 
 ## Acceptance criteria
 
-- [ ] The reproduction transcript of the pre-fix failure, taken with the exact commands
+- [x] The reproduction transcript of the pre-fix failure, taken with the exact commands
       that produced it, is recorded in `verification.md`
-- [ ] WHEN a merge candidate holds a task at a status that another parent of the same
+- [x] WHEN a merge candidate holds a task at a status that another parent of the same
       candidate already held, THE CHECK SHALL NOT report a lifecycle jump on the parent
       whose lineage did not take that step
-- [ ] WHEN a merge candidate advances a task to a status no parent held, THE CHECK SHALL
+- [x] WHEN a merge candidate advances a task to a status no parent held, THE CHECK SHALL
       still report `task:<id> jumped from <prior> to <status>`
-- [ ] WHEN a lifecycle jump crosses a single-parent edge, THE CHECK SHALL behave exactly
+- [x] WHEN a lifecycle jump crosses a single-parent edge, THE CHECK SHALL behave exactly
       as it does today
-- [ ] The suppression matches on the exact status, not merely on the task being recorded
+- [x] The suppression matches on the exact status, not merely on the task being recorded
       at a sibling parent — proved by a test that fails against the weaker shape
-- [ ] The task-id rename rule, the duplicate-incarnation guard, the deletion rule, the
+- [x] The task-id rename rule, the duplicate-incarnation guard, the deletion rule, the
       creation rule, and the `adopting` escape in the same function are unchanged
-- [ ] Every new test in `automation/tests/test_reconcile_queue.py` is recorded in
+- [x] Every new test in `automation/tests/test_reconcile_queue.py` is recorded in
       `verification.md` with the verdict it produced before the repair, so the
       discriminating ones are identifiable
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings and
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings and
       `python3 automation/run_tests.py` passes 11/11 files, both with real output in
       `verification.md`
-- [ ] The merge probe that reproduced the defect reports no `task-admission` finding after
+- [x] The merge probe that reproduced the defect reports no `task-admission` finding after
       the repair, with its real output in `verification.md`
-- [ ] `design.md` states which shape was chosen, what the rejected shapes do to each
+- [x] `design.md` states which shape was chosen, what the rejected shapes do to each
       preserved case, and carries a complete `## Core fit` receipt
 
 ## Links
