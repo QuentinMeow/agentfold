@@ -1,10 +1,10 @@
 # Stop task-admission from reading a merge parent edge as a lifecycle transition
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-08-01, by claude, from the reconciler failure reproduced by merging `origin/main` (8811770) into `origin/task/2026-07-31-finish-the-replacement-ref-boundary`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-merge-parent-transition-false-positives.md`
+**Queue actions:** none
 
 ## Goal
 
