@@ -7,8 +7,16 @@ raw HTML makes visible to a human; it must never supply structural evidence.
 """
 from html import unescape
 from html.parser import HTMLParser
+import functools
 import re
 import unicodedata
+
+# These views are pure functions of their exact source text, so the same document
+# analysed again — by another check, or by the same check at another Git revision
+# that did not change the file — has the same answer. Repository gates re-derive
+# them thousands of times per run, so each is memoised on its input text. The
+# bound keeps a long history walk from retaining every document it ever read.
+_TEXT_VIEW_CACHE_SIZE = 512
 
 
 FENCE_OPEN_RE = re.compile(r"^[ ]{0,3}(?P<fence>`{3,}|~{3,}).*$")
@@ -109,6 +117,7 @@ def strip_block_quote_markers(line, limit=None):
     return depth, cursor
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def _semantic_text(text, preserve_visible_html=False):
     """Blank fenced and raw-HTML blocks while preserving source line boundaries."""
     output = []
@@ -232,6 +241,7 @@ def _semantic_text(text, preserve_visible_html=False):
     return "".join(output)
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def semantic_text(text):
     """Blank constructs that cannot supply structural Markdown evidence.
 
@@ -397,6 +407,7 @@ class _RenderedHumanHTMLParser(HTMLParser):
         self.output.append(_line_endings_only(f"<![{data}]>"))
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def rendered_human_text(text):
     """Return prose a human can read, solely for detecting human-facing asks.
 
@@ -414,6 +425,7 @@ def rendered_human_text(text):
     )
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_default_ignorable_characters(text):
     """Remove invisible Unicode controls from an already isolated prose view.
 
@@ -513,6 +525,7 @@ def contains_raw_html(text):
     return bool(RAW_HTML_TOKEN_RE.search(clean))
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_indented_code(text):
     """Blank simple four-space/tab indented code lines."""
     output = []
