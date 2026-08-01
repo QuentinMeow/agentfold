@@ -70,8 +70,13 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertEqual("staged", selection.lane)
         self.assertEqual((self.cli_test,), selection.test_files)
         self.assertEqual(
-            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            [
+                "git", "--no-replace-objects",
+                "diff", "--cached", "--name-status", "-z", "-M",
+            ],
             run.call_args_list[1][0][0],
+            "the staged diff compares the index against a committed tree, so a "
+            "`refs/replace/*` entry must not be able to answer it",
         )
         self.assertEqual(
             ["git", "ls-files", "--stage", "-z"],
@@ -183,12 +188,18 @@ class StagedTestSelectionTests(unittest.TestCase):
 
     def test_automation_input_selects_only_its_registered_owners(self):
         cases = (
-            (b"automation/run_tests.py", ("test_run_tests.py",)),
+            (
+                b"automation/run_tests.py",
+                ("test_reconcile_queue.py", "test_run_tests.py"),
+            ),
             (b"automation/hooks/pre-commit", ("test_run_tests.py",)),
             (b"automation/reconcile/reconcile.py", ("test_reconcile_queue.py",)),
             (b"automation/mine_cochange.py", ("test_mine_cochange.py",)),
             (b"automation/cochange-ledger.txt", ("test_mine_cochange.py",)),
-            (b"automation/check_core_scope.py", ("test_check_core_scope.py",)),
+            (
+                b"automation/check_core_scope.py",
+                ("test_check_core_scope.py", "test_reconcile_queue.py"),
+            ),
             (
                 b".github/workflows/harness.yml",
                 (
@@ -515,6 +526,68 @@ class StagedTestSelectionTests(unittest.TestCase):
 
             self.assertEqual("full", selection.lane)
             self.assertIn("index changed", selection.reason)
+
+    def test_replace_ref_cannot_swap_the_staged_diff_for_a_record_only_one(self):
+        """A `refs/replace/*` entry must not choose the pre-commit test lane.
+
+        `git diff --cached` compares the index against HEAD's tree, so a
+        replacement for HEAD answers with whatever the attacker's commit
+        contains. Point it at a commit that already holds the staged code but an
+        older record, and the hook sees one record path, selects no test at all,
+        and lets an unreviewed code change through with nothing run.
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch) / "repository"
+            service = repository / "services/quote-cli"
+            tests = service / "tests"
+            tests.mkdir(parents=True)
+            record = repository / "tasks/1_in-progress/2026-07-31-example"
+            record.mkdir(parents=True)
+            code = service / "quote_cli.py"
+            test = tests / "test_quote_cli.py"
+            task_record = record / "task.md"
+            test.write_text("pass\n")
+
+            def git(*arguments, **keywords):
+                return subprocess.run(
+                    ["git", *arguments], cwd=repository, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    check=True, **keywords
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            # A decoy commit that already holds the final code, with an older record.
+            code.write_text("print('unreviewed')\n")
+            task_record.write_text("# older record\n")
+            git("add", ".")
+            git("commit", "-qm", "decoy")
+            decoy = git("rev-parse", "HEAD")
+            # The real HEAD: the old code and the current record.
+            code.write_text("print('reviewed')\n")
+            task_record.write_text("# current record\n")
+            git("add", ".")
+            git("commit", "-qm", "head")
+            head = git("rev-parse", "HEAD")
+            # Stage the real, unreviewed code change.
+            code.write_text("print('unreviewed')\n")
+            git("add", ".")
+
+            honest = RUN_TESTS.staged_test_selection((test,), repository)
+            git("replace", "-f", head, decoy)
+            try:
+                forged = RUN_TESTS.staged_test_selection((test,), repository)
+            finally:
+                git("replace", "-d", head)
+
+            self.assertEqual("staged", honest.lane)
+            self.assertEqual((test,), honest.test_files)
+            self.assertEqual(honest.lane, forged.lane)
+            self.assertEqual(
+                honest.test_files, forged.test_files,
+                "a replacement entry chose which tests the hook runs",
+            )
 
     def test_default_interface_is_the_full_suite(self):
         options = RUN_TESTS.parse_arguments(())

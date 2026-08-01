@@ -30,6 +30,12 @@ from markdown_semantics import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
+# Every Git read in this gate goes through this prefix, so a `refs/replace/*` entry
+# cannot substitute a forged commit, tree, or blob for the real one the gate was asked
+# about. `git_output` prepends it for its callers; the two direct spawns below spell it
+# out. The source-level guard in `automation/tests/test_reconcile_queue.py` holds that
+# line for this file too.
+RAW_GIT = ("git", "--no-replace-objects")
 QUEUE_ACTORS = ("needs-human", "needs-agent")
 QUEUE_ACTOR_CHOICES = (*QUEUE_ACTORS, "any")
 QUEUE_TYPED_ITEM_PATTERN = (
@@ -1650,7 +1656,7 @@ def queue_path_from_destination(
 
 def git_output(args, repo=REPO):
     result = subprocess.run(
-        ["git", *args],
+        [*RAW_GIT, *args],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1670,7 +1676,7 @@ def candidate_revision_oid(value, repo=REPO):
     if not FULL_OBJECT_ID_RE.fullmatch(revision):
         raise ValueError("candidate revision must be one full Git object id")
     output = git_output(
-        ["--no-replace-objects", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        ["rev-parse", "--verify", f"{revision}^{{commit}}"],
         repo=repo,
     ).decode("ascii", errors="replace").strip()
     if output.casefold() != revision.casefold():
@@ -1683,10 +1689,7 @@ def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
     base = candidate_revision_oid(base_revision, repo=repo)
     candidate = candidate_revision_oid(candidate_revision, repo=repo)
     ancestor = subprocess.run(
-        [
-            "git", "--no-replace-objects", "merge-base",
-            "--is-ancestor", base, candidate,
-        ],
+        [*RAW_GIT, "merge-base", "--is-ancestor", base, candidate],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1697,10 +1700,7 @@ def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
             "base revision must be an ancestor of the candidate revision"
         )
     changed = git_output(
-        [
-            "--no-replace-objects", "diff", "--name-only", "-z",
-            base, candidate, "--", "tasks",
-        ],
+        ["diff", "--name-only", "-z", base, candidate, "--", "tasks"],
         repo=repo,
     )
     task_ids = {
@@ -1717,10 +1717,7 @@ def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
         and TASK_ID_RE.fullmatch(parts[2])
     }
     messages = git_output(
-        [
-            "--no-replace-objects", "log", "--format=%B%x00",
-            f"{base}..{candidate}",
-        ],
+        ["log", "--format=%B%x00", f"{base}..{candidate}"],
         repo=repo,
     ).decode("utf-8", errors="replace")
     task_ids.update(
@@ -1762,7 +1759,7 @@ class RepositoryView:
         else:
             output = git_output(
                 [
-                    "--no-replace-objects", "ls-tree", "-r", "-z",
+                    "ls-tree", "-r", "-z",
                     self.candidate_revision,
                 ],
                 repo=self.repo,
@@ -1814,9 +1811,7 @@ class RepositoryView:
                 f":{path}" if self.candidate_revision is None
                 else f"{self.candidate_revision}:{path}"
             )
-            output = git_output(
-                ["--no-replace-objects", "show", object_name], repo=self.repo
-            )
+            output = git_output(["show", object_name], repo=self.repo)
             try:
                 self._texts[path] = output.decode("utf-8")
             except UnicodeDecodeError as error:
@@ -1846,7 +1841,7 @@ class RepositoryView:
         if not object_ids:
             return {}
         result = subprocess.run(
-            ["git", "--no-replace-objects", "cat-file", "--batch-check"],
+            [*RAW_GIT, "cat-file", "--batch-check"],
             cwd=self.repo,
             input=("\n".join(object_ids) + "\n").encode("ascii"),
             stdout=subprocess.PIPE,

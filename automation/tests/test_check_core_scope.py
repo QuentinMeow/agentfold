@@ -738,6 +738,110 @@ class CoreScopeTests(unittest.TestCase):
             ).strip()
             self.assertTrue(SCOPE.review_revision_findings("deadbee", head, repo=root))
 
+    def test_replace_ref_cannot_pass_a_blob_as_the_reviewed_core_commit(self):
+        """A `refs/replace/*` entry must not turn a blob into a reviewed commit.
+
+        Bare, `git rev-parse --verify $BLOB^{commit}` answers from the
+        replacement and prints the blob's own object id, so the blob clears both
+        the "is this a commit" test and the full-object-id equality test that
+        follows it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            (root / "notes.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            (root / "notes.txt").write_text("head\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=root, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            payload = root / "payload.txt"
+            payload.write_text("not a commit\n", encoding="utf-8")
+            blob = subprocess.check_output(
+                ["git", "hash-object", "-w", str(payload)], cwd=root, text=True
+            ).strip()
+
+            def verdict():
+                return SCOPE.review_revision_findings(blob, head, repo=root)
+
+            without_replace = verdict()
+            subprocess.run(
+                ["git", "replace", "-f", blob, base], cwd=root, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                with_replace = verdict()
+            finally:
+                subprocess.run(["git", "replace", "-d", blob], cwd=root, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual(
+                [f"reviewed revision {blob!r} is not a commit in this repository"],
+                without_replace,
+            )
+            self.assertEqual(without_replace, with_replace)
+
+    def test_replace_ref_cannot_hide_a_stale_core_fit_review(self):
+        """The whole gate, not one check: a stale review must stay stale.
+
+        Replacing the reviewed commit with the current one empties the later
+        bound diff and makes the reviewed task inputs equal the current ones, so
+        every bare read agrees the review is fresh when it is not.
+        """
+        task_id = "2026-07-22-example"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            task = root / "tasks" / "1_in-progress" / task_id
+            task.mkdir(parents=True)
+            (task / "task.md").write_text("# reviewed input\n", encoding="utf-8")
+            (root / "automation").mkdir()
+            tool = root / "automation" / "tool.py"
+            tool.write_text("print('reviewed')\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "reviewed"], cwd=root, check=True)
+            reviewed = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+
+            tool.write_text("print('changed after the review')\n", encoding="utf-8")
+            (task / "task.md").write_text("# rewritten input\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "later core change"], cwd=root, check=True)
+            current = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+
+            def verdict():
+                return SCOPE.review_revision_findings(
+                    reviewed, current, task_id=task_id, repo=root
+                )
+
+            without_replace = verdict()
+            subprocess.run(
+                ["git", "replace", "-f", reviewed, current], cwd=root, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                with_replace = verdict()
+            finally:
+                subprocess.run(["git", "replace", "-d", reviewed], cwd=root, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual(1, len(without_replace), without_replace)
+            self.assertIn("is stale", without_replace[0])
+            self.assertIn("automation/tool.py", without_replace[0])
+            self.assertIn("task input task.md", without_replace[0])
+            self.assertEqual(without_replace, with_replace)
+
 
 if __name__ == "__main__":
     unittest.main()
