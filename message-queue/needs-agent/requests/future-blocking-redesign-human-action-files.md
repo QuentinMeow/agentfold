@@ -1,6 +1,6 @@
 # Redesign every file that asks a human for attention
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-31, by claude, from the owner's changes-requested review of task `2026-07-23-first-class-message-queue`
 **Action:** Research human–AI interaction, then design, implement, and verify an action-first format in which every human-attention file states the requested action first, separates historical from current from proposed behavior, presents each choice with its rationale and consequence, carries an evidence-backed agent recommendation, and keeps machine bookkeeping out of the reader's way.
 **Full context:** `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`; `message-queue/AGENTS.md`; `handbook/principles/files-as-messages.md`

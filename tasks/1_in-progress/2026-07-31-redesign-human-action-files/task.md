@@ -1,10 +1,10 @@
 # Redesign every file that asks a human for attention
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-31, by claude, from the live redesign request — `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-redesign-human-action-files.md`
+**Queue actions:** none
 
 ## Goal
 
