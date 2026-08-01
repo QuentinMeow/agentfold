@@ -7332,6 +7332,327 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = list(RECONCILE.check_handover_queue_projection())
             self.assertEqual([], findings, self.messages(findings))
 
+    def activate_schemas(self, root, entry="v2", liveness=None):
+        """Commit one history contract activating the named handover schemas."""
+        self.init_git(root)
+        self.write(
+            root,
+            "history/AGENTS.md",
+            "# History\n\n"
+            "**Queue projection schema:** v1\n"
+            f"**Queue action-entry schema:** {entry}\n"
+            + (
+                f"**Queue liveness schema:** {liveness}\n"
+                if liveness is not None
+                else ""
+            ),
+        )
+        self.git(root, "add", ".")
+        self.git(
+            root, "commit", "-m",
+            f"activate entry {entry} liveness {liveness}",
+        )
+
+    def write_human_action(
+        self, root, rel, action, status=None, response=None
+    ):
+        """Write one needs-human item with an explicit lifecycle state."""
+        return self.write(
+            root,
+            rel,
+            f"# {action}\n\n"
+            + (f"**Status:** {status}\n" if status is not None else "")
+            + f"**Action:** {action}\n"
+            f"**Why-you-might-care:** {action} decides the release boundary.\n"
+            f"**If-you-do-nothing:** {action} stays pending.\n"
+            + (f"\n**Your review:** {response}\n" if response is not None else "")
+        )
+
+    @staticmethod
+    def human_entry(rel, action):
+        """Build the strict handover bullet that projects one needs-human item."""
+        return (
+            f"- [{action}](../../../{rel}) — Why-you-might-care: {action} "
+            f"decides the release boundary. || If-you-do-nothing: {action} "
+            "stays pending."
+        )
+
+    RESOLVED_HUMAN_STATES = (
+        # (slug, status, committed response) — each is an agent's turn, not the
+        # human's, so a v3 handover must leave it out of the projection.
+        ("future-blocking-review-claimed", "folding", "approved"),
+        ("future-blocking-review-parked", "awaiting-artifact", None),
+        ("non-blocking-review-answered", "waiting", "ship the strict lane"),
+    )
+
+    def test_liveness_v1_projects_only_unresolved_human_actions(self):
+        with self.repo() as root:
+            self.activate_schemas(root, liveness="v1")
+            pending_rel = (
+                "message-queue/needs-human/reviews/"
+                "blocking-review-open-boundary.md"
+            )
+            self.write_human_action(
+                root,
+                pending_rel,
+                "review the open boundary",
+                status="waiting",
+                response="______",
+            )
+            for slug, status, response in self.RESOLVED_HUMAN_STATES:
+                self.write_human_action(
+                    root,
+                    f"message-queue/needs-human/reviews/{slug}.md",
+                    f"review {slug}",
+                    status=status,
+                    response=response,
+                )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-unresolved-only",
+                self.human_entry(pending_rel, "review the open boundary"),
+            )
+            self.git(root, "add", ".")
+
+            findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_liveness_v1_rejects_a_projected_resolved_human_action(self):
+        for slug, status, response in self.RESOLVED_HUMAN_STATES:
+            with self.subTest(status=status), self.repo() as root:
+                self.activate_schemas(root, liveness="v1")
+                resolved_rel = (
+                    f"message-queue/needs-human/reviews/{slug}.md"
+                )
+                self.write_human_action(
+                    root,
+                    resolved_rel,
+                    f"review {slug}",
+                    status=status,
+                    response=response,
+                )
+                self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-resolved-ask",
+                    self.human_entry(resolved_rel, f"review {slug}"),
+                )
+                self.git(root, "add", ".")
+
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+                self.assertTrue(any(
+                    "was not live at handover creation" in message
+                    for message in messages
+                ), messages)
+
+    def test_liveness_v1_accepts_none_when_every_action_is_resolved(self):
+        with self.repo() as root:
+            self.activate_schemas(root, liveness="v1")
+            for slug, status, response in self.RESOLVED_HUMAN_STATES:
+                self.write_human_action(
+                    root,
+                    f"message-queue/needs-human/reviews/{slug}.md",
+                    f"review {slug}",
+                    status=status,
+                    response=response,
+                )
+            self.make_handover(
+                root, "2026-07-23-1200PDT-all-resolved", "None."
+            )
+            self.git(root, "add", ".")
+
+            findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_liveness_v1_still_projects_an_unreadable_or_unknown_state(self):
+        cases = (
+            ("absent status", None, None),
+            ("unknown status", "parked", None),
+            ("blank response", "waiting", "______"),
+            ("empty response", "waiting", ""),
+        )
+        for label, status, response in cases:
+            with self.subTest(state=label), self.repo() as root:
+                self.activate_schemas(root, liveness="v1")
+                queue_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "blocking-review-unknown-state.md"
+                )
+                self.write_human_action(
+                    root,
+                    queue_rel,
+                    "review the unknown state",
+                    status=status,
+                    response=response,
+                )
+                self.make_handover(
+                    root, "2026-07-23-1200PDT-unknown-state", "None."
+                )
+                self.git(root, "add", ".")
+
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+                self.assertTrue(any(
+                    "says None. while human queue actions are live" in message
+                    for message in messages
+                ), messages)
+
+    def test_liveness_v1_still_requires_every_unresolved_human_action(self):
+        with self.repo() as root:
+            self.activate_schemas(root, liveness="v1")
+            projected_rel = (
+                "message-queue/needs-human/reviews/"
+                "blocking-review-open-boundary.md"
+            )
+            omitted_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-second-boundary.md"
+            )
+            self.write_human_action(
+                root, projected_rel, "review the open boundary",
+                status="waiting", response="______",
+            )
+            self.write_human_action(
+                root, omitted_rel, "review the second boundary",
+                status="waiting", response="______",
+            )
+            self.make_handover(
+                root,
+                "2026-07-23-1200PDT-missing-unresolved",
+                self.human_entry(projected_rel, "review the open boundary"),
+            )
+            self.git(root, "add", ".")
+
+            messages = self.messages(
+                RECONCILE.check_handover_queue_projection()
+            )
+            self.assertTrue(any(
+                "missing " + omitted_rel in message for message in messages
+            ), messages)
+
+    def test_unmarked_liveness_keeps_projecting_every_live_human_action(self):
+        """The narrowed rule must not reach records admitted under v1 or v2."""
+        for version in ("v1", "v2"):
+            with self.subTest(version=version), self.repo() as root:
+                self.activate_schemas(root, entry=version)
+                resolved_rel = (
+                    "message-queue/needs-human/reviews/"
+                    "future-blocking-review-claimed.md"
+                )
+                self.write_human_action(
+                    root, resolved_rel, "review the claimed boundary",
+                    status="folding", response="approved",
+                )
+                self.make_handover(
+                    root,
+                    "2026-07-23-1200PDT-legacy-projection",
+                    self.human_entry(
+                        resolved_rel, "review the claimed boundary"
+                    ),
+                )
+                self.git(root, "add", ".")
+
+                findings = list(
+                    RECONCILE.check_handover_queue_projection()
+                )
+                self.assertEqual([], findings, self.messages(findings))
+
+    def test_an_unrecognised_entry_version_does_not_narrow_liveness(self):
+        """Liveness lives in its own marker, so another branch's entry version
+        number cannot silently redefine which actions a record had to project."""
+        with self.repo() as root:
+            self.activate_schemas(root, entry="v9")
+            resolved_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-claimed.md"
+            )
+            self.write_human_action(
+                root, resolved_rel, "review the claimed boundary",
+                status="folding", response="approved",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-foreign-entry-version",
+                self.human_entry(resolved_rel, "review the claimed boundary"),
+            )
+            self.git(root, "add", ".")
+
+            messages = self.messages(
+                RECONCILE.check_handover_queue_projection()
+            )
+            self.assertFalse(any(
+                "not live" in message or "was not live" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(handover.is_file())
+
+    def test_liveness_schema_is_sticky_after_activation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n"
+                "**Queue liveness schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate unresolved projection")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            contract.write_text(
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", "history/AGENTS.md")
+            self.git(root, "commit", "-m", "drop the liveness schema")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "liveness schema v1 was removed or downgraded" in message
+                for message in messages
+            ), messages)
+
+    def test_unresolved_human_state_predicate_fails_open(self):
+        resolved = (
+            "**Status:** folding\n**Your review:** approved\n",
+            "**Status:** awaiting-artifact\n**Your review:** ______\n",
+            "**Status:** waiting\n**Your answer:** option B\n",
+            "**Status:** `folding`\n**Your review:** approved\n",
+        )
+        unresolved = (
+            None,
+            "",
+            "**Status:** waiting\n**Your review:** ______\n",
+            "**Status:** waiting\n",
+            "**Status:** parked\n**Your review:** approved\n",
+            "**Your review:** approved\n",
+            "**Status:** waiting\n**Your answer:** n/a\n",
+            # A folding claim without the committed response it claims to be
+            # folding is malformed, so it keeps its owner's attention.
+            "**Status:** folding\n",
+            "**Status:** folding\n**Your review:** ______\n",
+        )
+        for text in resolved:
+            self.assertFalse(
+                RECONCILE.human_action_unresolved(text), repr(text)
+            )
+        for text in unresolved:
+            self.assertTrue(
+                RECONCILE.human_action_unresolved(text), repr(text)
+            )
+
     def test_strict_handover_rejects_two_queue_links_or_wrong_actor(self):
         cases = (
             (
