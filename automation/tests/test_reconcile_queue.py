@@ -3156,6 +3156,170 @@ class ReconcileQueueTests(unittest.TestCase):
             finally:
                 RECONCILE.stop_git_snapshot_cache()
 
+    EARLIER_EVIDENCE_TASK = "2026-07-23-example"
+    EARLIER_EVIDENCE_QUEUE_PATH = (
+        "message-queue/needs-agent/requests/blocking-repair.md"
+    )
+
+    def stage_earlier_evidence_deletion(
+        self,
+        root,
+        work_messages=("repair the reported path", "task: 2026-07-23-example"),
+        changed_earlier=True,
+        reachable=True,
+        status_at_work="1_in-progress",
+        blocks_now="operation:release",
+        links_queue_path=True,
+    ):
+        """Stage a deletion whose evidence, if it moved at all, moved earlier.
+
+        The deletion edge itself never touches `docs/source.md`, so the
+        deletion-edge comparison always refuses and only the earlier-work rule
+        can admit it.
+        """
+        queue_rel = self.EARLIER_EVIDENCE_QUEUE_PATH
+        self.init_git(root)
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n",
+        )
+        source = self.write(root, "docs/source.md", "# Broken\n")
+        item = self.write(
+            root,
+            queue_rel,
+            "# Repair\n\n"
+            "**Status:** open\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** repair\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/source.md`\n"
+            f"**Blocks now:** {blocks_now}\n",
+        )
+        task = self.make_task(
+            root,
+            status_at_work,
+            f"`{queue_rel}`" if links_queue_path else "none",
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "file repair")
+        if changed_earlier:
+            source.write_text("# Repaired\n", encoding="utf-8")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", *[
+                argument
+                for message in work_messages
+                for argument in ("-m", message)
+            ])
+            if not reachable:
+                self.git(root, "reset", "--hard", "HEAD~1")
+        if status_at_work == "0_backlog":
+            destination = (
+                root / "tasks/1_in-progress" / self.EARLIER_EVIDENCE_TASK
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            task.rename(destination)
+            (destination / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (destination / "worklog.md").write_text(
+                "# Worklog\n", encoding="utf-8"
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "claim the task")
+        item.write_text(
+            item.read_text(encoding="utf-8").replace(
+                "**Status:** open", "**Status:** in-repair"
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", queue_rel)
+        self.git(root, "commit", "-m", "claim repair")
+        item.unlink()
+        self.git(root, "add", "-A")
+
+    def earlier_evidence_findings(self):
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return list(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_evidence_a_linked_task_already_committed_resolves_the_item(self):
+        """The stuck case: the repair merged before the deletion could be made."""
+        with self.repo() as root:
+            self.stage_earlier_evidence_deletion(root)
+            self.assertEqual([], self.earlier_evidence_findings())
+
+    def test_earlier_evidence_admission_refuses_every_weaker_history(self):
+        cases = {
+            "evidence never changed anywhere": dict(changed_earlier=False),
+            "the work is not reachable from the candidate": dict(
+                reachable=False
+            ),
+            "the commit carries no task: token": dict(
+                work_messages=("repair the reported path",)
+            ),
+            "the trailer names the item's own boundary task": dict(
+                blocks_now=f"task:{self.EARLIER_EVIDENCE_TASK}"
+            ),
+            "the task was still in backlog at that commit": dict(
+                status_at_work="0_backlog"
+            ),
+            "no task record links this queue path": dict(
+                links_queue_path=False
+            ),
+            "the trailer names some other task": dict(
+                work_messages=(
+                    "repair the reported path", "task: 2026-07-23-other",
+                )
+            ),
+            "the blocking timing value names no boundary": dict(
+                blocks_now="when the release goes out"
+            ),
+        }
+        for label, overrides in cases.items():
+            with self.subTest(label), self.repo() as root:
+                self.stage_earlier_evidence_deletion(root, **overrides)
+                findings = self.earlier_evidence_findings()
+                self.assertEqual(
+                    [
+                        "deleted unresolved queue item: resolution evidence "
+                        "was not created or changed in the deletion commit: "
+                        "`docs/source.md`"
+                    ],
+                    self.messages(findings),
+                    label,
+                )
+
+    def test_earlier_evidence_admission_needs_the_exact_queue_link(self):
+        """A task that links some other action does not resolve this one."""
+        with self.repo() as root:
+            self.stage_earlier_evidence_deletion(root, links_queue_path=False)
+            head = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                set(),
+                RECONCILE.task_ids_linking_queue_at(
+                    head, self.EARLIER_EVIDENCE_QUEUE_PATH
+                ),
+            )
+
+    def test_task_links_are_read_from_the_listed_task_record_objects(self):
+        """The recursive listing's own objects answer every `task.md` read."""
+        with self.repo() as root:
+            self.stage_earlier_evidence_deletion(root)
+            head = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                {self.EARLIER_EVIDENCE_TASK},
+                RECONCILE.task_ids_linking_queue_at(
+                    head, self.EARLIER_EVIDENCE_QUEUE_PATH
+                ),
+            )
+            self.assertEqual(
+                set(),
+                RECONCILE.task_ids_linking_queue_at(
+                    head, "message-queue/needs-agent/requests/blocking-x.md"
+                ),
+            )
+
     def test_deleted_review_response_must_match_requested_revision(self):
         with self.repo() as root:
             self.init_git(root)
