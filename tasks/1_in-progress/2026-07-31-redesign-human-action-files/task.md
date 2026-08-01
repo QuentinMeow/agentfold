@@ -17,9 +17,11 @@ choices with per-choice example consequences, an evidence-backed recommendation 
 own counter-case and a graded confidence, and every machine field moved below the answer
 line — and enforces it in `automation/reconcile/reconcile.py`.
 
-It also migrates every live unanswered `message-queue/needs-human/` item to that format
-without touching the one item that already carries the owner's committed answer, which
-stays byte-identical and keeps the schema it was written under.
+It does not touch a single live item. Migrating the eight files already in
+`message-queue/needs-human/` was attempted, reviewed, and cut: see `design.md`. Every new
+ask is written in the new format; the existing files keep the schema they were written
+under and age out as they resolve, and the countersigned migration they would need is
+filed as task `2026-08-01-countersign-the-live-human-item-migration`.
 
 An earlier attempt is design input, not a merge candidate: it rewrote
 `automation/markdown_semantics.py` by 1,849 lines to reason about rendered prose and was
@@ -28,33 +30,37 @@ leaves `automation/markdown_semantics.py` untouched.
 
 ## Acceptance criteria
 
-- [ ] `templates/queue/review.md`, `templates/queue/decision.md`, and
+- [x] `templates/queue/review.md`, `templates/queue/decision.md`, and
       `templates/queue/clarification.md` describe one action-first format with exactly
       three fields above the first heading and all bookkeeping below the answer line
-- [ ] `handbook/human-action-guide.md` states the shape of a human-attention file once,
-      and `message-queue/needs-human/reviews/README.md` no longer tells a human to copy
-      a hash
-- [ ] The reconciler gains a `human-attention` check that rejects a fourth header field,
+- [x] `handbook/human-action-guide.md` states the shape of a human-attention file once,
+      and says a person is never asked to copy a hash, a revision, or any offered
+      vocabulary
+- [x] The reconciler gains a `human-attention` check that rejects a fourth header field,
       any machine field above the answer line, a missing or ungraded recommendation, a
       recommendation naming a choice that was never shown, raw HTML, a resurrected
       `Look-at`, more than 700 words above the answer line, and state-dependent prose
       that contradicts `Status`
-- [ ] `Why-you-might-care` and `If-you-do-nothing` are renamed to `Why this matters` and
+- [x] `Why-you-might-care` and `If-you-do-nothing` are renamed to `Why this matters` and
       `If you do nothing`, with a permanent legacy alias and a `Queue action-entry
       schema: v3` handover suffix, so no record created under v1/v2 is retroactively
       invalidated
-- [ ] Every live unanswered `needs-human/` item is migrated in one commit, and
-      `message-queue/needs-human/reviews/future-blocking-review-detector-failure-state.md`
-      — the only item carrying a committed human response — is byte-identical to the
-      baseline afterwards, proved in `verification.md`
-- [ ] The migration carve-out fires only on the one-shot activation edge, refuses any
-      item carrying a human answer, freezes 17 fields byte-exactly and 2 more by resolved
-      path set, and permits only appending to the two projected sentences; adversarial
-      mutations against each fence are recorded with their real output
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 findings and
+- [x] No file under `message-queue/needs-human/` changes at all:
+      `git diff 025de49 HEAD -- message-queue/needs-human/` is empty, proved in
+      `verification.md`
+- [x] `queue_mutation_problem` carries no presentation carve-out: reformatting a live
+      item is refused with the format marker active exactly as it is without it, pinned
+      by a test
+- [x] Every new presentation check is inert for an item written in the pre-rename
+      spelling, so an existing live ask is neither rewritten nor newly rejected
+- [x] `**Human-attention format:** v1` cannot be removed once activated while the queue
+      remains, matching the three existing schema markers
+- [x] `review_successor_problem` compares boundary tokens only for a review written in
+      the new spelling, and still compares the full timing tuple for one that is not
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 findings and
       `python3 automation/run_tests.py` passes every file, with both real outputs in
       `verification.md`
-- [ ] `design.md` carries a complete `## Core fit` receipt, because
+- [x] `design.md` carries a complete `## Core fit` receipt, because
       `automation/reconcile/reconcile.py` is a core path
 
 ## Links
@@ -64,3 +70,7 @@ leaves `automation/markdown_semantics.py` untouched.
 - What a human action must achieve: `handbook/human-action-guide.md`
 - The queue contract and its lifecycle: `message-queue/AGENTS.md`
 - Why the queue owns pending actions: `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`
+- Migrating the eight existing asks: task `2026-08-01-countersign-the-live-human-item-migration`
+- Why such a migration is one-way: task `2026-08-01-record-that-a-format-migration-is-one-way`
+- The placeholder hole this found: task `2026-08-01-stop-reading-none-as-an-unanswered-field`
+- The deferred field deletion: task `2026-08-01-derive-the-reviewed-revision-field`
