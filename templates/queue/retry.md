@@ -1,9 +1,8 @@
 <!--
-Filename: choose exactly one delivery prefix, then a kebab-case slug:
-- blocking-: a named current task, transition, or operation cannot proceed now.
-- future-blocking-: work may continue, but must stop at a named date, event, or transition.
-- non-blocking-: this message never stops work and names the safe unattended outcome.
-The filename prefix is canonical. Do not add a separate **Blocking:** field.
+Filename: one delivery prefix, then a kebab-case slug. The three prefixes, what each
+one means, and the rule that the filename is canonical (so no separate **Blocking:**
+field exists) are stated once in `message-queue/AGENTS.md`, under "Routing: three
+independent axes". Slug grammar: `handbook/naming-conventions.md`.
 -->
 
 # <The broken invariant, one line>

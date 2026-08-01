@@ -17,9 +17,8 @@ may override it for that task via a `**Mode:**` field.
 ## One-way doors (what `async` mode must not decide alone)
 
 A decision is a **one-way door** when reversing it later costs far more than pausing
-now. File it in `message-queue/needs-human/decisions/` (format:
-`decision-guide.md`). Use `future-blocking-*` while a safe path exists until a named
-boundary; use `blocking-*` only when a named task, operation, or transition is stopped:
+now. File it in `message-queue/needs-human/decisions/` (format: `decision-guide.md`)
+with whatever delivery prefix its real timing earns (`message-queue/AGENTS.md`):
 
 - Public API or schema changes others already depend on
 - Adding a dependency, external service, or new tool to the stack

@@ -5,6 +5,7 @@
 **Decided-by:** human (review response preserved in commit 76d224d)
 **Description:** Guardrails ship as templates controlled by one hard, soft, off, or manual mode surface; sandboxing is deferred
 **Review-by:** 2027-03-15
+**Amended-by:** `memory/decisions/2026-07-23-assurance-profile-review-disposition.md` (assurance profiles as a thing documentation can describe)
 
 ## Context
 

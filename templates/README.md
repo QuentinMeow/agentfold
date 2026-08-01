@@ -24,18 +24,12 @@ Placeholders look like `<this>`; every `**Key:**` line shown is required unless 
 optional. The reconciler (`automation/reconcile/reconcile.py`) validates required keys
 on real files and skips this folder.
 
-Every live queue filename starts with exactly one delivery prefix. `blocking-` means a
-named current task, transition, or operation cannot proceed; `future-blocking-` means
-work may continue only until a named date, event, or transition; `non-blocking-` means
-the message never stops work and records the safe unattended outcome. The filename is
-the canonical delivery class. Each queue template shows the one matching timing block
-to retain; do not add a second `Blocking` field. Live timing can only escalate from
-non-blocking to future-blocking to blocking, and freezes with a human response.
-Every review predeclares non-queue Resolution evidence distinct from its target, so
-crossing or cancellation can be folded without inventing evidence after the answer.
-UTC date boundaries are clock-checkable. For arbitrary named events, transitions, or
-operations, repository evidence is an agent attestation unless a controlled adapter
-validates and enforces crossing; do not describe the former as hard assurance.
+Every live queue filename starts with exactly one delivery prefix. What the prefixes
+mean, how live timing may change, and what evidence a boundary needs are stated once in
+`message-queue/AGENTS.md`; this folder does not restate them. What is template-local:
+each queue template ships all three timing blocks in one comment, and you keep exactly
+the one matching your filename — the filename is the canonical delivery class, so a
+second `Blocking` field is never added back.
 
 `task/task.md` lists its live dependencies in `Queue actions`. `handover.md` projects
 open human queue items in delivery order; it never originates an action.

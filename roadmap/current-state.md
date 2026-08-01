@@ -79,6 +79,17 @@ What is true today, mapped to the desired-state lines.
   one canonical item under `message-queue/needs-human/decisions/` carrying their
   disposition; their three tasks stay in `tasks/3_in-review/` with the measurement recorded
   in each worklog.
+- **Contract text (2026-07-31)**: contract precedence is stated in exactly one file,
+  `handbook/principles/folder-as-a-service.md`, after root `AGENTS.md` and
+  `handbook/AGENTS.md` spent a while deferring to each other in a loop. The queue
+  delivery-prefix rule was restated in thirteen live contracts and had already drifted in
+  five; it now lives only in `message-queue/AGENTS.md` and every other file links there.
+  Contracts no longer claim in the present tense that retries are auto-filed, that guard
+  modes are configurable, that a third branch lane exists, or that link-check is
+  unqualified — the same claim inside `handbook/principles/eventual-consistency.md` is
+  waiting on a human decision, because principles are near-immutable. ADRs gained
+  `**Amends:**`/`**Amended-by:**` for a partial reversal, and `memory/index.md` marks an
+  amended decision `[amended]` so an overturned clause is no longer advertised as live.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
 - **Design review (2026-07-22)**: a full grill of the harness — report in

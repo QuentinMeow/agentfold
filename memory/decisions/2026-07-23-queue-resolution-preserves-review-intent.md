@@ -1,11 +1,12 @@
 # Queue resolution preserves review intent across revisions and rejected proposals
 
-**Status:** decided
+**Status:** superseded
 **Date:** 2026-07-23
 **Decided-by:** agent (delegated two-way-door lifecycle repair after independent adversarial review)
 **Description:** Review bindings retract before revision, requested changes keep a successor, terminal rejection closes, and displaced Git tips preserve live actions
 **Review-by:** 2027-02-25
 **Supersedes:** `memory/decisions/2026-07-23-queue-resolution-is-git-evidence.md`
+**Superseded-by:** `memory/decisions/2026-07-23-requested-review-changes-route-through-agent-repair.md`
 
 ## Context
 

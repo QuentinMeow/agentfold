@@ -41,8 +41,8 @@ live (links). See `services/quote-api/AGENTS.md` for the shape at its smallest.
 ## Advanced: layered public/private workspace
 
 An ignored nested repository, symlinked mirror, hook, or private branch is a navigation
-convention, not a confidentiality or publication boundary. Do not use the earlier
-mirror-structure sketch as a specification.
+convention, not a confidentiality or publication boundary — so none of them is a
+specification you can build a privacy claim on.
 
 The current proposal is
 `docs/designs/layered-development-workspace.md`: a non-Git envelope, private integration

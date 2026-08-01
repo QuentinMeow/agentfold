@@ -21,7 +21,13 @@ What the project must not forget, in four zones — plus a hard rule that memory
   findings; the `skills/memory-gardener/` pass re-verifies, compacts, or deletes.
 - **Merge before adding**: search the zone for an existing entry about the same
   subject; update it instead of duplicating.
-- ADRs are immutable: reversal = new ADR + `**Superseded-by:**` link on the old one.
+- ADRs are immutable: a full reversal is a new ADR + `**Superseded-by:**` and
+  `**Status:** superseded` on the old one. When the new ADR overturns only some clauses,
+  it carries `**Amends:** `<path>` — <clause>` and the old one gains a matching
+  `**Amended-by:**` while staying `decided`; `index.md` then marks it `[amended]` so a
+  booting agent does not read an overturned clause as live. Both directions are written
+  in the same commit. Adding those lineage fields, and bumping `Review-by`, are the only
+  edits an existing ADR may receive (schema: `templates/memory/adr.md`).
   All other zones are freely editable — they state *current* truth, and git remembers.
 - Lessons stay scoped. If a lesson applies everywhere, it doesn't belong here — promote
   it into the relevant `AGENTS.md` and delete the lesson file (one home per fact).
