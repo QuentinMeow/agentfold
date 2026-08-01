@@ -254,3 +254,216 @@ test elapsed: 31.81s
 ```
 
 No command in this task used `--no-verify` for any commit that was kept.
+
+## Merge of `origin/main` — 2026-08-01
+
+Merge commit `b01636b`, second parent `8811770`. Seven files conflicted:
+`handbook/decision-guide.md`, `templates/README.md`, and all five
+`templates/queue/*.md`. `…` marks an elision; every other line is real output.
+
+### The merge conflicts, and that the blocked check is not one of them
+
+```
+$ git merge origin/main --no-commit
+CONFLICT (content): Merge conflict in templates/queue/review.md
+Auto-merging templates/queue/retry.md
+CONFLICT (content): Merge conflict in templates/queue/retry.md
+Auto-merging templates/queue/request.md
+CONFLICT (content): Merge conflict in templates/queue/request.md
+Auto-merging templates/queue/decision.md
+CONFLICT (content): Merge conflict in templates/queue/decision.md
+Auto-merging templates/queue/clarification.md
+CONFLICT (content): Merge conflict in templates/queue/clarification.md
+Auto-merging templates/README.md
+CONFLICT (content): Merge conflict in templates/README.md
+…
+CONFLICT (content): Merge conflict in handbook/decision-guide.md
+…
+Automatic merge failed; fix conflicts and then commit the result.
+```
+
+`origin/main` alone is green, because with no `MERGE_HEAD` the reconciler compares
+only HEAD against the index and never re-walks history:
+
+```
+$ git worktree add --detach tmp/mainprobe origin/main
+HEAD is now at 8811770 Merge pull request #43 from QuentinMeow/task/2026-07-31-cut-reconciler-recomputation
+$ python3 tmp/mainprobe/automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+A merge of `origin/main` is not, and the finding does not depend on how the
+conflicts were resolved — a mechanical `-X theirs` merge produces the same one:
+
+```
+$ git worktree add --detach tmp/mergeprobe bedf5c7
+HEAD is now at bedf5c7 harness: advance the one-edit answer task to review
+$ git -C tmp/mergeprobe merge -X theirs --no-commit origin/main
+Automatic merge went well; stopped before committing as requested
+$ python3 tmp/mergeprobe/automation/reconcile/reconcile.py --check
+[task-admission] tasks/4_done/2026-07-25-fix-handover-projection-code-span-copy/task.md: task snapshot 84e3524ef36c8aed5734c48248131f6c2b397ce8 violated lifecycle topology: task:2026-07-25-fix-handover-projection-code-span-copy jumped from 1_in-progress to 4_done
+    fix: use one declared lifecycle edge at a time; from 1_in-progress the allowed destination is 2_blocked, 3_in-review
+reconcile: 1 blocking finding(s)
+```
+
+`84e3524` is main's merge of PR #41, whose branch moved that task
+`1_in-progress → 3_in-review → 4_done` in two governed commits. Read through the
+trunk-side parent alone it looks like one illegal jump.
+`task_status_at_other_parent` suppresses exactly that edge. Both scratch worktrees
+were removed afterwards.
+
+The new test fails without the guard and passes with it:
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_admission_accepts_a_merge_inheriting_an_advanced_task
+    # with `if False and task_status_at_other_parent(...)`
+First extra element 0:
+'task snapshot b4efb6f4e8b5f5a0116544df2e7fcf3bdb8367c9 violated lifecycle topology: task:2026-07-23-example jumped from 1_in-progress to 4_done'
+…
+FAILED (failures=1)
+```
+
+The three sibling merge-topology tests that must keep their teeth still pass:
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue -k task_admission -v
+test_task_admission_accepts_a_merge_claiming_a_backlog_task … ok
+test_task_admission_accepts_a_merge_inheriting_an_advanced_task … ok
+test_task_admission_accepts_a_merge_parent_that_predates_a_task … ok
+test_task_admission_keeps_the_adoption_escape_for_a_first_task … ok
+test_task_admission_marker_is_sticky_while_tasks_remain … ok
+test_task_admission_marker_removal_is_historical_with_only_readme … ok
+test_task_admission_rejects_active_deletion_but_allows_archival … ok
+test_task_admission_rejects_illegal_lifecycle_jump … ok
+test_task_admission_rejects_intermediate_crossing_then_revert … ok
+test_task_admission_rejects_intermediate_marker_removal … ok
+test_task_admission_rejects_task_id_rename … ok
+test_task_admission_still_rejects_a_linear_in_progress_creation … ok
+test_task_admission_still_rejects_a_merge_creation_no_parent_had … ok
+test_task_admission_still_rejects_an_illegal_merge_advance … ok
+
+Ran 14 tests in 10.696s
+
+OK
+```
+
+### Copy-and-fill still holds on the merged templates
+
+Each merged `templates/queue/*.md` was copied to its real endpoint as
+`non-blocking-merge-copy-and-fill.md`, every `<placeholder>` replaced with a
+plausible value of its own documented form (`roadmap/current-state.md` as the
+target, `roadmap/desired-state.md` as the distinct evidence, that file's real
+SHA-256 as the revision), staged, and the whole reconciler run — one at a time,
+then all five together. The HTML comments were left exactly as shipped.
+
+```
+$ cp templates/queue/clarification.md message-queue/needs-human/clarifications/non-blocking-merge-copy-and-fill.md   # placeholders filled, then git add
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ cp templates/queue/decision.md message-queue/needs-human/decisions/non-blocking-merge-copy-and-fill.md   # placeholders filled, then git add
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ cp templates/queue/request.md message-queue/needs-agent/requests/non-blocking-merge-copy-and-fill.md   # placeholders filled, then git add
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ cp templates/queue/retry.md message-queue/needs-agent/retries/non-blocking-merge-copy-and-fill.md   # placeholders filled, then git add
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ cp templates/queue/review.md message-queue/needs-human/reviews/non-blocking-merge-copy-and-fill.md   # placeholders filled, then git add
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ git status --short   # all five filed copies staged together
+A  message-queue/needs-agent/requests/non-blocking-merge-copy-and-fill.md
+A  message-queue/needs-agent/retries/non-blocking-merge-copy-and-fill.md
+A  message-queue/needs-human/clarifications/non-blocking-merge-copy-and-fill.md
+A  message-queue/needs-human/decisions/non-blocking-merge-copy-and-fill.md
+A  message-queue/needs-human/reviews/non-blocking-merge-copy-and-fill.md
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+CHECK EXIT=0
+
+$ git status --short   # scratch copies removed
+(clean)
+```
+
+The same run against `origin/main`'s five templates — the "take theirs wholesale"
+resolution — shows what the branch's half of the merge is holding up. Thirteen
+findings, the same thirteen this task originally fixed:
+
+```
+$ git show origin/main:templates/queue/<name>.md   # then the identical fill + stage
+$ python3 automation/reconcile/reconcile.py --check
+[queue-schema] …/clarifications/non-blocking-merge-copy-and-fill.md: missing required field **If unanswered:** for non-blocking-*
+[queue-schema] …/clarifications/non-blocking-merge-copy-and-fill.md: **Status:** must be one of: folding, waiting
+reconcile: 2 blocking finding(s)
+[queue-schema] …/decisions/non-blocking-merge-copy-and-fill.md: missing required field **If unanswered:** for non-blocking-*
+[queue-schema] …/decisions/non-blocking-merge-copy-and-fill.md: **Status:** must be one of: folding, waiting
+reconcile: 2 blocking finding(s)
+[queue-schema] …/requests/non-blocking-merge-copy-and-fill.md: missing required field **If unanswered:** for non-blocking-*
+[queue-schema] …/requests/non-blocking-merge-copy-and-fill.md: **Status:** must be one of: in-repair, open
+reconcile: 2 blocking finding(s)
+[queue-schema] …/retries/non-blocking-merge-copy-and-fill.md: missing required field **If unanswered:** for non-blocking-*
+[queue-schema] …/retries/non-blocking-merge-copy-and-fill.md: **Status:** must be one of: in-repair, open
+reconcile: 2 blocking finding(s)
+[queue-schema] …/reviews/non-blocking-merge-copy-and-fill.md: missing required field **If unanswered:** for non-blocking-*
+[queue-schema] …/reviews/non-blocking-merge-copy-and-fill.md: **Status:** must be one of: awaiting-artifact, folding, waiting
+[queue-schema] …/reviews/non-blocking-merge-copy-and-fill.md: **Review target:** must identify exactly one file, Git range, or HTTPS artifact
+[queue-schema] …/reviews/non-blocking-merge-copy-and-fill.md: **Review revision:** is not an immutable sha256 or Git revision
+…
+reconcile: 5 blocking finding(s)
+```
+
+### Full check and suite on the merged tree
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/run_tests.py
+test lane: full
+…
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+test elapsed: 0.01s
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 65.39s
+```
+
+The merge commit went through the real pre-commit hook, not around it:
+
+```
+$ git commit -F <message>
+…
+pre-commit: OK
+[task/2026-07-31-let-a-human-answer-in-one-edit b01636b] Merge main into the one-edit answer branch
+```
+
+### Not verified here
+
+The branch is committed locally and **not pushed**, so nothing above is a claim
+about CI, about the merge's own admission range on the provider, or about how this
+composes with the unmerged `task/2026-07-31-redesign-human-action-files` (PR #48),
+which is not in `origin/main` and was not fetched into this tree.
