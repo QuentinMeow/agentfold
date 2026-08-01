@@ -79,6 +79,7 @@ _GIT_SNAPSHOT_CACHE_ACTIVE = False
 _GIT_INDEX_CACHE = None
 _GIT_INDEX_OID_CACHE = None
 _GIT_INDEX_ALL_PATHS_CACHE = None
+_GIT_IGNORED_PREFIX_CACHE = None
 _GIT_HEAD_PATHS_CACHE = None
 _GIT_HEAD_OID = None
 _GIT_ARTIFACT_CACHE = {}
@@ -216,8 +217,32 @@ RETRY_PROJECTION_END = "<!-- reconcile:projection:end -->"
 
 # Link check: backticked or markdown-linked repo paths with >= 2 segments.
 BACKTICK_RE = re.compile(r"`([^`\s]+/[^`\s]+)`")
-LINK_SKIP_PREFIXES = ("http", "tmp/", "private/", ".")
-LINK_SKIP_DIRS = {"templates", "history", "tmp"}  # + memory/decisions (records)
+# Anchored: an unanchored "http" or "." also matched `httpd/...` or any dotfile
+# path, so a genuinely broken link starting either way silently passed. A leading
+# "./" is not skipped: pathlib normalizes it away, so `./handbook/x.md` still
+# resolves and checks exactly like `handbook/x.md`. A leading "../" stays skipped
+# on purpose: read from the repository root (what the checks below actually do)
+# it names a path outside the repository, and Git itself refuses that pathspec —
+# `git ls-files -- ../x` fails with "is outside repository", which would abort
+# the whole reconciler rather than report one broken link. Resolving it correctly
+# needs the citing file's own directory, which no case here currently exercises.
+# "tmp/" stays here even though `live_markdown_files` skips git-ignored scratch:
+# the two act on different halves of the check. This tuple filters the *cited*
+# path, so a doc may name a scratch path it does not expect to resolve; the
+# enumeration filter decides which files are *read*.
+LINK_SKIP_PREFIXES = ("http://", "https://", "tmp/", "private/", "../")
+# "tmp" is not listed here: `live_markdown_files` already excludes git-ignored scratch
+# paths, and a tracked file must still be checked even at a path that looks scratch.
+LINK_SKIP_DIRS = {"templates", "history"}  # + memory/decisions (records)
+# A bare slash also shows up in ordinary prose (`24/7`, `and/or`, `s/foo/bar/`),
+# which otherwise matches the same shape as a repository path and reports every
+# such sentence as broken. A candidate only counts as a path claim when it either
+# names a known file type or starts under an entry that already exists in the
+# repository — real paths overwhelmingly satisfy one of the two.
+LINK_PATH_EXTENSIONS = {
+    ".md", ".py", ".sh", ".txt", ".json", ".yml", ".yaml", ".toml", ".cfg",
+    ".ini", ".js", ".ts", ".html", ".css",
+}
 
 
 class Finding:
@@ -324,6 +349,7 @@ def start_git_snapshot_cache():
     global _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
+    global _GIT_IGNORED_PREFIX_CACHE
     global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
@@ -334,6 +360,7 @@ def start_git_snapshot_cache():
     _GIT_INDEX_CACHE = None
     _GIT_INDEX_OID_CACHE = None
     _GIT_INDEX_ALL_PATHS_CACHE = None
+    _GIT_IGNORED_PREFIX_CACHE = None
     _GIT_HEAD_PATHS_CACHE = None
     _GIT_HEAD_OID = None
     _GIT_ARTIFACT_CACHE = {}
@@ -347,6 +374,7 @@ def start_git_snapshot_cache():
     _TASK_SNAPSHOT_CACHE = {}
     load_git_index_snapshot()
     load_git_head_snapshot()
+    load_git_ignored_snapshot()
 
 
 def stop_git_snapshot_cache():
@@ -354,6 +382,7 @@ def stop_git_snapshot_cache():
     global _GIT_SNAPSHOT_CACHE_ACTIVE
     global _GIT_INDEX_CACHE, _GIT_INDEX_OID_CACHE
     global _GIT_INDEX_ALL_PATHS_CACHE, _GIT_HEAD_PATHS_CACHE, _GIT_HEAD_OID
+    global _GIT_IGNORED_PREFIX_CACHE
     global _GIT_ARTIFACT_CACHE, _GIT_BLOB_CACHE
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
@@ -364,6 +393,7 @@ def stop_git_snapshot_cache():
     _GIT_INDEX_CACHE = None
     _GIT_INDEX_OID_CACHE = None
     _GIT_INDEX_ALL_PATHS_CACHE = None
+    _GIT_IGNORED_PREFIX_CACHE = None
     _GIT_HEAD_PATHS_CACHE = None
     _GIT_HEAD_OID = None
     _GIT_ARTIFACT_CACHE = {}
@@ -546,6 +576,71 @@ def load_git_head_snapshot():
         for name in result.stdout.split(b"\0")
         if name
     }
+
+
+def compute_git_ignored_prefixes():
+    """Return every Git-ignored path in the working tree, in one process call.
+
+    ``--directory`` collapses a wholly-ignored directory (``tmp/``) to one entry
+    instead of recursing into it — a stray scratch clone can be thousands of files —
+    and still lists individual ignored files living inside an otherwise-tracked
+    directory. Entries ending in ``/`` are directory prefixes; the rest are exact
+    files.
+    """
+    if not (REPO / ".git").exists():
+        return set()
+    result = subprocess.run(
+        [
+            "git", "ls-files", "--others", "--ignored", "--exclude-standard",
+            "--directory", "-z",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise GitSnapshotError(git_failure(
+            result, "could not list Git-ignored paths"
+        ))
+    return {
+        name.decode("utf-8", errors="surrogateescape")
+        for name in result.stdout.split(b"\0")
+        if name
+    }
+
+
+def load_git_ignored_snapshot():
+    """Capture the ignored-path prefixes once per reconciler invocation."""
+    global _GIT_IGNORED_PREFIX_CACHE
+    if _GIT_IGNORED_PREFIX_CACHE is not None:
+        return
+    _GIT_IGNORED_PREFIX_CACHE = compute_git_ignored_prefixes()
+
+
+def git_ignored_prefixes():
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        load_git_ignored_snapshot()
+        return _GIT_IGNORED_PREFIX_CACHE
+    return compute_git_ignored_prefixes()
+
+
+def path_is_git_ignored(rel_posix):
+    """Whether an untracked working-tree path is Git-ignored.
+
+    Scratch discipline (root ``AGENTS.md``) puts throwaway files under git-ignored
+    `tmp/`; the reconciler's untracked-file scans must not report findings for them.
+    Only call this for a path already known to be untracked (not in the Git index or
+    HEAD) — a *tracked* file must still be checked even if it also matches an ignore
+    rule, and this predicate never runs against the index/HEAD halves of any check.
+    """
+    for prefix in git_ignored_prefixes():
+        if prefix.endswith("/"):
+            if rel_posix == prefix[:-1] or rel_posix.startswith(prefix):
+                return True
+        elif rel_posix == prefix:
+            return True
+    return False
 
 
 def paths_under_prefix(paths, prefix):
@@ -775,8 +870,11 @@ def live_queue_items():
             name = item.relative_to(REPO).as_posix()
             if queue_document_path(name):
                 continue
-            if name not in seen and name not in committed:
-                yield item
+            if name in seen or name in committed:
+                continue
+            if path_is_git_ignored(name):
+                continue
+            yield item
 
 
 def live_markdown_files():
@@ -797,8 +895,11 @@ def live_markdown_files():
         if rel.parts[0].startswith(".") or not path.is_file() or path.is_symlink():
             continue
         name = rel.as_posix()
-        if name not in seen and name not in committed:
-            yield path
+        if name in seen or name in committed:
+            continue
+        if path_is_git_ignored(name):
+            continue
+        yield path
 
 
 def readable_queue_item(item):
@@ -4971,6 +5072,8 @@ def check_task_structure():
             if entry.name in ("AGENTS.md", "README.md", "CLAUDE.md") \
                     or entry.name.startswith("."):
                 continue
+            if path_is_git_ignored(entry.relative_to(REPO).as_posix()):
+                continue
             if entry.name not in TASK_STATUSES:
                 yield Finding(
                     "task-structure",
@@ -4982,6 +5085,8 @@ def check_task_structure():
                 continue
             for item in sorted(entry.iterdir()):
                 if item.name == "README.md" or item.name.startswith("."):
+                    continue
+                if path_is_git_ignored(item.relative_to(REPO).as_posix()):
                     continue
                 if not item.is_dir():
                     yield Finding(
@@ -5846,8 +5951,10 @@ def live_handover_paths():
             if not handover.is_file() or handover.is_symlink():
                 continue
             path = handover.relative_to(REPO)
-            if path.as_posix() not in committed:
-                paths.add(path)
+            name = path.as_posix()
+            if name in committed or path_is_git_ignored(name):
+                continue
+            paths.add(path)
     return paths
 
 
@@ -7286,7 +7393,8 @@ def anchor_slugs(headings):
     """Return GitHub heading anchors, numbering repeats in document order."""
     taken, slugs = {}, []
     for heading in headings:
-        base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        label = MARKDOWN_LINK_RE.sub(lambda m: m.group("label"), heading)
+        base = re.sub(r"[^\w\- ]", "", label.lower()).replace(" ", "-")
         slug = base
         while slug in taken:
             taken[base] += 1
@@ -7358,6 +7466,22 @@ def check_links():
                     "resolves differently on each machine",
                 )
                 continue
+            if cand.startswith(("message-queue/needs-human/", "message-queue/needs-agent/")):
+                # A queue action is resolved by deleting its file
+                # (`message-queue/AGENTS.md`), so any citation of one — from a
+                # design doc's evidence trail, not only from the queue's own
+                # predeclared fields above — names history, not a live link.
+                continue
+            if PurePosixPath(cand).suffix not in LINK_PATH_EXTENSIONS:
+                top = cand.split("/", 1)[0]
+                # Tracked content only, matching `repo_artifact_bytes` — otherwise
+                # VCS-internal paths such as `.git/objects` would count as a known
+                # prefix just because that directory happens to exist on disk.
+                known_top = bool(git_index_entries(top)) if (REPO / ".git").exists() \
+                    else (REPO / top).exists()
+                if not known_top:
+                    continue  # ordinary prose (`24/7`, `and/or`): no known
+                              # extension and no real top-level entry to root it
             try:
                 root_target = REPO / cand
                 local_target = (md.parent / cand).resolve()

@@ -12812,6 +12812,188 @@ class ReconcileQueueTests(unittest.TestCase):
 
             self.assertEqual([], list(RECONCILE.check_links()))
 
+    # --- Regressions: ordinary prose false positives, indented-code false
+    # positives, prefix-skip false negatives, heading-anchor false positives,
+    # and queue-citation false positives (2026-07-30-stop-link-check-false-positives) ---
+
+    def test_link_check_ignores_ordinary_prose_with_slashes(self):
+        for prose in ("12/s", "24/7", "A/B", "and/or", "input/output", "s/foo/bar/"):
+            with self.subTest(prose=prose), self.repo() as root:
+                self.write(root, "handbook/prose.md", f"Ordinary prose: `{prose}`.\n")
+
+                self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_ignores_a_path_inside_an_indented_code_block(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "handbook/prose.md",
+                "Indented code block, not a live link:\n\n"
+                "    See `automation/does-not-exist.py` for details.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_still_catches_a_broken_link_fenced_inside_a_list_item(self):
+        """Fenced blocks nested in list items must stay blanked: the new indented-
+        code stripping must not regress this pre-existing, correct behavior."""
+        with self.repo() as root:
+            self.write(
+                root,
+                "handbook/prose.md",
+                "- Item text\n\n"
+                "  ```python\n"
+                "  automation/does-not-exist.py\n"
+                "  ```\n\n"
+                "- Another item\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_semantic_text_blanks_indented_code_lines(self):
+        text = "Prose line.\n\n    indented `docs/does-not-exist.md` line\n\nMore.\n"
+        blanked = RECONCILE.semantic_text(text)
+        self.assertNotIn("does-not-exist", blanked)
+        self.assertIn("Prose line.", blanked)
+        self.assertIn("More.", blanked)
+        self.assertEqual(text.count("\n"), blanked.count("\n"))
+
+    def test_semantic_text_still_blanks_a_fence_nested_in_a_list_item(self):
+        text = "- Item\n\n  ```python\n  code here\n  ```\n\n- Next\n"
+        blanked = RECONCILE.semantic_text(text)
+        self.assertNotIn("code here", blanked)
+        self.assertIn("- Item", blanked)
+        self.assertIn("- Next", blanked)
+
+    def test_link_check_reports_httpd_prefix_no_longer_confused_with_http_scheme(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "See [y](httpd/conf/broken.md).\n")
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("httpd/conf/broken.md", messages[0])
+
+    def test_link_check_reports_a_broken_dot_slash_relative_link(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "See [x](./handbook/missing-file.md).\n")
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("handbook/missing-file.md", messages[0])
+
+    def test_link_check_still_skips_dot_dot_relative_candidates(self):
+        """`../` stays unresolved: read from the repository root (what this check
+        does) it names a path outside the repository, and Git's own pathspec
+        resolution refuses that outright rather than reporting one broken link."""
+        with self.repo() as root:
+            self.write(
+                root,
+                "handbook/principles/source.md",
+                "See `../this-does-not-exist-anywhere.md`.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_anchor_slugs_strip_markdown_link_syntax_from_headings(self):
+        self.assertEqual(
+            ["see-the-design"],
+            RECONCILE.anchor_slugs(["See [the design](docs/AGENTS.md)"]),
+        )
+
+    def test_link_check_accepts_an_anchor_defined_by_a_linked_heading(self):
+        with self.repo() as root:
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(
+                root,
+                "docs/target.md",
+                "# Target\n\n## See [the design](docs/design.md)\n",
+            )
+            self.write(root, "docs/source.md", "See `docs/target.md#see-the-design`.\n")
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_exempts_a_resolved_queue_action_cited_from_any_file(self):
+        """A queue action is deleted on resolution (`message-queue/AGENTS.md`), so
+        citing one — from a design doc's evidence trail, not only from the queue's
+        own predeclared fields — names history, not a live link."""
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/designs/example.md",
+                "See `message-queue/needs-agent/requests/"
+                "blocking-since-resolved.md` for the history.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_link_check_still_rejects_a_non_queue_path_near_a_queue_citation(self):
+        with self.repo() as root:
+            self.write(
+                root,
+                "docs/designs/example.md",
+                "See `message-queue/needs-agent/requests/"
+                "blocking-since-resolved.md` and `docs/still-missing.md`.\n",
+            )
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("docs/still-missing.md", messages[0])
+
+    def test_link_check_treats_a_known_extension_as_a_path_claim_regardless_of_prefix(self):
+        with self.repo() as root:
+            self.write(root, "docs/source.md", "See `zzz/does-not-exist.py`.\n")
+
+            messages = self.messages(RECONCILE.check_links())
+            self.assertEqual(1, len(messages), messages)
+            self.assertIn("zzz/does-not-exist.py", messages[0])
+
+    def test_link_check_does_not_treat_git_internals_as_a_known_prefix(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "docs/source.md",
+                "A polling thread watched `.git/objects` across every commit.\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_links()))
+    def test_agents_budget_ignores_an_untracked_scratch_file_under_gitignored_tmp(self):
+        # AGENTS.md guardrail: throwaway files go under git-ignored tmp/, never the
+        # repo root — the reconciler must not report findings for what its own
+        # contract calls scratch, even nested several directories deep (the "stray
+        # scratch clone" shape).
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, ".gitignore", "tmp/\n")
+            self.write(
+                root,
+                "tmp/scratch-clone/AGENTS.md",
+                "\n".join(f"line {i}" for i in range(70)) + "\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_agents_budget()))
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_agents_budget_still_checks_a_tracked_file_at_an_ignored_looking_path(self):
+        # A file that IS tracked must still be checked even at a path that also
+        # matches an ignore rule (root AGENTS.md guardrail) — the exclusion only
+        # applies to the untracked half of the scan.
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, ".gitignore", "tmp/\n")
+            self.write(
+                root,
+                "tmp/AGENTS.md",
+                "\n".join(f"line {i}" for i in range(70)) + "\n",
+            )
+            self.git(root, "add", "-f", "tmp/AGENTS.md")
+
+            findings = list(RECONCILE.check_agents_budget())
+            self.assertTrue(
+                any(str(f.subject) == "tmp/AGENTS.md" for f in findings),
+                self.messages(findings),
+            )
+
     @staticmethod
     def creation_topology_messages(findings):
         return [
