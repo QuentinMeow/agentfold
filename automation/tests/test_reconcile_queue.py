@@ -13686,6 +13686,83 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.messages(findings),
             )
 
+    def test_task_admission_accepts_a_merge_inheriting_an_advanced_task(self):
+        # Merging a trunk into a branch re-audits the trunk's own merge commits
+        # through both parents. A branch that advanced a task two legal steps
+        # makes the trunk-side edge look like 1_in-progress -> 4_done, even
+        # though every step was a governed edge on the branch.
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            claimed = self.advance_task_record(root, backlog, "1_in-progress")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "claim the task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "advance-the-task")
+            review = self.advance_task_record(root, claimed, "3_in-review")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "advance the task to review")
+            self.advance_task_record(root, review, "4_done")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "complete the task")
+
+            self.git(root, "checkout", trunk)
+            self.git(
+                root, "merge", "--no-ff", "-m", "merge the advanced task",
+                "advance-the-task",
+            )
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertEqual([], [
+                finding.message for finding in findings
+                if "jumped from" in finding.message
+            ], self.messages(findings))
+
+    def test_task_admission_still_rejects_a_merge_advance_past_a_sibling(self):
+        """The suppression matches the exact status, not merely the record.
+
+        A sibling parent that carries the task at some *other* status justifies
+        nothing about the status the merge produced, so the jump is still a jump.
+        Checking only that the task is recorded at another parent — the shape
+        `task_recorded_at_other_parent` uses for creations — would suppress both
+        edges of this merge and let an illegal advance through.
+        """
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "claim-the-task")
+            self.advance_task_record(root, backlog, "1_in-progress")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "claim the task")
+
+            self.git(root, "checkout", trunk)
+            self.git(root, "merge", "--no-ff", "--no-commit", "claim-the-task")
+            self.advance_task_record(
+                root,
+                root / "tasks" / "1_in-progress" / backlog.name,
+                "4_done",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "merge and finish the task")
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertTrue(any(
+                "task:2026-07-23-example jumped from" in finding.message
+                and "to 4_done" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
     def test_task_admission_keeps_the_adoption_escape_for_a_first_task(self):
         with self.repo() as root:
             self.init_git(root)

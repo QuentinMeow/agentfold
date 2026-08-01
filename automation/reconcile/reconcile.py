@@ -5908,6 +5908,35 @@ def task_recorded_at_other_parent(task_id, parent, revision):
     return False
 
 
+def task_status_at_other_parent(task_id, status, parent, revision):
+    """Return whether another parent of one candidate already held this status.
+
+    The transition half of `task_recorded_at_other_parent`. A merge that only
+    inherits a task took no lifecycle step for it: the parent that already sat at
+    this status reached it through its own governed edges, which
+    `queue_revision_edges` yields for the same candidate, so every step is still
+    validated by the transition table there. Without this, merging a trunk into a
+    branch reports every trunk merge whose incoming side advanced a task two
+    statuses as a jump on the trunk-side edge
+    (`tasks/4_done/2026-07-25-fix-merge-parent-task-topology/design.md` chose the
+    same shape for creations).
+
+    The status must match exactly. A sibling parent holding the task at some other
+    status justifies nothing about the status the merge produced, so an illegal
+    advance no parent had reached is still reported. A single-parent edge has no
+    sibling to consult, so linear behaviour is unchanged.
+    """
+    for other in candidate_parent_oids(revision):
+        if other == parent:
+            continue
+        records = task_record_paths_at(other).get(task_id, [])
+        # One incarnation only, matching the duplicate guard in the caller;
+        # `task-structure` owns a task recorded in two statuses at once.
+        if len(records) == 1 and records[0][0] == status:
+            return True
+    return False
+
+
 def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
@@ -6000,6 +6029,10 @@ def task_topology_problems(parent, revision, adopting=False):
         if status == prior_status:
             continue
         if status not in TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]:
+            # A merge parent that already sat at this status is no lifecycle step;
+            # the parent holding it supplies the validating edges.
+            if task_status_at_other_parent(task_id, status, parent, revision):
+                continue
             allowed = ", ".join(sorted(
                 TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]
             )) or "no further status"
