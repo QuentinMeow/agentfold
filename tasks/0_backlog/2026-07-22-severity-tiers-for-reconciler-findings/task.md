@@ -21,14 +21,22 @@ still stdlib), not filesystem mtime, which resets on every fresh checkout so CI 
 local clones currently disagree; and compare roadmap freshness against the git date
 a task *reached* `tasks/4_done/`, not its filed date.
 
+**Remaining scope (2026-07-30):** the tier split itself shipped under task
+2026-07-30-report-check-failures-honestly, which rewrote the same exit-code path while
+fixing three crash-reporting defects. This task could not be claimed for it: deleting
+its pickup request breaks `link-check` in a live queue item that names that path, and
+repairing that reference breaks `queue-resolution` — filed as
+`message-queue/needs-agent/requests/non-blocking-unblock-claiming-a-linked-pickup-task.md`.
+What is left here is the determinism half, criterion 4 below.
+
 ## Acceptance criteria
 
-- [ ] A queue item with `Filed:` 40 days ago produces a warning, not a failed
+- [x] A queue item with `Filed:` 40 days ago produces a warning, not a failed
       `--check` (shown with real output in `verification.md`)
-- [ ] An overdue `Review-by:` in `memory/` does not block commits
-- [ ] A missing required field still blocks, exactly as today
+- [x] An overdue `Review-by:` in `memory/` does not block commits
+- [x] A missing required field still blocks, exactly as today
 - [ ] `stale-task` returns identical results on a fresh clone and an old checkout
-- [ ] Docs updated in the same change: `automation/AGENTS.md` table names the two
+- [x] Docs updated in the same change: `automation/AGENTS.md` table names the two
       tiers; `handbook/principles/eventual-consistency.md` unchanged (it already
       describes the advisory model — this task makes the code match it)
 
@@ -36,3 +44,4 @@ a task *reached* `tasks/4_done/`, not its filed date.
 
 - Design review, finding 1.1: `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md`
 - Roadmap: `roadmap/desired-state.md` (harness-hardening line)
+- Tier split shipped by task 2026-07-30-report-check-failures-honestly

@@ -7,7 +7,9 @@ their session's area; never delete one without fixing it or recording a rejectio
 reason in the file. Reconciler-filed items are garbage-collected automatically once
 their finding clears.
 
-Every current reconciler finding blocks merge, so generated files use
-`blocking-reconcile-<check>-<subject>.md`; stable finding identity excludes the timing
-prefix. File one manually with the appropriate prefix by copying
-`templates/queue/retry.md`.
+Generated files use `blocking-reconcile-<check>-<subject>.md`; stable finding identity
+excludes the timing prefix. `--check` itself no longer fails on advisory findings
+(`automation/AGENTS.md`), but retry filing does not yet tier its prefix, so an advisory
+finding still files a blocking repair item — tracked by task
+`2026-07-22-retry-filing-automation-and-waivers`. File one manually with the appropriate
+prefix by copying `templates/queue/retry.md`.

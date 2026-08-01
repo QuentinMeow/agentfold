@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-30
+**Last-updated:** 2026-07-31
 
 What is true today, mapped to the desired-state lines.
 
@@ -11,7 +11,12 @@ What is true today, mapped to the desired-state lines.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
   schemas, queue timing names/fields, task↔queue links, new handover projections, link
   targets, line budgets (AGENTS.md, SKILL.md, root README), memory expiry, and
-  dependency-aware stale items. Visible CommonMark is the evidence boundary; task
+  dependency-aware stale items. Findings carry a severity derived from their check id:
+  the age-driven ids in `ADVISORY_CHECKS` report visibly but never fail `--check`, so no
+  calendar date can turn an unchanged clean tree red, and `--fail-on-advisory` is the
+  opt-in for maintenance runs. A check that cannot run at all exits 2 with one line
+  naming the file or check, and findings stream as they are produced, so one failure
+  cannot discard the rest. Visible CommonMark is the evidence boundary; task
   admission rechecks every post-activation Git edge and task-local Markdown artifact
   for named transitions and newly introduced human asks. Queue deletion is bound to
   claims, distinct evidence, still-crossed task/merge receipts, withdrawn negative targets,
