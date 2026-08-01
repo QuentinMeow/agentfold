@@ -13745,6 +13745,43 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.messages(findings),
             )
 
+    def test_task_admission_accepts_a_merge_inheriting_an_advanced_task(self):
+        # Merging a trunk into a branch re-audits the trunk's own merge commits
+        # through both parents. A branch that advanced a task two legal steps
+        # makes the trunk-side edge look like 1_in-progress -> 4_done, even
+        # though every step was a governed edge on the branch.
+        with self.repo() as root:
+            trunk = self.activate_task_admission(root)
+
+            backlog = self.file_unclaimed_backlog_task(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the backlog task")
+            claimed = self.advance_task_record(root, backlog, "1_in-progress")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "claim the task")
+            left = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "advance-the-task")
+            review = self.advance_task_record(root, claimed, "3_in-review")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "advance the task to review")
+            self.advance_task_record(root, review, "4_done")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "complete the task")
+
+            self.git(root, "checkout", trunk)
+            self.git(
+                root, "merge", "--no-ff", "-m", "merge the advanced task",
+                "advance-the-task",
+            )
+            merged = self.git(root, "rev-parse", "HEAD")
+
+            findings = self.admission_findings_over_range(left, merged)
+            self.assertEqual([], [
+                finding.message for finding in findings
+                if "jumped from" in finding.message
+            ], self.messages(findings))
+
     def test_task_admission_keeps_the_adoption_escape_for_a_first_task(self):
         with self.repo() as root:
             self.init_git(root)

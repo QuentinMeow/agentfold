@@ -52,7 +52,7 @@ agentfold/
 │   │   └── reviews/     #     judgment over a named diff, artifact, or claim
 │   └── needs-agent/     #   an agent's move:
 │       ├── requests/    #     durable work assigned to another session
-│       └── retries/     #     repair work auto-filed by the reconciler / failed jobs
+│       └── retries/     #     repair work from a reconciler finding or a failed job
 ├── tasks/               # work items; the folder a task sits in IS its status
 │   ├── 0_backlog/  1_in-progress/  2_blocked/  3_in-review/  4_done/
 │   └── …/<task>/        # task.md, design.md, plan.md, worklog.md, verification.md
@@ -94,8 +94,8 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 | Guarantee | Enforced by |
 |-----------|-------------|
 | Queue names/timing, action links, and queue/task/memory schemas agree | `reconcile.py` (pre-commit hook + CI) |
-| Every conversation *folder* contains a `handover.md` | reconciler → auto-filed retry item (a session that leaves no folder is invisible to it) |
-| Links in docs point to files that exist | reconciler link check |
+| Every conversation *folder* contains a `handover.md` | reconciler finding (a session that leaves no folder is invisible to it) |
+| Links in docs point to files that exist | reconciler link check, outside the directories it exempts (`templates/`, `history/`, `memory/decisions/`, retries, dot-dirs) |
 | Contracts stay short (line budgets on AGENTS.md, SKILL.md, this README) | reconciler budget check |
 | Memory expires and gets re-verified or deleted | `Review-by` dates + reconciler + gardener skill |
 | Example services stay green | `automation/run_tests.py` in the pre-commit hook + CI |

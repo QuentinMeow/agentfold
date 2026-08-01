@@ -38,10 +38,7 @@ This pass keeps `memory/`, `tasks/4_done/`, and `history/` small enough to stay 
 
 `message-queue/` is canonical for pending human actions and agent work that must
 survive the session; reports, tasks, handovers, and external review surfaces only link
-those live items. Follow `message-queue/AGENTS.md`: use `blocking-` when named work
-cannot proceed now, `future-blocking-` when work may continue only until a stated
-date/event/transition (normally the deletion boundary), and `non-blocking-` when it
-never stops work and has a safe unattended outcome. File any deferred repair found by
-the gardening pass as a needs-agent item rather than leaving it only in the report.
-Treat arbitrary event/transition/operation evidence as agent-attested unless a controlled
-adapter enforces the boundary.
+those live items. Follow `message-queue/AGENTS.md` for the delivery prefixes and what
+each one means; when a gardening item earns a future boundary, that boundary is normally
+the deletion date. File any deferred repair found by the gardening pass as a needs-agent
+item rather than leaving it only in the report.

@@ -1251,6 +1251,7 @@ def action_like_rendered_prose(text):
     )
 
 
+@functools.lru_cache(maxsize=8192)
 def action_like_task_record_prose(text):
     """Recognize human/authority asks without treating ordinary task work as one.
 
@@ -1259,6 +1260,11 @@ def action_like_task_record_prose(text):
     human action. Questions, TODOs, courtesy requests, authority verbs, explicit
     human obligations, and indirect human handoffs still do. The regex vocabulary
     remains the same centralized grammar used by provider projection checks.
+
+    The verdict is a pure function of the exact unit text, so an edge checker that
+    compares a parent snapshot with a candidate — and every later edge that carries
+    the same unchanged record — reads it from the memo instead of re-running the
+    whole grammar.
     """
     clean = rendered_human_text(text or "")
     clean = strip_indented_code(strip_inline_code(clean))

@@ -1,12 +1,16 @@
 <!--
-This template is filled in for a `non-blocking-<slug>.md` filename — the delivery class
-that never stops work, and the one live timing may always escalate away from. To file
-`blocking-` or `future-blocking-` instead, swap the `If unanswered` line below for that
-class's fields; all three are shown once in `templates/README.md`. The filename prefix
-is canonical: never add a separate **Blocking:** field. Every field line here is real
-Markdown, so a filled copy of this file is a valid item exactly as it stands. Guidance
-that is not a field stays inside comments like this one, which the reconciler blanks
-before parsing and a filing agent may delete.
+Filename: one delivery prefix, then a kebab-case slug. The three prefixes, what each
+one means, and the rule that the filename is canonical (so no separate **Blocking:**
+field exists) are stated once in `message-queue/AGENTS.md`, under "Routing: three
+independent axes". Slug grammar: `handbook/naming-conventions.md`.
+
+This file ships filled in for `non-blocking-`, the one class live timing may always
+escalate away from, so a copy is valid before you have decided anything about timing.
+To file `blocking-` or `future-blocking-` instead, swap the `If unanswered` line below
+for that class's fields, shown once in `templates/README.md`. Every field line here is
+real Markdown, so a filled copy of this file is a valid item exactly as it stands;
+guidance that is not a field stays inside comments like this one, which the reconciler
+blanks before parsing and a filing agent may delete.
 -->
 
 # <The broken invariant, one line>

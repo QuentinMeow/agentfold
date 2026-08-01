@@ -6,9 +6,16 @@
 **Description:** <one line for the generated index>
 **Review-by:** <YYYY-MM-DD — default +180 days>
 
-<When superseding: add `**Supersedes:**` here, and add `**Superseded-by:**` +
-`**Status:** superseded` to the old ADR — the only edits an existing ADR may receive,
-besides bumping Review-by.>
+<When wholly replacing an older decision: add `**Supersedes:**` here, and add
+`**Superseded-by:**` + `**Status:** superseded` to the old ADR.>
+
+<When overturning only part of one: add `**Amends:** `<old adr path>` — <the clause>`
+here, and add `**Amended-by:** `<this path>` — <the clause>` to the old ADR, whose
+`**Status:**` stays `decided` because the rest of it still binds. State in Decision
+exactly which clauses you replace and which stand.>
+
+<Those lineage fields, plus bumping Review-by, are the only edits an existing ADR may
+receive: they record what happened to the decision without rewriting it.>
 
 ## Context
 

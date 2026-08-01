@@ -68,16 +68,10 @@ prerequisite. A recommendation is evidence, not permission to hide an alternativ
 - `clarifications/`: correct an interpretation or supply missing intent.
 - `reviews/`: judge a named diff, artifact, or claim.
 
-Then choose the filename prefix from `message-queue/AGENTS.md`: `blocking-` only when a
-named boundary is stopped now; `future-blocking-` when work stops at an explicit future
-boundary; `non-blocking-` only when it can remain unanswered forever. Risk severity does
-not determine the prefix. A live action may move only toward an earlier dependency:
-`non-blocking` → `future-blocking` → `blocking`. Weakening creates an authorized
-replacement, and no human timing changes with or after the first concrete response.
-UTC dates can be checked against the repository clock. An arbitrary named event,
-transition, or operation is only an agent-attested acknowledgement when its Resolution
-evidence changes; hard assurance requires a controlled adapter that observes and
-enforces that boundary.
+Timing is the independent second axis, and `message-queue/AGENTS.md` owns it: which
+filename prefix each timing earns, which way a live action may move, and what evidence a
+UTC date, a named event, or a custom transition can actually supply. Choose the prefix
+there; this guide adds no timing rule of its own.
 
 ## Project without forking the action
 

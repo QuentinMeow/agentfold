@@ -32,29 +32,24 @@ guidance and optional-field syntax, and deleting them changes nothing.
 
 ## Queue delivery timing
 
-Every live queue filename starts with exactly one delivery prefix, and the filename is
-the canonical delivery class; never add a second `Blocking` field. Each queue template
-ships filled in for `non-blocking-`, the class that never stops work — live timing can
-only escalate from non-blocking to future-blocking to blocking, and it freezes with a
-human response, so starting at the weakest class is the only always-reversible choice.
-To file one of the other two, rename the file and swap the `If unanswered` line for that
-class's fields:
+Every live queue filename starts with exactly one delivery prefix. What the prefixes
+mean, how live timing may change, and what evidence a boundary needs are stated once in
+`message-queue/AGENTS.md`; this folder does not restate them. What is template-local:
+each queue template ships filled in for `non-blocking-`, the one class live timing may
+always escalate away from, so a copy is valid before you have thought about timing at
+all. The filename is the canonical delivery class, so a second `Blocking` field is never
+added back. To file one of the other two, rename the file and swap the `If unanswered`
+line for that class's fields — the field syntax, which is a schema and so lives here:
 
-| Filename prefix | Meaning | Fields that replace `If unanswered` |
-|-----------------|---------|-------------------------------------|
-| `blocking-` | a named current task, transition, or operation cannot proceed | `**Blocks now:** <task:<id> \| transition:<name> \| operation:<name>>` |
-| `future-blocking-` | work may continue only until a named date, event, or transition | `**Blocks at:** <UTC YYYY-MM-DD \| event:<name> \| transition:<name>> [task:<id>]` and `**Until then:** <the explicit safe path while work continues>` |
-| `non-blocking-` | never stops work; records the safe unattended outcome | `**If unanswered:** <the explicit safe outcome>` (already in every template) |
+| Filename prefix | Fields that replace `If unanswered` |
+|-----------------|-------------------------------------|
+| `blocking-` | `**Blocks now:** <task:<id> \| transition:<name> \| operation:<name>>` |
+| `future-blocking-` | `**Blocks at:** <UTC YYYY-MM-DD \| event:<name> \| transition:<name>> [task:<id>]` and `**Until then:** <the explicit safe path while work continues>` |
+| `non-blocking-` | `**If unanswered:** <the explicit safe outcome>` (already in every template) |
 
-UTC date boundaries are clock-checkable. For arbitrary named events, transitions, or
-operations, repository evidence is an agent attestation unless a controlled adapter
-validates and enforces crossing; do not describe the former as hard assurance.
-
-Every review predeclares non-queue Resolution evidence distinct from its target, so
-crossing or cancellation can be folded without inventing evidence after the answer. A
-human answers any item in one edit — one sentence in the response blank, committed while
-the status is `waiting`. `Reviewed revision` and `Review outcome` belong to the folding
-agent's claim, never to the human (`handbook/human-action-guide.md`).
+Every `**Your answer:**`/`**Your review:**` blank is the only line a human fills, so a
+review ships `Reviewed revision` and `Review outcome` as slots the folding agent
+completes (`handbook/human-action-guide.md`).
 
 ## Fields with no template of their own
 

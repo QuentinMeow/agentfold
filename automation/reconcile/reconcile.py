@@ -103,6 +103,7 @@ _GIT_REPOSITORY_PATH_CACHE = {}
 _GIT_SCHEMA_ACTIVATION_CACHE = {}
 _GIT_IMMUTABLE_CACHE_REPO = None
 _TASK_SNAPSHOT_CACHE = {}
+_LIVE_QUEUE_PATHS_CACHE = None
 _HANDOVER_HISTORY_RECHECK_ACTIVE = False
 
 # Required bold-key fields per queue folder (relative to message-queue/). Delivery
@@ -411,7 +412,7 @@ def start_git_snapshot_cache():
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = True
     _GIT_INDEX_CACHE = None
@@ -429,6 +430,7 @@ def start_git_snapshot_cache():
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
     load_git_index_snapshot()
     load_git_head_snapshot()
     load_git_ignored_snapshot()
@@ -444,7 +446,7 @@ def stop_git_snapshot_cache():
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
     close_git_cat_file()
     _GIT_SNAPSHOT_CACHE_ACTIVE = False
     _GIT_INDEX_CACHE = None
@@ -462,6 +464,7 @@ def stop_git_snapshot_cache():
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
 
 
 def close_git_cat_file():
@@ -731,6 +734,21 @@ def git_index_entries(prefix):
     return entries
 
 
+def git_index_entry_mode(relative):
+    """Return one exact candidate index mode without scanning the whole index.
+
+    `git_index_entries` answers "what is under this prefix", so asking it about a
+    single file filtered every captured path to reach one dictionary key. The
+    captured index is already keyed by path, so an exact question is a lookup.
+    """
+    if not (REPO / ".git").exists():
+        return None
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        return _GIT_INDEX_CACHE.get(relative)
+    mode, _oid = git_index_path_entry(relative)
+    return mode
+
+
 def git_index_path_entry(path):
     """Return one exact staged (mode, object) pair from a single index query."""
     result = subprocess.run(
@@ -771,10 +789,13 @@ def git_head_paths(prefix):
     if not (REPO / ".git").exists():
         return set()
     if _GIT_SNAPSHOT_CACHE_ACTIVE:
-        return set(paths_under_prefix(
-            {name: None for name in _GIT_HEAD_PATHS_CACHE},
-            prefix,
-        ))
+        prefix = prefix.rstrip("/")
+        if prefix in ("", "."):
+            return set(_GIT_HEAD_PATHS_CACHE)
+        return {
+            name for name in _GIT_HEAD_PATHS_CACHE
+            if name == prefix or name.startswith(prefix + "/")
+        }
     result = subprocess.run(
         ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
         cwd=REPO,
@@ -961,9 +982,7 @@ def live_markdown_files():
 
 def readable_queue_item(item):
     """Queue state must be stored in a repository-local regular file."""
-    mode = git_index_entries(item.relative_to(REPO).as_posix()).get(
-        item.relative_to(REPO).as_posix()
-    )
+    mode = git_index_entry_mode(item.relative_to(REPO).as_posix())
     if mode is not None:
         return mode in ("100644", "100755")
     return item.is_file() and not item.is_symlink()
@@ -1051,7 +1070,7 @@ def repo_artifact_bytes(path):
         if _GIT_SNAPSHOT_CACHE_ACTIVE and relative in _GIT_ARTIFACT_CACHE:
             return _GIT_ARTIFACT_CACHE[relative]
         if _GIT_SNAPSHOT_CACHE_ACTIVE:
-            mode = git_index_entries(relative).get(relative)
+            mode = _GIT_INDEX_CACHE.get(relative)
             oid = _GIT_INDEX_OID_CACHE.get(relative)
         else:
             # One index query carries both the mode and the object to read, so
@@ -1964,23 +1983,11 @@ def queue_revision_edges(activations):
             raise GitSnapshotError(governance_error)
         if not governed:
             continue
-        ancestry = subprocess.run(
-            [
-                "git", "--no-replace-objects", "rev-list",
-                "--parents", "-n", "1", commit,
-            ],
-            cwd=REPO,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if ancestry.returncode:
-            raise GitSnapshotError(
-                ancestry.stderr.strip()
-                or f"could not inspect parents of {commit}"
-            )
-        for parent in ancestry.stdout.split()[1:]:
+        # Six independent checks walk this same edge set. `revision_parents` runs
+        # the identical `git rev-list --parents -n 1` — so shallow boundaries and
+        # grafts are still honoured — but answers the second and later asks about
+        # one revision from its cache instead of another process.
+        for parent in revision_parents(commit, f"parents of {commit}"):
             yield parent, commit
 
 
@@ -3347,7 +3354,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
     global _GIT_STAGED_PARENTS_CACHE, _GIT_STAGED_SIDE_COMMITS_CACHE
     global _GIT_STAGED_SIDE_CREATION_CACHE, _GIT_TREE_PATH_ENTRY_CACHE
     global _GIT_REVISION_PARENTS_CACHE, _GIT_SCHEMA_ACTIVATION_CACHE
-    global _TASK_SNAPSHOT_CACHE
+    global _TASK_SNAPSHOT_CACHE, _LIVE_QUEUE_PATHS_CACHE
 
     tree = subprocess.run(
         [
@@ -3399,6 +3406,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
         _GIT_REVISION_PARENTS_CACHE,
         _GIT_SCHEMA_ACTIVATION_CACHE,
         _TASK_SNAPSHOT_CACHE,
+        _LIVE_QUEUE_PATHS_CACHE,
     )
     close_git_cat_file()
     if not preserve_change_range:
@@ -3420,6 +3428,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
     _GIT_REVISION_PARENTS_CACHE = {}
     _GIT_SCHEMA_ACTIVATION_CACHE = {}
     _TASK_SNAPSHOT_CACHE = {}
+    _LIVE_QUEUE_PATHS_CACHE = None
     try:
         yield
     finally:
@@ -3441,6 +3450,7 @@ def git_revision_candidate(revision, preserve_change_range=False):
             _GIT_REVISION_PARENTS_CACHE,
             _GIT_SCHEMA_ACTIVATION_CACHE,
             _TASK_SNAPSHOT_CACHE,
+            _LIVE_QUEUE_PATHS_CACHE,
         ) = saved
 
 
@@ -6019,6 +6029,34 @@ def task_recorded_at_other_parent(task_id, parent, revision):
     return False
 
 
+def task_status_at_other_parent(task_id, status, parent, revision):
+    """Return whether another parent of one candidate already held this status.
+
+    The transition half of `task_recorded_at_other_parent`. A merge that only
+    inherits a task took no lifecycle step for it: the parent that already sat at
+    this status reached it through its own governed edges, which
+    `queue_revision_edges` yields for the same candidate, so every step is still
+    validated by the transition table there. Without this, merging a trunk into a
+    branch reports every trunk merge whose incoming side advanced a task two
+    statuses as a jump on the trunk-side edge
+    (`tasks/4_done/2026-07-25-fix-merge-parent-task-topology/design.md` chose the
+    same shape for creations).
+
+    A single-parent edge has no sibling to consult, so linear behaviour is
+    unchanged, and a merge that itself advances a task no parent had held is
+    still reported.
+    """
+    for other in candidate_parent_oids(revision):
+        if other == parent:
+            continue
+        records = task_record_paths_at(other).get(task_id, [])
+        # One incarnation only, matching the duplicate guard in the caller;
+        # `task-structure` owns a task recorded in two statuses at once.
+        if len(records) == 1 and records[0][0] == status:
+            return True
+    return False
+
+
 def task_artifact_renames_on_edge(parent, revision):
     """Return detected task-local renames on one exact Git/index edge."""
     command = (
@@ -6111,6 +6149,10 @@ def task_topology_problems(parent, revision, adopting=False):
         if status == prior_status:
             continue
         if status not in TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]:
+            # A merge parent that already sat at this status is no lifecycle step;
+            # the parent holding it supplies the validating edges.
+            if task_status_at_other_parent(task_id, status, parent, revision):
+                continue
             allowed = ", ".join(sorted(
                 TASK_ALLOWED_STATUS_TRANSITIONS[prior_status]
             )) or "no further status"
@@ -6649,6 +6691,35 @@ def newly_added_handovers():
     return paths, None
 
 
+def live_queue_paths_by_actor():
+    """Return the readable needs-human and needs-agent path sets in one walk.
+
+    Which queue files exist is a property of the bound candidate — the captured
+    index, the captured HEAD path set, and the untracked queue files on disk — not
+    of the check asking, yet every governed handover asks for both sets. The answer
+    is therefore derived once per candidate. `git_revision_candidate` drops it with
+    the other candidate-scoped caches, so a rebound historical tree can never read
+    the answer another tree produced.
+    """
+    global _LIVE_QUEUE_PATHS_CACHE
+    if _GIT_SNAPSHOT_CACHE_ACTIVE and _LIVE_QUEUE_PATHS_CACHE is not None:
+        return _LIVE_QUEUE_PATHS_CACHE
+    human = set()
+    agent = set()
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue
+        actor = item.relative_to(QUEUE).parts[0]
+        if actor == "needs-human":
+            human.add(item.relative_to(REPO).as_posix())
+        elif actor == "needs-agent":
+            agent.add(item.relative_to(REPO).as_posix())
+    result = (human, agent)
+    if _GIT_SNAPSHOT_CACHE_ACTIVE:
+        _LIVE_QUEUE_PATHS_CACHE = result
+    return result
+
+
 def live_human_queue_paths():
     """Return every readable needs-human item, whatever state it is in.
 
@@ -6656,21 +6727,13 @@ def live_human_queue_paths():
     `human_action_unresolved` answers that, and a projection governed by
     action-entry v3 applies it on top of this set (history/AGENTS.md).
     """
-    return {
-        item.relative_to(REPO).as_posix()
-        for item in live_queue_items() or ()
-        if readable_queue_item(item)
-        and item.relative_to(QUEUE).parts[0] == "needs-human"
-    }
+    # A fresh set per caller: the shared answer is derived once, but a caller that
+    # narrows or extends its copy must not edit the next caller's view.
+    return set(live_queue_paths_by_actor()[0])
 
 
 def live_agent_queue_paths():
-    return {
-        item.relative_to(REPO).as_posix()
-        for item in live_queue_items() or ()
-        if readable_queue_item(item)
-        and item.relative_to(QUEUE).parts[0] == "needs-agent"
-    }
+    return set(live_queue_paths_by_actor()[1])
 
 
 def split_live_queue_entries(entries):
@@ -6910,17 +6973,14 @@ def handover_current_incarnation_text(rel):
     created_at = history.stdout.strip() if history.returncode == 0 else ""
     if not created_at:
         return None, history.stderr.strip() or "could not find creation commit"
-    artifact = subprocess.run(
-        ["git", "show", f"{created_at}:{rel.as_posix()}"],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if artifact.returncode:
-        return None, artifact.stderr.strip() or "could not read creation bytes"
-    return artifact.stdout, None
+    # The creation commit is a full object ID, so its bytes come from the reusable
+    # `cat-file --batch` reader rather than one `git show` per handover.
+    artifact = git_artifact_bytes_at(created_at, rel.as_posix())
+    if artifact is None:
+        return None, "could not read creation bytes"
+    return decode_utf8_artifact(
+        artifact, f"`{rel.as_posix()}` at {created_at}"
+    ), None
 
 
 def prior_governed_v1_handover_incarnation(rel):
@@ -7823,9 +7883,16 @@ def generated_index():
     lines = ["<!-- GENERATED by reconcile.py --fix-index — edit the memory files, never this index -->",
              "# Memory index", ""]
     superseded = set()
+    # A partial reversal keeps the old ADR `decided` — the clauses it did not overturn
+    # still bind — so it cannot be marked superseded, and leaving it unmarked would
+    # advertise the overturned clause to every booting agent. `Amends:` records that
+    # middle state (`memory/AGENTS.md`); the amended entry is marked, not retired.
+    amended = set()
     for zone, decision in memory_entries():
         if zone == "decisions":
-            superseded.update(context_files(fields(decision).get("Supersedes", "")))
+            metadata = fields(decision)
+            superseded.update(context_files(metadata.get("Supersedes", "")))
+            amended.update(context_files(metadata.get("Amends", "")))
     for zone in MEMORY_ZONES:
         entries = [(z, e) for z, e in memory_entries() if z == zone]
         if not entries:
@@ -7841,6 +7908,8 @@ def generated_index():
                 or entry in superseded
             ):
                 status = " **[superseded]**"
+            elif zone == "decisions" and entry in amended:
+                status = " **[amended]**"
             desc = metadata.get("Description", "").strip()
             lines.append(f"- [{title}]({entry.relative_to(MEMORY)}){status} — {desc}")
         lines.append("")

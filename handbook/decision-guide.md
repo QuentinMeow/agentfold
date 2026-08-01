@@ -20,8 +20,8 @@ screen, and will answer from their phone. Therefore:
    user does X, then Y happens." The example consequence is the most important part of
    the file: it is how a non-expert experiences the difference between options.
 4. **A recommendation and dependency timing.** Say which option you'd pick and why in
-   one sentence. The filename and its matching fields state whether the choice blocks
-   now, at a named future boundary, or never; no duplicate `Blocking` field exists.
+   one sentence. The filename and its matching timing block carry when the choice stops
+   work; `message-queue/AGENTS.md` owns that rule.
 5. **The answer slot is literal, and it is the only thing they fill**: end with
    `**Your answer:** ______`. Replacing that blank and committing is a complete answer —
    if anything else on the page has to be hand-written for the commit to pass, the item

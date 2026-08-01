@@ -40,9 +40,11 @@ everyone reads.
 - Frontmatter is bold-key lines — `**Status:** in-progress` — not YAML. It renders on
   GitHub, survives any markdown editor, and parses with one regex (ADR:
   `memory/decisions/2026-07-22-bold-key-frontmatter.md`).
-- Cross-references are repo-relative paths in backticks or markdown links — the
-  reconciler verifies they exist. Coded references ("see §6b", "rule R5") are banned;
-  use the target's name.
+- Cross-references are repo-relative paths in backticks or markdown links. The
+  reconciler's link check verifies they exist everywhere except the directories it
+  exempts — `templates/`, `history/`, `memory/decisions/`, `needs-agent/retries/`, and
+  dot-directories — so a link written there is a courtesy to the reader, not a checked
+  claim. Coded references ("see §6b", "rule R5") are banned; use the target's name.
 
 ## Scratch
 

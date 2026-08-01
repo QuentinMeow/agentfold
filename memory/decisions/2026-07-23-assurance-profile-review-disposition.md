@@ -5,6 +5,7 @@
 **Decided-by:** human (2026-07-24 review; requested-change response preserved in commit 92bdafa)
 **Description:** Repositories configure individual guard bindings; AgentFold derives assurance per obligation and scope from observed coverage, health, and enforcement rather than selectable profile labels
 **Review-by:** 2027-02-04
+**Amends:** `memory/decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md` — “assurance profiles” as a describable artifact; the four-mode guard surface stands
 
 ## Context
 

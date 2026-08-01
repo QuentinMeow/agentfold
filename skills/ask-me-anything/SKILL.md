@@ -44,10 +44,7 @@ can say (`handbook/principles/progressive-disclosure.md`).
 
 ## Queue timing
 
-Follow `message-queue/AGENTS.md`: `blocking-<slug>.md` means named work cannot proceed
-now; `future-blocking-<slug>.md` means work may continue only until a stated
-date/event/transition; `non-blocking-<slug>.md` means it never stops work and records
-the safe unattended result. The queue is canonical for all pending human actions and
-durable cross-session agent actions; every other channel is only a linked projection.
-An arbitrary event/transition/operation receipt is agent-attested unless a controlled
-adapter supplies hard assurance.
+Delivery prefixes, what each one means, and what evidence a boundary supplies are owned
+by `message-queue/AGENTS.md` — read it rather than answering a timing question from
+memory. The queue is canonical for all pending human actions and durable cross-session
+agent actions; every other channel is only a linked projection.

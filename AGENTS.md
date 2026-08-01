@@ -20,8 +20,9 @@ mode permits. A task file may override the mode for that task only.
 1. Read this file.
 2. Run the **message-queue ritual** (below). Top-level sessions only — subagents skip it.
 3. Read the `AGENTS.md` of every folder you are about to work in. The closest
-   `AGENTS.md` up the tree from a file wins; leaf files add to this contract and never
-   contradict it — a conflict is a bug in the leaf.
+   `AGENTS.md` up the tree from a file is the one that applies, and leaf contracts only
+   add local rules to this one. Precedence and the repair for a conflicting leaf are
+   stated once, in `handbook/principles/folder-as-a-service.md`.
 4. Skim `memory/index.md`; open only entries relevant to your task. If
    `memory/lessons/<area>/` exists for the area you are working in, read it first.
 5. If your work changes overall architecture, read `roadmap/current-state.md` and
