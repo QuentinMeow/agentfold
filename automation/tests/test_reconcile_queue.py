@@ -12957,6 +12957,42 @@ class ReconcileQueueTests(unittest.TestCase):
             )
 
             self.assertEqual([], list(RECONCILE.check_links()))
+    def test_agents_budget_ignores_an_untracked_scratch_file_under_gitignored_tmp(self):
+        # AGENTS.md guardrail: throwaway files go under git-ignored tmp/, never the
+        # repo root — the reconciler must not report findings for what its own
+        # contract calls scratch, even nested several directories deep (the "stray
+        # scratch clone" shape).
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, ".gitignore", "tmp/\n")
+            self.write(
+                root,
+                "tmp/scratch-clone/AGENTS.md",
+                "\n".join(f"line {i}" for i in range(70)) + "\n",
+            )
+
+            self.assertEqual([], list(RECONCILE.check_agents_budget()))
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+    def test_agents_budget_still_checks_a_tracked_file_at_an_ignored_looking_path(self):
+        # A file that IS tracked must still be checked even at a path that also
+        # matches an ignore rule (root AGENTS.md guardrail) — the exclusion only
+        # applies to the untracked half of the scan.
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, ".gitignore", "tmp/\n")
+            self.write(
+                root,
+                "tmp/AGENTS.md",
+                "\n".join(f"line {i}" for i in range(70)) + "\n",
+            )
+            self.git(root, "add", "-f", "tmp/AGENTS.md")
+
+            findings = list(RECONCILE.check_agents_budget())
+            self.assertTrue(
+                any(str(f.subject) == "tmp/AGENTS.md" for f in findings),
+                self.messages(findings),
+            )
 
     @staticmethod
     def creation_topology_messages(findings):
