@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13477,6 +13478,494 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(0, code, printed)
             self.assertIn("[memory-expiry] memory/facts/aging.md", printed)
             self.assertIn("(advisory)", printed)
+
+
+    # ------------------------------------------------ claim before evidence
+
+    AGENT_REQUEST = (
+        "# Repair the source\n\n"
+        "**Status:** {status}\n"
+        "**Filed:** 2026-07-23, by agent/session\n"
+        "**Action:** {action}\n"
+        "**Full context:** `docs/source.md`\n"
+        "{evidence}"
+        "**Blocks now:** transition:merge\n"
+    )
+
+    def agent_request(self, status="open", evidence="", action="repair the source"):
+        return self.AGENT_REQUEST.format(
+            status=status,
+            action=action,
+            evidence=(
+                f"**Resolution evidence:** `{evidence}`\n" if evidence else ""
+            ),
+        )
+
+    def generated_retry(self, status="open"):
+        finding = RECONCILE.Finding(
+            "stale-task",
+            Path("tasks/1_in-progress/2026-07-01-example"),
+            "untouched for over 14 days",
+            "continue it, or move back to 0_backlog and unclaim",
+        )
+        text = RECONCILE.retry_text(finding)
+        # File the shape the generator produced before it predeclared evidence:
+        # every retry filed before this fix is still live and must stay resolvable.
+        text = re.sub(
+            r"^\*\*Resolution evidence:\*\*.*\n", "", text, count=1, flags=re.M
+        )
+        return (
+            "message-queue/needs-agent/retries/blocking-"
+            + RECONCILE.finding_key(finding) + ".md",
+            text.replace("**Status:** open", f"**Status:** {status}"),
+        )
+
+    def test_claimed_agent_retry_may_establish_its_resolution_evidence(self):
+        """Claiming first and working the evidence out second must have an exit."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            path, open_text = self.generated_retry()
+            item = self.write(root, path, open_text)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the generated retry")
+
+            _path, claimed = self.generated_retry("in-repair")
+            item.write_text(claimed, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim the retry")
+
+            item.write_text(
+                claimed.replace(
+                    "**Blocks now:** transition:merge",
+                    "**Resolution evidence:** `docs/source.md`\n"
+                    "**Blocks now:** transition:merge",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+            self.git(root, "commit", "-m", "predeclare the evidence")
+
+            evidence.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_live_agent_request_may_establish_its_resolution_evidence(self):
+        """An agent request filed without the field must not be undeletable."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            path = "message-queue/needs-agent/requests/blocking-repair-source.md"
+            item = self.write(root, path, self.agent_request())
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the request")
+            item.write_text(self.agent_request("in-repair"), encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim the request")
+
+            item.write_text(
+                self.agent_request("in-repair", "docs/source.md"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+            self.git(root, "commit", "-m", "predeclare the evidence")
+
+            evidence.write_text("# Repaired\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_deleting_an_agent_item_still_needs_real_evidence(self):
+        """Evidence stayed mutable, not optional: both closed exits stay closed."""
+        cases = (
+            ("no evidence at all", None, "missing non-queue **Resolution evidence:**"),
+            (
+                "unchanged evidence",
+                "docs/untouched.md",
+                "resolution evidence was not created or changed",
+            ),
+        )
+        for label, declared, expected in cases:
+            with self.subTest(case=label), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                self.write(root, "docs/untouched.md", "# Untouched\n")
+                path = (
+                    "message-queue/needs-agent/requests/blocking-repair-source.md"
+                )
+                item = self.write(
+                    root, path, self.agent_request(evidence=declared or "")
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file the request")
+                item.write_text(
+                    self.agent_request("in-repair", declared or ""),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "claim the request")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn(expected, findings[0].message)
+
+    def test_mutable_evidence_does_not_make_a_claim_receipt_transferable(self):
+        """The action itself stays frozen by the claim it was made under."""
+        for field, replacement in (
+            ("**Action:** repair the source", "**Action:** repair something else"),
+            ("**Full context:** `docs/source.md`",
+             "**Full context:** `docs/other.md`"),
+        ):
+            with self.subTest(field=field), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                self.write(root, "docs/source.md", "# Source\n")
+                self.write(root, "docs/other.md", "# Other\n")
+                path = (
+                    "message-queue/needs-agent/requests/blocking-repair-source.md"
+                )
+                item = self.write(
+                    root, path, self.agent_request(evidence="docs/source.md")
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file the request")
+                item.write_text(
+                    self.agent_request("in-repair", "docs/source.md"),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "claim the request")
+
+                item.write_text(
+                    self.agent_request("in-repair", "docs/source.md").replace(
+                        field, replacement
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", "-A")
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn(
+                    "action identity changed while the queue item remained live",
+                    findings[0].message,
+                )
+
+    def test_human_claim_still_freezes_its_resolution_evidence(self):
+        """Only the agent side gained the freedom; the human side is untouched."""
+        for actor in ("needs-human", "needs-agent"):
+            keys = dict(RECONCILE.claim_identity(
+                "**Resolution evidence:** `docs/source.md`\n", actor, "decisions"
+            ))
+            self.assertEqual(
+                actor == "needs-human", "Resolution evidence" in keys
+            )
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            evidence = self.write(root, "docs/source.md", "# Source\n")
+            path = "message-queue/needs-human/decisions/blocking-choose.md"
+            body = (
+                "# Choose\n\n"
+                "**Status:** {status}\n"
+                "**Filed:** 2026-07-23, by test\n"
+                "**Action:** choose the source disposition\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `{evidence}`\n"
+                "**Blocks now:** transition:merge\n"
+                "**Your answer:** approve\n"
+            )
+            item = self.write(
+                root, path, body.format(status="waiting", evidence="docs/source.md")
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record the answer")
+            item.write_text(
+                body.format(status="folding", evidence="docs/source.md"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim the answer")
+            self.write(root, "docs/other.md", "# Other\n")
+            item.write_text(
+                body.format(status="folding", evidence="docs/other.md"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "retarget the human evidence")
+            evidence.write_text("# Approved\n", encoding="utf-8")
+            (root / "docs/other.md").write_text("# Approved\n", encoding="utf-8")
+            item.unlink()
+            self.git(root, "add", "-A")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(findings, "a retargeted human evidence must be caught")
+
+    # ---------------------------------------------- retry registry and filing
+
+    def test_every_emitted_check_id_is_registered(self):
+        """An unregistered id strands its retry and then blocks every merge."""
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        emitted = set(re.findall(r'Finding\(\s*"([a-z][a-z0-9-]*)"', source))
+        self.assertIn("stale-task", emitted, "the scan must see real emissions")
+        self.assertEqual(
+            set(),
+            emitted - set(RECONCILE.CHECKS),
+            "every emitted check id must be a key in CHECKS so its retry can be "
+            "certified as cleared and garbage-collected",
+        )
+
+    def test_registry_aliases_do_not_double_report_a_finding(self):
+        """One function per check id, so a registry pass reports each finding once.
+
+        `stale-task` was briefly registered as a second id for `check_task_structure`.
+        Running the registry then called that function twice — double-reporting every
+        task-structure finding — and gave one function two severity tiers. It now has
+        its own function; this guards both halves of that.
+        """
+        registrations = {}
+        for name, check in RECONCILE.CHECKS.items():
+            registrations.setdefault(check, []).append(name)
+        self.assertEqual(
+            [],
+            [names for names in registrations.values() if len(names) > 1],
+            "a function registered under several ids is run once per id",
+        )
+        with self.repo() as root:
+            self.write(root, "tasks/1_in-progress/README.md", "# Tasks\n")
+            task = self.make_task(root, "1_in-progress", "none")
+            stale = (
+                datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc)
+                .timestamp()
+            )
+            for path in sorted(task.rglob("*")) + [task]:
+                os.utime(path, (stale, stale))
+            findings = [
+                finding
+                for check in RECONCILE.CHECKS.values()
+                for finding in check()
+                if finding.check == "stale-task"
+            ]
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("untouched for over", findings[0].message)
+
+    def test_stale_task_retry_is_collected_once_its_finding_clears(self):
+        """The accidental garbage-collection escape that outlived its finding."""
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "stale-task",
+                Path("tasks/1_in-progress/2026-07-01-example"),
+                "untouched for over 14 days",
+                "continue it, or move back to 0_backlog and unclaim",
+            )
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            filed = next(RECONCILE.RETRIES.glob("blocking-*.md"))
+            self.assertIn(
+                "**Blocks now:** transition:merge",
+                filed.read_text(encoding="utf-8"),
+            )
+            self.assertEqual((0, 1), RECONCILE.file_retries([]))
+            self.assertEqual([], list(RECONCILE.RETRIES.glob("blocking-*.md")))
+
+    def test_collected_stale_task_retry_no_longer_blocks_every_merge(self):
+        """The headline symptom: a survivor blocks PRs it has nothing to do with.
+
+        A generated retry carries no `task:` token, so `active_task_scope_matches`
+        matches every scope. Under the arguments PR CI uses — `--check
+        --at-transition merge --branch task/<id>` — one stranded `blocking-*` retry
+        stopped every pull request, not only the task that produced it.
+        """
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            finding = RECONCILE.Finding(
+                "stale-task",
+                Path("tasks/1_in-progress/2026-07-01-example"),
+                "untouched for over 14 days",
+                "continue it, or move back to 0_backlog and unclaim",
+            )
+            RECONCILE.file_retries([finding])
+            RECONCILE.file_retries([])  # the finding has since been fixed
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID="2026-07-30-an-unrelated-task",
+            ):
+                findings = list(RECONCILE.check_active_queue_boundaries())
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_queue_resolution_retry_is_never_garbage_collected(self):
+        """Its checker reads the deletion being judged, so it cannot self-certify."""
+        self.assertFalse(
+            RECONCILE.generated_retry_collectable("queue-resolution")
+        )
+        self.assertTrue(RECONCILE.generated_retry_collectable("stale-task"))
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "queue-resolution",
+                Path("message-queue/AGENTS.md"),
+                "broken",
+                "repair it",
+            )
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            self.assertEqual((0, 0), RECONCILE.file_retries([]))
+            survivor = next(RECONCILE.RETRIES.glob("blocking-*.md"))
+            # It survives, so it must carry the manual exit it will need.
+            self.assertIn(
+                "**Resolution evidence:**",
+                survivor.read_text(encoding="utf-8"),
+            )
+
+    def test_generated_retry_predeclares_evidence_without_overwriting_it(self):
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "queue-schema", Path("example.md"), "broken", "repair it"
+            )
+            fresh = RECONCILE.retry_text(finding)
+            self.assertIn(
+                f"**Resolution evidence:** {RECONCILE.RETRY_EVIDENCE_PLACEHOLDER}",
+                fresh,
+            )
+            legacy = re.sub(
+                r"^\*\*Resolution evidence:\*\*.*\n", "", fresh, count=1, flags=re.M
+            )
+            self.assertNotIn("**Resolution evidence:**", legacy)
+            self.assertIn(
+                "**Resolution evidence:**",
+                RECONCILE.refresh_retry_text(legacy, finding),
+            )
+            declared = fresh.replace(
+                RECONCILE.RETRY_EVIDENCE_PLACEHOLDER, "`docs/repair.md`"
+            )
+            refreshed = RECONCILE.refresh_retry_text(declared, finding)
+            self.assertIn("**Resolution evidence:** `docs/repair.md`", refreshed)
+            self.assertNotIn(
+                RECONCILE.RETRY_EVIDENCE_PLACEHOLDER, refreshed
+            )
+
+    def test_refiling_a_deleted_retry_keeps_its_rejection_notes(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            finding = RECONCILE.Finding(
+                "queue-schema", Path("example.md"), "broken", "repair it"
+            )
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            item = next(RECONCILE.RETRIES.glob("blocking-*.md"))
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Status:** open", "**Status:** in-repair"
+                ).replace(
+                    "## Agent notes\n\nNone yet.\n",
+                    "## Agent notes\n\nRejected: this finding is a false positive.\n",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "claim and reject the retry")
+
+            item.unlink()
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            refiled = next(RECONCILE.RETRIES.glob("blocking-*.md"))
+            body = refiled.read_text(encoding="utf-8")
+            self.assertIn("Rejected: this finding is a false positive.", body)
+            self.assertIn("**Status:** in-repair", body)
+
+    def test_refiling_ignores_an_untrusted_lookalike_in_history(self):
+        """Recovery may only resurrect what the reconciler itself wrote."""
+        with self.repo() as root:
+            self.init_git(root)
+            finding = RECONCILE.Finding(
+                "queue-schema", Path("example.md"), "broken", "repair it"
+            )
+            key = RECONCILE.finding_key(finding)
+            self.write(
+                root,
+                f"message-queue/needs-agent/retries/blocking-{key}.md",
+                "# Hand-written lookalike\n\n"
+                "**Status:** in-repair\n"
+                "**Filed:** 2026-07-23, by someone\n"
+                "**Check:** queue-schema\n"
+                "**Subject:** `example.md`\n"
+                "**Action:** trust me\n"
+                "**Blocks now:** transition:merge\n\n"
+                "## Agent notes\n\nSmuggled text.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "commit a lookalike")
+            (RECONCILE.RETRIES / f"blocking-{key}.md").unlink()
+
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            body = next(
+                RECONCILE.RETRIES.glob("blocking-*.md")
+            ).read_text(encoding="utf-8")
+            self.assertNotIn("Smuggled text.", body)
+            self.assertIn("**Status:** open", body)
 
 
 if __name__ == "__main__":
