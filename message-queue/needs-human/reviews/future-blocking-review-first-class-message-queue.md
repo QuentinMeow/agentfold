@@ -7,8 +7,9 @@
 **Resolution evidence:** `roadmap/current-state.md`
 **Review target:** git:00690e89b53573aff4ca90929cc96852d00f7293...d7eefcee521ad319bbf428c796c96740833f2a17
 **Review revision:** git:00690e89b53573aff4ca90929cc96852d00f7293...d7eefcee521ad319bbf428c796c96740833f2a17
-**Reviewed revision:** ______
-**Review outcome:** pending
+**Reviewed revision:** git:00690e89b53573aff4ca90929cc96852d00f7293...d7eefcee521ad319bbf428c796c96740833f2a17
+**Review outcome:** changes-requested
+**Successor action:** `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`
 **Blocks at:** transition:merge task:2026-07-23-first-class-message-queue
 **Until then:** Implementation, tests, and independent review may continue.
 **Look-at:** `message-queue/AGENTS.md`; `handbook/principles/files-as-messages.md`
@@ -42,4 +43,4 @@ diff is not yet published. The publication step replaces the pending target with
 When this becomes waiting, copy `Review revision` into `Reviewed revision` with the
 answer.
 
-**Your review:** ______
+**Your review:** changes requested — this type of Markdown file is garbage for humans: the English is broken; past, current, and proposed behavior are unclear; choices are ambiguous; parser-style labels, excessive metadata, and duplicate links obscure the decision; research good human–AI interaction, make every human-attention file self-contained, provide options with design rationale and consequences plus a recommended approach, and use multiple agents to agree before implementation
