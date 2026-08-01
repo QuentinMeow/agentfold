@@ -11231,6 +11231,156 @@ class ReconcileQueueTests(unittest.TestCase):
                     1, len(list(RECONCILE.check_active_queue_boundaries()))
                 )
 
+    @staticmethod
+    def boundary_action_text(action="Redesign the human-action files."):
+        return (
+            "# Repair\n\n"
+            "**Status:** open\n"
+            "**Filed:** 2026-07-23, by test\n"
+            f"**Action:** {action}\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/result.md`\n"
+            "**Blocks at:** transition:merge task:2026-07-23-example\n"
+            "**Until then:** Implementation may continue.\n"
+        )
+
+    def test_boundary_ignores_an_action_the_range_itself_introduced(self):
+        """Filing a future blocker is not crossing its boundary.
+
+        The reciprocity check requires the reciprocal task link, which puts that
+        task in a non-task branch's inferred scope, so without this no
+        `transition:*` action could ever be introduced through a merged
+        candidate at all.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "future-blocking-filed-in-this-range.md",
+                self.boundary_action_text(),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the future blocker")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID=frozenset({"2026-07-23-example"}),
+                CHANGE_RANGE=f"{base}...{head}",
+            ):
+                self.assertEqual(
+                    [], list(RECONCILE.check_active_queue_boundaries())
+                )
+
+    def test_boundary_still_reports_an_action_live_at_the_range_base(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "future-blocking-already-pending.md",
+                self.boundary_action_text(),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base carries the future blocker")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(root, "README.md", "# Head\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "unrelated work")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID=frozenset({"2026-07-23-example"}),
+                CHANGE_RANGE=f"{base}...{head}",
+            ):
+                findings = list(RECONCILE.check_active_queue_boundaries())
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("already-pending.md", str(findings[0].subject))
+
+    def test_escalating_an_action_inside_the_range_still_reaches_it(self):
+        """A permitted timing rename must not read as a newly filed action."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "future-blocking-escalating-action.md",
+                self.boundary_action_text(),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base carries the future blocker")
+            base = self.git(root, "rev-parse", "HEAD")
+            (
+                root / "message-queue/needs-agent/requests"
+                / "future-blocking-escalating-action.md"
+            ).unlink()
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "blocking-escalating-action.md",
+                self.boundary_action_text().replace(
+                    "**Blocks at:** transition:merge task:2026-07-23-example\n"
+                    "**Until then:** Implementation may continue.\n",
+                    "**Blocks now:** task:2026-07-23-example\n",
+                ),
+            )
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "escalate the action's timing")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID=frozenset({"2026-07-23-example"}),
+                CHANGE_RANGE=f"{base}...{head}",
+            ):
+                findings = list(RECONCILE.check_active_queue_boundaries())
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("escalating-action.md", str(findings[0].subject))
+
+    def test_an_answered_review_filed_in_the_range_still_reaches_it(self):
+        """A committed human response is the boundary's receipt, never a filing."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-answered-in-range.md",
+                "# Review\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-23, by test\n"
+                "**Action:** Approve the merge candidate.\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                "**Review revision:** sha256:0\n"
+                "**Reviewed revision:** sha256:0\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:merge task:2026-07-23-example\n"
+                "**Until then:** Implementation may continue.\n"
+                "**Your review:** approve\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file an answered review")
+            head = self.git(root, "rev-parse", "HEAD")
+            with mock.patch.multiple(
+                RECONCILE,
+                ACTIVE_TRANSITIONS={"merge"},
+                ACTIVE_TASK_ID=frozenset({"2026-07-23-example"}),
+                CHANGE_RANGE=f"{base}...{head}",
+            ):
+                findings = list(RECONCILE.check_active_queue_boundaries())
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("answered-in-range.md", str(findings[0].subject))
+
     def test_immediate_task_blocker_stops_scoped_external_transition(self):
         with self.repo() as root:
             self.write(

@@ -1684,8 +1684,17 @@ def candidate_revision_oid(value, repo=REPO):
     return output
 
 
-def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
-    """Infer one task from changed task records and commit audit tags."""
+def inferred_changed_task_ids(base_revision, candidate_revision, repo=REPO):
+    """Infer every task a candidate carries, from records and commit audit tags.
+
+    A candidate routinely carries more than one task and cannot be refused for
+    it. `check_queue_task_reciprocity` requires a live queue item declaring
+    `task:<id>` to be listed in that task's `Queue actions`, so filing one
+    necessarily edits another task's record; a task that files a follow-up task,
+    checks off a criterion it shipped for another task, or is claimed together
+    with its child produces the same plural scope. The scope is therefore a set,
+    and the projection covers all of it rather than picking one member.
+    """
     base = candidate_revision_oid(base_revision, repo=repo)
     candidate = candidate_revision_oid(candidate_revision, repo=repo)
     ancestor = subprocess.run(
@@ -1733,12 +1742,7 @@ def inferred_changed_task_id(base_revision, candidate_revision, repo=REPO):
         matched.group("task")
         for matched in TASK_COMMIT_TOKEN_RE.finditer(messages)
     )
-    if len(task_ids) > 1:
-        raise ValueError(
-            "candidate maps to multiple task scopes: "
-            + ", ".join(sorted(task_ids))
-        )
-    return next(iter(task_ids), None)
+    return frozenset(task_ids)
 
 
 class RepositoryView:
@@ -2241,16 +2245,43 @@ def task_human_queue_paths(task_id, repo=REPO, candidate_revision=None):
     )
 
 
+def task_scope_ids(task_scope):
+    """Normalize one task scope: absent, one task id, or a set of them."""
+    if task_scope is None:
+        return None
+    if isinstance(task_scope, str):
+        task_scope = (task_scope,)
+    return tuple(sorted({normalized_task_id(value) for value in task_scope}))
+
+
+def task_scope_queue_paths(
+    task_scope,
+    queue_actor="needs-human",
+    repo=REPO,
+    candidate_revision=None,
+):
+    """Union one scope's task-owned queue paths for the selected actor."""
+    paths = set()
+    for task_id in task_scope_ids(task_scope) or ():
+        paths.update(task_queue_paths(
+            task_id,
+            queue_actor,
+            repo=repo,
+            candidate_revision=candidate_revision,
+        ))
+    return paths
+
+
 def required_queue_paths(
-    task_id=None,
+    task_scope=None,
     queue_actor="needs-human",
     repo=REPO,
     require_all_live=True,
     candidate_revision=None,
 ):
-    if task_id is not None:
-        return task_queue_paths(
-            task_id,
+    if task_scope is not None:
+        return task_scope_queue_paths(
+            task_scope,
             queue_actor,
             repo=repo,
             candidate_revision=candidate_revision,
@@ -2266,14 +2297,14 @@ def required_queue_paths(
 
 
 def required_human_queue_paths(
-    task_id=None,
+    task_scope=None,
     repo=REPO,
     require_all_live=True,
     candidate_revision=None,
 ):
     """Backward-compatible human-only required queue listing."""
     return required_queue_paths(
-        task_id=task_id,
+        task_scope=task_scope,
         queue_actor="needs-human",
         repo=repo,
         require_all_live=require_all_live,
@@ -2457,7 +2488,7 @@ def projection_findings(
     titles,
     repo=REPO,
     allowed_url_prefixes=(),
-    task_id=None,
+    task_scope=None,
     require_all_live=True,
     candidate_revision=None,
     external_actions=(),
@@ -2509,20 +2540,20 @@ def projection_findings(
         for prefix in allowed_url_prefixes
     )
     required_paths = required_queue_paths(
-        task_id=task_id,
+        task_scope=task_scope,
         queue_actor=required_queue_actor,
         repo=repo,
         require_all_live=require_all_live,
         candidate_revision=candidate_revision,
     )
     task_all_paths = (
-        task_queue_paths(
-            task_id,
+        task_scope_queue_paths(
+            task_scope,
             queue_actor="any",
             repo=repo,
             candidate_revision=candidate_revision,
         )
-        if task_id is not None else None
+        if task_scope is not None else None
     )
     section_spans = action_section_spans(text, titles)
     sections = [body for _start, _end, body in section_spans]
@@ -3182,30 +3213,33 @@ def main(argv=None):
         external_assignments = read_env_values(args.external_assignment_env)
         additional_prose = read_env_values(args.additional_prose_env)
         additional_summaries = read_env_values(args.additional_summary_env)
-        task_id = args.task_id
+        task_scope = args.task_id
         require_all_live = True
         if args.branch and args.branch.startswith("task/"):
-            task_id = args.branch
+            task_scope = args.branch
             if args.base_revision:
                 if not args.candidate_revision:
                     raise ValueError(
                         "--base-revision requires --candidate-revision"
                     )
-                inferred_task_id = inferred_changed_task_id(
+                inferred = inferred_changed_task_ids(
                     args.base_revision,
                     args.candidate_revision,
                     repo=REPO,
                 )
-                if inferred_task_id is None:
+                if not inferred:
                     raise ValueError(
                         "immutable candidate has no task scope evidence; "
                         "change its task record or include a `task:` commit token"
                     )
-                if normalized_task_id(task_id) != inferred_task_id:
+                branch_task_id = normalized_task_id(args.branch)
+                if branch_task_id not in inferred:
                     raise ValueError(
-                        "task branch conflicts with immutable candidate scope: "
-                        f"{normalized_task_id(task_id)} != {inferred_task_id}"
+                        "task branch is absent from the immutable candidate "
+                        f"scope: {branch_task_id} is not in "
+                        + ", ".join(sorted(inferred))
                     )
+                task_scope = inferred
         elif args.branch:
             if not args.base_revision or not args.candidate_revision:
                 raise ValueError(
@@ -3213,12 +3247,12 @@ def main(argv=None):
                     "--candidate-revision; use --unscoped only for an "
                     "intentionally inbound surface"
                 )
-            task_id = inferred_changed_task_id(
+            task_scope = inferred_changed_task_ids(
                 args.base_revision,
                 args.candidate_revision,
                 repo=REPO,
             )
-            if task_id is None:
+            if not task_scope:
                 raise ValueError(
                     "immutable candidate has no task scope evidence; "
                     "change its task record or include a `task:` commit token"
@@ -3232,7 +3266,7 @@ def main(argv=None):
             args.action_section,
             repo=REPO,
             allowed_url_prefixes=args.allowed_url_prefix,
-            task_id=task_id,
+            task_scope=task_scope,
             require_all_live=require_all_live,
             candidate_revision=args.candidate_revision,
             external_actions=external_actions,

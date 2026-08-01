@@ -102,6 +102,7 @@ _GIT_OBJECT_KIND_CACHE = {}
 _GIT_REPOSITORY_PATH_CACHE = {}
 _GIT_SCHEMA_ACTIVATION_CACHE = {}
 _GIT_IMMUTABLE_CACHE_REPO = None
+_QUEUE_IDENTITY_CACHE = {}
 _TASK_SNAPSHOT_CACHE = {}
 _LIVE_QUEUE_PATHS_CACHE = None
 _HANDOVER_HISTORY_RECHECK_ACTIVE = False
@@ -394,6 +395,7 @@ def scope_immutable_git_caches():
     _GIT_REVISION_PARENTS_CACHE.clear()
     _GIT_SCHEMA_ACTIVATION_CACHE.clear()
     _GIT_BLOB_CACHE.clear()
+    _QUEUE_IDENTITY_CACHE.clear()
     close_git_cat_file()
 
 
@@ -5124,11 +5126,88 @@ def active_blocking_repair_problem(item):
     )
 
 
+def change_range_base():
+    """Return the base the candidate is measured against, when one exists."""
+    if CHANGE_RANGE is None or CHANGE_RANGE.startswith("root:"):
+        return None
+    return CHANGE_RANGE.split("...", 1)[0]
+
+
+def queue_action_identities_at(revision):
+    """Return every governed queue action identity present at one revision.
+
+    Identity, not path: escalating `non-blocking-` to `future-blocking-` to
+    `blocking-` renames the file while the action stays the same one, and that
+    escalation must not read as a newly filed action.
+    """
+    cached = _QUEUE_IDENTITY_CACHE.get(revision)
+    if cached is not None:
+        return cached
+    tree = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree",
+            "-r", "-z", revision, "--", "message-queue",
+        ],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if tree.returncode:
+        raise GitSnapshotError(git_failure(
+            tree, f"could not list queue actions at {revision}"
+        ))
+    identities = set()
+    for path, mode in parse_git_tree_records(tree.stdout).items():
+        if mode not in ("100644", "100755") or not governed_queue_path(path):
+            continue
+        artifact = git_artifact_bytes_at(revision, path)
+        if artifact is None:
+            continue
+        identities.add(queue_action_identity(
+            path, decode_utf8_artifact(artifact, f"`{path}` at {revision}")
+        ))
+    _QUEUE_IDENTITY_CACHE[revision] = identities
+    return identities
+
+
+def unanswered_action_filed_inside_change_range(item):
+    """Return whether this range filed this action, and no human has answered it.
+
+    A boundary check asks whether an action that was *already* pending slipped
+    past its stop. An action created inside the range was not pending before it.
+    Filing is also the only way one comes into existence, and
+    `check_queue_task_reciprocity` requires the reciprocal `Queue actions` link
+    in the named task's record — which is exactly what puts that task in a
+    non-task branch's inferred scope. Without this, a
+    `transition:<name> task:<id>` action could never be introduced through any
+    merged candidate at all, and would be stranded the moment it was written. It
+    is still reported at every later boundary it reaches.
+
+    An action carrying a committed human response is different: it is the
+    boundary's receipt, and whether that receipt still covers the candidate is
+    precisely what this boundary validates. Those are never skipped.
+    """
+    base = change_range_base()
+    if base is None:
+        return False  # No base to compare against: report, do not assume.
+    if not unanswered_review(fields(item)):
+        return False
+    rel = item.relative_to(REPO).as_posix()
+    if git_artifact_bytes_at(base, rel) is not None:
+        return False
+    return queue_action_identity(
+        rel, repo_text(item)
+    ) not in queue_action_identities_at(base)
+
+
 def check_active_queue_boundaries():
     if not ACTIVE_TRANSITIONS:
         return
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
+            continue
+        if unanswered_action_filed_inside_change_range(item):
             continue
         timing = delivery_class(item.name)
         got = fields(item)

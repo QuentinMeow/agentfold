@@ -21,27 +21,27 @@ Rules:
   id is a key, carrying one severity tier) plus the rule where agents read it. External
   artifact boundaries use a canonical standalone gate, tests, and thin adapters. Check ids
   stay stable because retry filenames embed them (`memory/lessons/automation/deterministic-finding-keys.md`).
-- Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf
-  shape, and task↔blocker links. Known leaves add schemas; new typed leaves inherit the
-  actor's generic schema. Timing only escalates while live and freezes on human response.
-  `queue-resolution` checks staged/range deletion against its claim and evidence;
-  historical future reviews survive escalation. Task reviews bind local artifacts;
-  merge reviews bind Git ranges. Cleanup proves a still-crossed receipt or withdrawn
-  target/task plus distinct evidence. Requested changes require repair plus re-review. `stale-queue`
-  checks reached dates, not `non-blocking-*`; event boundaries require reclassification.
+- Queue checks enforce the filename delivery class, its matching fields, actor/typed-leaf shape, and
+  task↔blocker links. Known leaves add schemas; new typed leaves inherit the actor's generic schema.
+  Timing only escalates while live and freezes on human response. `queue-resolution` checks
+  staged/range deletion against its claim and evidence; historical future reviews survive escalation.
+  Task reviews bind local artifacts; merge reviews bind Git ranges. Cleanup proves a still-crossed
+  receipt or withdrawn target/task plus distinct evidence. Requested changes require repair plus
+  re-review. `stale-queue` checks reached dates, not `non-blocking-*`; event boundaries require
+  reclassification. A reached boundary skips only an unanswered action the range itself filed, by
+  identity so a rename still counts; an answered one is its receipt and is always checked.
 - Admission adapters pass `--displaced-tip <full oid>` for a replaced ref. The range head remains the candidate;
   a divergent old-tip snapshot must retain every live action, and an unavailable nonzero old tip fails closed.
-- PR adapters treat titles as summaries, bind one task from the trusted base/candidate
-  range, require and cross-check that evidence even for a task-named branch, and
-  project the task completely. Scoped external assignments require distinct task-owned
-  queue actions bound to the stable artifact, role, actor kind, and principal. Inbound
-  sources are unscoped; forced directionless sources let the bound queue path select
-  the actor. Structural issues/comments replay current event-artifact state. Removing
-  the final versioned source binding needs a closed current/released attestation from
-  the provider adapter at exact-tree admission; current or unknown blocks. Summary mode
-  allows ordinary PR titles while rejecting asks. GitHub thread state has no Actions
-  transition trigger: hard assurance needs native conversation resolution, a protected
-  required release check, and separately controlled provider code.
+- PR adapters treat titles as summaries and bind every task the trusted base/candidate range carries
+  — plural scope is ordinary, not an error. A task-named branch must be among them, and the
+  projection covers the whole scope. Scoped external assignments require distinct task-owned queue
+  actions bound to the stable artifact, role, actor kind, and principal. Inbound sources are
+  unscoped; forced directionless sources let the bound queue path select the actor. Structural
+  issues/comments replay current event-artifact state. Removing the final versioned source binding
+  needs a closed current/released attestation from the provider adapter at exact-tree admission;
+  current or unknown blocks. Summary mode allows ordinary PR titles while rejecting asks. GitHub
+  thread state has no Actions transition trigger: hard assurance needs native conversation
+  resolution, a protected required release check, and separately controlled provider code.
 - Task admission rechecks every post-activation Git edge and every task-local Markdown
   artifact, so reversion/deletion cannot hide a crossing or human ask; exact links project.
   Adapters pass `--at-transition <name>` for external boundaries such as merge.
