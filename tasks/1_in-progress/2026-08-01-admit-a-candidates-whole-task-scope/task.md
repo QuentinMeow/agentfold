@@ -1,10 +1,10 @@
 # Let a candidate carry more than one task, and stop a range failing the boundary it files
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-01, branch task/2026-08-01-admit-a-candidates-whole-task-scope)
 **Filed:** 2026-08-01, by claude, from six pull requests blocked by two gates that require opposite things
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-admit-a-candidates-whole-task-scope.md`
+**Queue actions:** none
 
 ## Goal
 
