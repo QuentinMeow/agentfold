@@ -133,3 +133,41 @@ tests: 12/12 files passed
 test elapsed: 77.98s
 exit=0
 ```
+
+## the hook that admitted the commit carrying this file
+
+The staged run above was made before this file existed. Commit `d49b307` carries it, and
+its pre-commit hook ran the same reconciler over the whole staged tree with this file in
+it. The message came from a file in a scratch directory outside the repository, which is
+why the command names a variable; everything after it is the hook's own output, trimmed in
+the middle where it lists the twelve test files no record path selects.
+
+```
+$ git commit -F "$SP/msg-work.txt"
+pre-commit: core scope
+core-scope: no core changes (independent review manual; not invoked)
+pre-commit: reconciler
+reconcile: 0 blocking finding(s)
+pre-commit: staged-path repository tests
+test lane: staged
+test reason: every staged path is a record path no test reads
+staged paths: 5
+  tasks/1_in-progress/2026-07-25-complete-stage-0-verification-transcripts/plan.md -> record path, no test reads it
+  tasks/1_in-progress/2026-07-25-complete-stage-0-verification-transcripts/task.md -> record path, no test reads it
+  tasks/1_in-progress/2026-07-25-complete-stage-0-verification-transcripts/verification.md -> record path, no test reads it
+  tasks/1_in-progress/2026-07-25-complete-stage-0-verification-transcripts/worklog.md -> record path, no test reads it
+  tasks/4_done/2026-07-25-mine-markdown-cochange-couplings/verification.md -> record path, no test reads it
+[...]
+no discovered test file can be affected by the staged change
+tests: 0/0 files passed
+test elapsed: 0.18s
+pre-commit: OK
+[task/2026-07-25-complete-stage-0-verification-transcripts d49b307] docs: record the four missing Stage 0 verification transcripts
+ 5 files changed, 341 insertions(+), 13 deletions(-)
+ create mode 100644 tasks/1_in-progress/2026-07-25-complete-stage-0-verification-transcripts/verification.md
+```
+
+The staged lane selects no test file because every staged path is a record path; the full
+suite in the section above is the test evidence, and it was run separately. The commit that
+adds this section runs the hook once more and nothing records that run — the recursion has
+to stop somewhere and it stops here. No `--no-verify` was used at any point.
