@@ -153,10 +153,16 @@ seconds apart; the runs above use 0-second delays so the suite does not sleep.
 Pull request #65 carries this change, so its own `pull_request` event ran the new step from
 the candidate's workflow code.
 
+The first run of that pull request, at 11:48 on 2026-08-02, was green across every job:
+
 ```
 $ gh pr checks 65 --json name,state -q '[.[]|select(.state!="SKIPPED")]|map(.name+"="+.state)|join(" ")'
 External source release admission=SUCCESS reconcile-and-test=SUCCESS Current review-state action projection=SUCCESS Authoritative action projection from trusted workflow code=SUCCESS reconcile-and-test=SUCCESS
 ```
+
+Later runs of the same branch are **not** all green, for reasons outside this change. They
+are recorded below under "Two failures that are not this change", so that a reader who
+opens the pull request and sees a red check is not left to guess.
 
 ```
 $ gh api "repos/QuentinMeow/agentfold/actions/jobs/91492855375" -q '.name, .conclusion, (.steps[]|.name+" -> "+.conclusion)'
@@ -189,6 +195,55 @@ The first five matches are Actions echoing the script source, not output. The on
 line is the fetch. `merge ref was recomputed after this event` does **not** appear, so the
 candidate equalled `github.sha` and the run took the fast path. The re-resolution branch has
 not run on GitHub; it has only run in the fixture.
+
+## Two failures that are not this change
+
+Several agents were merging to `main` while this branch was open, and the moving trunk
+produced two red `reconcile-and-test` results on the `pull_request` event. Neither touches
+the job this task repairs, and the `push`-event `reconcile-and-test` on the same commits
+stayed green throughout.
+
+**One.** The reconciler could not run at all:
+
+```
+$ gh api "repos/QuentinMeow/agentfold/actions/jobs/91493156864/logs" | grep -E "reconcile:|##\[error\]"
+2026-08-02T11:51:41.8772722Z reconcile: Git snapshot error: captured candidate is neither the --range head nor an exact base+head synthetic merge
+2026-08-02T11:51:41.8879064Z ##[error]Process completed with exit code 2.
+```
+
+The cause, from the objects themselves — the checked-out merge commit's first parent is not
+the base the same event payload declared:
+
+```
+$ git rev-list --parents -n1 4628a2d927bbf60590ba3d535b5082babf819d07
+4628a2d927bbf60590ba3d535b5082babf819d07 3eda9123da8aa7f8a7d8b2e8e9fb7687494b6015 f82df051fb3e2ae24c79884620583dbc041e7b51
+$ gh api "repos/QuentinMeow/agentfold/pulls/65" -q '.base.sha'
+8b2361f55220284b4647c08e02b574241aa30b47
+```
+
+GitHub computed `refs/pull/65/merge` against `main` at `3eda912` while the payload still
+named `8b2361f` as the base. That is the *same* stale-base race this task repairs, reached
+through `reconcile-and-test` rather than `review-state-action-projection`. Nothing in this
+change touches that job. It recurred on a later push (job `91493693894`, same message), so
+it is reproducible rather than a one-off.
+
+**Two.** Restacking the branch onto current `main` cleared that failure and produced a
+different one, caused by the force push:
+
+```
+$ gh api "repos/QuentinMeow/agentfold/actions/jobs/91493410813/logs" | grep -E "queue-resolution|reconcile:"
+2026-08-02T11:54:36.8349066Z [queue-resolution] message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md: deleted unresolved queue item: divergent update discarded a live old-tip action
+2026-08-02T11:54:36.8351882Z     fix: commit the required claim/response evidence before deleting it
+2026-08-02T11:54:36.8352735Z reconcile: 1 blocking finding(s)
+```
+
+Another agent deleted that queue item on `main` between the branch's old base and its new
+one, so the displaced-tip comparison read someone else's properly evidenced deletion as
+this branch discarding a live action. The next ordinary push, whose previous tip already
+carried the deletion, did not reproduce it.
+
+Neither failure was worked around by weakening a check, and no `--no-verify` bypass was
+used anywhere in this task.
 
 ## Review verdicts (when a review was explicitly run)
 
