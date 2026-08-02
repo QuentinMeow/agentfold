@@ -27,20 +27,20 @@ admission-edge ratchet for the rejecting clauses so branching early still cannot
 
 ## Acceptance criteria
 
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [ ] `python3 automation/run_tests.py` reports 11/11 files passed.
-- [ ] The PR #44 merge probe (`--check --at-transition merge --branch
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
+- [x] `python3 automation/run_tests.py` reports 11/11 files passed.
+- [x] The PR #44 merge probe (`--check --at-transition merge --branch
       task/2026-07-31-let-a-human-answer-in-one-edit` over a merge of `6c723ef` onto main with
       main as first parent) reports 0 blocking findings.
-- [ ] A range containing `b98621f` no longer reports the nine latent findings on the
+- [x] A range containing `b98621f` no longer reports the nine latent findings on the
       `2026-08-01-1522PDT-admit-a-candidates-whole-task-scope` handover.
-- [ ] A version withdrawn before a record was written does not govern that record.
-- [ ] A version activated only in parallel history does not change a record's required suffix.
-- [ ] A branch cut before a rejecting grammar activated still cannot evade that rejection,
+- [x] A version withdrawn before a record was written does not govern that record.
+- [x] A version activated only in parallel history does not change a record's required suffix.
+- [x] A branch cut before a rejecting grammar activated still cannot evade that rejection,
       proven by a test.
-- [ ] Every handover reachable from `main` is accepted under the marker its own creation
+- [x] Every handover reachable from `main` is accepted under the marker its own creation
       snapshot declared.
-- [ ] No committed handover bytes change.
+- [x] No committed handover bytes change.
 
 ## Links
 
