@@ -67,6 +67,7 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 **Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
 **Full context:** `<repo-relative path to the durable source>`
 **Resolution evidence:** `<durable non-queue file that folding this answer will change>`
+**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
 <!-- Then exactly one timing field matching the filename:
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]

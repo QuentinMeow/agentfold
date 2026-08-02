@@ -11,6 +11,7 @@
 **Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
+**Answer by:** 2026-10-29
 **Blocks at:** transition:merge task:2026-07-23-first-class-message-queue
 **Until then:** Implementation, tests, and independent review may continue.
 **Why-you-might-care:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.

@@ -7,6 +7,7 @@
 **Why-you-might-care:** Three core changes are live on main today without the review each of them declared mandatory before merge, and no commit can now satisfy that gate.
 **If-you-do-nothing:** The three reviews stay live and unanswered, their three tasks stay in review forever, and the queue keeps carrying three asks that no repository action can close.
 **Resolution evidence:** `memory/decisions/2026-07-31-merge-boundaries-crossed-unreviewed-disposition.md`
+**Answer by:** 2026-10-29
 **Blocks at:** transition:complete task:2026-07-23-first-class-message-queue task:2026-07-24-isolate-test-git-environment task:2026-07-24-layered-development-workspace
 **Until then:** The three tasks stay in review, their merged code stays on main, and every unrelated task, queue item, and merge continues normally.
 

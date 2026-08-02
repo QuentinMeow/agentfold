@@ -8,6 +8,7 @@
 **If-you-do-nothing:** Nothing stops. The principle keeps describing the loop in the present tense until either you answer this or the filed retry-automation task ships and makes the sentence true.
 **Resolution evidence:** `handbook/principles/eventual-consistency.md`
 
+**Answer by:** 2026-10-29
 **If unanswered:** The principle text stays exactly as it is; agents keep reading "retry item auto-filed" as a live mechanism, and the repair keeps waiting on the retry-automation task instead.
 
 ## What you need to know

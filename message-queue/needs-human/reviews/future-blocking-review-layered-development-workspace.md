@@ -9,6 +9,7 @@
 **Review revision:** git:d87b755e6259101bf76b0a2783b35dfb3f163fb0...8ca62bc82bd11c5b59b27c35092eeb29ba1d5b7b
 **Reviewed revision:** ______
 **Review outcome:** pending
+**Answer by:** 2026-10-22
 **Blocks at:** transition:merge task:2026-07-24-layered-development-workspace
 **Until then:** The draft PR may be inspected and revised, but this layer does not merge.
 **Look-at:** the zone/authority model in `docs/designs/layered-development-workspace.md`; the bounded claims and failure behavior in `automation/inspect_workspace_boundaries.py`; focused cases in `automation/tests/test_inspect_workspace_boundaries.py`

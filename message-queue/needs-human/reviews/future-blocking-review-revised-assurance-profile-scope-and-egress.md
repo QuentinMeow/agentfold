@@ -13,6 +13,7 @@
 **Review outcome:** pending
 **Supersedes:** `message-queue/needs-human/reviews/future-blocking-review-assurance-profile-ceilings.md`
 **Depends on:** `message-queue/needs-agent/requests/future-blocking-revise-assurance-profile-scope-and-egress.md`
+**Answer by:** 2026-10-22
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 

@@ -9,6 +9,7 @@
 **Review revision:** git:25d03257b5ee61753fa9bada609722c4e84a8064...fd2374d99796300ed4325c2961e696092c17875e
 **Reviewed revision:** ______
 **Review outcome:** pending
+**Answer by:** 2026-10-22
 **Blocks at:** transition:merge task:2026-07-24-isolate-test-git-environment
 **Until then:** The draft PR and later stack layers may be prepared, but this layer does not merge.
 **Look-at:** `automation/run_tests.py`; the linked-worktree preservation evidence in `verification.md`

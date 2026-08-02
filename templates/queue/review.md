@@ -74,6 +74,7 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
 **Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
+**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
 <!-- Then exactly one timing field matching the filename:
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
