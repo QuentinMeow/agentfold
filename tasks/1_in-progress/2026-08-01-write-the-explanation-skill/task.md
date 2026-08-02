@@ -24,19 +24,19 @@ it links them and adds only the explanation layer.
 
 ## Acceptance criteria
 
-- [ ] The skill entry point skills/explain-to-human/SKILL.md exists, is at most 70 lines (the reconciler's
+- [x] The skill entry point skills/explain-to-human/SKILL.md exists, is at most 70 lines (the reconciler's
       `SKILL_BUDGET`), and routes to one reference per surface.
-- [ ] The skill states the three-layer rule (one sentence → one paragraph → full depth)
+- [x] The skill states the three-layer rule (one sentence → one paragraph → full depth)
       and the self-containment rule (a decision file carries the effect; evidence is linked).
-- [ ] One scenario reference exists per surface: pull request, human queue message,
+- [x] One scenario reference exists per surface: pull request, human queue message,
       chat reply, and handover.
-- [ ] Every rule in the skill is mechanically checkable by a reader — no rule reads
+- [x] Every rule in the skill is mechanically checkable by a reader — no rule reads
       "be clear" without saying what to do instead.
-- [ ] `skills/AGENTS.md` lists the skill in its shipped-skills table.
-- [ ] The root `AGENTS.md` points at the skill from the message-queue ritual and the
+- [x] `skills/AGENTS.md` lists the skill in its shipped-skills table.
+- [x] The root `AGENTS.md` points at the skill from the message-queue ritual and the
       end-of-session ritual, without restating its content.
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [ ] `python3 automation/run_tests.py` passes.
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
+- [x] `python3 automation/run_tests.py` passes.
 
 ## Links
 
