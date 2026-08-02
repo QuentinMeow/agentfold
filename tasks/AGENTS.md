@@ -9,7 +9,7 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 ```
 0_backlog → 1_in-progress → 3_in-review → 4_done
                   ↕
-              2_blocked (only while an unresolved blocking-* action stops it)
+              2_blocked (only while an unresolved blocking-* agent action stops it)
 ```
 
 - Task id = folder name = `YYYY-MM-DD-<kebab-slug>` (date filed). The id never changes;
@@ -33,17 +33,16 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   task from backlog to in-progress, and resolve its pickup request; push, then start.
   One agent per task; a rejected push means someone beat you — pick another.
 - One git branch per task: `task/<task-id>` (`handbook/git-workflow.md`).
-- `2_blocked` requires a live `blocking-*` human or agent item in `Queue actions`, with
-  that item reciprocally naming `task:<id>` in `Blocks now`. `1_in-progress` is valid
-  only after a committed one-line `open` → `in-repair` agent claim, or an answered
-  `waiting` → `folding` human-action claim. Waiting/open blockers require `2_blocked`.
-- Every post-adoption Git edge rechecks task structure. A linked future blocker stops
-  `start`, `review`, or `complete`; its review binds a stable local artifact. Fresh
-  approval stays live in the crossing commit, and cleanup requires the task to remain
-  past that receipt. Its boundary names `task:<id>`; Git/provider admission handles merge.
-  Non-task branches infer scope from changed task records or `task: <id>` commit tags.
-- `4_done` requires real `verification.md` output and normally `Queue actions: none`;
-  only the exact approved completion receipt survives its crossing commit for cleanup.
+- `2_blocked` requires a live `blocking-*` **agent** item in `Queue actions` naming
+  `task:<id>` in `Blocks now`; no human action justifies it. `1_in-progress` is valid
+  only after a committed one-line `open` → `in-repair` agent claim. Open blockers require `2_blocked`.
+- Every post-adoption Git edge rechecks task structure. `transition:start` from `0_backlog`
+  is the only human boundary a task can cross: its review binds a stable local artifact and
+  stays live in the crossing commit, cleanup needs the task past that receipt, and returning
+  to `0_backlog` unstarts it. Non-task branches infer scope from changed task records or `task: <id>` commit tags.
+- `4_done` requires real `verification.md` output and no live `blocking-*`/`future-blocking-*`
+  **agent** action; a live human question stays listed and outlives the task, because done
+  means the agent owes nothing — never that the human is satisfied.
 - Done tasks are pruned by the memory gardener after ~90 days: durable learnings are
   promoted into `memory/`, then the folder is deleted (git history archives it).
 

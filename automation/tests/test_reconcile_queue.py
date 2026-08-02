@@ -1616,8 +1616,21 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Until then:** continue implementation\n",
                 ),
             )
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human gating schema:** v1\n",
+            )
+            self.git(root, "add", "-A")
             messages = self.messages(RECONCILE.check_queue_schema())
+            # The merge-bound review is refused a step earlier now: the boundary
+            # itself is unspellable, so there is no binding left to constrain.
             self.assertTrue(any(
+                "may not bind transition:merge" in message
+                for message in messages
+            ), messages)
+            self.assertFalse(any(
                 "merge-bound review must bind" in message
                 for message in messages
             ), messages)
@@ -1625,6 +1638,232 @@ class ReconcileQueueTests(unittest.TestCase):
                 "task-lifecycle review must bind" in message
                 for message in messages
             ), messages)
+
+    def human_gating_item(self, root, name, timing_block, extra=""):
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n"
+            "**Human gating schema:** v1\n",
+        )
+        self.write(root, "docs/source.md", "# Source\n")
+        self.write(
+            root,
+            "message-queue/needs-human/decisions/" + name,
+            "# Choose\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23, by codex, from task `2026-07-23-example`\n"
+            "**Action:** choose the source disposition\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/source.md`\n"
+            "**Answer by:** 2026-12-31\n"
+            + timing_block
+            + extra
+            + "**Your answer:** ______\n",
+        )
+        return self.messages(RECONCILE.check_queue_schema())
+
+    def test_human_action_may_not_bind_a_revertible_git_edge(self):
+        """The whole model, as one refusal an author sees on their own hook."""
+        for transition in ("merge", "review", "complete"):
+            with self.subTest(transition=transition), self.repo() as root:
+                messages = self.human_gating_item(
+                    root,
+                    "future-blocking-choose.md",
+                    f"**Blocks at:** transition:{transition} "
+                    "task:2026-07-23-example\n"
+                    "**Until then:** implementation may continue\n",
+                )
+                self.assertTrue(any(
+                    f"may not bind transition:{transition}" in message
+                    for message in messages
+                ), messages)
+
+    def test_human_action_may_not_stop_a_whole_task(self):
+        with self.repo() as root:
+            messages = self.human_gating_item(
+                root,
+                "blocking-choose.md",
+                "**Blocks now:** task:2026-07-23-example\n",
+            )
+            self.assertTrue(any(
+                "no human answer justifies 2_blocked" in message
+                for message in messages
+            ), messages)
+
+    def test_start_gate_must_name_an_unstarted_backlog_task(self):
+        for status, refused in (
+            ("0_backlog", False), ("1_in-progress", True), ("4_done", True),
+        ):
+            with self.subTest(status=status), self.repo() as root:
+                self.make_task(root, status, "none")
+                messages = self.human_gating_item(
+                    root,
+                    "future-blocking-choose.md",
+                    "**Blocks at:** transition:start task:2026-07-23-example\n"
+                    "**Until then:** implementation may continue\n",
+                )
+                self.assertEqual(refused, any(
+                    "a start gate binds an unstarted 0_backlog task" in message
+                    for message in messages
+                ), messages)
+
+    def test_start_gate_must_name_the_task_it_holds(self):
+        with self.repo() as root:
+            messages = self.human_gating_item(
+                root,
+                "future-blocking-choose.md",
+                "**Blocks at:** transition:start\n"
+                "**Until then:** implementation may continue\n",
+            )
+            self.assertTrue(any(
+                "must name the task it holds unstarted" in message
+                for message in messages
+            ), messages)
+
+    def test_one_act_with_no_undo_is_still_spellable(self):
+        """The model withholds two things; this is the second."""
+        with self.repo() as root:
+            messages = self.human_gating_item(
+                root,
+                "blocking-choose.md",
+                "**Blocks now:** operation:publish-the-release\n",
+            )
+            self.assertFalse(any(
+                "may not bind" in message
+                or "justifies 2_blocked" in message
+                or "start gate" in message
+                or "**Answer by:**" in message
+                for message in messages
+            ), messages)
+
+    def test_every_live_human_item_needs_a_parseable_answer_by(self):
+        for value, refused in (
+            ("2026-12-31", False), ("soon", True), (None, True),
+        ):
+            with self.subTest(value=value), self.repo() as root:
+                messages = self.human_gating_item(
+                    root,
+                    "non-blocking-choose.md",
+                    "**If unanswered:** the current behavior stays\n",
+                )
+                path = (
+                    root / "message-queue/needs-human/decisions/"
+                    "non-blocking-choose.md"
+                )
+                text = path.read_text(encoding="utf-8")
+                path.write_text(
+                    text.replace(
+                        "**Answer by:** 2026-12-31\n",
+                        "" if value is None else f"**Answer by:** {value}\n",
+                    ),
+                    encoding="utf-8",
+                )
+                messages = self.messages(RECONCILE.check_queue_schema())
+                self.assertEqual(refused, any(
+                    "**Answer by:** must be one UTC" in message
+                    for message in messages
+                ), messages)
+
+    def test_agent_boundaries_are_untouched_by_human_gating(self):
+        """An agent obligation can be discharged at any time, so it may wait."""
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human gating schema:** v1\n",
+            )
+            self.write(root, "docs/source.md", "# Source\n")
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "future-blocking-repair.md",
+                "# Repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23\n"
+                "**Action:** finish the repair\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks at:** transition:merge task:2026-07-23-example\n"
+                "**Until then:** implementation may continue\n",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertEqual([], messages, messages)
+
+    def test_human_gating_marker_may_not_be_removed_after_activation(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human gating schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate human gating")
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                messages = self.messages(RECONCILE.check_queue_schema())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Human gating schema v1 was removed after activation" in message
+                for message in messages
+            ), messages)
+
+    def test_a_lapsed_answer_by_is_advisory_and_never_blocks(self):
+        """The forcing function may notice lateness; it may never decide."""
+        with self.repo() as root:
+            self.human_gating_item(
+                root,
+                "non-blocking-choose.md",
+                "**If unanswered:** the current behavior stays\n",
+            )
+            path = (
+                root / "message-queue/needs-human/decisions/"
+                "non-blocking-choose.md"
+            )
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "**Answer by:** 2026-12-31", "**Answer by:** 2026-07-20"
+                ),
+                encoding="utf-8",
+            )
+            findings = list(RECONCILE.check_stale_queue())
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("answer-by date 2026-07-20 has passed",
+                          findings[0].message)
+            self.assertTrue(findings[0].advisory)
+            self.assertEqual("advisory", findings[0].severity)
+
+    def test_an_answered_human_item_stops_ageing_on_its_deadline(self):
+        """It is a record awaiting its fold, not a question awaiting an answer."""
+        with self.repo() as root:
+            self.human_gating_item(
+                root,
+                "non-blocking-choose.md",
+                "**If unanswered:** the current behavior stays\n",
+            )
+            path = (
+                root / "message-queue/needs-human/decisions/"
+                "non-blocking-choose.md"
+            )
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "**Answer by:** 2026-12-31", "**Answer by:** 2026-07-20"
+                ).replace(
+                    "**Your answer:** ______", "**Your answer:** keep it"
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], list(RECONCILE.check_stale_queue()))
 
     def test_review_target_and_cancellation_evidence_must_be_distinct(self):
         with self.repo() as root:

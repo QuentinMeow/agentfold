@@ -23,18 +23,24 @@ Background stays durable; the item owns delivery/state and an unfolded response 
 
 The filename is canonical; never duplicate `Blocking`. Live timing may only escalate
 `non-blocking` → `future-blocking` → `blocking`, updating every link in one commit.
-Weakening needs an authorized replacement; a concrete human response freezes timing.
+Weakening needs an authorized replacement or the human-gating activation edge below; a concrete human response freezes timing.
 
-Standard leaves are `needs-human/{decisions,clarifications,reviews}` and
-`needs-agent/{requests,retries}`; each leaf's own `README.md` states what belongs in it.
-An adopter may add a kebab-case typed leaf directly under either actor folder; the generic actor schema
-still applies, so put its contract and template in the repository. Extra nesting is invalid, so filenames remain discoverable recursively.
+**Nothing a human owes holds a Git edge.** Merging, moving a task, and recording it done
+are revertible, so they never wait. A `needs-human/` item may withhold only the start of a
+task still in `0_backlog` (`Blocks at: transition:start task:<id>`) or one act with no undo
+(`Blocks now: operation:<name>`); `transition:merge|review|complete` and
+`Blocks now: task:<id>` are unspellable there, and no human item justifies `2_blocked`.
+Everything else is `non-blocking-`, filed and merged with the question still open. Each
+carries `Answer by:` (UTC); when it passes, re-surface it and set a new date with
+`Re-asked:` — never write an answer nobody gave. `needs-agent/` timing is unchanged.
+
+Standard leaves are `needs-human/{decisions,clarifications,reviews}` and `needs-agent/{requests,retries}`; each leaf's own `README.md` states what belongs in it.
+An adopter may add a kebab-case typed leaf directly under either actor folder; the generic actor schema still applies, so put its contract and template in the repository. Extra nesting is invalid, so filenames remain discoverable recursively.
 
 ## Lifecycle and content
 
 - Copy the matching template; human fields follow `handbook/human-action-guide.md`. Under the format marker above, a live unanswered human item leads with the ask and keeps every machine field below its answer line.
-  Record an artifact-scoped `External assignment` or versioned `External source`.
-  Direct links never replace it; releasing the last binding needs trusted provider evidence.
+  Record an artifact-scoped `External assignment` or versioned `External source`; direct links never replace it, and releasing the last binding needs trusted provider evidence.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
 - Commit the first human response while `waiting`; it is immutable. Treat a counter-question
   as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
@@ -45,10 +51,10 @@ still applies, so put its contract and template in the repository. Extra nesting
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one reciprocal backlog `task.md` link. Its atomic claim/move deletes it; only
   pickups use moving task paths as live context, while retries may quote broken paths.
-- Every item predeclares non-queue `Resolution evidence`; a review keeps it distinct
-  from its target. Task reviews bind a stable local file; merge reviews bind the Git
-  range. Future timing survives response; cleanup needs a fresh crossed receipt/evidence.
-  UTC dates are clock-checked; other timing is agent-attested absent a validating
-  adapter; rejection withdraws its target, while changes requested creates re-review.
+- Every item predeclares non-queue `Resolution evidence`; a review keeps it distinct from
+  its target, binds a stable local file, and is owned by one task — by boundary, or by the
+  task its `Filed:` provenance names. Future timing survives response; cleanup needs the
+  crossed receipt for a start gate and changed evidence otherwise. UTC dates are
+  clock-checked, other timing is agent-attested absent a validating adapter; rejection withdraws its target, while changes requested creates re-review.
 - Generated retries need exact identity and a cleared finding; pickups need the atomic backlog-to-claimed move. Git history archives resolutions.
 - Transcribe chat responses before use; timing never changes after that response.

@@ -72,6 +72,9 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 non-blocking-* -> neither; If you do nothing above is the unattended outcome.
+A needs-human item may bind only transition:start on a 0_backlog task, or
+operation:<name> for one act with no undo. Merging, moving a task, and recording it
+done never wait on an answer (message-queue/AGENTS.md owns this rule).
 Add External assignment / External source only for a provider binding. A concrete
 response is immutable: if it is a counter-question, fold the answer into Resolution
 evidence and create a same-timing successor naming this path in Supersedes. -->
