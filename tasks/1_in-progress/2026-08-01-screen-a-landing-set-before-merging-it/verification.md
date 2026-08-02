@@ -229,6 +229,33 @@ test elapsed: 134.77s
 pre-commit: OK
 ```
 
+CI on pull request 68, which runs the same gates at the merge boundary rather than at the
+branch head (job 91495549814):
+
+```
+core-scope: pass (5 core path(s), task 2026-08-01-screen-a-landing-set-before-merging-it; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+tests: 13/13 files passed
+```
+
+The pull-request body was checked against the provider boundary gate before it was posted,
+with the flags the workflow itself uses:
+
+```
+$ python3 automation/check_action_projection.py --file <body> --action-section "What to review" \
+    --queue-actor any --required-queue-actor needs-human \
+    --allowed-url-prefix "https://github.com/QuentinMeow/agentfold/blob/$MERGE/" \
+    --candidate-revision "$MERGE" --branch task/2026-08-01-screen-a-landing-set-before-merging-it \
+    --base-revision "$BASE" --label "pull request 68"
+action-projection: 0 finding(s)
+```
+
+The first run of that gate reported two findings, both real: the body used the wrong
+no-action sentinel for the actor the workflow selects, and one sentence in the design
+rationale — "the order per leg is therefore: merge without committing, run the test lane,
+commit, then run the reconciler" — reads as a directive aimed at the reader. Both were
+fixed in the body rather than worked around.
+
 ## 7. What is proved end to end, and what is not
 
 - **End to end, against the real gates**: `plan` on real branches under both Git versions;
