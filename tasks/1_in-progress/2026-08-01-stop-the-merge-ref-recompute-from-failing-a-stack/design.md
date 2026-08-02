@@ -74,6 +74,44 @@ One thing deliberately *not* changed: the job still checks out
 `github.event.pull_request.base.sha`, and still never checks out the candidate. The
 candidate is read as data — parent ids and ancestry — and never executed.
 
+## The bound had only a lower end, and that was a fail-open
+
+The sentence above — "non-numeric or zero bounds fail the step before the loop starts" —
+was true and insufficient. Re-reading this branch against its own fail-closed constraint
+found the missing half, and the hole it left was not cosmetic.
+
+`[` does not report false when an operand overflows `intmax_t`. It reports **status 2** and
+writes a diagnostic, and `if` and `while` both read any non-zero status as false. So a
+bound above 2^63-1 was false at the lower guard, which skipped it, and false again at the
+loop condition, which skipped every iteration. The step then fell out of the loop having
+bound nothing and printed whatever `ACTION_PROJECTION_CANDIDATE_REVISION` happened to
+hold — the empty string. Exit 0, `revision=`, and a downstream `--candidate-revision ""`.
+That is precisely the fail-open this design exists to prevent, reached without a single
+guard rejecting anything. `verification.md` records the run: the pre-repair step publishing
+an empty revision at exit 0.
+
+Two changes close it, and they are deliberately independent:
+
+- **An upper bound**, `-gt 100`, beside the existing `-lt 1`. This is not only about the
+  overflow value: 9223372036854775807 is a whole number `[` compares happily, and a loop
+  that would run that many times is `while :` with extra steps, which the test beside it
+  already forbids. A range is what the guard meant from the start.
+- **A positive check after the loop.** Reaching the `printf` has to *mean* a `break` bound
+  a candidate. Inferring that from the absence of a failure is what let the overflow
+  through, because every guard inside the loop is a way to **reject** a candidate, so a
+  path that skips the loop skips all of them at once. An `[ -z ... ]` test and exit 1
+  establishes the candidate positively instead of trusting the control flow that reached
+  it.
+
+The second is the load-bearing one. The first closes this specific value; the second closes
+the class, whatever future edit or unanticipated `[` status produces it. Keeping both is
+cheap, and a reader who deletes either should have to argue with a test.
+
+The upper bound is 100 rather than a number derived from the delay. The two are set
+independently in `env:`, and a cap that moved with the delay would be a second thing to
+reason about for no gain — 100 attempts is already far past any provider-side recompute,
+and any value above it fails in the same microsecond that 101 does.
+
 ## Core fit
 
 **Agent substitution:** pass — the change is the shell of one CI step and the static test

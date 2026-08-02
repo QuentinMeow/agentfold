@@ -615,8 +615,12 @@ jobs:
                 ;;
             esac
           done
-          if [ "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" -lt 1 ]; then
-            echo "merge-ref resolution needs at least one attempt" >&2
+          # An upper bound as well as a lower one: 9223372036854775807 is a
+          # whole number `[` compares happily, and a loop that would run that
+          # many times is indistinguishable from an unbounded one.
+          if [ "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" -lt 1 ] ||
+              [ "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" -gt 100 ]; then
+            echo "merge-ref resolution needs 1 to 100 attempts" >&2
             exit 1
           fi
           ACTION_PROJECTION_ATTEMPT=1
@@ -668,6 +672,18 @@ jobs:
             sleep "$ACTION_PROJECTION_RESOLVE_DELAY_SECONDS"
             ACTION_PROJECTION_ATTEMPT=$((ACTION_PROJECTION_ATTEMPT + 1))
           done
+          # Reaching here has to mean a `break` bound a candidate. Falling out
+          # of the loop instead must never publish one, and inferring that from
+          # the absence of a failure is not enough: `[` reports a status of 2,
+          # not 1, when an operand overflows intmax, `if` and `while` both read
+          # that as false, and a bound above 2^63-1 therefore skipped the guard
+          # above *and* every iteration. So establish the candidate positively
+          # rather than trusting the loop, which closes that class of misparse
+          # whatever produces it.
+          if [ -z "$ACTION_PROJECTION_CANDIDATE_REVISION" ]; then
+            echo "no candidate revision was bound" >&2
+            exit 1
+          fi
           printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             >> "$GITHUB_OUTPUT"
       - name: Collect current formal reviews and unresolved diff threads

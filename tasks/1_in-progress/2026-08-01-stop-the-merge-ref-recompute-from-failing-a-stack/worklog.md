@@ -61,3 +61,36 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   green board and left the branch published with the cause recorded. Filed no queue item for
   it — the session that owns coordination decides whether this becomes its own task, and
   filing it here risked duplicating one.
+
+## 2026-08-02 (continued) — the bound's missing upper end (claude)
+
+This entry continues the session above, which ended when the machine it ran on crashed. The
+repair below was in the worktree uncommitted at that point; it is committed here with the
+design and verification records it needed and did not have.
+
+- Re-read the branch against its own fail-closed constraint and found the bound guarded at
+  one end only. `[` reports **status 2**, not 1, when an operand overflows `intmax_t`, and
+  `if` and `while` both read that as false — so a bound above 2^63-1 skipped the lower
+  guard *and* every loop iteration, and the step fell out of the loop and published the
+  empty string. Exit 0, `revision=`, no guard having rejected anything.
+- That is a real fail-open in the step as pull request #65 published it, not a
+  hypothetical. Both directions are recorded in `verification.md` as run output: the
+  pre-repair script from `HEAD` exiting 0 with `revision=`, and the repaired script exiting
+  1 with `no candidate revision was bound`.
+- Two independent changes close it. `-gt 100` beside `-lt 1` makes the guard a range, which
+  is what it always meant — 9223372036854775807 is a number `[` accepts and a loop that
+  long is `while :` with extra steps. The load-bearing one is the positive check after the
+  loop: reaching the `printf` must *mean* a candidate was bound, because every guard inside
+  the loop is a way to reject one and a path that skips the loop skips all of them.
+- Deliberately did not probe 9223372036854775807 itself. Any value over the cap reaches the
+  same guard and `101` does it in a microsecond, where that one would hang the suite if a
+  later edit removed the cap. The reasoning is written beside the case in the test.
+- Added a fidelity warning to `step_shell_script`'s docstring: the block ends at the first
+  under-indented line, so an indent broken mid-script yields a silent *prefix* of the step
+  that can still satisfy every assertion made about the surviving part. The new test pins
+  the script's last lines, so a truncated block no longer contains them.
+- `python3 automation/run_tests.py` green, 12/12 files; `reconcile.py --check` 0 blocking.
+- The two red `reconcile-and-test` checks on pull request #65 are unchanged and are still
+  not this branch's: both are the stale-base race recorded above, now filed as its own task
+  (`2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check`). No check was weakened
+  and no `--no-verify` bypass was used.

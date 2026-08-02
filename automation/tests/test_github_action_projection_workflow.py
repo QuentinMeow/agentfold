@@ -42,7 +42,18 @@ def workflow_job(workflow, name):
 
 
 def step_shell_script(step):
-    """Return one step's literal `run:` block with its block indent removed."""
+    """Return one step's literal `run:` block with its block indent removed.
+
+    Fidelity hazard worth knowing before trusting a green run: the block ends
+    at the first non-blank line indented less than `RUN_BLOCK_INDENT`. That is
+    how a `run:` block actually ends in YAML, but it means a later edit that
+    breaks the indent mid-script yields a *prefix* of the step rather than an
+    error — and a prefix can still satisfy every assertion made about the part
+    that survived. A behavioural test that suddenly stops exercising a guard
+    it used to reach will not say so. `test_review_state_candidate_is_
+    established_not_inferred` pins the last lines of the review-state script
+    for exactly this reason: a truncated block no longer contains them.
+    """
     _before, separator, remainder = step.partition(RUN_BLOCK_MARKER)
     if not separator:
         return ""
@@ -901,9 +912,30 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             )
             self.assertIn("stayed unbound across 3 resolutions", stderr)
             for attempts, message in (
-                ("0", "needs at least one attempt"),
+                ("0", "needs 1 to 100 attempts"),
+                ("101", "needs 1 to 100 attempts"),
+                # `[` reports status 2, not 1, when an operand overflows
+                # intmax, and both `if` and `while` read that as false — so
+                # this bound skips the range guard and every iteration, and
+                # only the positive check after the loop refuses it.
+                ("9223372036854775808", "no candidate revision was bound"),
+                ("99999999999999999999", "no candidate revision was bound"),
+                # 9223372036854775807 — one below the overflow — belongs to
+                # this class too: `[` compares it happily, and a loop of that
+                # length is an unbounded one with extra steps. It is *not*
+                # probed here on purpose. Any value above the cap exercises
+                # the same guard, and `101` does it in the same microsecond,
+                # whereas that one would hang this suite for the age of the
+                # universe if a future edit ever removed the cap. A test that
+                # hangs on a regression reports nothing.
                 ("", "bounds must be whole numbers"),
                 ("many", "bounds must be whole numbers"),
+                ("-3", "bounds must be whole numbers"),
+                (" 2", "bounds must be whole numbers"),
+                ("2 ", "bounds must be whole numbers"),
+                ("+2", "bounds must be whole numbers"),
+                ("2.5", "bounds must be whole numbers"),
+                ("0x2", "bounds must be whole numbers"),
             ):
                 with self.subTest(attempts=attempts):
                     code, output, stderr = fixture.run_step(script, {
@@ -913,6 +945,26 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
                     self.assertNotEqual(code, 0, output)
                     self.assertEqual(output, "")
                     self.assertIn(message, stderr)
+
+    def test_review_state_candidate_is_established_not_inferred(self):
+        """Publishing a revision requires binding one, not merely not failing.
+
+        Every guard in the loop is a way to *reject* a candidate, so a path
+        that skips the loop entirely skips all of them. Falling out of the
+        loop must therefore refuse to publish rather than emit whatever the
+        loop variable happens to hold.
+        """
+        script = self.review_state_candidate_script()
+        self.assert_contains_all(script, (
+            'if [ -z "$ACTION_PROJECTION_CANDIDATE_REVISION" ]; then\n'
+            '  echo "no candidate revision was bound" >&2\n'
+            '  exit 1\n'
+            'fi\n',
+            "printf 'revision=%s\\n' "
+            '"$ACTION_PROJECTION_CANDIDATE_REVISION"',
+        ))
+        guard = script.index('echo "no candidate revision was bound"')
+        self.assertLess(guard, script.index("printf 'revision="))
 
     def test_source_release_push_candidate_is_the_revision_the_push_names(self):
         script = step_shell_script(self.step(

@@ -148,6 +148,105 @@ Block B also shows the bound behaving: two attempts requested, two rejections pr
 the exhaustion message. The production bound declared in the step's `env:` is 5 attempts 5
 seconds apart; the runs above use 0-second delays so the suite does not sleep.
 
+## A fail-open the bound's missing upper end left open
+
+Everything above was recorded before this branch was re-read against its own fail-closed
+constraint. That re-reading found a fourth case, and it was not hypothetical: the step as
+published above **exits 0 and publishes an empty revision** for one class of bound.
+
+The mechanism first, straight from the shell:
+
+```
+$ bash -c '
+[ "9223372036854775808" -lt 1 ]; echo "-lt status: $?"
+[ "9223372036854775808" -gt 100 ]; echo "-gt status: $?"
+if [ "9223372036854775808" -lt 1 ]; then echo "if: true"; else echo "if: false"; fi
+i=1; if [ "$i" -le "9223372036854775808" ]; then echo "while-guard: true"; else echo "while-guard: false"; fi
+'
+bash: line 1: [: 9223372036854775808: integer expression expected
+-lt status: 2
+bash: line 2: [: 9223372036854775808: integer expression expected
+-gt status: 2
+bash: line 3: [: 9223372036854775808: integer expression expected
+if: false
+bash: line 4: [: 9223372036854775808: integer expression expected
+while-guard: false
+```
+
+`[` reports status **2** on an operand that overflows `intmax_t`, not 1, and `if` and
+`while` both read that as false. A bound above 2^63-1 therefore failed the lower guard's
+test — skipping the guard — and failed the loop condition — skipping every iteration.
+
+What that did to the real step, run through the same `MergeRefFixture` harness as every
+block above. The script is read from `HEAD:.github/workflows/harness.yml`, so this is the
+step exactly as pull request #65 published it:
+
+```
+$ python3 <scratchpad>/probe_unguarded.py
+exit code: 0
+GITHUB_OUTPUT: 'revision=\n'
+stderr: '.../step.sh: line 29: [: 9223372036854775808: integer expression expected\n.../step.sh: line 34: [: 9223372036854775808: integer expression expected'
+```
+
+Exit 0 with `revision=` — an empty candidate handed downstream as
+`--candidate-revision ""`, with no guard having rejected anything. The same probe against
+the repaired step, reading the working tree instead of `HEAD`:
+
+```
+$ python3 <scratchpad>/probe_guarded.py
+exit code: 1
+GITHUB_OUTPUT: ''
+stderr: '.../step.sh: line 32: [: 9223372036854775808: integer expression expected\n.../step.sh: line 33: [: 9223372036854775808: integer expression expected\n.../step.sh: line 38: [: 9223372036854775808: integer expression expected\nno candidate revision was bound'
+```
+
+Exit 1, nothing published, and the message names the reason. Both probe scripts are
+throwaway evidence in the session scratchpad, not the repository.
+
+## The four tests over the repaired step
+
+`test_review_state_merge_ref_resolution_is_bounded` gains the two overflow bounds, the
+`101` over-cap case, and six more malformed spellings; `test_review_state_candidate_is_
+established_not_inferred` is new and pins the positive check ahead of the `printf`.
+
+```
+$ python3 -m unittest -v \
+    automation.tests.test_github_action_projection_workflow.GitHubActionProjectionWorkflowTests.test_review_state_merge_ref_resolution_is_bounded \
+    automation.tests.test_github_action_projection_workflow.GitHubActionProjectionWorkflowTests.test_review_state_candidate_is_established_not_inferred \
+    automation.tests.test_github_action_projection_workflow.GitHubActionProjectionWorkflowTests.test_review_state_candidate_survives_a_merge_ref_recompute \
+    automation.tests.test_github_action_projection_workflow.GitHubActionProjectionWorkflowTests.test_review_state_candidate_still_fails_a_genuine_mismatch
+test_review_state_merge_ref_resolution_is_bounded (...)
+The retry is a bound, not a wait until the two values agree. ... ok
+test_review_state_candidate_is_established_not_inferred (...)
+Publishing a revision requires binding one, not merely not failing. ... ok
+test_review_state_candidate_survives_a_merge_ref_recompute (...)
+A recomputed merge ref is still this event's code, so it passes. ... ok
+test_review_state_candidate_still_fails_a_genuine_mismatch (...)
+Re-resolution admits a moved base and nothing else. ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 4.096s
+
+OK
+```
+
+One bound is deliberately **not** probed: 9223372036854775807, one below the overflow. It
+belongs to the same class — `[` compares it happily and a loop that long is unbounded with
+extra steps — but any value over the cap reaches the identical guard, and `101` does it in
+a microsecond where that one would hang the suite past the age of the universe if a later
+edit removed the cap. A test that hangs on a regression reports nothing. The reasoning sits
+in the test beside the case so it is not re-litigated.
+
+Full suite and reconciler over the repaired tree:
+
+```
+$ python3 automation/run_tests.py
+...
+tests: 12/12 files passed
+test elapsed: 38.08s
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
 ## The rewritten step on a real runner
 
 Pull request #65 carries this change, so its own `pull_request` event ran the new step from
