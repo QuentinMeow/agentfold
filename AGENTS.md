@@ -83,9 +83,17 @@ Before ending any session that did work: write `history/conversations/<timestamp
 from `templates/handover.md`, update the task's `worklog.md`, file every pending human
 or cross-session action in `message-queue/`, and update `roadmap/current-state.md` if
 reality changed.
+
+Then **publish and report**. Work that is finished but unpublished is invisible, and work
+that is published but unexplained is a diff nobody asked for. Push the task branch and open
+its pull request (`handbook/git-workflow.md` says when to stack and when to branch
+separately; body schema: `templates/pull-request.md`), then close the session with a reply
+that states whether anything is blocked, what changed, what was decided without the human
+and what undoing it would cost, and their own open items in order — each already carrying
+its consequence and its queue link.
 The `skills/session-handover/` skill walks through this, and
-`skills/explain-to-human/` says how to write each of those files so a reader who was
-away can act on it without asking a follow-up question.
+`skills/explain-to-human/` says how to write every one of those surfaces so a reader who
+was away can act without asking a follow-up question.
 
 ## Guardrails (hard invariants)
 
