@@ -66,7 +66,9 @@ leaves `automation/markdown_semantics.py` untouched.
 ## Links
 
 - The request this repairs: `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`
-- The promised follow-up judgment: `message-queue/needs-human/reviews/future-blocking-rereview-human-action-files.md`
+- The promised follow-up judgment: `message-queue/needs-human/reviews/non-blocking-rereview-human-action-files.md`
+  (filed under the pre-rename name `future-blocking-rereview-human-action-files.md`, which
+  never existed on disk; the live item carries the `non-blocking-` prefix)
 - What a human action must achieve: `handbook/human-action-guide.md`
 - The queue contract and its lifecycle: `message-queue/AGENTS.md`
 - Why the queue owns pending actions: `memory/decisions/2026-07-23-queue-owns-pending-actions-and-timing.md`
