@@ -1,10 +1,10 @@
 # Report the structurally visible readability rules as advisory findings
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-08-02-advise-on-explanation-shape)
 **Filed:** 2026-08-02, by claude, from the owner's answer folded in `memory/decisions/2026-08-02-readability-enforcement-disposition.md`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-advise-on-explanation-shape.md`
+**Queue actions:** none
 
 ## Goal
 
