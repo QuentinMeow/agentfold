@@ -1,10 +1,10 @@
 # Correct the contract text that no longer matches the code or itself
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-08-02-reconcile-the-contracts-with-the-code)
 **Filed:** 2026-08-02, by claude, from a contract-drift audit of every AGENTS.md, handbook file, template, and roadmap line
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-reconcile-the-contracts-with-the-code.md`
+**Queue actions:** none
 
 ## Goal
 
