@@ -105,6 +105,23 @@ class IndentedCodeViewTests(unittest.TestCase):
         self.assert_kept("- a\nlazy continuation\n\n    four spaces\n",
                          "four spaces")
 
+    def test_a_setext_underline_closes_the_paragraph_above_it(self):
+        self.assert_blanked("Prose line.\n---\n\n    code line\n", "code line")
+
+    def test_a_thematic_break_closes_the_paragraph_above_it(self):
+        self.assert_blanked("***\n\n    code line\n", "code line")
+
+    def test_a_table_row_is_paragraph_text(self):
+        self.assert_kept("| a | b |\n|---|---|\n    still prose\n", "still prose")
+
+    def test_a_second_chunk_of_one_code_block_is_still_blanked(self):
+        self.assert_blanked(
+            "Prose line.\n\n    first chunk\n\n    second chunk\n", "second chunk"
+        )
+
+    def test_a_new_sibling_item_reopens_the_same_threshold(self):
+        self.assert_kept("- a\n\n- b\n\n    four spaces\n", "four spaces")
+
     def test_a_fence_nested_in_a_list_item_is_still_blanked(self):
         self.assert_blanked(
             "- Item\n\n  ```python\n  code here\n  ```\n\n- Next\n", "code here"
