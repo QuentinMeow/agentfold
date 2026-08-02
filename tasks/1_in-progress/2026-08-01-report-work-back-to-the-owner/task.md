@@ -4,7 +4,7 @@
 **Filed:** 2026-08-01, by claude, from the owner's chat request to stop having to ask what was done
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/decisions/non-blocking-check-the-readability-rules-or-leave-them-to-review.md`
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-check-the-readability-rules-or-leave-them-to-review.md`; `message-queue/needs-human/decisions/non-blocking-re-ask-the-older-questions-in-plainer-words.md`
 
 ## Goal
 
@@ -28,9 +28,10 @@ attention" section, which is a projection of the queue, so this ritual originate
 - [ ] `skills/session-handover/SKILL.md` ends at the same place: publish, then report.
 - [ ] `handbook/git-workflow.md` states when a task opens its own pull request and when it
       stacks on another, in terms a reader can apply without asking.
-- [ ] The live `message-queue/needs-human/` items are rewritten into the readable shape,
-      except any that already carry a committed answer, which are records and are left
-      untouched.
+- [x] The live `message-queue/needs-human/` items were examined for rewriting. Nine
+      unanswered ones were drafted in the readable shape and the reconciler refused all
+      nine: a live question's visible text is its identity and an agent may not reword it.
+      The drafts are kept as a session artifact and the choice is filed for the owner.
 - [ ] An ADR records the reporting decision in `memory/decisions/`.
 - [ ] `roadmap/current-state.md` and `README.md` reflect what now exists.
 - [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.

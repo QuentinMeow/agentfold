@@ -47,6 +47,7 @@
 - [Never reuse a schema version number that was activated and withdrawn](lessons/automation/never-reuse-a-withdrawn-schema-version.md) — A version number that ever reached a commit is burned; reuse it and old records get judged by the new meaning.
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 - [Only bind a boundary every review outcome can still close](lessons/message-queue/a-boundary-must-be-closable-at-any-later-time.md) — A queue item may bind only a boundary all four review outcomes can satisfy with a commit an agent can make at any time after filing; a receipt Git cannot re-issue makes cleanup permanently unsatisfiable
+- [Get a question's wording right when you file it — you cannot reword it later](lessons/message-queue/a-live-question-cannot-be-reworded.md) — Reformatting a waiting needs-human item is refused; its title, context, choices, and recommendation are the action's identity, and the one migration edge that bent this rule is already spent
 
 ## known-issues
 - [A review outcome is an agent's attested reading of the human's sentence, not a proof](known-issues/2026-07-31-review-outcome-classification-is-attested.md) — Nothing mechanical verifies that a recorded Review outcome matches what the human actually wrote.
