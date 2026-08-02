@@ -87,6 +87,10 @@ Repeat every still-open item in every reply, including ones you surfaced last ti
 Repetition is the mechanism; an unanswered item that stops being mentioned is an item that
 silently died.
 
+When the list runs long, group it — the ones this session created, then the ones that were
+already waiting — and give the older group one line each instead of four. Grouping is
+presentation; dropping an item is not, and the set is fixed by the handover.
+
 ## 5. Where it is
 
 Last, short, and concrete: pull-request numbers and titles, the branch each one is on, and

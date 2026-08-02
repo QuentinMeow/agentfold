@@ -127,10 +127,22 @@ this section originates nothing — it projects.
    - If you do nothing: the items stay live and answerable, and the tasks complete without them.
 ```
 
-**Links here must be absolute and pinned to a commit.** A relative link in a pull-request
-body is not rewritten by GitHub — it resolves against the pull-request URL and 404s — and
-the boundary check accepts a URL only under the candidate's own
-`https://<host>/<owner>/<repo>/blob/<full-sha>/` prefix. Use that exact form.
+**Links here must be absolute and pinned to one specific commit.** A relative link in a
+pull-request body is not rewritten by GitHub — it resolves against the pull-request URL and
+404s — and the boundary check accepts a URL only under the candidate's own
+`https://<host>/<owner>/<repo>/blob/<full-sha>/` prefix.
+
+That commit is not your branch head. For a pull request the candidate is the commit GitHub
+computes at `refs/pull/<number>/merge`, so it does not exist until the pull request does and
+no local revision matches it. The order that works:
+
+1. Push the branch and open the pull request.
+2. `git ls-remote origin refs/pull/<number>/merge` — that SHA is the prefix.
+3. Write the body with those links; editing the body re-runs the check.
+
+The merge commit is recomputed whenever the head or the base moves, so links pinned to an
+old one go stale — most often when a parent in a stack merges and the child's base changes.
+The check reports it, and refreshing the body is the whole fix.
 
 ## What changed and why
 
