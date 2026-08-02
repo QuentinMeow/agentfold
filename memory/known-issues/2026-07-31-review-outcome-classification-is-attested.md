@@ -47,3 +47,13 @@ the one outcome that crosses a boundary; the other three preserve or decline it.
 puts a second word back on the human ("approved: looks good"), so it should only ship
 with evidence that the extra word is cheaper than the risk it removes. The alternative
 is written up in full in that task's `design.md`.
+
+## Owner disposition (2026-08-02)
+
+The owner was asked whether recording `approved` should require a recognized word in his own
+committed text. He chose to keep it attested, verbatim: *"for task 2, let's keep it default
+way (option A). I don't really think this will be a big problem."*
+
+So this stays open by decision, not by neglect. An approval remains an agent's reading of the
+owner's sentence, recorded next to it and permanently attributable. Revisit if a
+misclassification is ever observed.

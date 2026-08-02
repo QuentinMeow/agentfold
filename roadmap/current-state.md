@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-01
+**Last-updated:** 2026-08-02
 
 What is true today, mapped to the desired-state lines.
 
@@ -207,6 +207,14 @@ What is true today, mapped to the desired-state lines.
   origin checks the moment `main` moved to v3. All 66 handovers reachable from `main` already
   matched their own creation marker; no committed bytes changed
   (`memory/decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md`).
+- **Enforcement (2026-08-02)**: the owner decided the merge gate stays advisory while the
+  repository is immature — merging is possible with a red check, because the development cycle
+  is mostly agents and speed matters more right now than a hard stop. Recorded in
+  [the advisory-gate decision](../memory/decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md),
+  with the stated exit: require `reconcile-and-test` with a personal bypass once he judges the
+  repository stable. Until then a green trunk is evidence about the last push window only, so
+  the merged result is verified before landing rather than the branch alone. Approval
+  classification stays attested by the same decision round.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

@@ -38,6 +38,7 @@
 - [The commit gate skips a test only on proof, never on deferral](decisions/2026-07-30-commit-gate-skips-only-on-proof.md) — A local gate may skip a test only when nothing the test reads has changed; "a later boundary will run it" is not a reason to skip
 - [Nothing a human owes holds a Git edge](decisions/2026-08-01-human-answers-never-gate-a-git-edge.md) — A needs-human item may withhold only the start of a 0_backlog task or one act with no undo; merging, moving a task through review, and recording it done are revertible and never wait on an answer, and every human item carries an advisory Answer by date
 - [An immutable record is judged by the grammar it was written under](decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md) — A committed record's spelling is fixed by the schema marker in its own creation snapshot; only its rejections ratchet at the admission edge.
+- [The merge gate stays advisory while the repository is immature](decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md) — No status check is required to merge; a red check informs but never stops a merge, because the repository is early and its development cycle is mostly agents, and the owner will require `reconcile-and-test` once he judges the repository stable
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes

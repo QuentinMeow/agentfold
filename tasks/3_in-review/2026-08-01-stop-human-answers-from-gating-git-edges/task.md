@@ -4,7 +4,7 @@
 **Filed:** 2026-08-01, by claude, from a judged design over the queue's boundary grammar
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/decisions/non-blocking-turn-on-the-merge-gate-this-repository-already-runs.md`
+**Queue actions:** none
 
 ## Goal
 
