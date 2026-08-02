@@ -23,17 +23,18 @@ so a task never waits on a person to reach its own `git mv`.
 
 ## Acceptance criteria
 
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [ ] `python3 automation/run_tests.py` reports 11/11 files passed.
-- [ ] No live `needs-human/` item binds `transition:merge`, `transition:review`, or
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
+- [x] `python3 automation/run_tests.py` reports 11/11 files passed.
+- [x] No live `needs-human/` item binds `transition:merge`, `transition:review`, or
       `transition:complete`, and the grammar refuses a new one.
-- [ ] `--check --at-transition merge` reports no `needs-human/` queue-boundary finding.
-- [ ] Every live `needs-human/` item carries a parseable `**Answer by:**` date, and a
+- [x] `--check --at-transition merge` reports no `needs-human/` queue-boundary finding.
+- [x] Every live `needs-human/` item carries a parseable `**Answer by:**` date, and a
       lapsed date is advisory, never blocking.
-- [ ] A task reaches `4_done` while a live, unanswered `needs-human/` item stays listed in
-      its `Queue actions`.
-- [ ] Every committed human response is byte-identical to its state at `0e63bbe`.
-- [ ] `transition:start` on a started task and an agent-owned merge boundary both still
+- [x] A task reaches `4_done` while a live, unanswered `needs-human/` item stays listed in
+      its `Queue actions` — rehearsed in a throwaway clone, because completing the lifecycle
+      needs an answer that does not exist and must not be invented here.
+- [x] Every committed human response is byte-identical to its state at `0e63bbe`.
+- [x] `transition:start` on a started task and an agent-owned merge boundary both still
       refuse, proven by a failing run before the change.
 
 ## Links
