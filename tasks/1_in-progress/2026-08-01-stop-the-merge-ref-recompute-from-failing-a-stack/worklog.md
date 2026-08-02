@@ -54,3 +54,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
     comparison read someone else's evidenced deletion as this branch discarding a live
     action. An ordinary push whose previous tip already carries the deletion does not
     reproduce it.
+- The stale-base failure recurred a third time (job `91494071784`) on a later push, which
+  settles it as reproducible rather than incidental: `main` advances every few minutes while
+  several agents merge, and each advance can leave an open branch's `pull_request` payload
+  naming an older base than the merge ref GitHub computes. Stopped re-pushing to chase a
+  green board and left the branch published with the cause recorded. Filed no queue item for
+  it — the session that owns coordination decides whether this becomes its own task, and
+  filing it here risked duplicating one.

@@ -17,5 +17,5 @@
 - [x] 6. Record real output in `verification.md`: the full suite, the reconciler, the new
       tests, and evidence that the genuine-mismatch guard bites rather than an assertion
       that it does.
-- [ ] 7. Publish: rebase onto `main`, push the branch, open the pull request from
+- [x] 7. Publish: rebase onto `main`, push the branch, open the pull request from
       `templates/pull-request.md`, and append the worklog entry.
