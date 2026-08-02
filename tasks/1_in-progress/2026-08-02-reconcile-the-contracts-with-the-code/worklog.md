@@ -45,3 +45,13 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   containing `..` is silently dropped, so the message now says "root-relative" and its fix
   line says a `../` path is dropped rather than resolved. One test fixture matched the old
   template wording and moved with it; the full suite was re-run.
+- Publishing surfaced a constraint worth recording: the projection gate accepts a
+  `needs-human` link label only as a leading token prefix of the item's `Action` carrying
+  exactly one action verb, and `review` is one of those verbs. The first item's `Action`
+  read "Choose what a human review of ... holds up", whose every usable prefix carried two
+  verbs, so no legal label existed. Its `Why this matters` also contained "tell", which the
+  same gate refuses in the copied explanation. Both fields are frozen identity on a live
+  item, so the reconciler correctly refused to edit them in place; the branch was rebuilt
+  instead so the item is born with wording a projection can carry. Nothing on `main` was
+  rewritten, and the item was never visible to the owner under the old wording.
+
