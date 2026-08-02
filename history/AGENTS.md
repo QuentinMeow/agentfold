@@ -1,7 +1,7 @@
 # history/ — conversation record
 
 **Queue projection schema:** v1
-**Queue action-entry schema:** v2
+**Queue action-entry schema:** v3
 **Queue liveness schema:** v1
 
 One folder per conversation/session that did work:
@@ -25,27 +25,27 @@ project the `message-queue/needs-human/` actions its liveness version selects, i
 filename-timing order. It never originates an ask. Resolved targets may later disappear
 because git history archives past delivery. Range-based checks evaluate the handover and
 queue together at its creation commit, so later additions or resolutions never rewrite it.
-Once committed, v1 handover bytes are immutable; record corrections in a new handover.
 `Next steps` is `None.` or links assigned work to live `needs-agent/` items; it never
 originates a cross-session action.
 
-The action-entry marker versions strict projection syntax: version 1 freezes the entry
-contract existing records passed when created; version 2 adds raw-HTML and origin checks.
-The liveness marker separately versions *which* human actions any projection contains —
-this section and the chat reply alike. Version 1 selects only **unresolved** ones: an
-action awaits its owner until a concrete `**Your answer:**` or `**Your review:**` is
-committed; `folding` only moves an answered item on, `awaiting-artifact` binds nothing to
-judge, and every other state — unreadable or unrecognised — stays projected.
+The action-entry marker versions projection *syntax*: version 1 freezes the entry contract
+existing records passed when created; version 2 adds raw-HTML and origin checks; version 3
+keeps both and renames only the two suffix labels it renders. The liveness marker
+separately versions *which* human actions a projection contains: version 1 selects only
+**unresolved** ones — awaiting their owner until a concrete `**Your answer:**` or
+`**Your review:**` is committed, since `folding` only moves an answered item on and
+`awaiting-artifact` binds nothing to judge; every other state stays projected.
 Each post-activation entry is one top-level bullet whose first content is
 `[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
-` — Why-you-might-care: <field> || If-you-do-nothing: <field>`, copying both from that
-snapshot, in timing-then-path order; agent entries hold only the link and may project
-just work assigned here. The creation/admission edge selects the highest active version;
-parallel history joined with an activation uses that version. A rejecting grammar
-expansion requires a new schema version instead of retroactively changing immutable
-records. All three schema markers are sticky while `history/` remains. Queue-projection adoption
-freezes every existing handover path, including an unmarked legacy record: delete it when
-retention permits, but never edit or rename it; corrections use a new conversation path.
+` — Why this matters: <field> — If you do nothing: <field>` under v3 and
+` — Why-you-might-care: <field> || If-you-do-nothing: <field>` under v1/v2, copying both
+from that snapshot whichever spelling the item uses, in timing-then-path order; agent
+entries hold only the link and may project just work assigned here. The creation/admission
+edge selects the highest active version, as does parallel history joined with an
+activation; a rejecting grammar expansion requires a new version, never a retroactive
+change. All three markers are sticky while `history/` remains; adoption freezes every
+existing handover path, legacy records included — committed bytes are immutable, so delete
+when retention permits, never edit or rename, and correct in a new conversation path.
 
 ## Other files in a conversation folder (optional)
 

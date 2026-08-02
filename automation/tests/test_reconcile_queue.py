@@ -939,12 +939,14 @@ class ReconcileQueueTests(unittest.TestCase):
 
             messages = self.messages(RECONCILE.check_queue_schema())
             self.assertTrue(any(
-                "**Why-you-might-care:**" in message for message in messages
+                "**Why this matters:**" in message for message in messages
             ), messages)
             self.assertTrue(any(
-                "**If-you-do-nothing:**" in message for message in messages
+                "**If you do nothing:**" in message for message in messages
             ), messages)
 
+            # The pre-rename spelling still satisfies each slot, and is still
+            # reported under the spelling the item actually uses.
             item.write_text(
                 VALID_DECISION.replace(
                     "**Full context:** [design](docs/design.md#boundary)\n",
@@ -961,6 +963,22 @@ class ReconcileQueueTests(unittest.TestCase):
             ), messages)
             self.assertTrue(any(
                 "**If-you-do-nothing:** is empty" in message
+                for message in messages
+            ), messages)
+
+            item.write_text(
+                VALID_DECISION.replace(
+                    "**Full context:** [design](docs/design.md#boundary)\n",
+                    "**Full context:** [design](docs/design.md#boundary)\n"
+                    "**Why this matters:** The choice controls admission.\n"
+                    "**Why-you-might-care:** The choice controls admission.\n"
+                    "**If you do nothing:** The task stays blocked.\n",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any(
+                "name the same projected sentence twice" in message
                 for message in messages
             ), messages)
 
@@ -14982,6 +15000,692 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.creation_topology_messages(findings),
                 self.messages(findings),
             )
+
+    # ------------------------------------------------ human-attention format
+
+    HUMAN_ATTENTION_REVIEW = (
+        "# Should the admission boundary move to the server?\n"
+        "\n"
+        "**Action:** confirm the admission boundary\n"
+        "**Why this matters:** A bypassable check is not a boundary.\n"
+        "**If you do nothing:** The guard stays local and the task waits.\n"
+        "\n"
+        "## What you need to know\n"
+        "\n"
+        "**Today:** Nothing is implemented; no check runs anywhere.\n"
+        "**What this would change:** Where an unsafe object is refused.\n"
+        "**What this does not decide:** Which detector does the refusing.\n"
+        "\n"
+        "The boundary decides who can skip it, which is the whole question.\n"
+        "\n"
+        "## Your choices\n"
+        "\n"
+        "They differ in who can bypass the check.\n"
+        "\n"
+        "### Approve\n"
+        "The server refuses the push. The cost is one more moving part.\n"
+        "*Example consequence:* a skipped hook still cannot send the object.\n"
+        "\n"
+        "### Request changes\n"
+        "The boundary stays closed while the named gap is repaired.\n"
+        "*Example consequence:* the detector list is narrowed first.\n"
+        "\n"
+        "## What I recommend\n"
+        "\n"
+        "**Recommendation:** Approve — every accepted push passes the guard.\n"
+        "**Strongest case against this:** Server checks are slower to change.\n"
+        "**Confidence:** Medium — I read the design; I ran nothing.\n"
+        "\n"
+        "Answer in plain words; one sentence is enough.\n"
+        "\n"
+        "**Your review:** ______\n"
+        "\n"
+        "## For the record\n"
+        "\n"
+        "**Status:** awaiting-artifact\n"
+        "**Filed:** 2026-07-23, by test\n"
+        "**Full context:** `docs/design.md`\n"
+        "**Resolution evidence:** `docs/disposition.md`\n"
+        "**Review target:** pending\n"
+        "**Review revision:** pending\n"
+        "**Reviewed revision:** ______\n"
+        "**Review outcome:** pending\n"
+        "**Blocks at:** transition:start task:2026-07-23-example\n"
+    )
+    HUMAN_ATTENTION_PATH = (
+        "message-queue/needs-human/reviews/"
+        "future-blocking-review-admission.md"
+    )
+
+    def human_attention_repo(self, root, text=None):
+        """Write one live human item with the format marker active."""
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n"
+            "**Human-attention format:** v1\n",
+        )
+        self.write(root, "docs/design.md", "# Design\n")
+        self.write(root, "docs/disposition.md", "# Disposition\n")
+        return self.write(
+            root,
+            self.HUMAN_ATTENTION_PATH,
+            self.HUMAN_ATTENTION_REVIEW if text is None else text,
+        )
+
+    def human_attention_messages(self, root, replacements=()):
+        text = self.HUMAN_ATTENTION_REVIEW
+        for old, new in replacements:
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        self.human_attention_repo(root, text)
+        return self.messages(RECONCILE.check_human_attention()) + self.messages(
+            RECONCILE.check_queue_schema()
+        )
+
+    def test_human_attention_accepts_the_decided_shape(self):
+        with self.repo() as root:
+            self.human_attention_repo(root)
+            self.assertEqual([], list(RECONCILE.check_human_attention()))
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_human_attention_is_inert_without_its_marker(self):
+        with self.repo() as root:
+            self.human_attention_repo(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.assertEqual([], list(RECONCILE.check_human_attention()))
+
+    def test_human_attention_rejects_a_fourth_header_field(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "**If you do nothing:** The guard stays local and the task waits.\n",
+                "**If you do nothing:** The guard stays local and the task waits.\n"
+                "**Filed:** 2026-07-23, by test\n",
+            )])
+            self.assertTrue(any(
+                "the block above the first heading must be exactly" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_a_machine_field_above_the_answer(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "The boundary decides who can skip it, which is the whole question.\n",
+                "**Review revision:** pending\n",
+            )])
+            self.assertTrue(any(
+                "machine field(s) above the answer line" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_a_raw_html_bookkeeping_block(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "## For the record\n",
+                "<details>\n<summary>For the record</summary>\n",
+            )])
+            self.assertTrue(any(
+                "contains raw HTML" in message for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_a_resurrected_look_at_field(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "**Full context:** `docs/design.md`\n",
+                "**Full context:** `docs/design.md`\n"
+                "**Look-at:** `docs/design.md`, the admission section\n",
+            )])
+            self.assertTrue(any(
+                "deleted field **Look-at:** is present" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_requires_a_counter_case(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "**Strongest case against this:** Server checks are slower to change.\n",
+                "",
+            )])
+            self.assertTrue(any(
+                "has no **Strongest case against this:**" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_requires_a_graded_confidence(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "**Confidence:** Medium — I read the design; I ran nothing.\n",
+                "**Confidence:** Medium\n",
+            )])
+            self.assertTrue(any(
+                "**Confidence:** must read" in message for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_a_recommendation_never_shown(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "**Recommendation:** Approve — every accepted push passes the guard.\n",
+                "**Recommendation:** Defer it — nobody needs this yet.\n",
+            )])
+            self.assertTrue(any(
+                "does not name any choice shown" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_exceeding_the_word_budget(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "The boundary decides who can skip it, which is the whole question.\n",
+                "The boundary decides who can skip it. "
+                + "Background sentence. " * 400 + "\n",
+            )])
+            self.assertTrue(any(
+                "exceeds the 700-word budget" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_requires_two_choices_with_examples(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "### Request changes\n"
+                "The boundary stays closed while the named gap is repaired.\n"
+                "*Example consequence:* the detector list is narrowed first.\n",
+                "",
+            )])
+            self.assertTrue(any(
+                "needs at least two `### ` choices" in message
+                for message in messages
+            ), messages)
+            self.assertTrue(any(
+                "needs a concrete *Example consequence:*" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_rejects_state_prose_contradicting_status(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "The boundary decides who can skip it, which is the whole question.\n",
+                "Do not answer this item until its status becomes `waiting`.\n",
+            )])
+            self.assertTrue(any(
+                "names lifecycle state `waiting` while **Status:** "
+                "is `awaiting-artifact`" in message
+                for message in messages
+            ), messages)
+
+    def test_answering_a_migrated_item_keeps_its_own_schema(self):
+        """The answer must not demand the pre-rename timing field back.
+
+        Timing may never change with or after a human response, so an item whose
+        schema flipped on being answered would be unfixable: it would need
+        `Until then` restored and be forbidden from restoring it.
+        """
+        with self.repo() as root:
+            answered = self.HUMAN_ATTENTION_REVIEW.replace(
+                "**Status:** awaiting-artifact", "**Status:** folding"
+            ).replace(
+                "**Your review:** ______",
+                "**Your review:** looks right, continue",
+            )
+            digest = "sha256:" + hashlib.sha256(b"# Design\n").hexdigest()
+            answered = answered.replace(
+                "**Review target:** pending", "**Review target:** `docs/design.md`"
+            ).replace(
+                "**Review revision:** pending", f"**Review revision:** {digest}"
+            ).replace(
+                "**Reviewed revision:** ______", f"**Reviewed revision:** {digest}"
+            ).replace(
+                "**Review outcome:** pending", "**Review outcome:** approved"
+            )
+            self.human_attention_repo(root, answered)
+            self.assertEqual(
+                [], self.messages(RECONCILE.check_queue_schema())
+            )
+            self.assertEqual([], list(RECONCILE.check_human_attention()))
+
+    def test_human_attention_requires_two_choices_when_only_one_is_shown(self):
+        with self.repo() as root:
+            messages = self.human_attention_messages(root, [(
+                "### Request changes\n"
+                "The boundary stays closed while the named gap is repaired.\n"
+                "*Example consequence:* the detector list is narrowed first.\n",
+                "",
+            )])
+            self.assertTrue(any(
+                "needs at least two `### ` choices" in message
+                for message in messages
+            ), messages)
+
+    def test_human_attention_leaves_an_answered_record_alone(self):
+        with self.repo() as root:
+            # A legacy answered item keeps its own spelling, its `Until then`,
+            # its `Look-at`, and its pre-format shape: it is a record, not an ask.
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human-attention format:** v1\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            digest = "sha256:" + hashlib.sha256(
+                (root / "docs/design.md").read_bytes()
+            ).hexdigest()
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-answered.md",
+                "# Answered review\n\n"
+                "**Status:** folding\n"
+                "**Filed:** 2026-07-23, by test\n"
+                "**Action:** confirm the boundary\n"
+                "**Full context:** `docs/design.md`\n"
+                "**Resolution evidence:** `docs/disposition.md`\n"
+                "**Review target:** `docs/design.md`\n"
+                f"**Review revision:** {digest}\n"
+                f"**Reviewed revision:** {digest}\n"
+                "**Review outcome:** approved\n"
+                "**Blocks at:** transition:start task:2026-07-23-example\n"
+                "**Until then:** unrelated work may continue\n"
+                "**Look-at:** `docs/design.md`, the admission section\n"
+                "**Why-you-might-care:** A bypassable check is not a boundary.\n"
+                "**If-you-do-nothing:** The task waits at its boundary.\n\n"
+                "## What you need to know\n\nThe boundary is local today.\n\n"
+                "## Differences\n\nLocal is bypassable; server is not.\n\n"
+                "## Example\n\nA skipped hook still sends the object.\n\n"
+                "**Your review:** looks right, continue\n",
+            )
+            self.assertEqual([], list(RECONCILE.check_human_attention()))
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    # ------------------------- live items keep the schema they were written in
+
+    LEGACY_HUMAN_ITEM = (
+        "# Confirm the admission boundary\n\n"
+        "**Status:** awaiting-artifact\n"
+        "**Filed:** 2026-07-23, by test\n"
+        "**Action:** confirm the admission boundary\n"
+        "**Full context:** `docs/design.md`\n"
+        "**Resolution evidence:** `docs/disposition.md`\n"
+        "**Review target:** pending\n"
+        "**Review revision:** pending\n"
+        "**Reviewed revision:** ______\n"
+        "**Review outcome:** pending\n"
+        "**Blocks at:** transition:start task:2026-07-23-example\n"
+        "**Until then:** unrelated work may continue\n"
+        "**Look-at:** `docs/design.md`, the admission section\n"
+        "**Why-you-might-care:** A bypassable check is not a boundary.\n"
+        "**If-you-do-nothing:** The guard stays local and the task waits.\n\n"
+        "## What you need to know\n\nThe boundary is local today.\n\n"
+        "## Differences\n\nLocal is bypassable; server is not.\n\n"
+        "## Example\n\nA skipped hook still sends the object.\n\n"
+        "**Your review:** ______\n"
+    )
+
+    def test_human_attention_leaves_an_unanswered_legacy_item_alone(self):
+        """A live ask written before the format is governed by its own schema.
+
+        Nothing may rewrite a live ask in place, so the format cannot be applied
+        retroactively to one. The marker arms the checks for every item written
+        under the new spelling; an earlier item ages out as it resolves.
+        """
+        with self.repo() as root:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human-attention format:** v1\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            self.write(root, self.HUMAN_ATTENTION_PATH, self.LEGACY_HUMAN_ITEM)
+            self.assertEqual([], self.messages(RECONCILE.check_human_attention()))
+            self.assertEqual([], self.messages(RECONCILE.check_queue_schema()))
+
+    def stage_live_item_reformat(self, root, marker=True):
+        """Commit one live legacy ask, then stage a reformat of exactly it."""
+        self.init_git(root)
+        contract = self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n",
+        )
+        self.write(root, "docs/design.md", "# Design\n")
+        self.write(root, "docs/disposition.md", "# Disposition\n")
+        item = self.write(root, self.HUMAN_ATTENTION_PATH, self.LEGACY_HUMAN_ITEM)
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "legacy human action")
+        if marker:
+            contract.write_text(
+                "**Queue resolution schema:** v1\n"
+                "**Human-attention format:** v1\n",
+                encoding="utf-8",
+            )
+        item.write_text(self.HUMAN_ATTENTION_REVIEW, encoding="utf-8")
+        self.git(root, "add", ".")
+        return contract, item
+
+    def test_reformatting_a_live_item_is_refused_with_or_without_the_marker(self):
+        """There is no presentation carve-out in `queue_mutation_problem`.
+
+        A fence over field labels cannot protect the ask a human reads: the
+        title, the context block, the choices, and the recommendation are all
+        outside any such fence by construction. So the identity rule stands, and
+        activating the format never licenses rewriting a live item.
+        """
+        for marker in (True, False):
+            with self.subTest(marker=marker), self.repo() as root:
+                self.stage_live_item_reformat(root, marker=marker)
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertTrue(any(
+                    "action identity changed" in finding.message
+                    for finding in findings
+                ), self.messages(findings))
+
+    def test_human_attention_marker_is_sticky_after_activation(self):
+        """The marker cannot be toggled off and back on around one candidate."""
+        with self.repo() as root:
+            self.init_git(root)
+            contract = self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human-attention format:** v1\n",
+            )
+            self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            self.write(root, self.HUMAN_ATTENTION_PATH, self.HUMAN_ATTENTION_REVIEW)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate the human-attention format")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                kept = self.messages(RECONCILE.check_human_attention())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], kept)
+
+            contract.write_text(
+                "**Queue resolution schema:** v1\n", encoding="utf-8"
+            )
+            self.git(root, "add", ".")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                removed = self.messages(RECONCILE.check_human_attention())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertTrue(any(
+                "Human-attention format v1 was removed after activation" in message
+                for message in removed
+            ), removed)
+
+    # ------------------- a review successor is compared on its own schema
+
+    LEGACY_REVIEW_TIMING = (
+        "**Blocks at:** transition:merge\n"
+        "**Until then:** revise the artifact\n"
+        "**Why-you-might-care:** A bypassable check is not a boundary.\n"
+        "**If-you-do-nothing:** The merge waits at its boundary.\n"
+    )
+    MODERN_REVIEW_TIMING = (
+        "**Blocks at:** transition:merge\n"
+        "**Why this matters:** A bypassable check is not a boundary.\n"
+        "**If you do nothing:** The merge waits at its boundary, and "
+        "unrelated work continues.\n"
+    )
+
+    def stage_changes_requested_resolution(self, root, review_timing):
+        """Delete one changes-requested review, creating repair and re-review.
+
+        The needs-agent successor and the fresh human review always carry the
+        pre-rename timing prose, which is what a legacy review must be compared
+        against and what a review written under the new format no longer has.
+        """
+        self.init_git(root)
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n"
+            "**Human-attention format:** v1\n",
+        )
+        target = self.write(root, "docs/source.md", "# Reviewed\n")
+        digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+        old_path = (
+            "message-queue/needs-human/reviews/future-blocking-review.md"
+        )
+        successor_path = (
+            "message-queue/needs-agent/requests/"
+            "future-blocking-repair-review.md"
+        )
+        followup_path = (
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-repaired-artifact.md"
+        )
+        item = self.write(
+            root,
+            old_path,
+            "# Review\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** review exact bytes\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** `docs/source.md`\n"
+            f"**Review revision:** {digest}\n"
+            f"**Reviewed revision:** {digest}\n"
+            "**Review outcome:** changes-requested\n"
+            f"**Successor action:** `{successor_path}`\n"
+            + review_timing
+            + "**Your review:** request changes\n",
+        )
+        self.write(root, "docs/disposition.md", "# Disposition\n")
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "record requested changes")
+        item.write_text(
+            item.read_text(encoding="utf-8").replace(
+                "**Status:** waiting", "**Status:** folding"
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", old_path)
+        self.git(root, "commit", "-m", "claim review")
+        self.write(
+            root,
+            successor_path,
+            "# Repair the reviewed artifact\n\n"
+            "**Status:** open\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** repair the exact bytes requested by review\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/source.md`\n"
+            f"**Supersedes:** `{old_path}`\n"
+            f"**Follow-up review:** `{followup_path}`\n"
+            "**Blocks at:** transition:merge\n"
+            "**Until then:** revise the artifact\n"
+            "\n## What you need to know\n\n"
+            "The review requested a concrete repair.\n\n"
+            "## Done when\n\nThe reviewed bytes are repaired.\n",
+        )
+        self.write(
+            root,
+            followup_path,
+            "# Review repaired artifact\n\n"
+            "**Status:** awaiting-artifact\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** review the repaired artifact\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** pending\n"
+            "**Review revision:** pending\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** pending\n"
+            f"**Supersedes:** `{old_path}`\n"
+            f"**Depends on:** `{successor_path}`\n"
+            "**Blocks at:** transition:merge\n"
+            "**Until then:** revise the artifact\n"
+            "**Why-you-might-care:** A bypassable check is not a boundary.\n"
+            "**If-you-do-nothing:** The merge waits at its boundary.\n"
+            "**Your review:** ______\n",
+        )
+        item.unlink()
+        self.git(root, "add", "-A")
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return self.messages(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_legacy_review_successor_is_still_compared_on_its_timing_prose(self):
+        """The marker alone must not stop comparing a field the item still has.
+
+        A review that never moved to the new format keeps `Until then`, so the
+        successor still has to carry the same sentence. Comparing only boundary
+        tokens for every review would silently drop that check.
+        """
+        with self.repo() as root:
+            messages = self.stage_changes_requested_resolution(
+                root,
+                self.LEGACY_REVIEW_TIMING.replace(
+                    "**Until then:** revise the artifact",
+                    "**Until then:** the merge boundary stays closed",
+                ),
+            )
+            self.assertTrue(any(
+                "review successor changes **Until then:**" in message
+                for message in messages
+            ), messages)
+
+    def test_modern_review_successor_is_compared_on_the_boundary_token(self):
+        """A review written under the format has no timing prose left to match.
+
+        Its unattended outcome sits above the fold in `If you do nothing`; the
+        needs-agent successor states its own in `Until then`. Those are
+        different sentences, so only the boundary token is comparable.
+        """
+        with self.repo() as root:
+            self.assertEqual(
+                [],
+                self.stage_changes_requested_resolution(
+                    root, self.MODERN_REVIEW_TIMING
+                ),
+            )
+
+    # ------------------------------------------- handover action-entry v3
+
+    def test_v3_handover_projects_the_renamed_suffix(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why this matters:** The docs control production behavior.\n"
+                "**If you do nothing:** The review remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-31-1200PDT-v3-suffix",
+                "- [review docs](../../../"
+                f"{queue_rel}) — Why this matters: The docs control "
+                "production behavior. — If you do nothing: The review "
+                "remains pending.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                self.assertEqual(
+                    [], list(RECONCILE.check_handover_queue_projection())
+                )
+
+    def test_v3_handover_projects_a_legacy_spelled_item(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why-you-might-care:** The docs control production behavior.\n"
+                "**If-you-do-nothing:** The review remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-31-1200PDT-v3-legacy-item",
+                "- [review docs](../../../"
+                f"{queue_rel}) — Why this matters: The docs control "
+                "production behavior. — If you do nothing: The review "
+                "remains pending.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                self.assertEqual(
+                    [], list(RECONCILE.check_handover_queue_projection())
+                )
+
+    def test_v3_handover_rejects_the_v2_suffix(self):
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why this matters:** The docs control production behavior.\n"
+                "**If you do nothing:** The review remains pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-31-1200PDT-v3-old-suffix",
+                "- [review docs](../../../"
+                f"{queue_rel}) — Why-you-might-care: The docs control "
+                "production behavior. || If-you-do-nothing: The review "
+                "remains pending.",
+            )
+            self.activate_strict_handover_entries(root, version="v3")
+            with mock.patch.object(
+                RECONCILE,
+                "newly_added_handovers",
+                return_value=({handover.relative_to(root)}, None),
+            ):
+                messages = self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+            self.assertTrue(any(
+                "fixed handover suffix" in message for message in messages
+            ), messages)
+
+    def test_entry_schema_order_is_monotone(self):
+        """A newer entry version satisfies an older floor, never the reverse."""
+        self.assertEqual(("v1", "v2", "v3"), RECONCILE.HANDOVER_ENTRY_VERSIONS)
+        self.assertFalse(RECONCILE.entry_version_at_least(None, "v1"))
+        self.assertFalse(RECONCILE.entry_version_at_least("v0", "v1"))
+        self.assertTrue(RECONCILE.entry_version_at_least("v2", "v1"))
+        self.assertTrue(RECONCILE.entry_version_at_least("v3", "v2"))
+        self.assertFalse(RECONCILE.entry_version_at_least("v2", "v3"))
 
     # ---------------------------------------------------------------------
     # Honest failure reporting: a crash is not a finding, a staged violation

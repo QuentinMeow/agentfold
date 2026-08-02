@@ -3,53 +3,74 @@ Filename: one delivery prefix, then a kebab-case slug. The three prefixes, what 
 one means, and the rule that the filename is canonical (so no separate **Blocking:**
 field exists) are stated once in `message-queue/AGENTS.md`, under "Routing: three
 independent axes". Slug grammar: `handbook/naming-conventions.md`.
+
+Before you file, check all nine. Lifecycle law lives in handbook/human-action-guide.md.
+1. The title is a question the owner can answer without knowing this repository.
+2. Exactly three fields above the first heading: Action, Why this matters, If you do nothing.
+3. Today / What this would change / What this does not decide are true and specific.
+4. Two or more readings, each with a cost and a concrete *Example consequence:*.
+5. The axis sentence opens Your choices and says what the readings differ on.
+6. My working assumption names one reading shown; its counter-case sits beside it.
+7. No machine field, hash, or token appears above the answer line.
+8. The source is linked once in the prose; For the record keeps the machine copies.
+9. Under 700 words before the answer. Cut background, not choices.
+
+An agent recommending an answer to "what did you mean?" puts words in the owner's
+mouth. State what you will assume and do instead.
 -->
 
-# <The clarification, one sentence>
+# <The question the owner can answer, in plain English>
 
-**Status:** <waiting | folding>
-**Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
-**Action:** <answer the question or correct the stated understanding>
-**Full context:** [<complete source>](<repo-relative path>)
-<!-- For a provider assignment, add exactly one **External assignment:** <opaque
-stable-artifact, role, actor-kind, and principal binding emitted by its adapter>.
-Omit it otherwise. -->
-<!-- For an active provider source, add exactly one **External source:** <opaque
-versioned identity emitted by its adapter>, even when provider prose links here. -->
-**Why-you-might-care:** <one sentence explaining the practical consequence>
-**If-you-do-nothing:** <one sentence stating the boundary or unattended outcome>
-**Resolution evidence:** `<durable file that folding this answer will change>`
-
-<!-- Replace this comment with exactly one block matching the filename:
-blocking-*:
-**Blocks now:** <task:<id> | transition:<name> | operation:<name>>
-
-future-blocking-*:
-**Blocks at:** <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-**Until then:** <the explicit safe assumption or path while work continues>
-Dates are clock-checkable. An event/custom transition is agent-attested unless a
-controlled adapter validates and enforces its crossing.
-
-non-blocking-*:
-**If unanswered:** <the explicit safe outcome; this message will never stop work>
--->
+**Action:** <one imperative sentence; handovers copy this verbatim as the link label>
+**Why this matters:** <one sentence of consequence in the world, not in the repository>
+**If you do nothing:** <one sentence: what stops, and what safely continues>
 
 ## What you need to know
 
-<2–3 sentences from zero. Explain what prompted the question, the current understanding,
-and what a different answer changes. This summary must stand alone; the Full context
-link supplies depth rather than missing prerequisites.>
+**Today:** <what actually happens now — say "nothing is implemented" when that is true>
+**What this would change:** <the delta a different reading would produce>
+**What this does not decide:** <adjacent things a reader will assume are in scope>
 
-## Differences
+<One or two short value-neutral paragraphs from zero context. Link the source exactly
+once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
+alone: the reader should be able to answer without opening anything.>
 
-<Describe at least two meaningful answers or interpretations and the consequence of
-each. Make the distinction concrete enough that the reader knows what they are choosing.>
+## Your choices
 
-## Example
+<One sentence naming the axis the readings differ on. Not a restatement of them.>
 
-<One small scenario showing how the alternatives produce different behavior or work.>
+### Reading A — <short name>
+<What this would mean, and what an agent would then do. Name at least one cost.>
+*Example consequence:* <a concrete scenario of life after this answer>
+
+### Reading B — <short name>
+<Same shape. Two readings is the minimum; never pad one nobody would mean.>
+*Example consequence:* <a concrete scenario of life after this answer>
+
+## What I recommend
+
+**My working assumption:** <exactly one of the readings above> — <one sentence why>
+**Strongest case against this:** <the best argument for a different reading>
+**Confidence:** <high | medium | low> — <what you checked, and what you did not>
+
+Answer in plain words — one sentence is enough. You do not need to copy anything or use
+particular vocabulary; the agent that folds your answer does the bookkeeping and will
+show you how it read your words before acting.
 
 **Your answer:** ______
 
-<!-- A concrete response is immutable. If it is a counter-question, fold the answer into
-Resolution evidence and create a same-timing successor with **Supersedes:** `<this path>`. -->
+## For the record
+
+Bookkeeping the reconciler reads. Nothing here needs you.
+
+**Status:** <waiting | folding>
+**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
+**Full context:** `<repo-relative path to the durable source>`
+**Resolution evidence:** `<durable non-queue file that folding this answer will change>`
+<!-- Then exactly one timing field matching the filename:
+blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
+future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
+non-blocking-* -> neither; If you do nothing above is the unattended outcome.
+Add External assignment / External source only for a provider binding. A concrete
+response is immutable: if it is a counter-question, fold the answer into Resolution
+evidence and create a same-timing successor naming this path in Supersedes. -->
