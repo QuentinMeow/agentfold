@@ -2774,6 +2774,114 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(1, len(findings), self.messages(findings))
                 self.assertIn(expected, findings[0].message)
 
+    def gating_migration_repo(self, root, activate=True, **overrides):
+        """Build the exact shape of the one-time human-gating weakening."""
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n",
+        )
+        self.write(root, "docs/source.md", "# Source\n")
+        source = self.write(
+            root,
+            "message-queue/needs-human/decisions/"
+            "future-blocking-choose.md",
+            "# Choose\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** choose the source disposition\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/source.md`\n"
+            + overrides.get(
+                "boundary",
+                "**Blocks at:** transition:merge task:2026-07-23-example\n"
+                "**Until then:** implementation may continue\n",
+            )
+            + overrides.get("response", "**Your answer:** ______\n"),
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "file the human action")
+        if activate:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n"
+                "**Human gating schema:** v1\n",
+            )
+        destination = source.with_name("non-blocking-choose.md")
+        source.rename(destination)
+        text = destination.read_text(encoding="utf-8")
+        text = re.sub(
+            r"^\*\*Blocks at:\*\*.*\n(?:^\*\*Until then:\*\*.*\n)?",
+            overrides.get(
+                "replacement",
+                "**Answer by:** 2026-09-30\n"
+                "**If unanswered:** The merged boundary stands.\n",
+            ),
+            text,
+            count=1,
+            flags=re.M,
+        )
+        destination.write_text(text, encoding="utf-8")
+        self.git(root, "add", "-A")
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return list(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_human_gating_activation_permits_one_bounded_weakening(self):
+        """The only edge that bends the monotonic timing ratchet.
+
+        Without it the four live merge-bound human items could never be
+        migrated: the ratchet refuses the weakening, and `check_queue_resolution`
+        re-walks historical edges, so a scripted rewrite would be re-found
+        forever rather than fixed once.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(root)
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_the_same_weakening_is_refused_without_the_activation_edge(self):
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(root, activate=False)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("timing was weakened", findings[0].message)
+
+    def test_gating_migration_refuses_an_ordinary_boundary(self):
+        """Only a boundary the new schema forbids may take this edge."""
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(
+                root,
+                boundary="**Blocks at:** event:publication\n"
+                "**Until then:** implementation may continue\n",
+            )
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("timing was weakened", findings[0].message)
+
+    def test_gating_migration_refuses_a_missing_answer_by(self):
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(
+                root,
+                replacement="**If unanswered:** The merged boundary stands.\n",
+            )
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("timing was weakened", findings[0].message)
+
+    def test_gating_migration_refuses_an_answered_item(self):
+        """A committed response freezes timing, activation edge or not."""
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(
+                root, response="**Your answer:** keep it\n"
+            )
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("human response", findings[0].message)
+
     def test_claim_receipt_survives_later_timing_escalation(self):
         with self.repo() as root:
             self.init_git(root)
@@ -3999,7 +4107,15 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertIn("docs/source.md", findings[0].message)
 
-    def test_blocking_git_range_review_cannot_delete_before_merge_receipt(self):
+    def test_blocking_git_range_review_deletes_on_changed_evidence(self):
+        """The merge receipt is retired; changed durable evidence replaces it.
+
+        Was `..._cannot_delete_before_merge_receipt`. The old rule required an
+        exact two-parent merge in already-admitted history carrying the approved
+        bytes, which no commit can supply once the merge happened first. The
+        obligation that survives is the ordinary one every other queue item has:
+        name durable evidence up front, and change it in the deletion commit.
+        """
         with self.repo() as root:
             self.init_git(root)
             self.write(
@@ -4008,6 +4124,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Queue resolution schema:** v1\n",
             )
             source = self.write(root, "docs/source.md", "# Base\n")
+            evidence = self.write(
+                root, "docs/review-disposition.md", "# Pending\n"
+            )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "base")
             base = self.git(root, "rev-parse", "HEAD")
@@ -4028,6 +4147,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Filed:** 2026-07-23\n"
                 "**Action:** approve the exact merge range\n"
                 f"**Full context:** {binding}\n"
+                "**Resolution evidence:** `docs/review-disposition.md`\n"
                 f"**Review target:** {binding}\n"
                 f"**Review revision:** {binding}\n"
                 f"**Reviewed revision:** {binding}\n"
@@ -4056,15 +4176,35 @@ class ReconcileQueueTests(unittest.TestCase):
                 findings = list(RECONCILE.check_queue_resolution())
             finally:
                 RECONCILE.stop_git_snapshot_cache()
+            # No merge exists anywhere in this history, yet the refusal must
+            # still bite — on unchanged evidence, not on a missing receipt.
             self.assertTrue(any(
-                "merge cleanup needs" in finding.message
-                or "previously admitted target history" in finding.message
+                "resolution evidence was not created or changed"
+                in finding.message
                 for finding in findings
             ), self.messages(findings))
 
-    def test_future_git_review_deletes_only_after_merge_carries_receipt(self):
-        for merged, rejected in ((False, True), (True, False)):
-            with self.subTest(merged=merged), self.repo() as root:
+            evidence.write_text("# Disposed\n", encoding="utf-8")
+            self.git(root, "add", "-A")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_future_git_review_deletes_on_evidence_not_on_a_merge(self):
+        """Was `..._deletes_only_after_merge_carries_receipt`.
+
+        The stranded case is the one that mattered: the merge already happened,
+        the reviewed range is an ancestor of the trunk, and no future commit can
+        be the two-parent receipt the old rule demanded. Cleanup now turns on
+        changed evidence, which an agent can supply at any time — and the same
+        assertion still refuses a silent deletion.
+        """
+        for changed_evidence, rejected in ((False, True), (True, False)):
+            with self.subTest(changed_evidence=changed_evidence), \
+                    self.repo() as root:
                 self.init_git(root)
                 self.write(
                     root,
@@ -4072,6 +4212,9 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Queue resolution schema:** v1\n",
                 )
                 source = self.write(root, "docs/source.md", "# Base\n")
+                evidence = self.write(
+                    root, "docs/review-disposition.md", "# Pending\n"
+                )
                 self.git(root, "add", ".")
                 self.git(root, "commit", "-m", "base")
                 base = self.git(root, "rev-parse", "HEAD")
@@ -4092,6 +4235,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Filed:** 2026-07-23\n"
                     "**Action:** approve the merge candidate\n"
                     "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/review-disposition.md`\n"
                     f"**Review target:** {binding}\n"
                     f"**Review revision:** {binding}\n"
                     f"**Reviewed revision:** {binding}\n"
@@ -4110,13 +4254,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
                 self.git(root, "add", path)
                 self.git(root, "commit", "-m", "claim response")
-                feature = self.git(root, "rev-parse", "HEAD")
-                if merged:
-                    self.git(root, "checkout", "-b", "merge-receipt", base)
-                    self.git(
-                        root, "merge", "--no-ff", feature,
-                        "-m", "carry approved receipt",
-                    )
+                # Deliberately no merge anywhere: this is the stranded shape.
+                if changed_evidence:
+                    evidence.write_text("# Disposed\n", encoding="utf-8")
                 item.unlink()
                 self.git(root, "add", "-A")
 
@@ -4128,11 +4268,18 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual(rejected, bool(findings), self.messages(findings))
                 if rejected:
                     self.assertIn(
-                        "previously admitted target history",
+                        "resolution evidence was not created or changed",
                         findings[0].message,
                     )
 
-    def test_historical_future_review_cannot_delete_as_blocking(self):
+    def test_historical_future_review_still_needs_evidence_as_blocking(self):
+        """Escalating to `blocking-*` never buys a cheaper exit.
+
+        Was `..._cannot_delete_as_blocking`, which asserted the retired merge
+        receipt. The lineage rule it really protects is unchanged: the item is
+        judged on the timing it historically held, so a late rename cannot skip
+        the obligation it was filed under.
+        """
         with self.repo() as root:
             self.init_git(root)
             self.write(
@@ -4214,12 +4361,22 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual(1, len(findings), self.messages(findings))
             self.assertIn(
-                "previously admitted target history", findings[0].message
+                "missing non-queue **Resolution evidence:**",
+                findings[0].message,
             )
 
-    def test_merge_receipt_must_predate_the_admission_candidate(self):
-        for receipt_in_base, rejected in ((False, True), (True, False)):
-            with self.subTest(receipt_in_base=receipt_in_base), self.repo() as root:
+    def test_merge_boundary_no_longer_needs_a_merge_in_admitted_history(self):
+        """The exact deadlock this model exists to remove.
+
+        Was `test_merge_receipt_must_predate_the_admission_candidate`, which
+        pinned the rule that a candidate-local merge could not authorize cleanup
+        — true, and irrelevant once no merge at all can. Here the reviewed range
+        is already an ancestor of the admitted base, exactly like the two live
+        reviews on `main`, and cleanup succeeds on changed evidence alone.
+        """
+        for changed_evidence, rejected in ((False, True), (True, False)):
+            with self.subTest(changed_evidence=changed_evidence), \
+                    self.repo() as root:
                 self.init_git(root)
                 self.write(
                     root,
@@ -4227,6 +4384,9 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Queue resolution schema:** v1\n",
                 )
                 source = self.write(root, "docs/source.md", "# Base\n")
+                evidence = self.write(
+                    root, "docs/review-disposition.md", "# Pending\n"
+                )
                 self.git(root, "add", ".")
                 self.git(root, "commit", "-m", "base")
                 base = self.git(root, "rev-parse", "HEAD")
@@ -4247,6 +4407,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Filed:** 2026-07-23\n"
                     "**Action:** approve the merge candidate\n"
                     "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/review-disposition.md`\n"
                     f"**Review target:** {binding}\n"
                     f"**Review revision:** {binding}\n"
                     f"**Reviewed revision:** {binding}\n"
@@ -4265,19 +4426,16 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
                 self.git(root, "add", path)
                 self.git(root, "commit", "-m", "claim response")
-                feature = self.git(root, "rev-parse", "HEAD")
-                self.git(root, "checkout", "-b", "target", base)
-                self.git(
-                    root, "merge", "--no-ff", feature,
-                    "-m", "carry approved receipt",
+                admitted_base = self.git(root, "rev-parse", "HEAD")
+                self.assertTrue(
+                    RECONCILE.git_is_ancestor(reviewed_head, admitted_base),
+                    "the reviewed range must already be merged history",
                 )
-                receipt_merge = self.git(root, "rev-parse", "HEAD")
-                admitted_base = receipt_merge if receipt_in_base else base
-                if not receipt_in_base:
-                    self.git(root, "checkout", "-b", "candidate")
+                if changed_evidence:
+                    evidence.write_text("# Disposed\n", encoding="utf-8")
                 item.unlink()
                 self.git(root, "add", "-A")
-                self.git(root, "commit", "-m", "clean up receipt")
+                self.git(root, "commit", "-m", "clean up the crossed review")
                 candidate = self.git(root, "rev-parse", "HEAD")
 
                 RECONCILE.start_git_snapshot_cache()
@@ -4295,7 +4453,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 )
                 if rejected:
                     self.assertIn(
-                        "previously admitted target history",
+                        "resolution evidence was not created or changed",
                         findings[-1].message,
                     )
 
@@ -4887,23 +5045,20 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual([], findings, self.messages(findings))
 
     def test_review_cleanup_enforces_target_kind_at_the_named_boundary(self):
-        local_text = self.terminal_local_review(
-            "docs/source.md",
-            "sha256:" + "a" * 64,
-            "approved",
-            "**Blocks at:** transition:merge",
-            status="folding",
+        """A task boundary still demands a stable local target.
+
+        The merge half of this test is gone with the merge receipt: `merge` no
+        longer selects a target kind, because it no longer selects a cleanup
+        route at all. What survives is the rule that still has a route — a
+        task-lifecycle boundary cannot be closed by reviewing a Git range,
+        because a range is not a thing the task's own transition can re-verify.
+        """
+        self.assertEqual(
+            {"merge"},
+            set(RECONCILE.HUMAN_UNSPELLABLE_TRANSITIONS)
+            - set(RECONCILE.TASK_LIFECYCLE_TRANSITIONS),
+            "only `merge` loses its own cleanup route",
         )
-        problem = RECONCILE.review_cleanup_boundary_problem(
-            "message-queue/needs-human/reviews/"
-            "future-blocking-local-merge.md",
-            local_text,
-            "a" * 40,
-            None,
-            local_text,
-            "future-blocking",
-        )
-        self.assertIn("candidate-range Git", problem)
 
         git_revision = f"git:{'a' * 40}...{'b' * 40}"
         git_text = (
@@ -5291,7 +5446,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual([], findings, self.messages(findings))
 
-    def test_merge_receipt_survives_same_timing_slug_rename(self):
+    def test_merge_review_lineage_survives_same_timing_slug_rename(self):
         with self.repo() as root:
             self.init_git(root)
             self.write(
@@ -5347,12 +5502,11 @@ class ReconcileQueueTests(unittest.TestCase):
             review.rename(root / new_path)
             self.git(root, "add", "-A")
             self.git(root, "commit", "-m", "clarify merge review name")
-            feature = self.git(root, "rev-parse", "HEAD")
 
-            self.git(root, "checkout", "-b", "target", base)
-            self.git(
-                root, "merge", "--no-ff", feature,
-                "-m", "carry renamed merge receipt",
+            # The claim, the response, and the evidence declaration all live on
+            # the pre-rename path; cleanup must still find them through it.
+            (root / "docs/review-disposition.md").write_text(
+                "# Disposed\n", encoding="utf-8"
             )
             (root / new_path).unlink()
             self.git(root, "add", "-A")
@@ -5475,7 +5629,10 @@ class ReconcileQueueTests(unittest.TestCase):
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual(1, len(findings), self.messages(findings))
                 expected = (
-                    "merge cleanup needs"
+                    # The merge receipt is retired, so an approved blocking
+                    # review now closes on the ordinary durable-evidence rule.
+                    # What must not change is that it cannot simply vanish.
+                    "durable boundary evidence"
                     if outcome == "approved"
                     else "cancellation evidence"
                 )
@@ -12781,7 +12938,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     ]),
                 )
 
-    def test_task_queue_paths_must_be_live_and_done_tasks_must_use_none(self):
+    def test_task_queue_paths_must_be_live_and_done_tasks_may_not_list_dead_ones(self):
         with self.repo() as root:
             (root / "message-queue").mkdir()
             missing = (
@@ -12792,7 +12949,73 @@ class ReconcileQueueTests(unittest.TestCase):
             messages = self.messages(RECONCILE.check_task_structure())
             self.assertTrue(any("is not in the Git index" in message
                                 for message in messages))
-            self.assertTrue(any("done task must declare" in message for message in messages))
+            self.assertTrue(any(
+                "not a live queue item" in message for message in messages
+            ))
+
+    def test_done_task_keeps_a_live_unanswered_human_question(self):
+        """`4_done` is an agent's `git mv`, so it tests the agent's obligation.
+
+        Before this rule a task could not be recorded done while any question
+        was open, which made completing the work wait on a person answering —
+        a wait-on-human on a revertible Git edge, and the exact state the two
+        stranded reviews on `main` had produced.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            question = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-open-question.md"
+            )
+            self.write(
+                root,
+                question,
+                "# Is this the right boundary?\n\n"
+                "**Status:** waiting\n"
+                "**Filed:** 2026-07-24, by codex, from task `2026-07-23-example`\n"
+                "**Action:** judge the merged boundary\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Review target:** `docs/source.md`\n"
+                "**Review revision:** sha256:" + "a" * 64 + "\n"
+                "**Reviewed revision:** ______\n"
+                "**Review outcome:** pending\n"
+                "**Answer by:** 2026-09-30\n"
+                "**If unanswered:** The merged boundary stands.\n"
+                "**Your review:** ______\n",
+            )
+            self.make_task(root, "4_done", "`" + question + "`")
+            self.git(root, "add", "-A")
+            messages = self.messages(RECONCILE.check_task_structure())
+            self.assertEqual([], messages, messages)
+
+    def test_done_task_may_not_still_owe_an_agent_action(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            owed = (
+                "message-queue/needs-agent/requests/"
+                "future-blocking-still-owed.md"
+            )
+            self.write(
+                root,
+                owed,
+                "# Finish the repair\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-24\n"
+                "**Action:** finish the repair\n"
+                "**Full context:** `docs/source.md`\n"
+                "**Resolution evidence:** `docs/source.md`\n"
+                "**Blocks at:** event:publication\n"
+                "**Until then:** unrelated work continues\n",
+            )
+            self.make_task(root, "4_done", "`" + owed + "`")
+            self.git(root, "add", "-A")
+            messages = self.messages(RECONCILE.check_task_structure())
+            self.assertTrue(any(
+                "still owes agent action" in message for message in messages
+            ), messages)
 
     def test_staged_task_cannot_link_untracked_queue_item(self):
         with self.repo() as root:
@@ -13769,6 +13992,50 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertTrue(any(
                 "jumped from 1_in-progress to 4_done" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
+    def test_task_admission_accepts_unstarting_a_claimed_task(self):
+        """The escape edge that makes a `transition:start` gate satisfiable.
+
+        A start gate is only deadlock-free while all four review outcomes are
+        reachable by a commit an agent can make at any time. Reject and
+        changes-requested both need the task back in `0_backlog`, and
+        `check_stale_task`'s own fix text has always said so — but the edge
+        did not exist, so following that instruction failed admission.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            (task / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (task / "worklog.md").write_text("# Worklog\n", encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            base = self.git(root, "rev-parse", "HEAD")
+            backlog = task.parent.parent / "0_backlog" / task.name
+            backlog.parent.mkdir(parents=True, exist_ok=True)
+            task.rename(backlog)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "unclaim and unstart the task")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    findings = list(
+                        RECONCILE.check_task_admission_history()
+                    )
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertFalse(any(
+                "1_in-progress to 0_backlog" in finding.message
                 for finding in findings
             ), self.messages(findings))
 
@@ -15975,6 +16242,16 @@ class ReconcileQueueTests(unittest.TestCase):
         text = re.sub(
             r"^\*\*Resolution evidence:\*\*.*\n", "", text, count=1, flags=re.M
         )
+        # `stale-task` is advisory, so the generator files it `non-blocking-*`
+        # today. These fixtures are about a *blocking* retry's resolution path,
+        # which is the shape every retry filed before that change still has.
+        text = re.sub(
+            r"^\*\*If unanswered:\*\*.*\n",
+            "**Blocks now:** transition:merge\n",
+            text,
+            count=1,
+            flags=re.M,
+        )
         return (
             "message-queue/needs-agent/retries/blocking-"
             + RECONCILE.finding_key(finding) + ".md",
@@ -16278,13 +16555,62 @@ class ReconcileQueueTests(unittest.TestCase):
                 "continue it, or move back to 0_backlog and unclaim",
             )
             self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
+            # `stale-task` is advisory: the calendar alone can create it, so its
+            # retry may not carry `Blocks now: transition:merge` and stop a merge
+            # the check itself is forbidden to stop.
+            filed = next(RECONCILE.RETRIES.glob("non-blocking-*.md"))
+            body = filed.read_text(encoding="utf-8")
+            self.assertNotIn("**Blocks now:**", body)
+            self.assertIn("**If unanswered:**", body)
+            self.assertEqual((0, 1), RECONCILE.file_retries([]))
+            self.assertEqual([], list(RECONCILE.RETRIES.glob("*.md")))
+
+    def test_blocking_finding_still_files_a_blocking_retry(self):
+        """Only the advisory tier is weakened; a broken invariant still stops."""
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "queue-schema",
+                Path("message-queue/needs-agent/requests/non-blocking-x.md"),
+                "missing required field",
+                "copy the matching header",
+            )
+            self.assertFalse(finding.advisory)
+            self.assertEqual((1, 0), RECONCILE.file_retries([finding]))
             filed = next(RECONCILE.RETRIES.glob("blocking-*.md"))
             self.assertIn(
                 "**Blocks now:** transition:merge",
                 filed.read_text(encoding="utf-8"),
             )
-            self.assertEqual((0, 1), RECONCILE.file_retries([]))
-            self.assertEqual([], list(RECONCILE.RETRIES.glob("blocking-*.md")))
+
+    def test_an_existing_blocking_retry_is_not_duplicated_when_advisory(self):
+        """The prefix change must not orphan a retry an agent already claimed."""
+        with self.repo() as root:
+            finding = RECONCILE.Finding(
+                "stale-task",
+                Path("tasks/1_in-progress/2026-07-01-example"),
+                "untouched for over 14 days",
+                "continue it, or move back to 0_backlog and unclaim",
+            )
+            legacy = RECONCILE.RETRIES / (
+                "blocking-" + RECONCILE.finding_key(finding) + ".md"
+            )
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(
+                RECONCILE.retry_text(finding).replace(
+                    "**If unanswered:** The advisory finding stays reported "
+                    "and unrepaired; nothing stops.",
+                    "**Blocks now:** transition:merge",
+                ).replace("**Status:** open", "**Status:** in-repair"),
+                encoding="utf-8",
+            )
+            RECONCILE.file_retries([finding])
+            self.assertEqual(
+                [legacy], sorted(RECONCILE.RETRIES.glob("*.md"))
+            )
+            self.assertIn(
+                "**Status:** in-repair",
+                legacy.read_text(encoding="utf-8"),
+            )
 
     def test_collected_stale_task_retry_no_longer_blocks_every_merge(self):
         """The headline symptom: a survivor blocks PRs it has nothing to do with.
