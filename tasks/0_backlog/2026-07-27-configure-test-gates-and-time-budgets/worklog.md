@@ -58,3 +58,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Returned to `0_backlog` with a fresh `task-pickup` request,
   `message-queue/needs-agent/requests/non-blocking-pick-up-configure-test-gates-and-time-budgets.md`,
   whose Action tells the claimant to re-measure before implementing.
+
+## 2026-08-02 — timing correction (claude, orchestrating session)
+
+- The 75.87s figure above does not reproduce, and the entry immediately below it in this
+  worklog should be read with that in mind. A separate agent measured the same suite on the
+  same day with nothing else in flight and recorded `121.11s` (2:01.62 wall), and `142.10s`
+  on a loaded host. Three same-week measurements of the same command therefore span roughly
+  1.9x: 75.87s, 121.11s, 142.10s. None of them is wrong; the spread is the finding.
+- The reconciler shows the same problem at smaller scale — measured at 31s wall in that run,
+  against the ~5.28s this task's own text assumes.
+- What this changes for the claimant: do not re-derive the budget from a single fresh
+  measurement either. A target built on one number from this suite is built on noise. Decide
+  first what the measurement protocol is — how many runs, on what machine state, and which
+  statistic — and record it, because the next agent to question the budget will otherwise
+  repeat this exact exchange. The task's own premise that a budget is the right shape of goal
+  is worth re-examining against a 1.9x spread.
