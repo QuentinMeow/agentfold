@@ -1,10 +1,10 @@
 # Stop a human answer from holding any Git edge
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-08-01, by claude, from a judged design over the queue's boundary grammar
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-human-answers-from-gating-git-edges.md`
+**Queue actions:** none
 
 ## Goal
 
