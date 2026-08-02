@@ -336,12 +336,67 @@ $ /usr/bin/git diff --stat 0aeb7ff 71fb066
  11 files changed, 544 insertions(+), 36 deletions(-)
 ```
 
+## 13. Repeated at the commit that carries this file (`eae7a62`)
+
+Sections 1–12 were run at `71fb066`, before the record commit existed. Everything was
+re-run at `eae7a62`, the tip that carries this `verification.md`, with the merge probe
+rebuilt the same way on top of it (`93f8802`, first parent `eae7a62`).
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/run_tests.py
+[... lane and shard output elided ...]
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 31.44s
+```
+
+```
+$ /usr/bin/git log -1 --format='%H %P %s' 93f8802
+93f8802a3f3a60df6d27e0964faf3beffddb2155 eae7a62c09a817bd324da43c1d30067fda7710d8 6c723eff9edc8f46746c76aaf1f39a72b5fbd951 Merge the one-edit answer branch onto the repaired main
+```
+
+```
+$ python3 tmp/reconcile/reconcile.py --check --at-transition merge \
+    --branch task/2026-07-31-let-a-human-answer-in-one-edit \
+    --range eae7a62c09a817bd324da43c1d30067fda7710d8...93f8802a3f3a60df6d27e0964faf3beffddb2155
+[... the same 9 findings on 2026-07-31-0910PDT-let-a-human-answer-in-one-edit/handover.md ...]
+reconcile: 9 blocking finding(s)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge \
+    --branch task/2026-07-31-let-a-human-answer-in-one-edit \
+    --range eae7a62c09a817bd324da43c1d30067fda7710d8...93f8802a3f3a60df6d27e0964faf3beffddb2155
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check \
+    --range b4f36671311d3bb6d90409cecccc16031615d643...93f8802a3f3a60df6d27e0964faf3beffddb2155
+reconcile: 0 blocking finding(s)
+```
+
 ## What this run did not verify
 
 - **Nothing was pushed.** `71fb066` and the probe merge `99a2c84` exist only in this
   worktree, so no CI, no GitHub adapter, and no real merge of PR #44 was exercised.
 - **The probe merge is reconstructed, not the original `e4e631c`.** Its tree is
-  `e4e631c`'s tree plus this task's three commits; its first parent is the repaired main.
+  `e4e631c`'s tree plus this task's commits; its first parent is the repaired main.
   A real PR #44 merge after this lands would resolve `reconcile.py` the same way, but
   that resolution has not been performed by a human or by GitHub.
 - **`handover_liveness_version_for` is untouched** and still governs by the admission

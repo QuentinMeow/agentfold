@@ -27,5 +27,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Left `handover_liveness_version_for` on the floor deliberately — same defect is possible
   in principle, no reproduction exists, and narrowing it without evidence would weaken a
   live check. Recorded in `design.md` and in the ADR's consequences.
-- Local only: this worktree cannot push, so `71fb066` and the probe merge `99a2c84` are
-  not on any remote and no CI has seen them.
+- Local only: this worktree cannot push, so nothing here is on any remote and no CI has
+  seen it. Final tip `eae7a62`; merge probe `93f8802` (branch `probe/pr44-merge`).
+- The re-enabled origin check rejected this session's own handover on its first `--check`,
+  for two rhetorical questions and one sentence. Fixed by rewording a record that was still
+  being written; recorded in `verification.md` §11 as evidence the clause is armed again.
