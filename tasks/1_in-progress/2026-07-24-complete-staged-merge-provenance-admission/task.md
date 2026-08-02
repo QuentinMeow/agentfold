@@ -1,11 +1,11 @@
 # Complete staged-merge provenance admission
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Mode:** async
 **Filed:** 2026-07-24, by codex, from the publication audit of task `2026-07-23-first-class-message-queue`
 **Parent:** 2026-07-23-first-class-message-queue
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-staged-merge-provenance-admission.md`
+**Queue actions:** none
 
 ## Goal
 
