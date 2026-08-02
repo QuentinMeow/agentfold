@@ -40,6 +40,35 @@ evidence of broken state.
 The summary must be sufficient to act; the full-context link is for depth, not a missing
 prerequisite. A recommendation is evidence, not permission to hide an alternative.
 
+## The shape of a human-attention file
+
+The file is read top to bottom exactly once, so its order is the contract and the
+reconciler enforces it. The ask leads: three sentences — what is asked, what it changes
+in the world, and what happens if it is never answered — and nothing else stands above
+the first heading, because those three sentences are also the whole notification. Then
+what a reader needs: today's real behaviour separated from the proposed change and from
+the adjacent things they will wrongly assume are in scope. Then the choices, each under
+its own heading with its cost and one concrete consequence of picking it. Then the
+recommendation, after the choices so it cannot anchor them, with the best case against
+it beside it and a graded confidence that names what was not checked. Then the answer
+line. Everything a machine reads sits below it, under `## For the record`.
+
+Three rules are judgment, not syntax, and review is their only control. The title is a
+question the owner can answer without knowing this repository, and it never states the
+verdict. `Today` says what actually happens now — "nothing is implemented" when that is
+true — rather than describing the proposal twice. And the counter-case is the strongest
+argument for a different answer, not a hedge: an agent can satisfy the grammar with
+confidently-calibrated mush, and no check can tell.
+
+Never ask a person to copy a hash, a revision, or any offered vocabulary. A plain-English
+sentence is a complete answer; the agent that folds it does the bookkeeping and shows the
+person how it read their words before acting. State the source once, as one clickable
+link in the prose; the machine-readable copy belongs in `Full context` below the answer.
+A file that already carries a concrete response is a record, not an ask: it is never
+reformatted and keeps the schema it was written under.
+
+Field names, headings, and their exact order live in `templates/queue/`.
+
 ## Choose kind and timing independently
 
 - `decisions/`: choose among alternatives only the human may authorize.

@@ -206,9 +206,64 @@ QUEUE_TIMING_ORDER = {
     "future-blocking": 1,
     "blocking": 2,
 }
+# A boundary token is the whole of a dependency-timing claim another item can be
+# compared against; the prose standing beside it is presentation, not dependency.
+BOUNDARY_TIMING_FIELDS = {
+    "blocking": ("Blocks now",),
+    "future-blocking": ("Blocks at",),
+    "non-blocking": (),
+}
+# Under the human-attention format a live human item keeps only that token:
+# `If you do nothing` above the fold carries the whole unattended outcome, so
+# `Until then` and `If unanswered` would be a second answer to one question.
+HUMAN_QUEUE_TIMING_FIELDS = BOUNDARY_TIMING_FIELDS
 HUMAN_PROJECTION_FIELDS = (
+    "Why this matters",
+    "If you do nothing",
+)
+# The pre-rename spelling stays valid forever: a record written under it is a
+# record, and reformatting one to match a later presentation would rewrite it.
+LEGACY_HUMAN_PROJECTION_FIELDS = (
     "Why-you-might-care",
     "If-you-do-nothing",
+)
+HUMAN_PROJECTION_FIELD_PAIRS = tuple(
+    zip(HUMAN_PROJECTION_FIELDS, LEGACY_HUMAN_PROJECTION_FIELDS)
+)
+# Exactly these three, and nothing else, stand above the first heading, so the
+# top of the file and the notification a human receives are the same artifact.
+HUMAN_ABOVE_FOLD_FIELDS = ("Action",) + HUMAN_PROJECTION_FIELDS
+HUMAN_CONTEXT_FIELDS = (
+    "Today",
+    "What this would change",
+    "What this does not decide",
+)
+HUMAN_VERDICT_FIELDS = ("Recommendation", "My working assumption")
+HUMAN_COUNTER_CASE_FIELD = "Strongest case against this"
+HUMAN_CONFIDENCE_FIELD = "Confidence"
+# Machine bookkeeping lives below the answer line. This deny-list is closed and
+# is checked against the parsed field set, never against rendered prose.
+HUMAN_MACHINE_FIELDS = frozenset({
+    "Status", "Filed", "Full context", "Resolution evidence",
+    "Review target", "Review revision", "Reviewed revision", "Review outcome",
+    "Blocks now", "Blocks at", "Until then", "If unanswered",
+    "Supersedes", "Depends on", "Successor action", "Follow-up review",
+    "External assignment", "External source", "Request kind",
+})
+# Dead fields that may not drift back. `Look-at` had six live uses, no template,
+# no contract sentence, and no reader; the source is named once in the prose.
+BANNED_QUEUE_FIELDS = ("Look-at",)
+HUMAN_ATTENTION_WORD_BUDGET = 700
+HUMAN_CHOICES_HEADINGS = ("## Your choices", "## Differences", "## Options")
+CHOICE_HEADING_RE = re.compile(r"^###[ \t]+(\S.*?)[ \t]*$", re.M)
+# A bare adjective is not a calibration signal: say what was checked and what
+# was not, or the grade carries no information.
+CONFIDENCE_RE = re.compile(r"^(?:high|medium|low)\s+—\s+\S", re.I)
+HUMAN_RESPONSE_LINE_RE = re.compile(
+    r"^\*\*(?:Your answer|Your review):\*\*", re.M
+)
+QUEUE_STATUS_TOKEN_RE = re.compile(
+    r"`(awaiting-artifact|waiting|folding|open|in-repair)`"
 )
 QUEUE_ROOT_DOCUMENT_PATHS = {
     "message-queue/AGENTS.md",
@@ -236,7 +291,9 @@ HANDOVER_AGENT_LINK_RE = re.compile(
 # Handover action-entry schema versions, oldest first. This namespace versions
 # projection *syntax* only; which actions a projection must contain is versioned
 # separately below, so the two can move without colliding (history/AGENTS.md).
-HANDOVER_ENTRY_VERSIONS = ("v1", "v2")
+# A record keeps the grammar it was created under; a newly rejecting expansion
+# adds a version instead of retroactively invalidating immutable history.
+HANDOVER_ENTRY_VERSIONS = ("v1", "v2", "v3")
 HANDOVER_ENTRY_FIELD = "Queue action-entry schema"
 # Handover liveness schema versions, oldest first. v1 projects only the
 # needs-human actions that still await the human.
@@ -1014,6 +1071,93 @@ def level_two_section_body(text, heading):
     return matched.group(1).strip() if matched else None
 
 
+def human_header_block(text):
+    """Return the source between the title and the first section heading."""
+    clean = semantic_text(text)
+    title = re.search(r"^#[ \t]+\S.*$", clean, flags=re.M)
+    start = title.end() if title else 0
+    heading = re.search(r"^##(?:\s|$)", clean[start:], flags=re.M)
+    end = start + heading.start() if heading else len(clean)
+    return clean[start:end]
+
+
+def human_response_line_offset(clean):
+    """Return where the answer line starts, or None when it is absent."""
+    matched = HUMAN_RESPONSE_LINE_RE.search(clean)
+    return matched.start() if matched else None
+
+
+def human_attention_above_fold(text):
+    """Return the visible source a human reads before the answer line."""
+    clean = semantic_text(text)
+    offset = human_response_line_offset(clean)
+    return clean if offset is None else clean[:offset]
+
+
+def human_choices_body(clean):
+    """Return the choices source, joining every accepted heading alias.
+
+    `templates/queue/decision.md` split the axis (`## Differences`) from the list
+    (`## Options`), so counting under one heading alone would reject every legacy
+    decision item. The union accepts both the old two-heading shape and the new
+    single `## Your choices`.
+    """
+    bodies = []
+    for heading in HUMAN_CHOICES_HEADINGS:
+        body = level_two_section_body(clean, heading)
+        if body is not None:
+            bodies.append(body)
+    return "\n\n".join(bodies) if bodies else None
+
+
+def choice_labels(headings):
+    """Return every name a recommendation may use for one shown choice."""
+    labels = []
+    for heading in headings:
+        label = " ".join(heading.split())
+        if not label:
+            continue
+        labels.append(label)
+        for separator in (" — ", " – ", " - ", ": "):
+            if separator in label:
+                labels.append(label.split(separator, 1)[0].strip())
+                break
+    return [label for label in labels if label]
+
+
+def projection_value(got, index):
+    """Return the spelling one item actually uses for a projected sentence."""
+    modern, legacy = HUMAN_PROJECTION_FIELD_PAIRS[index]
+    if modern in got:
+        return modern, got.get(modern, "")
+    return legacy, got.get(legacy, "")
+
+
+def human_attention_format_applies(actor, text):
+    """Return whether one live item is written under the human-attention format.
+
+    The test is the projection spelling the item itself uses, not whether it has
+    been answered. The two renames are one schema generation: an item that says
+    `Why this matters` also carries the whole unattended outcome in
+    `If you do nothing`, and both are part of its frozen action identity, so the
+    answer it receives later cannot move it back to the earlier schema. Keying
+    this on answered-ness instead would demand `Until then` back from a migrated
+    item the moment the owner replies — and adding it then is exactly what
+    "timing never changes with or after the response" forbids.
+    """
+    if actor != "needs-human" or not human_attention_format_enabled():
+        return False
+    got = text_fields(text)
+    return any(field in got for field in HUMAN_PROJECTION_FIELDS)
+
+
+def queue_timing_fields_for(actor, text):
+    """Return the timing fields one live item must carry for its prefix."""
+    if human_attention_format_applies(actor, text):
+        return HUMAN_QUEUE_TIMING_FIELDS
+    return QUEUE_TIMING_FIELDS
+
+
 def raw_level_two_section_body(text, heading):
     """Return raw section source for fail-closed syntax validation only."""
     matched = re.search(
@@ -1618,6 +1762,36 @@ def queue_resolution_v1_at(revision):
     )
 
 
+def human_attention_format_enabled():
+    contract = repo_artifact_bytes(QUEUE / "AGENTS.md")
+    return bool(
+        contract is not None
+        and text_fields(decode_utf8_artifact(
+            contract, "candidate `message-queue/AGENTS.md`"
+        )).get("Human-attention format", "").strip() == "v1"
+    )
+
+
+def human_attention_format_v1_at(revision):
+    """Return whether one exact candidate or commit enables the human format."""
+    artifact = (
+        repo_artifact_bytes(QUEUE / "AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "message-queue/AGENTS.md")
+    )
+    return bool(
+        artifact is not None
+        and text_fields(decode_utf8_artifact(
+            artifact,
+            (
+                "candidate `message-queue/AGENTS.md`"
+                if revision is None
+                else f"`message-queue/AGENTS.md` at {revision}"
+            ),
+        )).get("Human-attention format", "").strip() == "v1"
+    )
+
+
 def schema_activation_commits(head, path, field, version="v1"):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
@@ -1667,6 +1841,21 @@ def queue_resolution_activation_commits(head):
             candidate_head,
             "message-queue/AGENTS.md",
             "Queue resolution schema",
+        )
+        if error:
+            raise GitSnapshotError(error)
+        activations.extend(found)
+    return tuple(dict.fromkeys(activations))
+
+
+def human_attention_activation_commits(head):
+    """Return every reachable commit that already carried the human format."""
+    activations = []
+    for candidate_head in candidate_activation_heads(head):
+        found, error = schema_activation_commits(
+            candidate_head,
+            "message-queue/AGENTS.md",
+            "Human-attention format",
         )
         if error:
             raise GitSnapshotError(error)
@@ -2470,20 +2659,24 @@ def human_projection_context_migration(
         return False
     prior = text_fields(before)
     current = text_fields(after)
-    for field in HUMAN_PROJECTION_FIELDS:
-        if not has_concrete_value(current.get(field, "")):
+    for index in range(len(HUMAN_PROJECTION_FIELD_PAIRS)):
+        _prior_key, prior_value = projection_value(prior, index)
+        _current_key, current_value = projection_value(current, index)
+        if not has_concrete_value(current_value):
             return False
-        if has_concrete_value(prior.get(field, "")) \
-                and prior[field].strip() != current[field].strip():
+        if has_concrete_value(prior_value) \
+                and prior_value.strip() != current_value.strip():
             return False
+    # Either spelling may carry the enriched sentence, so both are mutable here.
+    mutable = HUMAN_PROJECTION_FIELDS + LEGACY_HUMAN_PROJECTION_FIELDS
     return queue_action_identity(
         source,
         before,
-        extra_mutable_fields=HUMAN_PROJECTION_FIELDS,
+        extra_mutable_fields=mutable,
     ) == queue_action_identity(
         destination,
         after,
-        extra_mutable_fields=HUMAN_PROJECTION_FIELDS,
+        extra_mutable_fields=mutable,
     )
 
 
@@ -2517,6 +2710,10 @@ def queue_mutation_problem(
     regression = queue_parent_state_regression_problem(before, after)
     if regression is not None:
         return regression
+    # There is no presentation carve-out. A live item's visible text is its
+    # identity, so reformatting one is an identity change and is refused: a
+    # fence over field labels cannot protect the ask itself, which is the title,
+    # the context block, the choices, and the recommendation.
     if queue_action_identity(source, before) != queue_action_identity(
         destination, after
     ) and not human_projection_context_migration(
@@ -4035,7 +4232,14 @@ def review_successor_problem(path, text, prior_revision, revision):
     if delivery_class(Path(successor_path).name) != delivery_class(Path(path).name):
         return "review successor changes the dependency timing"
     timing = delivery_class(Path(path).name)
-    for key in QUEUE_TIMING_FIELDS.get(timing, ()):
+    # The reviewed item's own schema says what "the same dependency timing"
+    # means, so nothing is loosened for an item that still carries the prose
+    # field. Only an item written under the human-attention format has moved its
+    # unattended outcome above the fold, and only that item is compared on the
+    # boundary token alone; a legacy item keeps the full tuple it was written
+    # with, including `Until then` and `If unanswered`.
+    compared_timing_fields = queue_timing_fields_for("needs-human", text)
+    for key in compared_timing_fields.get(timing, ()):
         if successor.get(key, "").strip() != got.get(key, "").strip():
             return f"review successor changes **{key}:**"
     if successor.get("Full context", "").strip() != got.get(
@@ -4080,7 +4284,7 @@ def review_successor_problem(path, text, prior_revision, revision):
         return "follow-up review does not name the repair with **Depends on:**"
     if delivery_class(Path(followup_path).name) != timing:
         return "follow-up review changes the dependency timing"
-    for key in QUEUE_TIMING_FIELDS.get(timing, ()):
+    for key in compared_timing_fields.get(timing, ()):
         if followup.get(key, "").strip() != got.get(key, "").strip():
             return f"follow-up review changes **{key}:**"
     if followup.get("Full context", "").strip() != got.get(
@@ -4355,6 +4559,8 @@ def check_queue_schema():
             continue  # queue-name owns the malformed-name finding
         text = repo_text(item)
         got = text_fields(text)
+        location = item.parent.relative_to(QUEUE).parts
+        item_actor = location[0] if len(location) == 2 else ""
         if "Blocking" in got:
             yield Finding(
                 "queue-schema",
@@ -4362,7 +4568,7 @@ def check_queue_schema():
                 "obsolete **Blocking:** field conflicts with filename timing",
                 "remove it and use only the field required by the filename prefix",
             )
-        expected = set(QUEUE_TIMING_FIELDS[timing])
+        expected = set(queue_timing_fields_for(item_actor, text)[timing])
         present = expected.intersection(got)
         for key in sorted(expected - present):
             yield Finding(
@@ -4436,8 +4642,6 @@ def check_queue_schema():
             required = ["Status", "Filed", "Action", "Full context"]
         else:
             required = list(required)
-        if actor == "needs-human" and queue_v1:
-            required.extend(HUMAN_PROJECTION_FIELDS)
         text = repo_text(item)
         clean = semantic_text(text)
         got = text_fields(text)
@@ -4470,12 +4674,33 @@ def check_queue_schema():
                               f"missing required field **{key}:**",
                               f"copy the base schema from templates/queue/ ({rel})")
         if actor == "needs-human" and queue_v1:
-            for key in HUMAN_PROJECTION_FIELDS:
-                if key in got and not has_concrete_value(got[key]):
+            # Either spelling satisfies a projected slot; carrying both would
+            # leave a handover no way to choose which sentence it must copy.
+            for modern, legacy in HUMAN_PROJECTION_FIELD_PAIRS:
+                present = [key for key in (modern, legacy) if key in got]
+                if not present:
                     yield Finding(
                         "queue-schema",
                         item.relative_to(REPO),
-                        f"field **{key}:** is empty or a placeholder",
+                        f"missing required field **{modern}:**",
+                        "copy the base schema from templates/queue/ "
+                        f"({rel})",
+                    )
+                    continue
+                if len(present) == 2:
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        f"fields **{modern}:** and **{legacy}:** name the same "
+                        "projected sentence twice",
+                        "keep exactly one spelling per projected sentence",
+                    )
+                    continue
+                if not has_concrete_value(got[present[0]]):
+                    yield Finding(
+                        "queue-schema",
+                        item.relative_to(REPO),
+                        f"field **{present[0]}:** is empty or a placeholder",
                         "state the concrete consequence copied into handover "
                         "action projections",
                     )
@@ -4792,6 +5017,45 @@ def check_queue_schema():
                 "missing a concrete ## What you need to know section",
                 "summarize the action from zero context before linking to depth",
             )
+        if human_attention_format_applies(actor, text):
+            # One shape for every live ask: named choices, each carrying the
+            # state it enters and one concrete consequence of choosing it.
+            choices_body = human_choices_body(clean)
+            if not has_concrete_value(choices_body):
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "missing a concrete ## Your choices section",
+                    "open it with the axis the choices differ on, then show "
+                    "each choice under its own `### ` heading",
+                )
+                continue
+            choices = [
+                value for value in CHOICE_HEADING_RE.findall(choices_body)
+                if has_concrete_value(value)
+            ]
+            examples = [
+                value
+                for value in EXAMPLE_CONSEQUENCE_RE.findall(choices_body)
+                if has_concrete_value(value)
+            ]
+            if len(choices) < 2:
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "## Your choices needs at least two `### ` choices",
+                    "show at least two materially different answers, or say in "
+                    "the axis sentence why one is unavailable",
+                )
+            if len(examples) < 2:
+                yield Finding(
+                    "queue-schema",
+                    item.relative_to(REPO),
+                    "## Your choices needs a concrete *Example consequence:* "
+                    "for each choice",
+                    "include at least two non-placeholder example consequences",
+                )
+            continue
         differences = section_body(clean, "## Differences")
         if not has_concrete_value(differences):
             yield Finding(
@@ -4827,6 +5091,185 @@ def check_queue_schema():
                     item.relative_to(REPO),
                     "missing a concrete ## Example section",
                     "show one small scenario that makes the requested judgment tangible",
+                )
+
+
+def check_human_attention():
+    """Enforce the shape of a live ask, never the prose a renderer produces.
+
+    Everything here is structural: which fields exist, where they sit, and
+    whether a named choice was actually shown. Nothing depends on knowing what
+    a browser renders, which is the boundary that keeps this check small.
+
+    An answered item is a record, not an ask. Records are immutable, so the
+    presentation rules stop applying to them and they keep the schema they were
+    written under, including the pre-rename field spelling.
+
+    The same reasoning covers a live item that predates the format. Nothing may
+    rewrite a live ask in place, so an item written in the earlier spelling is
+    governed by the schema it was written under and ages out as it resolves;
+    every new item is written from `templates/queue/` and is checked here.
+    """
+    enabled = human_attention_format_enabled()
+    if not enabled and (REPO / ".git").exists() \
+            and git_index_entries("message-queue") \
+            and human_attention_activation_commits(_GIT_HEAD_OID):
+        # The marker selects a rejecting grammar for every new ask. Letting it
+        # be toggled off and back on would let one candidate slip an ask past
+        # the checks and re-arm them afterwards.
+        yield Finding(
+            "human-attention",
+            Path("message-queue/AGENTS.md"),
+            "Human-attention format v1 was removed after activation",
+            "restore **Human-attention format:** v1 while the queue remains",
+        )
+    if not enabled:
+        return
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue  # queue-location owns unsafe or broken filesystem entries
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] != "needs-human":
+            continue
+        rel = item.relative_to(REPO)
+        text = repo_text(item)
+        if not human_attention_format_applies(parts[0], text):
+            continue  # an earlier-spelled live item keeps its own schema
+        if first_concrete_response(human_response_fields(text)) is not None:
+            continue
+        clean = semantic_text(text)
+        got = text_fields(text)
+
+        if contains_raw_html(text):
+            yield Finding(
+                "human-attention",
+                rel,
+                "live human item contains raw HTML",
+                "write it in Markdown only: an HTML block silently swallows "
+                "every field below it while still rendering identically",
+            )
+        for key in BANNED_QUEUE_FIELDS:
+            if key in got:
+                yield Finding(
+                    "human-attention",
+                    rel,
+                    f"deleted field **{key}:** is present",
+                    "name the source once in the prose; For the record keeps "
+                    "the machine copy in Full context",
+                )
+
+        header_fields = [
+            key for key, _value in FIELD_RE.findall(human_header_block(text))
+        ]
+        if tuple(header_fields) != HUMAN_ABOVE_FOLD_FIELDS:
+            yield Finding(
+                "human-attention",
+                rel,
+                "the block above the first heading must be exactly "
+                + ", ".join(f"**{key}:**" for key in HUMAN_ABOVE_FOLD_FIELDS)
+                + ", in that order; found "
+                + (
+                    ", ".join(f"**{key}:**" for key in header_fields)
+                    if header_fields else "no field"
+                ),
+                "move everything else below the answer line so the top of the "
+                "file and the notification are the same three sentences",
+            )
+
+        above = human_attention_above_fold(text)
+        machine_above = sorted({
+            key for key, _value in FIELD_RE.findall(above)
+            if key in HUMAN_MACHINE_FIELDS
+        })
+        if machine_above:
+            yield Finding(
+                "human-attention",
+                rel,
+                "machine field(s) above the answer line: "
+                + ", ".join(f"**{key}:**" for key in machine_above),
+                "move them under ## For the record; nothing a human answers "
+                "with needs a status, a path, a hash, or a boundary token",
+            )
+
+        missing_context = [
+            key for key in HUMAN_CONTEXT_FIELDS
+            if not has_concrete_value(got.get(key, ""))
+        ]
+        if missing_context:
+            yield Finding(
+                "human-attention",
+                rel,
+                "missing or empty "
+                + ", ".join(f"**{key}:**" for key in missing_context),
+                "separate what happens now from what this would change and "
+                "from what a reader will wrongly assume is in scope",
+            )
+
+        verdicts = [key for key in HUMAN_VERDICT_FIELDS if key in got]
+        if len(verdicts) != 1 or not has_concrete_value(got[verdicts[0]]):
+            yield Finding(
+                "human-attention",
+                rel,
+                "needs exactly one concrete "
+                + " or ".join(f"**{key}:**" for key in HUMAN_VERDICT_FIELDS),
+                "recommend one of the choices shown, or in a clarification "
+                "state the assumption you will act on",
+            )
+        elif not has_concrete_value(got.get(HUMAN_COUNTER_CASE_FIELD, "")):
+            yield Finding(
+                "human-attention",
+                rel,
+                f"**{verdicts[0]}:** has no "
+                f"**{HUMAN_COUNTER_CASE_FIELD}:**",
+                "a verdict a reader cannot argue with is an instruction; give "
+                "the best case for a different answer beside it",
+            )
+        else:
+            labels = choice_labels(
+                CHOICE_HEADING_RE.findall(human_choices_body(clean) or "")
+            )
+            verdict = " ".join(got[verdicts[0]].split()).lower()
+            if not any(label.lower() in verdict for label in labels):
+                yield Finding(
+                    "human-attention",
+                    rel,
+                    f"**{verdicts[0]}:** does not name any choice shown under "
+                    "## Your choices",
+                    "recommend one of the `### ` choices offered, or offer the "
+                    "one you actually recommend",
+                )
+
+        confidence = got.get(HUMAN_CONFIDENCE_FIELD, "")
+        if not CONFIDENCE_RE.match(confidence.strip()):
+            yield Finding(
+                "human-attention",
+                rel,
+                f"**{HUMAN_CONFIDENCE_FIELD}:** must read "
+                "`high|medium|low — <what you checked, and what you did not>`",
+                "a bare adjective is not a calibration signal; name the thing "
+                "you did not check",
+            )
+
+        words = len(above.split())
+        if words > HUMAN_ATTENTION_WORD_BUDGET:
+            yield Finding(
+                "human-attention",
+                rel,
+                f"{words} words before the answer line exceeds the "
+                f"{HUMAN_ATTENTION_WORD_BUDGET}-word budget",
+                "cut background, not choices",
+            )
+
+        status = got.get("Status", "").strip()
+        for token in sorted(set(QUEUE_STATUS_TOKEN_RE.findall(above))):
+            if token != status:
+                yield Finding(
+                    "human-attention",
+                    rel,
+                    f"prose above the answer line names lifecycle state "
+                    f"`{token}` while **Status:** is `{status or 'absent'}`",
+                    "delete the state-dependent sentence; the item's own "
+                    "Status is the single source of when it can be answered",
                 )
 
 
@@ -6885,17 +7328,22 @@ def handover_queue_fields_at_creation(rel, queue_path, required):
     counts = field_counts(text)
     got = text_fields(text)
     projected = {}
-    for field in required:
-        if counts.get(field, 0) != 1:
+    for slot in required:
+        # A slot may accept several spellings of one sentence. The snapshot must
+        # settle on exactly one of them, and the caller reads it by canonical
+        # name, so a legacy record projects correctly under a later grammar.
+        aliases = (slot,) if isinstance(slot, str) else tuple(slot)
+        present = [alias for alias in aliases if counts.get(alias, 0) >= 1]
+        if len(present) != 1 or counts.get(present[0], 0) != 1:
             return None, (
-                f"`{queue_path}` must contain exactly one **{field}:**"
+                f"`{queue_path}` must contain exactly one **{aliases[0]}:**"
             )
-        value = got.get(field, "").strip()
+        value = got.get(present[0], "").strip()
         if not has_concrete_value(value):
             return None, (
-                f"`{queue_path}` has no concrete **{field}:**"
+                f"`{queue_path}` has no concrete **{present[0]}:**"
             )
-        projected[field] = value
+        projected[aliases[0]] = value
     return projected, None
 
 
@@ -7128,7 +7576,7 @@ def handover_projection_entries(
         projected.append(canonical)
 
         required_fields = (
-            ("Action", "Why-you-might-care", "If-you-do-nothing")
+            ("Action",) + HUMAN_PROJECTION_FIELD_PAIRS
             if actor == "needs-human"
             else ("Action",)
         )
@@ -7145,14 +7593,24 @@ def handover_projection_entries(
                 f"queue item's **Action:** `{action}`"
             )
 
-        expected_context = (
-            "— Why-you-might-care: "
-            + queue_fields["Why-you-might-care"]
-            + " || If-you-do-nothing: "
-            + queue_fields["If-you-do-nothing"]
-            if actor == "needs-human"
-            else ""
-        )
+        if actor != "needs-human":
+            expected_context = ""
+        elif entry_version == "v3":
+            # v3 renders the two sentences in English. v1/v2 records keep their
+            # creation-time suffix byte for byte.
+            expected_context = (
+                "— Why this matters: "
+                + queue_fields[HUMAN_PROJECTION_FIELDS[0]]
+                + " — If you do nothing: "
+                + queue_fields[HUMAN_PROJECTION_FIELDS[1]]
+            )
+        else:
+            expected_context = (
+                "— Why-you-might-care: "
+                + queue_fields[HUMAN_PROJECTION_FIELDS[0]]
+                + " || If-you-do-nothing: "
+                + queue_fields[HUMAN_PROJECTION_FIELDS[1]]
+            )
         expected_context = render_inline_code(expected_context)
         for context in (
             copied_prose_without_links(entry),
@@ -7167,7 +7625,7 @@ def handover_projection_entries(
                 if actor == "needs-human":
                     problems.append(
                         f"entry {index} must copy the creation-snapshot "
-                        "Why-you-might-care and If-you-do-nothing fields "
+                        "why-this-matters and if-you-do-nothing fields "
                         "using the fixed handover suffix"
                     )
                 else:
@@ -8093,6 +8551,7 @@ CHECKS = {
     "queue-name": check_queue_name,
     "queue-location": check_queue_location,
     "queue-schema": check_queue_schema,
+    "human-attention": check_human_attention,
     "queue-resolution": check_queue_resolution,
     "queue-boundary": check_active_queue_boundaries,
     "queue-task-reciprocity": check_queue_task_reciprocity,
