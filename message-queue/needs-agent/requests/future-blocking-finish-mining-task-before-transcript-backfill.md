@@ -1,6 +1,6 @@
 # Finish the mining task before the transcript backfill starts
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Action:** After 2026-07-25-mine-markdown-cochange-couplings reaches `4_done`, confirm which transcript sections its verification file is still missing, then remove this dependency action and its reciprocal task link before the backfill task is claimed.
 **Full context:** `docs/designs/markdown-edge-graph.md`
