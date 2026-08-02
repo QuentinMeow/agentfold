@@ -1,10 +1,10 @@
 # Ship a skill that makes an agent explain its work so a non-expert can decide
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-01-2317PDT)
 **Filed:** 2026-08-01, by claude, from the owner's chat request to make messages and PR bodies readable
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-write-the-explanation-skill.md`
+**Queue actions:** none
 
 ## Goal
 

@@ -1,10 +1,10 @@
 # Make "publish it and report it" the required end of every task
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-01-2317PDT)
 **Filed:** 2026-08-01, by claude, from the owner's chat request to stop having to ask what was done
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-report-work-back-to-the-owner.md`
+**Queue actions:** none
 
 ## Goal
 

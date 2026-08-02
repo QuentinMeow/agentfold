@@ -1,10 +1,10 @@
 # Give every pull request one body schema a zero-context reader can act on
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-01-2317PDT)
 **Filed:** 2026-08-01, by claude, from the owner's chat request to make PR descriptions readable
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-standardize-pull-request-bodies.md`
+**Queue actions:** none
 
 ## Goal
 
