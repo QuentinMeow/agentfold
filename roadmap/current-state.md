@@ -273,3 +273,25 @@ What is true today, mapped to the desired-state lines.
   and cannot be corrected while the item lives — attempting it reports
   `queue-resolution: action identity changed while the queue item remained live`, which is
   instance 2 of `memory/known-issues/2026-08-01-an-immutable-field-cannot-be-repaired-on-a-live-item.md`.
+- **The three pull requests the repaired scope gate refused (2026-08-02)**: all three are
+  terminal, and the repair the request named can no longer be performed on any of them.
+  `gh pr view` reports 41 `MERGED` at 2026-08-01T22:18:06Z as `84e3524`, 45 `CLOSED` at
+  2026-08-02T00:10:37Z, and 46 `CLOSED` at 2026-08-02T03:25:14Z. Rewriting a "What to
+  review" section on a merged or closed candidate changes no gate and reaches no reviewer,
+  so the projection repair 41 and 45 needed is unreachable rather than outstanding. 45 was
+  not abandoned: its head branch `harness/2026-07-31-fold-answered-queue-review` was
+  republished as PR 53, which merged on 2026-08-02 — the rebuilt-pull-request half of the
+  deleted-base-ref incident `handbook/git-workflow.md` records. 46 is the other half: its
+  base was that same branch, and deleting the base on 53's merge closed it in the same
+  second, unreopenably.
+  The branch `task/2026-07-31-redo-stranded-review-disposition` no longer exists —
+  `git branch -a` and `git ls-remote --heads origin` both fail to list it — so the request's
+  first clause ("carries its own task record or no longer claims to be a task branch") is
+  satisfied by the branch's absence rather than by filing anything. Its task record was
+  never filed and still exists in no commit on any ref, and its single commit `694b26d` is
+  not an ancestor of `main`. Nothing was lost with it: its purpose was to file the
+  disposition decision for the stranded merge reviews, and that decision is live on `main`
+  as `message-queue/needs-human/decisions/non-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`,
+  filed instead by `4d2f8aa harness: activate human gating v1 and free four crossed boundaries`.
+  The gate limitation recorded above is unchanged by any of this; what is resolved is the
+  repair request, not the over-broad `task:<id>` merge boundary it was filed beside.
