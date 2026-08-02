@@ -1,53 +1,76 @@
 # Writing decisions humans can actually answer
 
-A decision file is an interface between an agent with full context and a human with
-none. Most unanswered decisions are unanswerable — they assume knowledge the human
-doesn't have. General rules for every human action:
-`human-action-guide.md`; schema: `templates/queue/decision.md`. This guide adds the
-decision-specific content.
+A decision file is an interface between an agent with full context and a human with none.
+Most unanswered decisions are unanswerable: they assume knowledge the reader does not have,
+or they ask for a judgment the agent should have made itself.
 
-## The contract with the reader
+This guide covers only what is specific to a *decision*. The rules every human action
+shares — who may be asked, the order of the file, how one edit answers it, how it resolves —
+are in `handbook/human-action-guide.md`. The fields to copy are in
+`templates/queue/decision.md`. How to write the prose is
+`skills/explain-to-human/scenarios/queue-item.md`.
 
-Assume the human: is not an expert in this domain, has not read the codebase, skims one
-screen, and will answer from their phone. Therefore:
+## Assume this reader
 
-1. **The question fits in the title**, answerable with a word or two.
-2. **Context from zero.** Two or three sentences: what part of the system this touches,
-   why the question came up now. Link every source (the task, the code, the doc) — the
-   link is for depth, never a requirement.
-3. **Options with example consequences.** For each option: what it means in plain
-   language, then a *concrete scenario* of life after choosing it — "If we pick A and a
-   user does X, then Y happens." The example consequence is the most important part of
-   the file: it is how a non-expert experiences the difference between options.
-4. **A recommendation and dependency timing.** Say which option you'd pick and why in
-   one sentence. The filename and its matching timing block carry when the choice stops
-   work; `message-queue/AGENTS.md` owns that rule.
-5. **The answer slot is literal, and it is the only thing they fill**: end with
-   `**Your answer:** ______`. Replacing that blank and committing is a complete answer —
-   if anything else on the page has to be hand-written for the commit to pass, the item
-   is unanswerable from a phone and filed wrong (`human-action-guide.md`). Accept a
-   letter, sentence, or counter-question; the first concrete response is immutable. For a
-   counter-question, claim and fold that disposition, answer it in the named durable
-   evidence, then create a new same-timing item whose `Supersedes` names the old path.
-   Never edit human text; claim `folding` with a status-only commit.
-6. **Background is reconstructable; delivery state is not.** Durable background belongs
-   in the task's `design.md` or `memory/`, linked from here — never written only here.
-   The live file uniquely owns the unresolved action, timing, status, and any answer;
-   do not delete it until those are folded or explicitly disposed.
+They are not an expert in this domain. They have not read the code. They will read one
+screen and answer from their phone. Everything below follows from that.
 
-## Example (abridged)
+## The five things a decision file owes
+
+**1. A question in the title.** Answerable in a word or two, by someone who does not know
+this repository, and carrying no verdict.
+
+**2. Context from zero.** Two or three sentences: what part of the system this touches, and
+why the question came up now. Link every source — the link is depth, never a prerequisite.
+
+**3. Options with example consequences.** For each option: what it means in plain language,
+then a *concrete scenario* of life after choosing it — "if we pick A and a user does X, then
+Y happens". The example consequence is the most important part of the file. It is how a
+non-expert experiences the difference between two options they cannot otherwise compare.
+
+Two options is the minimum. Four is the maximum: past that, readers defer rather than
+choose. Never pad the list with an outcome nobody would pick.
+
+**4. A recommendation.** One sentence saying which you would pick and why, placed after the
+options so it cannot anchor them, with the strongest case against it beside it.
+
+**5. What happens if nobody answers.** The safe default, and what it costs. "Nothing stops"
+is a complete answer and often the true one.
+
+## A worked example
 
 > **Should the quote API store quotes in a JSON file or SQLite?**
-> Option A — JSON file: human-readable, diffable in git. *Example consequence: two
-> agents writing quotes at the same time can corrupt the file; you'd see occasional
-> lost quotes.* Option B — SQLite: safe concurrent writes. *Example consequence: the
-> data stops being reviewable in a pull request; you'd need a tool to inspect it.*
-> Recommendation: A, our writes are single-threaded today. Default path: A, starting
-> 2026-08-01.
+>
+> **Option A — JSON file.** Human-readable, and reviewable in a pull request.
+> *Example consequence:* two agents writing quotes at the same time can corrupt the file;
+> you would see quotes occasionally disappear with no error.
+>
+> **Option B — SQLite.** Safe concurrent writes.
+> *Example consequence:* the data stops being reviewable in a pull request; inspecting it
+> needs a tool.
+>
+> **Recommendation:** A — our writes are single-threaded today.
+> **If you do nothing:** we proceed on A from 2026-08-01 and the question stays answerable.
+
+Notice what the example consequences do that the option descriptions cannot: they name
+something the reader would *see happen*. "Safe concurrent writes" is a property; "quotes
+occasionally disappear with no error" is an experience.
+
+## Where the background lives
+
+Durable background belongs in the task's `design.md` or in `memory/`, and this file links
+it. The queue file uniquely owns the unresolved action, its timing, its status, and any
+answer — nothing else. Delete it only when those are folded or explicitly disposed of.
+
+## When the answer is a counter-question
+
+A counter-question is a valid answer, and like every other concrete response it is
+immutable. Treat it as a disposition: claim the item, fold the answer into the durable
+evidence it named, then file a new same-timing item whose `Supersedes` names the old path.
+Never edit what the human wrote.
 
 ## After the answer
 
-Fold the answer (or the answer to a counter-question) into the affected docs, record an
-ADR in `memory/decisions/` (schema: `templates/memory/adr.md`) when a decision was made,
-then delete the resolved item. A counter-question also gets the linked successor above;
-Git history archives completed delivery but does not replace live state.
+Fold the answer into the affected documents, record an ADR in `memory/decisions/` (schema:
+`templates/memory/adr.md`), then delete the resolved item in that same commit. Git history
+archives the completed delivery; it does not replace live state.
