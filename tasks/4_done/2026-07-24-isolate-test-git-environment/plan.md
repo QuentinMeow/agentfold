@@ -9,4 +9,7 @@
 - [x] 7. Record real verification and obtain a fresh independent panel majority.
 - [x] 8. Rebuild PR #8 on latest main and repair projected-path, Git-config,
       identity, ignored-test, and copy-amplification findings.
-- [ ] 9. Bind the final main-based range for human merge review and publish it.
+- [x] 9. Bind the final main-based range for human merge review and publish it. Confirmed
+      2026-08-02: `message-queue/needs-human/reviews/non-blocking-review-test-runner-git-environment-isolation.md`
+      binds `git:25d03257...fd2374d9`, both endpoints are ancestors of `main`, and PR #11
+      merged it. The review itself is still `waiting` and stays live past this task.

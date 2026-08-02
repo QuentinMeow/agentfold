@@ -28,7 +28,10 @@ admission-edge ratchet for the rejecting clauses so branching early still cannot
 ## Acceptance criteria
 
 - [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [x] `python3 automation/run_tests.py` reports 11/11 files passed.
+- [x] `python3 automation/run_tests.py` passes every test file: 11/11 when this task was
+      verified, and 12/12 when re-run on 2026-08-02 during the status sweep. The count rose
+      because `automation/tests/test_pull_request_schema.py` was added afterwards by commit
+      `a18f2e0`, not because anything here changed.
 - [x] The PR #44 merge probe (`--check --at-transition merge --branch
       task/2026-07-31-let-a-human-answer-in-one-edit` over a merge of `6c723ef` onto main with
       main as first parent) reports 0 blocking findings.
