@@ -1,10 +1,10 @@
 # Screen a set of branches for collisions before any of them merges
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-08-01-screen-a-landing-set-before-merging-it)
 **Filed:** 2026-08-01, by claude, from task `2026-08-01-stop-human-answers-from-gating-git-edges`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-screen-a-landing-set-before-merging-it.md`
+**Queue actions:** none
 
 ## Goal
 
