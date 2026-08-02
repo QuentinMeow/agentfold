@@ -16,13 +16,18 @@ What it exercises for real: the shell control flow, the `git fetch` of a pull me
 the parent-shape binding, the ancestry check, the bound, the exit codes, and the
 `GITHUB_OUTPUT` the step writes.
 
-What it does **not** exercise: GitHub itself. No run here touches a real pull request, a
-real Actions runner, or the real timing of a merge-ref recompute. The recompute is
-*simulated* by pointing the fixture's `refs/pull/2/merge` at a merge of the same head onto
-an advanced base — the observable end state of a recompute — not by racing a live provider.
-Nothing below is evidence about how long GitHub actually takes to recompute, and no CI-level
-verification of this change has been performed: the branch's own CI run is the first time
-the new step meets GitHub, and that happens after this record is written.
+What it does **not** exercise: GitHub itself. No fixture run here touches a real pull
+request, a real Actions runner, or the real timing of a merge-ref recompute. The recompute
+is *simulated* by pointing the fixture's `refs/pull/2/merge` at a merge of the same head
+onto an advanced base — the observable end state of a recompute — not by racing a live
+provider. Nothing in the fixture runs is evidence about how long GitHub actually takes to
+recompute.
+
+One real CI run is recorded at the end of this file. It proves the rewritten step runs on a
+real runner and admits a real candidate; it exercised the **equality fast path**, not the
+re-resolution branch. Making a live GitHub run take the recompute branch requires merging a
+parent pull request underneath this one while its check is in flight, which no command here
+can stage on demand.
 
 ## Full test suite
 
@@ -142,6 +147,48 @@ case, which is what proves that test is load-bearing rather than vacuous.
 Block B also shows the bound behaving: two attempts requested, two rejections printed, then
 the exhaustion message. The production bound declared in the step's `env:` is 5 attempts 5
 seconds apart; the runs above use 0-second delays so the suite does not sleep.
+
+## The rewritten step on a real runner
+
+Pull request #65 carries this change, so its own `pull_request` event ran the new step from
+the candidate's workflow code.
+
+```
+$ gh pr checks 65 --json name,state -q '[.[]|select(.state!="SKIPPED")]|map(.name+"="+.state)|join(" ")'
+External source release admission=SUCCESS reconcile-and-test=SUCCESS Current review-state action projection=SUCCESS Authoritative action projection from trusted workflow code=SUCCESS reconcile-and-test=SUCCESS
+```
+
+```
+$ gh api "repos/QuentinMeow/agentfold/actions/jobs/91492855375" -q '.name, .conclusion, (.steps[]|.name+" -> "+.conclusion)'
+Current review-state action projection
+success
+Set up job -> success
+Checkout PR-base projection gate for review state -> success
+Fetch event-bound PR merge candidate without checking it out -> success
+Collect current formal reviews and unresolved diff threads -> success
+Action projection — current review state -> success
+Collect current PR conversation comments -> success
+Action projection — current PR conversation state -> success
+Post Checkout PR-base projection gate for review state -> success
+Complete job -> success
+```
+
+Which branch that run took, from the job's own log:
+
+```
+$ gh api "repos/QuentinMeow/agentfold/actions/jobs/91492855375/logs" | grep -i "merge ref\|FETCH_HEAD\|recomputed\|branch  *refs/pull"
+2026-08-02T11:48:20.1372984Z # merge ref, and the two revisions stop being equal for a reason
+2026-08-02T11:48:20.1435920Z         "FETCH_HEAD^{commit}"
+2026-08-02T11:48:20.1442244Z     ACTION_PROJECTION_REJECTION="merge ref resolves to no commit"
+2026-08-02T11:48:20.1479825Z     echo "merge ref was recomputed after this event;" \
+2026-08-02T11:48:20.1491039Z     echo "merge ref stayed unbound across" \
+2026-08-02T11:48:20.5646312Z  * branch            refs/pull/65/merge -> FETCH_HEAD
+```
+
+The first five matches are Actions echoing the script source, not output. The only runtime
+line is the fetch. `merge ref was recomputed after this event` does **not** appear, so the
+candidate equalled `github.sha` and the run took the fast path. The re-resolution branch has
+not run on GitHub; it has only run in the fixture.
 
 ## Review verdicts (when a review was explicitly run)
 

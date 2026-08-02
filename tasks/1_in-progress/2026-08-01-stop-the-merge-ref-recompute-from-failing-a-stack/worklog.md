@@ -33,3 +33,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `11/11` test files when the suite now has 12.
 - Filed nothing in `message-queue/`: the task's `Queue actions` is `none` and this change
   raises no question for the owner.
+- Opened PR #65 and captured its own CI run as evidence. `Current review-state action
+  projection` passed on a real runner with the rewritten step, but its job log shows the
+  candidate equalled `github.sha`, so it took the fast path — the re-resolution branch has
+  still only run in the fixture. Recorded that distinction rather than letting a green check
+  imply more than it proves.
