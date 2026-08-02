@@ -9122,6 +9122,11 @@ class ReconcileQueueTests(unittest.TestCase):
             "`[inline](message-queue/needs-human/reviews/blocking-inline.md)`\n"
             "\\[escaped](message-queue/needs-human/reviews/blocking-escaped.md)\n"
             "not-a-link](message-queue/needs-human/reviews/blocking-malformed.md)\n"
+            # The blank line is what makes the next line an indented code block. Four
+            # spaces straight after prose is a paragraph continuation a human still
+            # reads, so `strip_indented_code` leaves that link visible on purpose
+            # (task 2026-08-02-stop-indented-prose-from-hiding-from-the-checks).
+            "\n"
             "    [indented](message-queue/needs-human/reviews/"
             "blocking-indented.md)\n"
         )

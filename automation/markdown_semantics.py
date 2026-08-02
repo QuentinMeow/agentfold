@@ -42,6 +42,22 @@ RAW_HTML_TYPE6_START_RE = re.compile(
 RAW_HTML_TYPE7_START_RE = re.compile(
     r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?=[\s>/]).*>[ \t]*$", re.I
 )
+# Block starts that end an open paragraph, matched against a line whose leading
+# indentation has already been consumed. A paragraph matters here because an indented
+# code block cannot interrupt one: after a paragraph line, four more spaces are wrapped
+# prose, not code.
+ATX_HEADING_RE = re.compile(r"#{1,6}(?:[ \t]|$)")
+THEMATIC_BREAK_RE = re.compile(
+    r"(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})"
+)
+SETEXT_UNDERLINE_RE = re.compile(r"(?:=+|-+)[ \t]*")
+LIST_MARKER_RE = re.compile(
+    r"(?P<marker>[-+*]|(?P<number>\d{1,9})[.)])(?=[ \t]|$)"
+)
+# CommonMark measures an indented code block four columns past the content column of
+# whatever container it sits in, and uses the same four columns as the widest run of
+# spaces that can still separate a list marker from its own content.
+INDENTED_CODE_MARGIN = 4
 MARKDOWN_LINK_RE = re.compile(
     r"""(?<!!)(?<!\\)\[(?P<label>(?:\\.|[^\]\\])*)\](?<!\\)
         \([ \t]*(?:<(?P<angle>[^<>\r\n]*)>|(?P<bare>[^()\s]+))
@@ -245,11 +261,15 @@ def _semantic_text(text, preserve_visible_html=False):
 def semantic_text(text):
     """Blank constructs that cannot supply structural Markdown evidence.
 
-    Four-space/tab indented code lines are blanked too, via `strip_indented_code`,
-    for the same reason fences and raw HTML are: an example path or field inside one
-    must not satisfy a structural check. This runs after fence/HTML blanking, so a
-    fenced block nested in a list item — whose content lines are already blank by
-    then — is unaffected; only genuine indented-code lines change.
+    Indented code blocks are blanked too, via `strip_indented_code`, for the same
+    reason fences and raw HTML are: an example path or field inside one must not
+    satisfy a structural check. This runs after fence/HTML blanking, so a fenced block
+    nested in a list item — whose content lines are already blank by then — is
+    unaffected. What `strip_indented_code` changes is only what CommonMark parses as an
+    indented code block, which is narrower than "the line starts with four spaces":
+    that width has to be four columns past the enclosing list item's content column,
+    and it cannot interrupt a paragraph. Prose in a wrapped paragraph or under a list
+    item stays visible, because a human reads it.
     """
     return strip_indented_code(_semantic_text(text))
 
@@ -525,17 +545,136 @@ def contains_raw_html(text):
     return bool(RAW_HTML_TOKEN_RE.search(clean))
 
 
+def split_indentation(value):
+    """Return leading indentation in CommonMark columns and the rest of the line."""
+    width = 0
+    index = 0
+    for character in value:
+        if character == " ":
+            width += 1
+        elif character == "\t":
+            width += INDENTED_CODE_MARGIN - (width % INDENTED_CODE_MARGIN)
+        else:
+            break
+        index += 1
+    return width, value[index:]
+
+
+def indentation_width(value):
+    """Return leading indentation in CommonMark columns."""
+    return split_indentation(value)[0]
+
+
+def list_item_content_column(marker_end, spacing, content):
+    """Return the column a list item's own content starts at.
+
+    Ordinarily the content column is where the run of spaces after the marker ends.
+    CommonMark pins it to one column past the marker in the two cases where that run
+    is not separation: an item that is empty after its marker, and an item followed by
+    five or more spaces, whose first line is itself an indented code block.
+    """
+    if not content or spacing > INDENTED_CODE_MARGIN:
+        return marker_end + 1
+    return marker_end + spacing
+
+
+def _paragraph_continuation(rest, paragraph_open):
+    """Whether this line is an open paragraph's own text rather than a new block.
+
+    `rest` is one visible line with its indentation already removed. A continuation
+    line stays with its paragraph however far left it sits, so it neither closes the
+    list items around it nor opens an indented code block.
+    """
+    if not paragraph_open:
+        return False
+    if THEMATIC_BREAK_RE.fullmatch(rest) or ATX_HEADING_RE.match(rest) \
+            or FENCE_OPEN_RE.match(rest):
+        return False
+    item = LIST_MARKER_RE.match(rest)
+    if item is None:
+        return True
+    spacing, content = split_indentation(rest[item.end("marker"):])
+    number = item.group("number")
+    # Only a non-empty item, and among ordered items only one numbered 1, may
+    # interrupt a paragraph; anything else is that paragraph's own text.
+    return not content or (number is not None and number.lstrip("0") != "1")
+
+
+def _block_state_after(width, rest, content_columns, paragraph_open):
+    """Open any list items this line starts and report whether a paragraph is open.
+
+    `content_columns` is mutated in place: it holds the content column of every list
+    item still open, innermost last, which is what moves the indented-code threshold
+    away from column zero inside a list.
+    """
+    while True:
+        if THEMATIC_BREAK_RE.fullmatch(rest) or ATX_HEADING_RE.match(rest) \
+                or FENCE_OPEN_RE.match(rest):
+            return False
+        if paragraph_open and SETEXT_UNDERLINE_RE.fullmatch(rest):
+            return False
+        item = LIST_MARKER_RE.match(rest)
+        if item is None or _paragraph_continuation(rest, paragraph_open):
+            return bool(rest.strip())
+        spacing, content = split_indentation(rest[item.end("marker"):])
+        column = list_item_content_column(
+            width + len(item.group("marker")), spacing, content
+        )
+        while content_columns and content_columns[-1] > width:
+            content_columns.pop()
+        content_columns.append(column)
+        if not content or spacing > INDENTED_CODE_MARGIN:
+            # An empty item opens no paragraph, and an item whose own first line is
+            # indented code opens a code block rather than one.
+            return False
+        paragraph_open = False
+        width = column
+        rest = content
+
+
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_indented_code(text):
-    """Blank simple four-space/tab indented code lines."""
+    """Blank the lines CommonMark reads as an indented code block.
+
+    A line is one when it is indented at least four columns past the content column
+    of the innermost open list item — column zero when no list is open — and no
+    paragraph is open above it, because an indented code block cannot interrupt a
+    paragraph. Anything else is prose a human reads, including the two shapes a
+    width-only rule got wrong: a wrapped paragraph line and a continuation line under
+    a list item.
+
+    Two shapes keep their historical answer rather than CommonMark's. A line carrying
+    its own list marker is never blanked, even where the marker is followed by five or
+    more spaces and so opens the item with code. A block-quoted line is never blanked
+    either; it only updates paragraph state, so how quoted source reads is unchanged.
+    """
     output = []
+    content_columns = []
+    paragraph_open = False
     for line in commonmark_lines(text):
         candidate = line[:-1] if line.endswith("\n") else line
-        blank = "\n" if line.endswith("\n") else ""
-        if candidate.startswith("    ") or candidate.startswith("\t"):
-            output.append(blank)
-        else:
+        ending = "\n" if line.endswith("\n") else ""
+        quote_depth, quoted = strip_block_quote_markers(candidate)
+        if quote_depth:
+            paragraph_open = bool(quoted.strip())
             output.append(line)
+            continue
+        width, rest = split_indentation(candidate)
+        if not rest.strip():
+            paragraph_open = False
+            output.append(line)
+            continue
+        if not _paragraph_continuation(rest, paragraph_open):
+            while content_columns and width < content_columns[-1]:
+                content_columns.pop()
+        base = content_columns[-1] if content_columns else 0
+        if not paragraph_open and width - base >= INDENTED_CODE_MARGIN:
+            output.append(ending)
+            continue
+        output.append(line)
+        paragraph_open = _block_state_after(
+            width, rest, content_columns, paragraph_open
+        )
     return "".join(output)
 
 

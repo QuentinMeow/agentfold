@@ -170,6 +170,7 @@ INPUT_TEST_OWNERS = (
         (
             "automation/tests/test_check_action_projection.py",
             "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_markdown_semantics.py",
             "automation/tests/test_pull_request_schema.py",
             "automation/tests/test_reconcile_queue.py",
             "automation/tests/test_resolve_github_external_sources.py",
@@ -208,7 +209,10 @@ INPUT_TEST_OWNERS = (
     ),
     (
         b"automation/reconcile/",
-        ("automation/tests/test_reconcile_queue.py",),
+        (
+            "automation/tests/test_markdown_semantics.py",
+            "automation/tests/test_reconcile_queue.py",
+        ),
     ),
     (
         b"automation/run_tests.py",
