@@ -4,7 +4,7 @@
 **Filed:** 2026-08-01, by claude, from the owner's chat request to make PR descriptions readable
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/reviews/non-blocking-review-the-pull-request-shape.md`
 
 ## Goal
 
