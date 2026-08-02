@@ -38,3 +38,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   candidate equalled `github.sha`, so it took the fast path — the re-resolution branch has
   still only run in the fixture. Recorded that distinction rather than letting a green check
   imply more than it proves.
+- Two CI failures on PR #65 came from the shared trunk moving under an open branch, not
+  from this change, and both are worth someone's attention:
+  - `reconcile-and-test` exited 2 with `Git snapshot error: captured candidate is neither
+    the --range head nor an exact base+head synthetic merge`. GitHub had computed
+    `refs/pull/65/merge` against a `main` newer than the `base.sha` in the same event
+    payload, so the checked-out merge commit's first parent was not the declared base. That
+    is the same stale-base race this task repairs in `review-state-action-projection`,
+    reached through a different job; the fix here does not touch it. Restacking the branch
+    onto current `main` cleared it.
+  - The restack's force push then produced `[queue-resolution] ... deleted unresolved queue
+    item: divergent update discarded a live old-tip action` for
+    `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`.
+    Another agent deleted that item on `main` between the two bases, so the displaced-tip
+    comparison read someone else's evidenced deletion as this branch discarding a live
+    action. An ordinary push whose previous tip already carries the deletion does not
+    reproduce it.
