@@ -1,10 +1,10 @@
 # Stop indented prose from hiding from every repository check
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-08-02-stop-indented-prose-from-hiding-from-the-checks)
 **Filed:** 2026-08-02, by claude, from a reported guardrail bypass — `automation/markdown_semantics.py`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-indented-prose-from-hiding-from-the-checks.md`
+**Queue actions:** none
 
 ## Goal
 
