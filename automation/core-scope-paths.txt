@@ -1,4 +1,5 @@
 # Thin agent/provider adapters that invoke canonical AgentFold core behavior.
+.github/pull_request_template.md
 .github/scripts/collect_conversation_actions.py
 .github/scripts/collect_review_actions.py
 .github/workflows/harness.yml

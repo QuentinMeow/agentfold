@@ -69,6 +69,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   Merging a change whose review has not come back is the accepted price of an `async`
   repository: the undo is `git revert -m 1`, and the start gate is what stops any *task*
   that depends on the unanswered judgment from beginning on top of it.
+- A PR body's shape is a schema like any other: copy `templates/pull-request.md`, and write
+  the prose in each slot as `skills/explain-to-human/scenarios/pull-request.md` describes.
+  Neither is restated here; this section owns only what the boundary check requires.
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
   one top-level entry and one queue link per action, including every live human path in

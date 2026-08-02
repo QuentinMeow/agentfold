@@ -4,7 +4,7 @@
 **Filed:** 2026-08-01, by claude, from the owner's chat request to make PR descriptions readable
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/reviews/non-blocking-review-the-pull-request-shape.md`
 
 ## Goal
 
@@ -23,18 +23,18 @@ link each — and it must put the reader's own to-do list above the fold, before
 
 ## Acceptance criteria
 
-- [ ] The schema file templates/pull-request.md exists and is listed in the `templates/README.md` table.
-- [ ] The schema orders sections: one-line title, TL;DR (numbered, before → after),
+- [x] The schema file templates/pull-request.md exists and is listed in the `templates/README.md` table.
+- [x] The schema orders sections: one-line title, TL;DR (numbered, before → after),
       `What to review` (ranked, each entry naming its consequence if ignored), then folded
       detail, folded change table, folded verification.
-- [ ] The `What to review` section as specified passes
+- [x] The `What to review` section as specified passes
       `automation/check_action_projection.py` — proven by a test over a filled example,
       not by assertion.
-- [ ] .github/pull_request_template.md exists, matches the schema, and is registered as
+- [x] .github/pull_request_template.md exists, matches the schema, and is registered as
       a thin adapter in `automation/core-scope-paths.txt`.
-- [ ] `handbook/git-workflow.md` points at the schema instead of describing a body shape.
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [ ] `python3 automation/run_tests.py` passes.
+- [x] `handbook/git-workflow.md` points at the schema instead of describing a body shape.
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
+- [x] `python3 automation/run_tests.py` passes.
 
 ## Links
 

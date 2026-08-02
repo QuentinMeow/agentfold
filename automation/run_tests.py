@@ -123,6 +123,16 @@ MARKDOWN_SUFFIX = b".md"
 # automation/markdown_semantics.py) is deliberately left out so that it lands on the
 # coarse group fallback below.
 INPUT_TEST_OWNERS = (
+    # Not a record either: the pull-request schema test reads both the schema and its
+    # GitHub projection and asserts their shape, so editing one is a real input.
+    (
+        b".github/pull_request_template.md",
+        ("automation/tests/test_pull_request_schema.py",),
+    ),
+    (
+        b"templates/pull-request.md",
+        ("automation/tests/test_pull_request_schema.py",),
+    ),
     (
         b".github/scripts/collect_conversation_actions.py",
         (
@@ -160,6 +170,7 @@ INPUT_TEST_OWNERS = (
         (
             "automation/tests/test_check_action_projection.py",
             "automation/tests/test_github_action_projection_workflow.py",
+            "automation/tests/test_pull_request_schema.py",
             "automation/tests/test_reconcile_queue.py",
             "automation/tests/test_resolve_github_external_sources.py",
         ),

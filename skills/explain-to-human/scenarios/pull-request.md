@@ -6,7 +6,9 @@ order: what is different now, what they personally have to do, and whether they 
 that it works. Everything else is optional depth and belongs behind a fold.
 
 Read `../reference.md` for the craft. This file owns the section order, the folding rules,
-and the GitHub mechanics that make the body render the way you intend.
+and the GitHub mechanics that make the body render the way you intend. The skeleton to
+copy is `templates/pull-request.md`; GitHub pre-fills it from
+`.github/pull_request_template.md`.
 
 ## Section order
 
@@ -143,6 +145,24 @@ no local revision matches it. The order that works:
 The merge commit is recomputed whenever the head or the base moves, so links pinned to an
 old one go stale — most often when a parent in a stack merges and the child's base changes.
 The check reports it, and refreshing the body is the whole fix.
+
+### Everywhere else in the body is indicative
+
+The same check refuses any sentence outside this section that reads as a request or a
+grant of permission. That is deliberate — an ask that lives only in a pull-request body is
+an ask with no file behind it — but it catches innocent phrasings too, so write the rest of
+the body in the indicative with a named subject.
+
+| Refused | Accepted |
+|---|---|
+| A branch that filed its own review can now merge. | A branch is no longer blocked by a review it filed itself. |
+| Merge from the bottom up. | The stack lands bottom-up. |
+| Please look at the caching change. | The caching change is the one with real risk. |
+| Let me know if the wording is wrong. | *(file a clarification item and link it above)* |
+
+The pattern is that "can now <verb>" and bare imperatives read as permission or
+instruction. Naming the subject and using the present or past indicative fixes it without
+losing anything.
 
 ## What changed and why
 
