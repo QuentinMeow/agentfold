@@ -296,6 +296,13 @@ OPTION_RE = re.compile(r"^### Option(?:\s|$)", re.M)
 EXAMPLE_CONSEQUENCE_RE = re.compile(
     r"^\*Example consequence:\*\s*(.+)$", re.M
 )
+SECTION_HEADING_RE = re.compile(r"^##[ \t]+(\S.*?)[ \t]*$", re.M)
+# Where each queue leaf's own shape is written down. The requirement is read from
+# the template at run time rather than copied here, so the schema keeps living in
+# exactly one file; a leaf an adopter adds without a template gets no rule, which
+# is the same "new typed leaves inherit the actor's generic schema" already in
+# `automation/AGENTS.md`.
+QUEUE_TEMPLATES = "templates/queue"
 CONTEXT_BACKTICK_RE = re.compile(r"`([^`\s]+)`")
 HANDOVER_HUMAN_LINK_RE = re.compile(
     r"message-queue/needs-human/[a-z0-9][a-z0-9-]*/"
@@ -358,10 +365,16 @@ LINK_PATH_EXTENSIONS = {
 }
 
 
-# Advisory checks report drift that the calendar alone can create, so an unchanged
+# Advisory findings print with a marker and are counted separately, but never exit 1.
+# Two kinds live here. Most report drift the calendar alone can create, so an unchanged
 # clean tree must never start failing on a date
-# (`handbook/principles/eventual-consistency.md`). Every other check is blocking.
+# (`handbook/principles/eventual-consistency.md`). `explanation-shape` is the other
+# kind: a readability rule whose shape a program can see but whose intent it cannot, so
+# it is put in front of the agent that broke it and is never allowed to refuse a commit
+# (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
+# Every other check is blocking.
 ADVISORY_CHECKS = {
+    "explanation-shape",
     "memory-expiry",
     "roadmap-fresh",
     "stale-queue",
@@ -375,7 +388,7 @@ class Finding:
 
     @property
     def advisory(self):
-        """Whether this reports age-driven drift instead of a broken invariant."""
+        """Whether this reports something to know instead of a broken invariant."""
         return self.check in ADVISORY_CHECKS
 
     @property
@@ -1127,6 +1140,69 @@ def human_choices_body(clean):
         if body is not None:
             bodies.append(body)
     return "\n\n".join(bodies) if bodies else None
+
+
+def choice_sections(body):
+    """Return each `### ` choice heading with the source that belongs to it."""
+    matches = list(CHOICE_HEADING_RE.finditer(body or ""))
+    for index, matched in enumerate(matches):
+        end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(body)
+        )
+        yield " ".join(matched.group(1).split()), body[matched.end():end]
+
+
+def section_headings(text):
+    """Return the level-two headings of one document, in source order."""
+    return SECTION_HEADING_RE.findall(semantic_text(text))
+
+
+def queue_leaf_template_name(leaf):
+    """Return the template filename one queue leaf folder is filled from.
+
+    `templates/README.md` pairs each leaf with its template by singularizing the
+    folder name, so this derives the pairing instead of storing a second copy of
+    it: `decisions` is filled from `decision.md`, `retries` from `retry.md`.
+    """
+    singular = re.sub(r"ies$", "y", leaf)
+    if singular == leaf:
+        singular = re.sub(r"s$", "", leaf)
+    return f"{singular}.md" if SLUG_RE.fullmatch(singular) else None
+
+
+def queue_leaf_template_sections(leaf):
+    """Return the sections one leaf's template declares, or None when it has none.
+
+    An adopter's own typed leaf has no template here, and then it has no section
+    requirement either — `automation/AGENTS.md` already says a new typed leaf
+    inherits only the actor's generic schema.
+    """
+    name = queue_leaf_template_name(leaf)
+    if name is None:
+        return None
+    path = REPO / QUEUE_TEMPLATES / name
+    if not candidate_has_file(path):
+        return None
+    return section_headings(repo_text(path))
+
+
+def current_queue_template_governs(actor, text):
+    """Whether today's templates define this item's section shape.
+
+    A written record is immutable, so an item filed under the earlier field
+    spelling keeps the schema it was written under — the same judgment
+    `check_human_attention` makes with `human_attention_format_applies`, extended
+    to the agent side, where one live request still carries those fields. Asking
+    such an item for today's sections would demand an edit the immutability rule
+    forbids, and the repair would be to rewrite history rather than to write
+    better.
+    """
+    if actor == "needs-human":
+        return human_attention_format_applies(actor, text)
+    got = text_fields(text)
+    return not any(key in got for key in LEGACY_HUMAN_PROJECTION_FIELDS)
 
 
 def choice_labels(headings):
@@ -5542,6 +5618,83 @@ def check_human_attention():
                 )
 
 
+def check_explanation_shape():
+    """Report the readability rules a program can see, and only those.
+
+    `skills/explain-to-human/` says how everything a person reads is written.
+    Three of its rules have a shape rather than a meaning: the sections a file
+    carries, the order they come in, and whether each choice ends with a concrete
+    consequence. Those are reported here. Whether an explanation is actually clear,
+    or whether a consequence is real rather than hedged, stays a reviewer's job —
+    the decision that created this check says so
+    (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
+
+    Every finding is advisory. A checker can see that a section is missing and not
+    that the prose in it was worth writing, so refusing a commit over one would
+    train agents to write for the checker. The pull-request half of the same
+    standard lives in `automation/check_action_projection.py`, which is the only
+    tracked program that ever holds a pull-request body.
+    """
+    sections_by_leaf = {}
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue  # queue-location owns unsafe or broken filesystem entries
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] not in ("needs-human", "needs-agent"):
+            continue
+        actor, leaf = parts
+        text = repo_text(item)
+        if not current_queue_template_governs(actor, text):
+            continue
+        if leaf not in sections_by_leaf:
+            sections_by_leaf[leaf] = queue_leaf_template_sections(leaf)
+        required = sections_by_leaf[leaf]
+        if not required:
+            continue
+        rel = item.relative_to(REPO)
+        template = f"{QUEUE_TEMPLATES}/{queue_leaf_template_name(leaf)}"
+        present = section_headings(text)
+        for heading in required:
+            if heading not in present:
+                yield Finding(
+                    "explanation-shape",
+                    rel,
+                    f"missing section `## {heading}`",
+                    f"copy the sections and their order from `{template}`",
+                )
+        # Compare only the required sections an item actually carries, so a
+        # missing one is reported once as missing rather than again as disorder.
+        ordered = list(dict.fromkeys(
+            heading for heading in present if heading in required
+        ))
+        expected = [heading for heading in required if heading in ordered]
+        for found, wanted in zip(ordered, expected):
+            if found != wanted:
+                yield Finding(
+                    "explanation-shape",
+                    rel,
+                    f"section `## {found}` comes before `## {wanted}`",
+                    f"a reader scans these in one order; `{template}` sets it",
+                )
+                break
+
+        clean = semantic_text(text)
+        for label, body in choice_sections(human_choices_body(clean) or ""):
+            if any(
+                has_concrete_value(value)
+                for value in EXAMPLE_CONSEQUENCE_RE.findall(body)
+            ):
+                continue
+            yield Finding(
+                "explanation-shape",
+                rel,
+                f"choice `### {label}` has no concrete "
+                "*Example consequence:* line",
+                "end the choice with one scenario of life after it is picked; a "
+                "cost nobody can picture is a cost nobody weighs",
+            )
+
+
 def check_stale_queue():
     # No worktree gate: live_queue_items() reads the Git index first, so a staged
     # item still ages when its worktree copy is gone, and yields nothing otherwise.
@@ -8915,6 +9068,7 @@ CHECKS = {
     "queue-location": check_queue_location,
     "queue-schema": check_queue_schema,
     "human-attention": check_human_attention,
+    "explanation-shape": check_explanation_shape,
     "queue-resolution": check_queue_resolution,
     "queue-boundary": check_active_queue_boundaries,
     "queue-task-reciprocity": check_queue_task_reciprocity,

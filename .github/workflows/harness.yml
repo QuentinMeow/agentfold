@@ -262,6 +262,7 @@ jobs:
             --base-revision "$ACTION_PROJECTION_BASE_REVISION" \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
+            --pull-request-body-shape \
             --label github-pull-request-description
       - name: Collect current formal reviews and unresolved diff threads
         if: ${{ github.event_name == 'pull_request_target' }}

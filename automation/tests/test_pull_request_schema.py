@@ -303,6 +303,36 @@ class PullRequestSchemaTest(unittest.TestCase):
                     text.index("## What to review"), text.index("<details>")
                 )
 
+    def test_the_advisory_shape_rules_are_derived_from_this_schema(self):
+        """The section list the gate reports on is this file's, read at run time."""
+        expected = [
+            line[len("## "):].strip()
+            for line in COMMENT_RE.sub("", TEMPLATE.read_text(encoding="utf-8"))
+            .splitlines()
+            if line.startswith("## ")
+        ]
+        self.assertEqual(expected, PROJECTION.pull_request_schema_sections())
+        self.assertIn(PROJECTION.PULL_REQUEST_SUMMARY_SECTION, expected)
+        for section in PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS:
+            self.assertIn(section, expected)
+
+    def test_the_two_unreadable_schema_facts_still_say_what_the_gate_assumes(self):
+        """Both live only in comments the parsers blank, so they are pinned here.
+
+        `templates/README.md` requires that nothing a check reads is hidden in an
+        HTML comment, and these two are: which section is deleted when empty, and
+        how many summary items the schema asks for. The gate names them in its own
+        source; if the schema ever says something else, this fails instead of the
+        gate quietly reporting the wrong thing.
+        """
+        raw = TEMPLATE.read_text(encoding="utf-8")
+        low, high = PROJECTION.PULL_REQUEST_SUMMARY_RANGE
+        self.assertEqual((3, 6), (low, high))
+        self.assertIn("Three to six numbered items", raw)
+        self.assertEqual(("Notes",), PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS)
+        notes = raw[raw.index("## Notes"):]
+        self.assertIn("Delete this section, heading included", notes)
+
 
 if __name__ == "__main__":
     unittest.main()

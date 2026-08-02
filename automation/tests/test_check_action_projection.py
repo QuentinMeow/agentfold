@@ -4058,6 +4058,228 @@ class ActionProjectionTests(unittest.TestCase):
         self.assertNotIn("github", source)
         self.assertNotIn("codex", source)
 
+    # ------------------------------------------------ pull-request body shape
+
+    SHAPED_BODY = (
+        "## TL;DR\n\n"
+        "1. **A branch no longer blocks itself.** Before it could not merge. "
+        "Now it can.\n"
+        "2. **Three stuck branches move.** Before all three were refused. Now "
+        "all three pass.\n"
+        "3. **Nothing answered is skipped.** Before and after, an answered "
+        "review blocks.\n\n"
+        "## What to review\n\nNo queued action requested.\n\n"
+        "## What changed and why\n\nThe boundary reads the range it was given.\n\n"
+        "## Changes\n\nOne check, one test file.\n\n"
+        "## Verification\n\nThe suite passed.\n"
+    )
+
+    def shape_repo(self, root):
+        """Put the real schema where the gate reads it from."""
+        schema = root / PROJECTION.PULL_REQUEST_SCHEMA_PATH
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text(
+            (MODULE_PATH.parents[1] / PROJECTION.PULL_REQUEST_SCHEMA_PATH)
+            .read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return schema
+
+    def test_body_shape_says_nothing_about_a_schema_shaped_body(self):
+        with self.repo() as root:
+            self.shape_repo(root)
+            self.assertEqual(
+                [], PROJECTION.body_shape_findings(self.SHAPED_BODY, repo=root)
+            )
+
+    def test_body_shape_names_a_missing_section(self):
+        with self.repo() as root:
+            self.shape_repo(root)
+            body = self.SHAPED_BODY.replace(
+                "## Verification\n\nThe suite passed.\n", ""
+            )
+            findings = PROJECTION.body_shape_findings(body, repo=root)
+            self.assertEqual(1, len(findings), findings)
+            self.assertIn("missing section `## Verification`", findings[0])
+
+    def test_body_shape_treats_an_absent_notes_section_as_written(self):
+        """`Notes` is deleted when it would be empty, so its absence is correct."""
+        with self.repo() as root:
+            self.shape_repo(root)
+            self.assertNotIn("## Notes", self.SHAPED_BODY)
+            self.assertEqual(
+                [], PROJECTION.body_shape_findings(self.SHAPED_BODY, repo=root)
+            )
+
+    def test_body_shape_names_a_section_out_of_schema_order(self):
+        with self.repo() as root:
+            self.shape_repo(root)
+            summary, _, rest = self.SHAPED_BODY.partition("## What to review")
+            action, _, tail = rest.partition("## What changed and why")
+            body = (
+                "## What to review" + action + summary
+                + "## What changed and why" + tail
+            )
+            findings = PROJECTION.body_shape_findings(body, repo=root)
+            self.assertEqual(1, len(findings), findings)
+            self.assertIn(
+                "section `## What to review` comes before `## TL;DR`",
+                findings[0],
+            )
+
+    def test_body_shape_reports_a_summary_outside_the_range(self):
+        low, high = PROJECTION.PULL_REQUEST_SUMMARY_RANGE
+        head, _, tail = self.SHAPED_BODY.partition("## What to review")
+        with self.repo() as root:
+            self.shape_repo(root)
+            for count in (low - 1, high + 1):
+                with self.subTest(count=count):
+                    items = "".join(
+                        f"{index}. **Item {index}.** Before x. Now y.\n"
+                        for index in range(1, count + 1)
+                    )
+                    body = (
+                        f"## TL;DR\n\n{items}\n## What to review" + tail
+                    )
+                    self.assertNotIn("## TL;DR\n\n1. **A branch", body)
+                    findings = PROJECTION.body_shape_findings(body, repo=root)
+                    self.assertEqual(1, len(findings), findings)
+                    self.assertIn(
+                        f"carries {count} numbered item(s)", findings[0]
+                    )
+            self.assertTrue(head)
+
+    def test_body_shape_reads_the_requirement_from_the_schema(self):
+        """Changing the schema changes the rule, because there is one copy."""
+        with self.repo() as root:
+            schema = self.shape_repo(root)
+            self.assertEqual(
+                [], PROJECTION.body_shape_findings(self.SHAPED_BODY, repo=root)
+            )
+            schema.write_text(
+                schema.read_text(encoding="utf-8") + "\n## What it cost\n\nx\n",
+                encoding="utf-8",
+            )
+            findings = PROJECTION.body_shape_findings(
+                self.SHAPED_BODY, repo=root
+            )
+            self.assertEqual(1, len(findings), findings)
+            self.assertIn("missing section `## What it cost`", findings[0])
+
+    def test_body_shape_is_silent_without_the_schema(self):
+        """A checkout with no schema loses an opinion, never a pull request."""
+        with self.repo() as root:
+            self.assertEqual(
+                [],
+                PROJECTION.body_shape_findings("## Nothing here\n", repo=root),
+            )
+
+    def test_cli_reports_body_shape_without_changing_its_exit_status(self):
+        with self.repo() as root:
+            self.shape_repo(root)
+            broken = self.SHAPED_BODY.replace(
+                "## Verification\n\nThe suite passed.\n", ""
+            )
+            args = [
+                "--from-env", "BODY",
+                "--action-section", "What to review",
+                "--queue-actor", "any",
+                "--unscoped",
+                "--pull-request-body-shape",
+            ]
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"BODY": broken}), \
+                    contextlib.redirect_stdout(out):
+                code = PROJECTION.main(args)
+            printed = out.getvalue()
+            self.assertEqual(0, code, printed)
+            self.assertIn("action-projection: 0 finding(s)", printed)
+            self.assertIn(
+                "[explanation-shape] external projection: missing section "
+                "`## Verification`",
+                printed,
+            )
+            self.assertIn("(advisory)", printed)
+            self.assertIn(
+                "explanation-shape: 1 advisory finding(s) (not blocking)",
+                printed,
+            )
+
+    def test_cli_leaves_body_shape_alone_unless_it_is_asked_for(self):
+        """An issue body and a comment have no section schema of their own."""
+        with self.repo() as root:
+            self.shape_repo(root)
+            out = io.StringIO()
+            with mock.patch.dict(
+                os.environ,
+                {"BODY": "## What to review\n\nNo queued action requested.\n"},
+            ), contextlib.redirect_stdout(out):
+                code = PROJECTION.main([
+                    "--from-env", "BODY",
+                    "--action-section", "What to review",
+                    "--queue-actor", "any",
+                    "--unscoped",
+                ])
+            printed = out.getvalue()
+            self.assertEqual(0, code, printed)
+            self.assertNotIn("explanation-shape", printed)
+
+    def test_a_blocking_projection_finding_still_fails_beside_an_advisory(self):
+        """The advisory line is added beside the verdict, never instead of it."""
+        with self.repo() as root:
+            self.shape_repo(root)
+            self.queue_item(root, name="non-blocking-review-boundary.md")
+            self.git(root, "add", ".")
+            broken = self.SHAPED_BODY.replace(
+                "## Verification\n\nThe suite passed.\n", ""
+            ).replace(
+                "No queued action requested.",
+                "1. [Review the boundary.](https://example.invalid/elsewhere)",
+            )
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"BODY": broken}), \
+                    contextlib.redirect_stdout(out):
+                code = PROJECTION.main([
+                    "--from-env", "BODY",
+                    "--action-section", "What to review",
+                    "--queue-actor", "any",
+                    "--unscoped",
+                    "--pull-request-body-shape",
+                ])
+            printed = out.getvalue()
+            self.assertEqual(1, code, printed)
+            self.assertIn("[action-projection]", printed)
+            self.assertIn(
+                "explanation-shape: 1 advisory finding(s) (not blocking)",
+                printed,
+            )
+
+    def test_body_shape_cannot_be_asked_of_a_source_file_input(self):
+        """That input is not a body, so the flag is refused, never ignored."""
+        with self.repo() as root:
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".json", delete=False
+            ) as state_file:
+                state_file.write('{"current":[],"released":[]}\n')
+                state_path = state_file.name
+            try:
+                errors = io.StringIO()
+                with mock.patch.object(PROJECTION, "REPO", root), \
+                        contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(errors):
+                    self.assertEqual(
+                        2,
+                        PROJECTION.main([
+                            "--external-source-release-state-file", state_path,
+                            "--pull-request-body-shape",
+                            "--base-revision", "0" * 40,
+                            "--candidate-revision", "1" * 40,
+                        ]),
+                    )
+                self.assertIn("cannot be combined", errors.getvalue())
+            finally:
+                Path(state_path).unlink()
+
 
 class RepositoryViewTests(unittest.TestCase):
     """One read of a repository view must answer exactly what per-path reads did."""

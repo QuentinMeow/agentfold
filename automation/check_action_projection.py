@@ -797,6 +797,20 @@ LEAF_GENERIC_ACTION_LABELS = {
 }
 
 
+# The pull-request body schema. Its sections and their order are read from the file
+# at run time, so the schema keeps living in exactly one place. Two facts it states
+# only inside HTML comments cannot be read that way — `templates/README.md` requires
+# that nothing a check reads is hidden in a comment, and every parser here blanks
+# them — so they are named once, here, and pinned against the schema by
+# `automation/tests/test_pull_request_schema.py`.
+PULL_REQUEST_SCHEMA_PATH = "templates/pull-request.md"
+PULL_REQUEST_OPTIONAL_SECTIONS = ("Notes",)
+PULL_REQUEST_SUMMARY_SECTION = "TL;DR"
+PULL_REQUEST_SUMMARY_RANGE = (3, 6)
+ORDERED_LIST_ITEM_RE = re.compile(r"^[ ]{0,3}\d+[.)][ \t]+")
+BODY_SHAPE_CHECK = "explanation-shape"
+
+
 def normalized_title(value):
     return " ".join((value or "").strip().casefold().split())
 
@@ -897,6 +911,97 @@ def visible_outside_action_sections(text, titles):
         for index in range(start, min(end, len(lines))):
             lines[index] = ""
     return "\n".join(lines)
+
+
+def body_sections(text):
+    """Return the visible unquoted level-two headings of a body, in order."""
+    headings = []
+    for line in semantic_text(text).splitlines():
+        matched = HEADING_RE.match(line)
+        if not matched or matched.group("quote").count(">"):
+            continue
+        if len(matched.group("level")) != 2:
+            continue
+        title = " ".join(matched.group("title").split())
+        if title:
+            headings.append(title)
+    return headings
+
+
+def pull_request_schema_sections(repo=REPO):
+    """Return the sections `templates/pull-request.md` declares, in its order.
+
+    Returns an empty list when the schema is not in this checkout. The rules it
+    feeds are advisory, so a checkout without the template loses a readability
+    opinion and nothing else; failing the run instead would turn a missing
+    document into a refused pull request.
+    """
+    try:
+        text = (repo / PULL_REQUEST_SCHEMA_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    return body_sections(text)
+
+
+def summary_item_count(text):
+    """Return how many numbered top-level items the summary section carries."""
+    bodies = action_sections(text, [PULL_REQUEST_SUMMARY_SECTION])
+    if not bodies:
+        return None
+    entries, _outside = section_entries(bodies[0])
+    return sum(
+        1 for entry in entries
+        if ORDERED_LIST_ITEM_RE.match(entry.splitlines()[0] if entry else "")
+    )
+
+
+def body_shape_findings(text, repo=REPO):
+    """Report the pull-request body rules a program can see, and only those.
+
+    This is the half of `skills/explain-to-human/` that lives outside the
+    repository: a pull-request body is a provider artifact, so the reconciler —
+    which is a function of repository files — never reads one, and this gate is
+    the only tracked program that does. What it can see is which sections are
+    present, what order they come in, and how many items the summary holds. What
+    it cannot see is whether any of them was worth reading, so every finding here
+    is advisory and none of them changes this program's exit status
+    (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
+    """
+    schema = pull_request_schema_sections(repo)
+    if not schema:
+        return []
+    findings = []
+    present = body_sections(text)
+    for heading in schema:
+        if heading in PULL_REQUEST_OPTIONAL_SECTIONS or heading in present:
+            continue
+        findings.append(
+            f"missing section `## {heading}`; "
+            f"`{PULL_REQUEST_SCHEMA_PATH}` is the skeleton to copy"
+        )
+    # Compare only the schema sections the body actually carries, so a missing
+    # one is reported once as missing rather than again as disorder.
+    ordered = list(dict.fromkeys(
+        heading for heading in present if heading in schema
+    ))
+    expected = [heading for heading in schema if heading in ordered]
+    for found, wanted in zip(ordered, expected):
+        if found != wanted:
+            findings.append(
+                f"section `## {found}` comes before `## {wanted}`; a reader "
+                f"scans these in one order and `{PULL_REQUEST_SCHEMA_PATH}` "
+                "sets it"
+            )
+            break
+    low, high = PULL_REQUEST_SUMMARY_RANGE
+    count = summary_item_count(text)
+    if count is not None and not low <= count <= high:
+        findings.append(
+            f"`## {PULL_REQUEST_SUMMARY_SECTION}` carries {count} numbered "
+            f"item(s); the schema asks for {low} to {high}, each naming a state "
+            "before and a state after"
+        )
+    return findings
 
 
 def rendered_action_section_body(text, start, end):
@@ -3099,6 +3204,17 @@ def main(argv=None):
             "state contain no queued-action signal"
         ),
     )
+    parser.add_argument(
+        "--pull-request-body-shape",
+        action="store_true",
+        help=(
+            "also report the readability rules templates/pull-request.md makes "
+            "visible — sections present and in order, summary length — as "
+            "advisory lines that never change this program's exit status; only "
+            "a pull-request description has that schema, so an issue body or a "
+            "conversation comment never passes this"
+        ),
+    )
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument(
         "--task-id",
@@ -3142,6 +3258,7 @@ def main(argv=None):
                 or args.additional_prose_env
                 or args.additional_summary_env
                 or args.allow_missing_action_section_if_no_action
+                or args.pull_request_body_shape
                 or args.task_id
                 or args.branch
                 or args.unscoped
@@ -3178,6 +3295,7 @@ def main(argv=None):
                 or args.external_assignment_env
                 or args.additional_prose_env
                 or args.additional_summary_env
+                or args.pull_request_body_shape
                 or args.task_id
                 or args.branch
                 or args.unscoped
@@ -3280,6 +3398,17 @@ def main(argv=None):
     for finding in findings:
         print(f"[action-projection] {args.label}: {finding}")
     print(f"action-projection: {len(findings)} finding(s)")
+    if args.pull_request_body_shape:
+        # Printed and counted on their own line, never added to the total above:
+        # a readability opinion is put in front of the agent that broke it and is
+        # not allowed to refuse the change.
+        advisory = body_shape_findings(text)
+        for finding in advisory:
+            print(f"[{BODY_SHAPE_CHECK}] {args.label}: {finding}  (advisory)")
+        print(
+            f"{BODY_SHAPE_CHECK}: {len(advisory)} advisory finding(s) "
+            "(not blocking)"
+        )
     return 1 if findings else 0
 
 

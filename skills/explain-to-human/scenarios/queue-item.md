@@ -115,3 +115,17 @@ and shows the owner how it read their words before acting.
 - [ ] Nothing above the answer line requires opening another file.
 - [ ] No hash, field name, or machine token appears above the answer line.
 - [ ] Every uncommon term is glossed at first use.
+
+## Part of this is reported back to you
+
+The reconciler's `explanation-shape` check reads every live queue item and reports, as an
+**advisory** finding, a section missing from the item's own template, a section that sits
+out of that template's order, and any `### ` choice with no concrete
+`*Example consequence:*` line under it. Advisory means it prints with an `(advisory)`
+marker and is counted, and never fails a commit or a merge
+(`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
+
+Nothing else on the checklist above is checked. Whether the title is really a question,
+whether `Today` describes reality, and whether the counter-case is real rather than hedged
+are judgments a program cannot make — an item can satisfy every rule a machine can see and
+still be unanswerable. The advisory line catches the shape; the rest is still yours.
