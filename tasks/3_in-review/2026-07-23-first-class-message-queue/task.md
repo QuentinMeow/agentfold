@@ -5,7 +5,7 @@
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`; `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`; `message-queue/needs-human/reviews/non-blocking-rereview-human-action-files.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`; `message-queue/needs-human/reviews/non-blocking-rereview-human-action-files.md`
 
 ## Goal
 

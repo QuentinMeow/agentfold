@@ -109,3 +109,42 @@ c05e8002e495e4ee346e685213c48f8d6632fa85
 The coordination lane recorded `c05e8002e495e4ee346e685213c48f8d6632fa85`
 as the published PR #7 head before the ancestry join. No final merge-panel verdict was
 claimed by that coordination checkpoint.
+
+## 2026-08-02 — what the pre-merge boundary actually got
+
+This section records a measurement, not a new test run. The task's last acceptance
+criterion requires "a fresh final independent adversarial review" to complete *before
+merge*. It did not, and it can no longer.
+
+```
+$ git log --format='%H%n%ad%n%s' -1 2372e48
+2372e4824c136af579da5665e6f632ca6f98dd59
+Fri Jul 24 13:54:56 2026 -0700
+Merge pull request #7 from QuentinMeow/task/2026-07-23-first-class-message-queue
+
+$ git merge-base --is-ancestor 2372e48 origin/main; echo $?
+0
+```
+
+The merge is nine days old and is an ancestor of `main`. The only two statements about a
+final panel anywhere in this file are the ones above, both written before that merge:
+
+```
+$ grep -n "Review verdicts\|panel" tasks/3_in-review/2026-07-23-first-class-message-queue/verification.md
+69:boundary, a fresh final immutable-revision panel is intentionally deferred until after
+110:as the published PR #7 head before the ancestry join. No final merge-panel verdict was
+```
+
+The panel was deferred until after the first human review. That review came back
+`changes-requested`, was committed only to an unpushed branch, and was not folded onto
+`main` until 2026-07-31:
+
+```
+$ git log --format='%ad' -1 --date=short 31571da
+2026-07-31
+```
+
+So the deferral outlived the boundary it was deferred past. No panel verdict is claimed
+here, then or now. The continuation action that carried this obligation is resolved
+against `roadmap/current-state.md`, which states plainly what was skipped; resolving it
+does not un-cross the merge.

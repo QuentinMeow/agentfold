@@ -887,3 +887,26 @@
   was never given, so it was filed as one canonical item under
   `message-queue/needs-human/decisions/`, now linked from `Queue actions`, rather than
   decided here. This task stays in `3_in-review` until that item is folded.
+
+## 2026-08-02 — disposition of the two agent actions (claude)
+
+- Resolved `future-blocking-continue-first-class-message-queue-review.md`. Its stated
+  premise — "PR #7 remains in review and does not merge" — has been false since
+  2026-07-24. Two of its three `Done when` clauses were met; the third, recording the
+  final independent panel before merge, can never be. `verification.md` records the
+  measurement and names the skipped panel rather than implying it happened.
+- Left `future-blocking-redesign-human-action-files.md` live, and this task therefore
+  stays in `3_in-review`. Pull request 56 landed the action-first format and its
+  enforcement, but the action's `Done when` also requires every live unanswered
+  human-attention file to be migrated, and PR #56 migrated none of them on purpose: the
+  fenced migration carve-out was proven exploitable and the migration was re-filed as an
+  owner-countersigned task. Ten of the thirteen live human-attention files are still in
+  the rejected format, so the promised re-review is not published against PR #56 either —
+  it would ask the owner to judge "every human-attention file" at a revision where most of
+  them are the files he already rejected.
+- Its `Follow-up review` field still names the pre-rename path of that re-review. The
+  repair was attempted and the reconciler refused it —
+  `queue-resolution: live queue action was rewritten: action identity changed while the
+  queue item remained live` — which is exactly instance 2 of
+  `memory/known-issues/2026-08-01-an-immutable-field-cannot-be-repaired-on-a-live-item.md`.
+  No check was weakened; the field stays wrong and stays documented.

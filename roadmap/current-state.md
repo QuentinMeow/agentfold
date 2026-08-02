@@ -241,3 +241,35 @@ What is true today, mapped to the desired-state lines.
   Publishing the branch and reporting to the owner are now steps 8 and 9 of the
   end-of-session ritual. None of the readability rules is machine-checked; whether any
   should be is a live decision under `message-queue/needs-human/decisions/`.
+- **The two agent actions pinning the first-class-queue task (2026-08-02)**: one is
+  disposed of and one is deliberately not, and the task stays in `tasks/3_in-review/`
+  because of the second. The continuation action asked an agent to finish PR #7's review
+  and record its independent panel *before merge*; PR #7 merged on 2026-07-24 as `2372e48`,
+  an ancestor of `main`, seven days before the human review it was waiting on was even
+  folded. Two of its three `Done when` clauses were met — the response is folded, and the
+  review stayed bound to its exact candidate range — and the third can never be met. What
+  was skipped is recorded rather than implied: **no final independent adversarial panel
+  verdict was ever taken on PR #7**, the task's own `verification.md` says so in the words
+  it was written in ("a fresh final immutable-revision panel is intentionally deferred
+  until after the first human review"), and that deferral outlived the merge. The action is
+  resolved against this file; the merge itself is not un-crossed by resolving it. The
+  human-side twin of the same question, for three merge reviews rather than an agent
+  request, is still the owner's and is still live under
+  `message-queue/needs-human/decisions/`.
+  The second action, the human-action redesign, stays live and is **not** satisfied by
+  pull request 56. That pull request landed the format and its enforcement, but the
+  action's `Done when` also requires "every live unanswered human-attention file is
+  migrated to it", and PR #56 deliberately migrated none: its own task records "It does not
+  touch a single live item", and an independent review had broken the fenced migration
+  carve-out that would have allowed it — with every frozen field byte-identical and the
+  reconciler clean, a rewrite could still change the question, invert a scope limit, delete
+  a choice, and flip the recommendation. Ten of the thirteen live human-attention files are
+  still in the format the owner rejected. So the promised re-review stays
+  `awaiting-artifact` with a pending binding rather than being published against PR #56:
+  the artifact still missing is the countersigned migration of those live files, which is
+  owner-gated twice over, by backlog task `2026-08-01-countersign-the-live-human-item-migration`
+  and by the live decision `non-blocking-re-ask-the-older-questions-in-plainer-words.md`.
+  The redesign action's `Follow-up review` still names the pre-rename path of that review
+  and cannot be corrected while the item lives — attempting it reports
+  `queue-resolution: action identity changed while the queue item remained live`, which is
+  instance 2 of `memory/known-issues/2026-08-01-an-immutable-field-cannot-be-repaired-on-a-live-item.md`.
