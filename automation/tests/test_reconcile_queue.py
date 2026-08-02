@@ -13864,6 +13864,35 @@ class ReconcileQueueTests(unittest.TestCase):
                 for finding in structure
             ), self.messages(structure))
 
+    def test_filed_provenance_owns_a_task_however_it_is_phrased(self):
+        """`Filed:` is immutable, so one preposition may not be the whole rule.
+
+        A human item's other ownership proof is its boundary `task:` token.
+        Dropping that boundary is exactly what this model does, which makes
+        `Filed:` the sole owner — and an item that plainly reads "from the
+        owner's review of task `x`" must be able to prove what it says, because
+        it can never be reworded to say it differently.
+        """
+        with self.repo() as root:
+            queue_rel = (
+                "message-queue/needs-human/reviews/"
+                "non-blocking-review-rollout.md"
+            )
+            self.write(
+                root,
+                queue_rel,
+                "# Review rollout\n\n"
+                "**Filed:** 2026-07-23, by codex, from the owner's "
+                "changes-requested review of task `2026-07-23-example`\n"
+                "**Action:** Review the rollout boundary.\n",
+            )
+            self.assertTrue(RECONCILE.queue_item_owned_by_task(
+                queue_rel, "2026-07-23-example"
+            ))
+            self.assertFalse(RECONCILE.queue_item_owned_by_task(
+                queue_rel, "2026-07-23-somewhere-else"
+            ))
+
     def test_task_admission_marker_removal_is_historical_with_only_readme(self):
         with self.repo() as root:
             self.init_git(root)

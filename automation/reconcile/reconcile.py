@@ -5407,8 +5407,14 @@ def queue_item_owned_by_task(path, task_id, revision=None):
     ))
     if task_id in owned_boundaries:
         return True
+    # Any phrasing that names the task inside `Filed:` proves provenance. The
+    # field is the provenance clause and it is immutable, so pinning one exact
+    # preposition means an item written as "from the owner's review of task `x`"
+    # can never prove what it plainly says — and cannot be reworded to. That
+    # mattered the moment a human item lost its boundary: the boundary token was
+    # its other ownership proof, and dropping it must not orphan the item.
     return bool(re.search(
-        r"(?<![A-Za-z0-9_-])from[ \t]+task[ \t]+`"
+        r"(?<![A-Za-z0-9_-])task[ \t]+`"
         + re.escape(task_id)
         + r"`(?![A-Za-z0-9-])",
         got.get("Filed", ""),
