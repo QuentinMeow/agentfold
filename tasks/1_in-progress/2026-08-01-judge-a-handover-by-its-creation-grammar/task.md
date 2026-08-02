@@ -1,10 +1,10 @@
 # Judge a handover by the entry grammar its own creation snapshot declared
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (worktree agent-a3dd7926a22a81287)
 **Filed:** 2026-08-01, by claude, from a reproduced merge failure on PR #44 and a latent one on `main`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-judge-a-handover-by-its-creation-grammar.md`
+**Queue actions:** none
 
 ## Goal
 
