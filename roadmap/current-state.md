@@ -56,10 +56,10 @@ What is true today, mapped to the desired-state lines.
   approach ruled out by measurement: `docs/designs/fast-local-test-feedback.md`. The
   action-projection gate's own per-path Git reads are the open item, in review at 84
   processes down to 2 per run.
-- **Skills**: four portable skills ship (`ask-me-anything`, `session-handover`,
-  `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md protocols; the
-  gardener is a protocol only — no script yet. Each treats the message queue as the
-  canonical action surface and external prose as a linked projection.
+- **Skills**: five portable skills ship (`ask-me-anything`, `explain-to-human`,
+  `session-handover`, `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md
+  protocols; the gardener is a protocol only — no script yet. Each treats the message queue
+  as the canonical action surface and external prose as a linked projection.
 - **Coordination**: every pending human action and durable cross-session agent action
   has one canonical queue file. Actor and message kind remain folder routes; filename
   prefixes expose blocking now, blocking at a future boundary, or never blocking.
@@ -218,3 +218,16 @@ What is true today, mapped to the desired-state lines.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.
+- **Explaining the work (2026-08-02)**: `skills/explain-to-human/` states one standard for
+  everything a human reads — three layers, effect before mechanism, a before and an after
+  per change claim, glossed local vocabulary, one worked example, calibrated uncertainty,
+  and self-containment on the decision with evidence linked — and routes to one scenario
+  file per surface: pull-request body, chat reply, human queue item, handover. A
+  pull-request body has a schema (`templates/pull-request.md`) projected into
+  `.github/pull_request_template.md` and proven against the existing action-projection gate
+  by ten tests. `handbook/human-action-guide.md`, `message-queue/AGENTS.md`, and
+  `handbook/decision-guide.md` were rewritten to obey the rules they state; a rule-by-rule
+  inventory and an independent audit of that rewrite are committed as task evidence.
+  Publishing the branch and reporting to the owner are now steps 8 and 9 of the
+  end-of-session ritual. None of the readability rules is machine-checked; whether any
+  should be is a live decision under `message-queue/needs-human/decisions/`.

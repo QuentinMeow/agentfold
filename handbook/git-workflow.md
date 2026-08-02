@@ -27,9 +27,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - **One worktree per agent** — parallel agents use `git worktree add ../<task-id>
   task/<task-id>`, never share a checkout.
 - **Service boundaries** — a task branch touches one service; cross-service work is
-  split into linked tasks. Two *independent* branches editing the same file is a planning
-  bug; a *stack*, where each layer contains the one below, is the normal way to sequence
-  work on one file. Screen a landing set for cross-leg collisions before merging any of it.
+  split into linked tasks. When two branches need the same file, stack them rather than
+  running them independently (see "Publishing" below). Screen a landing set for cross-leg
+  collisions before merging any of it.
 
 ## Commits
 
@@ -40,6 +40,30 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
   is a giant revert.
 - Never commit through a failing pre-commit hook. A `--no-verify` bypass must be
   reported in the handover with a reason.
+
+## Publishing: one pull request per task, and when it stacks
+
+Finishing a task means publishing it. The end-of-session ritual in the root `AGENTS.md`
+pushes the task branch and opens its pull request; a finished branch that was never pushed
+is work nobody can see.
+
+Where the branch starts is decided by dependency, never by the order you happened to work in:
+
+| Situation | Branch from | Pull request base |
+|---|---|---|
+| the task needs nothing that is not already on `main` | `main` | `main` |
+| the task needs a file or behaviour that exists only on another unmerged branch | that branch | that branch's pull request |
+
+Two independent branches editing the same file is a planning bug. A *stack*, where each
+layer contains the one below, is the normal way to sequence dependent work on one file —
+but only when the dependency is real. Doing B after A is not a dependency.
+
+A stacked pull request says so in the first thing in its body: which layer it is, what its
+base branch is, and that the stack lands bottom-up (`templates/pull-request.md`). Without
+that note a reviewer reads the wrong diff and reviews work that is already approved below.
+
+Prefer shallow stacks. Every extra layer is another base ref that must not be deleted while
+a child is open, and the rule below explains what that costs when it goes wrong.
 
 ## Merging and review
 

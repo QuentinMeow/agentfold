@@ -36,6 +36,16 @@ anything.
    surfaces only summarize and link live queue items; they never become a second action
    ledger. End the final reply with the handover's "Needs your attention" projections,
    each linking its queue item with enough context to act. Repeat still-open items.
+8. **Publish**: push the task branch and open its pull request. Unpublished work is
+   invisible, so a session does not end with a finished branch sitting on a laptop.
+   `handbook/git-workflow.md` says when a task stacks on another and when it branches
+   from `main`; the body's shape is `templates/pull-request.md`, and how to write it is
+   `skills/explain-to-human/scenarios/pull-request.md`.
+9. **Report**: close with a reply in the shape
+   `skills/explain-to-human/scenarios/chat-reply.md` defines — whether anything is
+   blocked, what changed, what was decided without the human and what undoing it costs,
+   their open items in order, then where everything is. Chat is the only channel that
+   reaches them without their going to look.
 
 ## Skip conditions
 

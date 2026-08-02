@@ -38,6 +38,7 @@
 - [The commit gate skips a test only on proof, never on deferral](decisions/2026-07-30-commit-gate-skips-only-on-proof.md) — A local gate may skip a test only when nothing the test reads has changed; "a later boundary will run it" is not a reason to skip
 - [Nothing a human owes holds a Git edge](decisions/2026-08-01-human-answers-never-gate-a-git-edge.md) — A needs-human item may withhold only the start of a 0_backlog task or one act with no undo; merging, moving a task through review, and recording it done are revertible and never wait on an answer, and every human item carries an advisory Answer by date
 - [An immutable record is judged by the grammar it was written under](decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md) — A committed record's spelling is fixed by the schema marker in its own creation snapshot; only its rejections ratchet at the admission edge.
+- [Explaining the work and publishing it are part of doing it, not extras](decisions/2026-08-02-explaining-and-publishing-are-part-of-the-work.md) — One skill states how to write anything a human reads, and every task now ends by opening its pull request and reporting what changed, what was decided, and what the owner owes
 - [The merge gate stays advisory while the repository is immature](decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md) — No status check is required to merge; a red check informs but never stops a merge, because the repository is early and its development cycle is mostly agents, and the owner will require `reconcile-and-test` once he judges the repository stable
 
 ## lessons
@@ -46,6 +47,7 @@
 - [Never reuse a schema version number that was activated and withdrawn](lessons/automation/never-reuse-a-withdrawn-schema-version.md) — A version number that ever reached a commit is burned; reuse it and old records get judged by the new meaning.
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 - [Only bind a boundary every review outcome can still close](lessons/message-queue/a-boundary-must-be-closable-at-any-later-time.md) — A queue item may bind only a boundary all four review outcomes can satisfy with a commit an agent can make at any time after filing; a receipt Git cannot re-issue makes cleanup permanently unsatisfiable
+- [Get a question's wording right when you file it — you cannot reword it later](lessons/message-queue/a-live-question-cannot-be-reworded.md) — Reformatting a waiting needs-human item is refused; its title, context, choices, and recommendation are the action's identity, and the one migration edge that bent this rule is already spent
 
 ## known-issues
 - [A review outcome is an agent's attested reading of the human's sentence, not a proof](known-issues/2026-07-31-review-outcome-classification-is-attested.md) — Nothing mechanical verifies that a recorded Review outcome matches what the human actually wrote.
