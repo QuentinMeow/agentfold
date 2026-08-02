@@ -21,6 +21,62 @@ SPEC = importlib.util.spec_from_file_location("reconcile_queue", MODULE_PATH)
 RECONCILE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECONCILE)
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+QUEUE_TEMPLATES = REPO_ROOT / "templates" / "queue"
+# Where each queue template's filled copy belongs, so the copy-and-fill test files
+# every one at the endpoint whose schema it claims to satisfy.
+QUEUE_TEMPLATE_ENDPOINTS = {
+    "decision.md": "needs-human/decisions",
+    "clarification.md": "needs-human/clarifications",
+    "review.md": "needs-human/reviews",
+    "request.md": "needs-agent/requests",
+    "retry.md": "needs-agent/retries",
+}
+# Both markers this repository has activated, so a copied template is judged by
+# the grammar it is actually written under.
+QUEUE_SCHEMA_MARKERS = (
+    "**Queue resolution schema:** v1\n"
+    "**Human-attention format:** v1\n"
+)
+QUEUE_TEMPLATE_TARGET = "docs/source.md"
+QUEUE_TEMPLATE_EVIDENCE = "docs/disposition.md"
+QUEUE_TEMPLATE_PROSE = (
+    "A filled queue template states one concrete thing, so a zero-context reader "
+    "can act on it without opening anything else first."
+)
+QUEUE_PLACEHOLDER_RE = re.compile(r"<[^<>]*>")
+
+
+def fill_queue_template(text, digest):
+    """Fill one queue template the most obvious way, from its own placeholders.
+
+    Every `<placeholder>` names what belongs in it, so this reads that description
+    and writes a plausible value of the documented form — a date where the template
+    asks for `YYYY-MM-DD`, a real digest where it asks for 64 hex, a repository path
+    where it asks for one, and a sentence everywhere else. Nothing else is touched:
+    the HTML comments stay exactly as shipped, because a filer who leaves them in
+    must get a valid item too.
+    """
+    def value(matched):
+        body = matched.group()[1:-1].strip().lower()
+        if "yyyy-mm-dd" in body:
+            return "2026-07-23"
+        if "64 hex" in body:
+            return digest
+        if "repo-relative path" in body:
+            return QUEUE_TEMPLATE_TARGET
+        if "non-queue path" in body or "durable" in body:
+            return QUEUE_TEMPLATE_EVIDENCE
+        if "file/folder" in body:
+            return f"`{QUEUE_TEMPLATE_TARGET}`"
+        if "reconciler check id" in body:
+            return "manual"
+        if "short name" in body:
+            return "Keep the current shape"
+        return QUEUE_TEMPLATE_PROSE
+
+    return QUEUE_PLACEHOLDER_RE.sub(value, text)
+
 FIXTURE_GIT_PATH = Path(__file__).resolve().parent / "fixture_git.py"
 FIXTURE_GIT_SPEC = importlib.util.spec_from_file_location(
     "fixture_git", FIXTURE_GIT_PATH
@@ -1394,9 +1450,21 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
 
+            # The human's own edit stands alone while the item is waiting; the
+            # binding is the folding agent's, so demanding it here is what made the
+            # documented workflow uncommittable. A partial binding is still wrong.
             item.write_text(
                 item.read_text(encoding="utf-8").replace(
                     "**Your review:** ______", "**Your review:** approve"
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
                 ),
                 encoding="utf-8",
             )
@@ -1407,9 +1475,6 @@ class ReconcileQueueTests(unittest.TestCase):
                 item.read_text(encoding="utf-8").replace(
                     "**Reviewed revision:** ______",
                     f"**Reviewed revision:** {digest}",
-                ).replace(
-                    "**Review outcome:** pending",
-                    "**Review outcome:** approved",
                 ),
                 encoding="utf-8",
             )
@@ -17135,6 +17200,428 @@ class ReconcileQueueTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             self.assertNotIn("Smuggled text.", body)
             self.assertIn("**Status:** open", body)
+
+    # --- a human answers in one edit -------------------------------------------
+
+    def one_edit_review(self, root, response="______", status="waiting",
+                        reviewed="______", outcome="pending"):
+        """File one published local-file review at an arbitrary lifecycle point."""
+        target = self.write(root, "docs/source.md", "# Source\n")
+        digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+        path = (
+            "message-queue/needs-human/reviews/"
+            "non-blocking-answer-in-one-edit.md"
+        )
+        item = self.write(
+            root,
+            path,
+            "# Does the wording explain the decision?\n\n"
+            f"**Status:** {status}\n"
+            "**Filed:** 2026-07-23, by claude\n"
+            "**Action:** approve the wording or name the change you want\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Why-you-might-care:** The wording decides what a reader believes.\n"
+            "**If-you-do-nothing:** The current wording stays exactly as it is.\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** `docs/source.md`\n"
+            f"**Review revision:** {digest}\n"
+            f"**Reviewed revision:** {reviewed}\n"
+            f"**Review outcome:** {outcome}\n"
+            "**If unanswered:** The current wording stays and nothing stops.\n\n"
+            "## What you need to know\n\nOne page changed wording.\n\n"
+            "## Differences\n\nApprove keeps it; changes revise it.\n\n"
+            "## Example\n\nApproval ships A; a change produces B.\n\n"
+            f"**Your review:** {response}\n",
+        )
+        return item, path, digest
+
+    def test_human_answers_a_review_in_one_edit(self):
+        """One sentence in the response blank is a complete, committable answer.
+
+        The two fields that used to be required alongside it belong to the agent's
+        folding claim, so `waiting` accepts the human's edit on its own and
+        `folding` — the agent's own commit — still demands the full binding.
+        """
+        with self.repo() as root:
+            item, _path, digest = self.one_edit_review(root)
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            answered = item.read_text(encoding="utf-8").replace(
+                "**Your review:** ______",
+                "**Your review:** Looks good to me, ship it.",
+            )
+            item.write_text(answered, encoding="utf-8")
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+            item.write_text(
+                answered.replace("**Status:** waiting", "**Status:** folding"),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("not bound to the requested revision" in message
+                                for message in messages))
+            self.assertTrue(any("explicit terminal" in message
+                                for message in messages))
+
+            item.write_text(
+                answered.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {digest}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+
+    def test_a_blank_review_outcome_reads_as_pending(self):
+        """`______` and `pending` mean the same unclassified state."""
+        with self.repo() as root:
+            item, _path, _digest = self.one_edit_review(root, outcome="______")
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Your review:** ______",
+                    "**Your review:** Looks good to me.",
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], list(RECONCILE.check_queue_schema()))
+            self.assertEqual("pending", RECONCILE.review_outcome_value("<...>"))
+            self.assertEqual("pending", RECONCILE.review_outcome_value(""))
+            self.assertEqual(
+                "approved", RECONCILE.review_outcome_value(" approved ")
+            )
+
+    def commit_one_edit_review(self, root, digest, item, path):
+        """Publish a review, then commit the human's one-sentence answer."""
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "publish the review")
+        answered = item.read_text(encoding="utf-8").replace(
+            "**Your review:** ______",
+            "**Your review:** Looks good to me, ship it.",
+        )
+        item.write_text(answered, encoding="utf-8")
+        self.git(root, "add", path)
+        self.git(root, "commit", "-m", "record the human review response")
+        return answered
+
+    def resolution_messages(self, root, base=None):
+        head = self.git(root, "rev-parse", "HEAD")
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            if base is None:
+                return self.messages(RECONCILE.check_queue_resolution())
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+            ):
+                return self.messages(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_the_folding_claim_may_add_the_review_binding(self):
+        """The agent supplies the binding in the claim, and only there."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            item, path, digest = self.one_edit_review(root)
+            answered = self.commit_one_edit_review(root, digest, item, path)
+            base = self.git(root, "rev-parse", "HEAD")
+
+            claimed = answered.replace(
+                "**Status:** waiting", "**Status:** folding"
+            ).replace(
+                "**Reviewed revision:** ______",
+                f"**Reviewed revision:** {digest}",
+            ).replace(
+                "**Review outcome:** pending",
+                "**Review outcome:** approved",
+            )
+            item.write_text(claimed, encoding="utf-8")
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "claim and classify the response")
+            self.assertEqual([], self.resolution_messages(root, base))
+            self.assertEqual([], self.messages(RECONCILE.check_queue_schema()))
+
+    def test_an_agent_cannot_classify_a_response_it_wrote_in_the_same_commit(self):
+        """A manufactured approval needs the human's commit to exist first."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            item, path, digest = self.one_edit_review(root)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "publish the review")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            item.write_text(
+                item.read_text(encoding="utf-8").replace(
+                    "**Your review:** ______", "**Your review:** approve"
+                ).replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {digest}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", path)
+            self.git(root, "commit", "-m", "answer and approve in one commit")
+            messages = self.resolution_messages(root, base)
+            self.assertTrue(any("changed more than status" in message
+                                for message in messages), messages)
+
+    def test_the_review_binding_is_write_once_and_claim_edge_only(self):
+        """Every other edge that touches the binding stays rejected."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            item, path, digest = self.one_edit_review(root)
+            answered = self.commit_one_edit_review(root, digest, item, path)
+            base = self.git(root, "rev-parse", "HEAD")
+
+            def commit(text, message):
+                item.write_text(text, encoding="utf-8")
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", message)
+                return self.resolution_messages(root, base)
+
+            bound = answered.replace(
+                "**Reviewed revision:** ______",
+                f"**Reviewed revision:** {digest}",
+            ).replace(
+                "**Review outcome:** pending", "**Review outcome:** approved"
+            )
+            messages = commit(bound, "bind without claiming")
+            self.assertTrue(any("only be recorded on the waiting -> folding"
+                                in message for message in messages), messages)
+
+            self.git(root, "reset", "--hard", base)
+            claimed = bound.replace(
+                "**Status:** waiting", "**Status:** folding"
+            )
+            self.assertEqual([], commit(claimed, "claim and classify"))
+
+            after_claim = self.git(root, "rev-parse", "HEAD")
+            messages = commit(
+                claimed.replace(
+                    "**Review outcome:** approved",
+                    "**Review outcome:** rejected",
+                ),
+                "rewrite the recorded outcome",
+            )
+            self.assertTrue(any("after the first concrete response" in message
+                                for message in messages), messages)
+            self.git(root, "reset", "--hard", after_claim)
+
+    def test_the_binding_cannot_repoint_or_rewrite_the_human_response(self):
+        """The classified bytes and the classified sentence both stay frozen."""
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root, "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            item, path, digest = self.one_edit_review(root)
+            answered = self.commit_one_edit_review(root, digest, item, path)
+            base = self.git(root, "rev-parse", "HEAD")
+
+            def commit(text, message):
+                item.write_text(text, encoding="utf-8")
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", message)
+                messages = self.resolution_messages(root, base)
+                self.git(root, "reset", "--hard", base)
+                return messages
+
+            other = "sha256:" + "b" * 64
+            messages = commit(
+                answered.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    f"**Review revision:** {digest}",
+                    f"**Review revision:** {other}",
+                ).replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {other}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ),
+                "re-point the binding at other bytes",
+            )
+            self.assertTrue(any("immutable review binding" in message
+                                for message in messages), messages)
+
+            messages = commit(
+                answered.replace(
+                    "**Status:** waiting", "**Status:** folding"
+                ).replace(
+                    "**Your review:** Looks good to me, ship it.",
+                    "**Your review:** Approved, no reservations.",
+                ).replace(
+                    "**Reviewed revision:** ______",
+                    f"**Reviewed revision:** {digest}",
+                ).replace(
+                    "**Review outcome:** pending",
+                    "**Review outcome:** approved",
+                ),
+                "reword the human sentence while classifying it",
+            )
+            self.assertTrue(any("after the first concrete response" in message
+                                for message in messages), messages)
+
+    def test_a_path_in_a_human_response_never_breaks_link_check(self):
+        """A backticked path the human types is prose, not a repository claim."""
+        with self.repo() as root:
+            item, _path, _digest = self.one_edit_review(root)
+            answered = item.read_text(encoding="utf-8").replace(
+                "**Your review:** ______",
+                "**Your review:** Ship it, and mention this in "
+                "`handbook/guardrail-modes.md` when you fold it.",
+            )
+            item.write_text(answered, encoding="utf-8")
+            self.assertEqual([], list(RECONCILE.check_links()))
+
+            item.write_text(
+                answered.replace(
+                    "## What you need to know\n\nOne page changed wording.",
+                    "## What you need to know\n\nSee "
+                    "`handbook/guardrail-modes.md`.",
+                ),
+                encoding="utf-8",
+            )
+            messages = self.messages(RECONCILE.check_links())
+            self.assertTrue(any("guardrail-modes.md` does not exist" in message
+                                for message in messages), messages)
+
+    # --- every queue template is copy-and-fill valid ----------------------------
+
+    def test_every_queue_template_survives_copy_and_fill(self):
+        """Copy a template, fill its placeholders, commit: zero findings.
+
+        `fields()` runs `semantic_text()` first, which blanks HTML comments, so a
+        required field written inside one is invisible to every check. This test is
+        the standing guarantee that no queue template ever hides one there again.
+
+        The fixture carries both schema markers this repository has activated, so
+        the templates are judged by the grammar they are written under: turning
+        the human-attention format off here would test the human templates against
+        a schema generation they deliberately no longer follow.
+        """
+        templates = sorted(
+            path.name for path in QUEUE_TEMPLATES.glob("*.md")
+        )
+        self.assertEqual(sorted(QUEUE_TEMPLATE_ENDPOINTS), templates)
+        for name in templates:
+            with self.subTest(template=name):
+                with self.repo() as root:
+                    self.write(
+                        root, "message-queue/AGENTS.md", QUEUE_SCHEMA_MARKERS
+                    )
+                    target = self.write(
+                        root, QUEUE_TEMPLATE_TARGET, "# Source\n"
+                    )
+                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                    filled = fill_queue_template(
+                        (QUEUE_TEMPLATES / name).read_text(encoding="utf-8"),
+                        digest,
+                    )
+                    self.assertNotIn("<", filled.split("-->")[-1])
+                    self.write(
+                        root,
+                        "message-queue/"
+                        + QUEUE_TEMPLATE_ENDPOINTS[name]
+                        + "/non-blocking-copy-and-fill.md",
+                        filled,
+                    )
+                    findings = []
+                    for check in (
+                        RECONCILE.check_queue_schema,
+                        RECONCILE.check_queue_name,
+                        RECONCILE.check_queue_location,
+                        RECONCILE.check_links,
+                    ):
+                        findings.extend(self.messages(check()))
+                    self.assertEqual([], findings)
+
+    def test_a_queue_template_hiding_a_required_field_in_a_comment_fails(self):
+        """The copy-and-fill guarantee has teeth: prove the old shape breaks."""
+        with self.repo() as root:
+            self.write(root, "message-queue/AGENTS.md", QUEUE_SCHEMA_MARKERS)
+            target = self.write(root, QUEUE_TEMPLATE_TARGET, "# Source\n")
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            filled = fill_queue_template(
+                (QUEUE_TEMPLATES / "decision.md").read_text(encoding="utf-8"),
+                digest,
+            )
+            hidden = filled.replace(
+                "**Full context:**",
+                "<!--\n**Full context:**",
+            ).replace(
+                "\n**Resolution evidence:**",
+                "\n-->\n**Resolution evidence:**",
+                1,
+            )
+            self.write(
+                root,
+                "message-queue/needs-human/decisions/non-blocking-hidden.md",
+                hidden,
+            )
+            messages = self.messages(RECONCILE.check_queue_schema())
+            self.assertTrue(any("missing required field **Full context:**"
+                                in message for message in messages), messages)
+
+    # --- schema fields that no template creates --------------------------------
+
+    def test_schema_marker_fields_are_documented_where_templates_are_indexed(self):
+        """Fields required by code with no copyable template still have a home.
+
+        These are single-instance markers on files that already exist, so nothing
+        copies them and no template can show them — which is exactly how they went
+        undocumented while `templates/README.md` claimed to be the single source of
+        truth for every file schema. Each row must name the field and the file that
+        carries it, on one line, so the index says where to look without restating
+        what the field means. That the marker is still *present* on its owner is
+        already enforced by the reconciler's own schema-activation checks, so this
+        test deliberately does not re-read those records.
+        """
+        index = (REPO_ROOT / "templates" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        for field, owner in (
+            ("Collaboration mode", "AGENTS.md"),
+            ("Task admission schema", "tasks/AGENTS.md"),
+            ("Queue resolution schema", "message-queue/AGENTS.md"),
+            ("Human-attention format", "message-queue/AGENTS.md"),
+            ("Human gating schema", "message-queue/AGENTS.md"),
+            ("Queue projection schema", "history/AGENTS.md"),
+            (RECONCILE.HANDOVER_ENTRY_FIELD, "history/AGENTS.md"),
+            (RECONCILE.HANDOVER_LIVENESS_FIELD, "history/AGENTS.md"),
+            ("Last-updated", "roadmap/current-state.md"),
+        ):
+            with self.subTest(field=field):
+                self.assertRegex(
+                    index, re.escape(field) + r"[^\n]*" + re.escape(owner)
+                )
+        retry = (QUEUE_TEMPLATES / "retry.md").read_text(encoding="utf-8")
+        for field in ("Generated by", "Finding identity"):
+            with self.subTest(field=field):
+                self.assertIn(field, retry)
 
 
 if __name__ == "__main__":

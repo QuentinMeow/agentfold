@@ -66,16 +66,26 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** <awaiting-artifact | waiting | folding>
+**Status:** waiting
 **Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
 **Full context:** `<repo-relative path to the durable source>`
 **Resolution evidence:** `<non-queue path distinct from Review target>`
-**Review target:** <pending | `repo/path` | git:<full id or base...head> | one HTTPS link>
-**Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
+**Review target:** `<repo-relative path to the exact file being judged>`
+**Review revision:** sha256:<64 hex digits of that file's bytes>
 **Reviewed revision:** ______
-**Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
+**Review outcome:** pending
 **Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
-<!-- Then exactly one timing field matching the filename:
+<!-- Status ships as `waiting` with a local file bound. Before the artifact exists,
+file it with **Status:** awaiting-artifact and both target and revision literally
+`pending`, then publish the binding in one later commit that moves the status to
+`waiting`; the folding agent moves it to `folding` on its claim edge.
+A Git range uses **Review target:** git:<base>...<head> with an identical
+**Review revision:**; an HTTPS artifact uses one URL with a sha256 revision. Full
+context explains the judgment; it is never the target.
+`Reviewed revision` and `Review outcome` are the folding agent's, written once over
+an already-committed response: it copies `Review revision` into `Reviewed revision`
+and replaces `pending` with approved, changes-requested, rejected, or abandoned.
+Then exactly one timing field matching the filename:
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 non-blocking-* -> neither; If you do nothing above is the unattended outcome.
