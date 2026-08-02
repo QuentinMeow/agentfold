@@ -1,10 +1,10 @@
 # Stop the merge-ref recompute race from failing every stacked pull request
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-08-01-stop-the-merge-ref-recompute-from-failing-a-stack)
 **Filed:** 2026-08-01, by claude, from task `2026-08-01-stop-human-answers-from-gating-git-edges`
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-the-merge-ref-recompute-from-failing-a-stack.md`
+**Queue actions:** none
 
 ## Goal
 
