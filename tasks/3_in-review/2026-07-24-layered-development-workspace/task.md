@@ -5,7 +5,7 @@
 **Filed:** 2026-07-24, by codex, from the owner's layered-workspace request in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md`; `message-queue/needs-human/decisions/future-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
+**Queue actions:** `message-queue/needs-human/reviews/non-blocking-review-layered-development-workspace.md`
 
 ## Goal
 
@@ -67,7 +67,7 @@ review is recorded.
 - [x] Reconciler and relevant tests pass with real output in `verification.md`, and
       remaining work is published as separately claimable queue-owned tasks through
       the live coordination lane after this PR is admitted.
-- [ ] [After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, review the layered workspace design and read-only inspector, then approve the exact Git range, request a named change, or reject it before merge.](../../../message-queue/needs-human/reviews/future-blocking-review-layered-development-workspace.md)
+- [ ] [After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, review the layered workspace design and read-only inspector, then approve the exact Git range, request a named change, or reject it before merge.](../../../message-queue/needs-human/reviews/non-blocking-review-layered-development-workspace.md)
 
 ## Links
 

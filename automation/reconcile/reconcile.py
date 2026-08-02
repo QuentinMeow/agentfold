@@ -69,11 +69,24 @@ TASK_ARTIFACT_NAMES = {
 TASK_MARKDOWN_SUFFIXES = {".md", ".markdown"}
 TASK_ALLOWED_STATUS_TRANSITIONS = {
     "0_backlog": {"1_in-progress"},
-    "1_in-progress": {"2_blocked", "3_in-review"},
+    # The unstart edge is load-bearing, not cosmetic. `transition:start` is the
+    # only boundary a human item may still bind, and a start gate is only
+    # deadlock-free while every review outcome is satisfiable by a commit an
+    # agent can make at any time. Two of the four — reject and changes-requested
+    # — need the task back in `0_backlog`, which is also what `check_stale_task`
+    # has always told an agent to do ("move back to `0_backlog` and unclaim").
+    "1_in-progress": {"0_backlog", "2_blocked", "3_in-review"},
     "2_blocked": {"1_in-progress"},
     "3_in-review": {"1_in-progress", "4_done"},
     "4_done": set(),
 }
+# Merging, moving a task through review, and recording it complete are all
+# revertible Git edges, so nothing a human owes may withhold one. A
+# `needs-human/` item may bind only `transition:start` on a task still in
+# `0_backlog`, or one act with no undo (`operation:<name>`). `needs-agent/` is
+# untouched: an agent obligation is discharged by an agent at any time, so an
+# agent boundary cannot strand.
+HUMAN_UNSPELLABLE_TRANSITIONS = frozenset({"merge", "review", "complete"})
 TASK_DELETABLE_STATUSES = {"0_backlog", "4_done"}
 CONVERSATIONS = REPO / "history" / "conversations"
 MEMORY = REPO / "memory"
@@ -247,6 +260,7 @@ HUMAN_MACHINE_FIELDS = frozenset({
     "Status", "Filed", "Full context", "Resolution evidence",
     "Review target", "Review revision", "Reviewed revision", "Review outcome",
     "Blocks now", "Blocks at", "Until then", "If unanswered",
+    "Answer by", "Re-asked",
     "Supersedes", "Depends on", "Successor action", "Follow-up review",
     "External assignment", "External source", "Request kind",
 })
@@ -1792,6 +1806,42 @@ def human_attention_format_v1_at(revision):
     )
 
 
+def human_gating_enabled():
+    contract = repo_artifact_bytes(QUEUE / "AGENTS.md")
+    return bool(
+        contract is not None
+        and text_fields(decode_utf8_artifact(
+            contract, "candidate `message-queue/AGENTS.md`"
+        )).get("Human gating schema", "").strip() == "v1"
+    )
+
+
+def human_gating_v1_at(revision):
+    """Return whether one exact candidate or commit enables human gating v1.
+
+    Deliberately a separate marker rather than a `Queue resolution schema` bump:
+    three sites compare that field against the literal `v1`, one of them an
+    anti-downgrade check, so raising it would break all three at once. The
+    activation machinery underneath is the same.
+    """
+    artifact = (
+        repo_artifact_bytes(QUEUE / "AGENTS.md")
+        if revision is None
+        else git_artifact_bytes_at(revision, "message-queue/AGENTS.md")
+    )
+    return bool(
+        artifact is not None
+        and text_fields(decode_utf8_artifact(
+            artifact,
+            (
+                "candidate `message-queue/AGENTS.md`"
+                if revision is None
+                else f"`message-queue/AGENTS.md` at {revision}"
+            ),
+        )).get("Human gating schema", "").strip() == "v1"
+    )
+
+
 def schema_activation_commits(head, path, field, version="v1"):
     """Return every reachable marker-bearing commit, including merged branches."""
     if not head:
@@ -1856,6 +1906,21 @@ def human_attention_activation_commits(head):
             candidate_head,
             "message-queue/AGENTS.md",
             "Human-attention format",
+        )
+        if error:
+            raise GitSnapshotError(error)
+        activations.extend(found)
+    return tuple(dict.fromkeys(activations))
+
+
+def human_gating_activation_commits(head):
+    """Return every reachable commit that already carried human gating v1."""
+    activations = []
+    for candidate_head in candidate_activation_heads(head):
+        found, error = schema_activation_commits(
+            candidate_head,
+            "message-queue/AGENTS.md",
+            "Human gating schema",
         )
         if error:
             raise GitSnapshotError(error)
@@ -2536,6 +2601,11 @@ LIFECYCLE_MUTABLE_FIELDS = {
     "Blocks at",
     "Until then",
     "If unanswered",
+    # A deadline and its re-ask are delivery state, not the ask. Holding them
+    # immutable would make re-surfacing a lapsed question an identity change,
+    # and the only legal repair would be to invent an answer nobody gave.
+    "Answer by",
+    "Re-asked",
 }
 AGENT_NOTES_SECTION_RE = re.compile(
     r"^## Agent notes\s*\n.*?(?=^##(?:\s|$)|\Z)",
@@ -2680,6 +2750,68 @@ def human_projection_context_migration(
     )
 
 
+def queue_gating_migration(
+    source, destination, before, after, prior_revision, revision
+):
+    """Allow one live human item to drop an unspellable boundary, once.
+
+    The monotonic timing ratchet is the queue's strongest invariant and this is
+    the only edge that bends it. It is bounded the same way
+    `human_projection_context_migration` is bounded: the weakening is legal only
+    in the exact commit that activates the schema which forbids the old boundary,
+    so it can be taken once and never again.
+
+    Four things must hold together, and each one is what stops a different abuse:
+    the old boundary must actually name a transition the new schema makes
+    unspellable (so this cannot launder an ordinary weakening); the item must
+    gain the concrete unattended outcome its own schema requires plus a
+    parseable `Answer by:` (so nothing becomes quietly unowned); neither side may
+    carry a concrete response (so a committed human answer can never be reframed);
+    and the action identity must be unchanged (so the ask itself is untouched).
+    """
+    source_parts = Path(source).parts
+    destination_parts = Path(destination).parts
+    if len(source_parts) < 3 or len(destination_parts) < 3 \
+            or source_parts[1] != "needs-human" \
+            or destination_parts[1] != "needs-human" \
+            or source_parts[2] != destination_parts[2] \
+            or delivery_class(Path(source).name) != "future-blocking" \
+            or delivery_class(Path(destination).name) != "non-blocking" \
+            or human_gating_v1_at(prior_revision) \
+            or not human_gating_v1_at(revision):
+        return False
+    prior = text_fields(before)
+    current = text_fields(after)
+    prior_transitions = boundary_transitions(
+        future_boundary_tokens(prior.get("Blocks at", ""))
+    )
+    if not prior_transitions.intersection(HUMAN_UNSPELLABLE_TRANSITIONS):
+        return False
+    if first_concrete_response(human_response_fields(before)) is not None \
+            or first_concrete_response(human_response_fields(after)) is not None:
+        return False
+    for key in queue_timing_fields_for("needs-human", after)["non-blocking"]:
+        if not has_concrete_value(current.get(key, "")):
+            return False
+    if parse_date(current.get("Answer by", "").strip()) is None:
+        return False
+    # The unattended-outcome sentence is the one thing the weakening makes
+    # false: an item that said "this does not merge until you answer" must not
+    # keep saying it once merging no longer waits. Both spellings are mutable
+    # here for that reason, and only that field is — `Why this matters` and the
+    # ask itself stay frozen, so this cannot become a licence to reword a
+    # question on the way past the ratchet.
+    _key, outcome = projection_value(current, 1)
+    if not has_concrete_value(outcome):
+        return False
+    mutable = (HUMAN_PROJECTION_FIELDS[1], LEGACY_HUMAN_PROJECTION_FIELDS[1])
+    return queue_action_identity(
+        source, before, extra_mutable_fields=mutable
+    ) == queue_action_identity(
+        destination, after, extra_mutable_fields=mutable
+    )
+
+
 def queue_parent_state_regression_problem(before, after):
     """Protect write-once responses and committed claims across merge parents."""
     prior = text_fields(before)
@@ -2717,6 +2849,13 @@ def queue_mutation_problem(
     if queue_action_identity(source, before) != queue_action_identity(
         destination, after
     ) and not human_projection_context_migration(
+        source,
+        destination,
+        before,
+        after,
+        prior_revision,
+        revision,
+    ) and not queue_gating_migration(
         source,
         destination,
         before,
@@ -2814,7 +2953,15 @@ def queue_mutation_problem(
     if source_timing in QUEUE_TIMING_ORDER \
             and destination_timing in QUEUE_TIMING_ORDER \
             and QUEUE_TIMING_ORDER[destination_timing] \
-            < QUEUE_TIMING_ORDER[source_timing]:
+            < QUEUE_TIMING_ORDER[source_timing] \
+            and not queue_gating_migration(
+                source,
+                destination,
+                before,
+                after,
+                prior_revision,
+                revision,
+            ):
         return "dependency timing was weakened while the queue item remained live"
     if source_timing == destination_timing and prior_timing != current_timing:
         return "dependency timing changed without a matching timing-prefix rename"
@@ -3983,92 +4130,6 @@ def task_transition_receipt_problem(
     return None
 
 
-def approved_review_merge_receipt_problem(
-    path, text, prior_revision, boundary_tokens
-):
-    """Require the admitted target history to carry the live merge receipt."""
-    got = text_fields(text)
-    if "transition:merge" not in boundary_tokens:
-        return (
-            "review must remain live until its boundary adapter records "
-            "durable crossing evidence"
-        )
-    review_revision = got.get("Review revision", "").strip()
-    if not review_revision.startswith("git:") or "..." not in review_revision:
-        return "merge cleanup needs a candidate-range Git review receipt"
-    reviewed_base, reviewed_head = review_revision[len("git:"):].split("...")
-    if CHANGE_RANGE is not None and CHANGE_RANGE.startswith("root:"):
-        return (
-            "merge cleanup needs a previously admitted target base; "
-            "a root range has no prior admission boundary"
-        )
-    # In exact-range admission, only history already reachable from the
-    # adapter-supplied target BASE can prove that the receipt survived a prior
-    # boundary. A merge manufactured inside the candidate must not authorize
-    # deleting the receipt before that candidate's own merge. No-range local
-    # hooks use the deletion parent as a best-effort usability check; the
-    # controlled range adapter rechecks the stronger target-history claim.
-    receipt_history = (
-        CHANGE_RANGE.split("...", 1)[0]
-        if CHANGE_RANGE is not None
-        else prior_revision
-    )
-    merges = subprocess.run(
-        [
-            "git", "--no-replace-objects", "rev-list", "--topo-order",
-            "--merges", receipt_history,
-        ],
-        cwd=REPO,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if merges.returncode:
-        raise GitSnapshotError(
-            merges.stderr.strip() or "could not inspect merge-boundary receipts"
-        )
-    receipt_paths_at = {}
-    for commit, receipt_path, receipt_text in queue_lineage_revision_snapshots(
-        path, text, prior_revision
-    ):
-        if receipt_text == text:
-            receipt_paths_at.setdefault(commit, set()).add(receipt_path)
-    for merge in merges.stdout.splitlines():
-        parents = revision_parents(merge, "merge-boundary receipt")
-        if len(parents) != 2 or parents[0] != reviewed_base:
-            continue
-        feature_parent = parents[1]
-        if not git_is_ancestor(reviewed_head, feature_parent):
-            continue
-        if not receipt_paths_at.get(merge):
-            continue
-        same_tree = subprocess.run(
-            [
-                "git", "--no-replace-objects", "diff", "--quiet",
-                merge, feature_parent, "--",
-            ],
-            cwd=REPO,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if same_tree.returncode not in (0, 1):
-            raise GitSnapshotError(
-                same_tree.stderr.decode("utf-8", errors="replace").strip()
-                or "could not verify merge-boundary receipt tree"
-            )
-        if same_tree.returncode:
-            continue
-        tail = changed_paths_between_revisions(reviewed_head, feature_parent)
-        if any(not valid_queue_item_path(candidate) for candidate in tail):
-            continue
-        return None
-    return (
-        "review must remain live until the previously admitted target "
-        "history contains an exact two-parent merge carrying its approved receipt"
-    )
-
-
 def negative_review_cancellation_problem(
     path, text, prior_revision, revision, boundary_tokens=()
 ):
@@ -4163,14 +4224,20 @@ def review_cleanup_boundary_problem(
         else blocking_boundary_tokens(boundary.get("Blocks now", ""))
     )
     transitions = boundary_transitions(tokens)
-    if "merge" in transitions:
-        target = review_target(got.get("Review target", ""))
-        if target is None or target[0] != "git":
-            return "merge cleanup needs a candidate-range Git review receipt"
-        return approved_review_merge_receipt_problem(
-            path, text, prior_revision, tokens
-        )
-    if transitions.intersection(TASK_LIFECYCLE_TRANSITIONS):
+    # A boundary Git cannot un-cross must never be a cleanup condition. The
+    # retired merge receipt demanded an exact two-parent merge in already-admitted
+    # history carrying the approved bytes, which is unsatisfiable the moment the
+    # merge happens before the answer — and that is the ordinary case in an
+    # `async` repository. `merge` is no longer spellable on a human item; a
+    # historical one loses only its own receipt route and falls through to the
+    # ordinary evidence rules, so an item filed under the old grammar stays
+    # deletable instead of stranding. `transitions` itself is left whole: the
+    # tail rule below still demands durable evidence for a named boundary, and
+    # narrowing it there would let a blocking merge review vanish silently.
+    routed = transitions - (
+        HUMAN_UNSPELLABLE_TRANSITIONS - TASK_LIFECYCLE_TRANSITIONS
+    )
+    if routed.intersection(TASK_LIFECYCLE_TRANSITIONS):
         target = review_target(got.get("Review target", ""))
         if target is None or target[0] != "local":
             return "task-boundary cleanup needs a stable local review target"
@@ -4358,8 +4425,10 @@ def queue_deletion_problem(path, text, prior_revision, revision):
             historical_future = historical_queue_timing(
                 path, text, prior_revision, "future-blocking"
             )
+            closed_on_a_boundary = False
             if historical_future is not None \
                     and outcome in REVIEW_TERMINAL_OUTCOMES:
+                closed_on_a_boundary = True
                 boundary_problem = review_cleanup_boundary_problem(
                     path,
                     text,
@@ -4372,6 +4441,7 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                     return boundary_problem
             elif delivery_class(Path(path).name) == "blocking" \
                     and outcome in REVIEW_TERMINAL_OUTCOMES:
+                closed_on_a_boundary = True
                 boundary_problem = review_cleanup_boundary_problem(
                     path,
                     text,
@@ -4391,7 +4461,18 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                         "negative review needs durable cancellation evidence: "
                         + cancellation_problem
                     )
-            return None
+            # Cleanup needs the crossed receipt for a boundary review and
+            # changed evidence otherwise (`message-queue/AGENTS.md`). Only the
+            # boundary branches above were enforced, so a review that never
+            # carried one could be answered and deleted with nothing outside
+            # the queue to show for it — and this model makes `non-blocking-`
+            # the ordinary timing for a human review, so that is now the common
+            # case rather than the rare one.
+            if closed_on_a_boundary:
+                return None
+            return resolution_evidence_problem(
+                path, text, prior_revision, revision
+            )
         return resolution_evidence_problem(
             path, text, prior_revision, revision
         )
@@ -4549,8 +4630,82 @@ def check_queue_location():
             )
 
 
+def human_gating_problems(timing, got, records):
+    """Yield why one live `needs-human/` item may not bind what it binds.
+
+    The whole model is here: a human answer never holds a Git edge. Merging,
+    moving a task through review, and recording it complete are all revertible,
+    so none of them may wait on an answer that arrives whenever it arrives. What
+    a human item may still withhold is the start of work nobody has begun, and
+    one act with no undo — both satisfiable by a commit an agent can make at any
+    time after filing, in every review outcome.
+    """
+    tokens = (
+        future_boundary_tokens(got.get("Blocks at", ""))
+        if timing == "future-blocking"
+        else blocking_boundary_tokens(got.get("Blocks now", ""))
+        if timing == "blocking"
+        else []
+    )
+    transitions = boundary_transitions(tokens)
+    task_ids = boundary_task_ids(tokens)
+    for name in sorted(transitions.intersection(HUMAN_UNSPELLABLE_TRANSITIONS)):
+        yield (
+            f"human action may not bind transition:{name}; merging, reviewing, "
+            "and completing are revertible Git edges",
+            "drop the boundary and file it non-blocking-* with its unattended "
+            "outcome, or bind transition:start on a 0_backlog task",
+        )
+    if timing == "blocking" and blocking_task_ids(got.get("Blocks now", "")):
+        yield (
+            "human action may not stop a whole task with **Blocks now:** "
+            "task:<id>; no human answer justifies 2_blocked",
+            "file it non-blocking-* with its unattended outcome, or name the "
+            "one act with no undo as operation:<name>",
+        )
+    if "start" in transitions:
+        if not task_ids:
+            yield (
+                "transition:start on a human action must name the task it "
+                "holds unstarted",
+                "append task:<id> for the 0_backlog task this gate withholds",
+            )
+        for task_id in sorted(task_ids):
+            record = records.get(task_id)
+            if record is None:
+                continue  # queue-task-reciprocity owns a missing task record
+            status = record[0]
+            if status != "0_backlog":
+                yield (
+                    f"transition:start names task:{task_id} in {status}; a "
+                    "start gate binds an unstarted 0_backlog task",
+                    "return that task to 0_backlog and unclaim it, or drop the "
+                    "boundary and file this non-blocking-*",
+                )
+    if parse_date(got.get("Answer by", "").strip()) is None:
+        yield (
+            "**Answer by:** must be one UTC YYYY-MM-DD date",
+            "set the date this question is worth re-surfacing on — 90 days "
+            "from Filed unless something real dates it",
+        )
+
+
 def check_queue_schema():
     queue_v1 = queue_resolution_enabled()
+    gating_v1 = human_gating_enabled()
+    if not gating_v1 and (REPO / ".git").exists() \
+            and git_index_entries("message-queue") \
+            and human_gating_activation_commits(_GIT_HEAD_OID):
+        # The marker selects the restricted boundary grammar. Letting it be
+        # toggled off and back on would let one candidate file a human merge
+        # gate and re-arm the refusal behind it.
+        yield Finding(
+            "queue-schema",
+            Path("message-queue/AGENTS.md"),
+            "Human gating schema v1 was removed after activation",
+            "restore **Human gating schema:** v1 while the queue remains",
+        )
+    gating_records = task_records() if gating_v1 else {}
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue  # queue-location owns unsafe or broken filesystem entries
@@ -4628,6 +4783,13 @@ def check_queue_schema():
                 f"field **{key}:** contradicts the {timing}-* filename",
                 "rename the item or keep only the timing fields for its prefix",
             )
+        if gating_v1 and item_actor == "needs-human":
+            for message, fix in human_gating_problems(
+                timing, got, gating_records
+            ):
+                yield Finding(
+                    "queue-schema", item.relative_to(REPO), message, fix
+                )
 
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
@@ -4778,24 +4940,10 @@ def check_queue_schema():
             )
             transitions = boundary_transitions(boundary_tokens)
             review_revision = got.get("Review revision", "").strip()
-            is_git_range = bool(
-                review_revision.startswith("git:")
-                and "..." in review_revision
-            )
-            if "merge" in transitions \
-                    and review_revision != "pending" \
-                    and has_concrete_value(review_revision) \
-                    and (
-                        target is None
-                        or target[0] != "git"
-                        or not is_git_range
-                    ):
-                yield Finding(
-                    "queue-schema",
-                    item.relative_to(REPO),
-                    "merge-bound review must bind the candidate Git range",
-                    "publish Review target/revision as git:<base>...<head>",
-                )
+            # The merge-bound-review rule that stood here is gone with the
+            # boundary it served: every review is a human item, and a human item
+            # can no longer bind `transition:merge` at all, so the rule could
+            # only ever fire beside the refusal above as a duplicate.
             if transitions.intersection(TASK_LIFECYCLE_TRANSITIONS) \
                     and review_revision != "pending" \
                     and has_concrete_value(review_revision) \
@@ -5280,9 +5428,37 @@ def check_stale_queue():
         if not readable_queue_item(item):
             continue
         timing = delivery_class(item.name)
-        if timing is None or timing == "non-blocking":
+        if timing is None:
             continue
         got = fields(item)
+        if item.parent.parent.name == "needs-human":
+            # A human item ages on its own deadline, whatever its prefix. The
+            # old rules never reached these at all: `non-blocking` was skipped
+            # outright, and a `future-blocking` item was skipped unless its
+            # boundary began with a date — which no named boundary does. Ten
+            # live questions therefore carried no staleness pressure of any
+            # kind, and "it blocks a merge" was the only alarm any of them had.
+            #
+            # `stale-queue` is advisory, so a lapse never blocks a commit or a
+            # merge. That tier is what makes a deadline admissible here: the
+            # answer is the human's to give, and a repository may notice that it
+            # is late without ever deciding it for them.
+            if first_concrete_response(human_response_fields(repo_text(item))) \
+                    is not None:
+                continue  # answered: a record awaiting its fold, not an ask
+            deadline = parse_date(got.get("Answer by", ""))
+            if deadline and deadline <= TODAY:
+                yield Finding(
+                    "stale-queue",
+                    item.relative_to(REPO),
+                    f"answer-by date {deadline} has passed",
+                    "re-surface it in the next reply, then set a new "
+                    "**Answer by:** with a **Re-asked:** line naming the "
+                    "lapsed date; never write an answer nobody gave",
+                )
+            continue
+        if timing == "non-blocking":
+            continue
         if timing == "future-blocking":
             boundary = parse_leading_date(got.get("Blocks at", ""))
             if boundary and boundary <= TODAY:
@@ -5340,8 +5516,14 @@ def queue_item_owned_by_task(path, task_id, revision=None):
     ))
     if task_id in owned_boundaries:
         return True
+    # Any phrasing that names the task inside `Filed:` proves provenance. The
+    # field is the provenance clause and it is immutable, so pinning one exact
+    # preposition means an item written as "from the owner's review of task `x`"
+    # can never prove what it plainly says — and cannot be reworded to. That
+    # mattered the moment a human item lost its boundary: the boundary token was
+    # its other ownership proof, and dropping it must not orphan the item.
     return bool(re.search(
-        r"(?<![A-Za-z0-9_-])from[ \t]+task[ \t]+`"
+        r"(?<![A-Za-z0-9_-])task[ \t]+`"
         + re.escape(task_id)
         + r"`(?![A-Za-z0-9-])",
         got.get("Filed", ""),
@@ -6035,34 +6217,34 @@ def check_task_structure():
                             "resolve or reclassify the queue action before moving task status",
                         )
                 if entry_name == "4_done" and not queue_is_none:
-                    receipt_actions = bool(live_queue_paths)
-                    for target in live_queue_paths:
-                        timing = delivery_class(target.name)
-                        got = fields(target)
-                        tokens = (
-                            future_boundary_tokens(got.get("Blocks at", ""))
-                            if timing == "future-blocking"
-                            else blocking_boundary_tokens(
-                                got.get("Blocks now", "")
-                            )
-                            if timing == "blocking"
-                            else []
-                        )
-                        if "complete" not in boundary_transitions(tokens) \
-                                or review_boundary_problem(
-                                    target, {"complete"}
-                                ) is not None:
-                            receipt_actions = False
-                            break
+                    # `4_done` is an agent's `git mv`, so it tests the agent's
+                    # obligation, never the human's satisfaction. Done means the
+                    # work is merged, `verification.md` carries real output, and
+                    # nothing is left for an agent to do. A live human question
+                    # stays listed and outlives the task: the queue is the single
+                    # source of truth for open questions, and holding a task in
+                    # review until someone answers is exactly the wait this model
+                    # removes.
                     if len(live_queue_paths) != len(queue_paths):
-                        receipt_actions = False
-                    if not receipt_actions:
                         yield Finding(
                             "task-structure",
                             rel / "task.md",
-                            "done task must declare **Queue actions:** none",
-                            "resolve or transfer pending actions; only an exact "
-                            "approved completion receipt may survive its crossing commit",
+                            "done task lists a **Queue actions:** path that is "
+                            "not a live queue item",
+                            "drop the resolved path, or restore the item it names",
+                        )
+                    for target in live_queue_paths:
+                        rel_target = target.relative_to(REPO).as_posix()
+                        if Path(rel_target).parts[1] != "needs-agent":
+                            continue
+                        if delivery_class(target.name) == "non-blocking":
+                            continue
+                        yield Finding(
+                            "task-structure",
+                            rel / "task.md",
+                            f"done task still owes agent action `{rel_target}`",
+                            "resolve or transfer it, or reclassify its timing; a "
+                            "task is done when the agent owes nothing",
                         )
                 if entry_name == "2_blocked":
                     reciprocal = "task:" + task.name
@@ -8651,7 +8833,26 @@ RETRY_EVIDENCE_PLACEHOLDER = (
 )
 
 
+def retry_timing(f):
+    """Return the timing prefix a generated retry earns from its finding.
+
+    An advisory finding reports drift the calendar alone can create, so a clean
+    tree must never start failing on a date. Filing its retry as `blocking-*`
+    would smuggle exactly that failure back in through a second door: the
+    blocking header carries `Blocks now: transition:merge`, and the advisory
+    would stop a merge the check itself is not allowed to stop.
+    """
+    return "non-blocking" if f.advisory else "blocking"
+
+
 def retry_text(f):
+    timing = retry_timing(f)
+    boundary = (
+        "**Blocks now:** transition:merge\n"
+        if timing == "blocking"
+        else "**If unanswered:** The advisory finding stays reported and "
+             "unrepaired; nothing stops.\n"
+    )
     return (
         f"# {retry_title(f)}\n\n"
         f"**Status:** open\n"
@@ -8662,7 +8863,7 @@ def retry_text(f):
         f"**Subject:** `{f.subject}`\n"
         f"**Action:** {retry_action(f)}\n"
         f"**Resolution evidence:** {RETRY_EVIDENCE_PLACEHOLDER}\n"
-        f"**Blocks now:** transition:merge\n\n"
+        f"{boundary}\n"
         f"{retry_projection(f)}\n\n"
         "## Agent notes\n\nNone yet.\n"
     )
@@ -8739,6 +8940,11 @@ def refresh_retry_text(text, finding, timing="blocking"):
         )
     if timing == "blocking" and "Blocks now" not in got:
         additions.append("**Blocks now:** transition:merge")
+    if timing == "non-blocking" and "If unanswered" not in got:
+        additions.append(
+            "**If unanswered:** The advisory finding stays reported and "
+            "unrepaired; nothing stops."
+        )
     subject_line = re.search(r"^\*\*Subject:\*\*.*$", text, flags=re.M)
     if additions and not subject_line:
         return text  # provenance recognition requires Subject; avoid a destructive guess
@@ -8820,9 +9026,10 @@ def retry_destination(key, finding):
                     and retry_identity_matches(text, finding):
                 return candidate
 
-    base = RETRIES / f"blocking-{key}.md"
+    timing = retry_timing(finding)
+    base = RETRIES / f"{timing}-{key}.md"
     existing = [base]
-    existing.extend(sorted(RETRIES.glob(f"blocking-{key}-[0-9]*.md")))
+    existing.extend(sorted(RETRIES.glob(f"{timing}-{key}-[0-9]*.md")))
     for candidate in existing:
         if not candidate.is_file() or candidate.is_symlink():
             continue
@@ -8837,7 +9044,7 @@ def retry_destination(key, finding):
     suffix = 0
     while True:
         disambiguator = "" if suffix == 0 else f"-{suffix}"
-        candidate = RETRIES / f"blocking-{key}{disambiguator}.md"
+        candidate = RETRIES / f"{timing}-{key}{disambiguator}.md"
         if not candidate.exists() and not candidate.is_symlink():
             return candidate
         suffix += 1

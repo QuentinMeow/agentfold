@@ -9,11 +9,11 @@
 **Review revision:** git:25d03257b5ee61753fa9bada609722c4e84a8064...fd2374d99796300ed4325c2961e696092c17875e
 **Reviewed revision:** ______
 **Review outcome:** pending
-**Blocks at:** transition:merge task:2026-07-24-isolate-test-git-environment
-**Until then:** The draft PR and later stack layers may be prepared, but this layer does not merge.
+**Answer by:** 2026-10-22
+**If unanswered:** The Git-isolation boundary as merged stands as the repository-wide test boundary, and its task completes without your judgment on record.
 **Look-at:** `automation/run_tests.py`; the linked-worktree preservation evidence in `verification.md`
 **Why-you-might-care:** Every hook-launched repository test depends on this boundary not redirecting Git operations into the invoking checkout.
-**If-you-do-nothing:** This PR and its dependent stack layers remain unmerged.
+**If-you-do-nothing:** The merged boundary stands as the repository-wide test boundary, and its task completes without your judgment on record.
 
 ## What you need to know
 

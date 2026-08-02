@@ -168,6 +168,24 @@ What is true today, mapped to the desired-state lines.
   implementation on that stale branch is design input only, because its 1,849-line
   `automation/markdown_semantics.py` rewrite was blocked by its own adversarial parser lens
   three times and never tested against the current reconciler.
+- **Human gating (2026-08-01)**: nothing a human owes holds a Git edge. A
+  `needs-human/` item may withhold only the start of a task still in `0_backlog` or one
+  act with no undo; `transition:merge|review|complete` and `Blocks now: task:<id>` are
+  unspellable there, `4_done` tests the agent's obligation rather than the human's
+  satisfaction, and every human item carries an advisory `Answer by:` date. `needs-agent/`
+  timing is untouched. The repair was forced by a real deadlock: two reviews bound
+  `transition:merge` on ranges already merged into `main`, and their cleanup required a
+  merge that had already happened, so they could be neither resolved nor deleted — and the
+  decision filed to dispose of them bound `transition:complete` on the same three tasks it
+  asked about. Four live items were migrated on a one-time schema-activation edge, with
+  every committed human response byte-identical afterwards; both stranded reviews are still
+  unanswered and are now answerable at any time. What this does **not** do is make any of
+  it enforceable: the `main-projection` ruleset is still `enforcement: disabled` with no
+  required check, so every merge gate here remains advisory until the owner answers
+  `message-queue/needs-human/decisions/non-blocking-turn-on-the-merge-gate-this-repository-already-runs.md`.
+  Two known gaps stay written down rather than papered over: an agent `future-blocking`
+  item bound to `transition:merge` still gates its own task's merge by design, and an
+  immutable field on a live item has no legal repair (`memory/known-issues/`).
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

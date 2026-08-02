@@ -6,6 +6,7 @@
 **Description:** A changes-requested review creates one agent-owned repair and a distinct artifact-pending human re-review at the same boundary
 **Review-by:** 2027-01-19
 **Supersedes:** `memory/decisions/2026-07-23-queue-resolution-preserves-review-intent.md`
+**Amended-by:** `memory/decisions/2026-08-01-human-answers-never-gate-a-git-edge.md` (the re-review may no longer bind the repair's merge, so a changes-requested review whose repair has already landed carries its question `non-blocking-`; the agent-repair-plus-distinct-re-review pair stands)
 
 ## Context
 

@@ -9,6 +9,7 @@
 **Review revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
 **Reviewed revision:** ______
 **Review outcome:** pending
+**Answer by:** 2026-10-21
 **If unanswered:** The 2026-07-22 ADR remains authoritative and the current expanded explanation stays; implementation may proceed.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Human review disposition” and “Review vocabulary and concrete differences”
 **Why-you-might-care:** This review is about whether the documentation now explains a prior decision, not whether an implementation task may reverse it.

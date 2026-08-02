@@ -9,6 +9,7 @@
 **Review revision:** sha256:344a30c86bba805c4b78093b2916a0dffd1fcc98c3085dc85f5fbfbd09b5773f
 **Reviewed revision:** ______
 **Review outcome:** pending
+**Answer by:** 2026-10-21
 **Blocks at:** transition:start task:2026-07-22-universal-guard-mode-configuration
 **Until then:** The proposal remains documentation only; unrelated work may continue.
 **Look-at:** `docs/designs/risk-tiered-agent-guardrails.md`, “Bind evidence to exact bytes and policy” and “Content-bound acknowledgement”

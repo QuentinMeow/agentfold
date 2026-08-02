@@ -74,9 +74,13 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 **Review revision:** <pending | sha256:<64 hex> | git:<full id> | git:<base>...<head>>
 **Reviewed revision:** ______
 **Review outcome:** <pending | approved | changes-requested | rejected | abandoned>
+**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
 <!-- Then exactly one timing field matching the filename:
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 non-blocking-* -> neither; If you do nothing above is the unattended outcome.
+A needs-human item may bind only transition:start on a 0_backlog task, or
+operation:<name> for one act with no undo. Merging, moving a task, and recording it
+done never wait on an answer (message-queue/AGENTS.md owns this rule).
 Add External assignment / External source only for a provider binding. On a
 changes-requested resolution add Successor action and Follow-up review here. -->

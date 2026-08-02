@@ -5,6 +5,7 @@
 **Decided-by:** agent (delegated two-way-door lifecycle hardening after independent adversarial review)
 **Description:** Live timing only escalates, future boundaries survive renames, and a provider source's final binding remains until trusted release evidence
 **Review-by:** 2027-02-28
+**Amended-by:** `memory/decisions/2026-08-01-human-answers-never-gate-a-git-edge.md` (the merge-receipt cleanup condition, retired as permanently unsatisfiable once the merge precedes the answer; the monotonic ratchet and the provider-release clause stand, the ratchet bending only on a recorded schema-activation edge)
 
 ## Context
 

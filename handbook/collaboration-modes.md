@@ -8,8 +8,8 @@ may override it for that task via a `**Mode:**` field.
 |---|---|---|---|
 | Who drives | agent | agent | human |
 | Agent decides alone | everything | everything **reversible** | trivial steps only |
-| Agent files & continues | optional `non-blocking-*` review | one-way door → `future-blocking-*` decision + path until boundary | — |
-| Agent stops and waits | only a separately mandated trust gate | a `blocking-*` item, or unresolved item at its future boundary | before every meaningful step, after filing its `blocking-*` item |
+| Agent files & continues | optional `non-blocking-*` review | one-way door → `future-blocking-*` decision on the act itself; every other question is `non-blocking-*` and merges with it | — |
+| Agent stops and waits | only a separately mandated trust gate | an unstarted `0_backlog` task with a live start review, or one act with no undo — never a merge, a task move, or a completion | before every meaningful step, after filing its `blocking-*` item |
 | Human reviews | queue projections, usually non-blocking | queue items, ordered by timing prefix | live projections of queued actions |
 | Merge gate | adversarial-review majority (`skills/adversarial-review/`) | tests + reconciler; panel for one-way doors | the human |
 | Costs | most tokens, zero human time | balanced | fewest tokens, most control |

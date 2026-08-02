@@ -27,7 +27,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - **One worktree per agent** — parallel agents use `git worktree add ../<task-id>
   task/<task-id>`, never share a checkout.
 - **Service boundaries** — a task branch touches one service; cross-service work is
-  split into linked tasks. Two branches editing the same file is a planning bug.
+  split into linked tasks. Two *independent* branches editing the same file is a planning
+  bug; a *stack*, where each layer contains the one below, is the normal way to sequence
+  work on one file. Screen a landing set for cross-leg collisions before merging any of it.
 
 ## Commits
 
@@ -44,17 +46,29 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - `main` is always green: reconciler clean, tests passing.
 - Merge task branches via PR/merge-commit (not squash — task commits are the audit
   trail; not rebase-onto-main of shared branches — pushed history is never rewritten).
+  Restacking your own unmerged layer onto a newly merged parent with `--force-with-lease`
+  is expected, and the adapter passes `--displaced-tip` for it.
+- **Never delete a branch that is another open PR's base.** Before merging any PR whose
+  head branch is a base elsewhere, run
+  `gh pr list --state open --json number,baseRefName,headRefName` and retarget every child
+  (`gh pr edit <child> --base main`), then re-query and assert `baseRefName == "main"` —
+  the exit code is not the assertion. Merge the parent only then, delete no branch during
+  a landing window, and re-run the query immediately before each deletion afterwards.
+  Deleting a base ref closes the child PR in the same second, and a closed PR whose base
+  was deleted cannot be reopened; this cost 41 minutes and two rebuilt PRs on 2026-08-01.
+  Prefer shallow stacks whose members all target `main`: there is then no base ref to destroy.
 - Filing an action is not crossing its boundary. A merge boundary skips an unanswered
   action the range itself filed — otherwise the reciprocal task link the reconciler
   requires would strand every `transition:*` action the moment it was written — and it
   is reported at every later boundary it reaches. An answered one is never skipped.
-- A terminal human response does not erase a future merge dependency. Keep its
-  `future-blocking-*` review folding and live; fresh approval of `git:<base>...<head>`
-  satisfies merge only on that base with queue-only lifecycle commits afterward. The
-  merge commit carries the receipt. Cleanup passes only when that merge is already in
-  the adapter-supplied target base, so candidate-local topology cannot stand in for
-  admission. Local no-range hooks are best-effort; hard assurance depends on a
-  controlled adapter supplying the authentic target base and enforcing its ref policy.
+- A human answer never gates a merge. A `needs-human/` review is `non-blocking-*` unless it
+  gates the start of a task still in `0_backlog` or one act with no undo
+  (`message-queue/AGENTS.md`); it is filed, merged, and answered later, and its PR body
+  lists it without waiting for it. A `transition:start` review binds a stable local
+  artifact, and its fresh approval is the transition receipt in the crossing commit.
+  Merging a change whose review has not come back is the accepted price of an `async`
+  repository: the undo is `git revert -m 1`, and the start gate is what stops any *task*
+  that depends on the unanswered judgment from beginning on top of it.
 - A PR description may summarize actions only by linking their live canonical queue
   items. Its declared “What to review” section is checked at the provider boundary:
   one top-level entry and one queue link per action, including every live human path in
