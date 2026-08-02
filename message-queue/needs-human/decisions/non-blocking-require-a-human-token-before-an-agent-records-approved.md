@@ -1,6 +1,6 @@
 # Should recording `approved` require a word the human actually typed?
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-07-31, by claude, from task 2026-07-31-let-a-human-answer-in-one-edit
 **Action:** Choose Option A or Option B, or state another rule for how an approval is derived from human text.
 **Full context:** [what a human action must contain, and what an outcome is worth](handbook/human-action-guide.md)

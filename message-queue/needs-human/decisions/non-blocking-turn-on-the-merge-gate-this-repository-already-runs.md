@@ -73,7 +73,7 @@ you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-08-01, by claude, from task `2026-08-01-stop-human-answers-from-gating-git-edges`
 **Full context:** `handbook/git-workflow.md`; `memory/decisions/2026-08-01-human-answers-never-gate-a-git-edge.md`
 **Resolution evidence:** `roadmap/current-state.md`
