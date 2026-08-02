@@ -1,10 +1,10 @@
 # Decide what happens when a queue-format migration has to be undone
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-08-01, by claude, from the human-action format redesign — `message-queue/AGENTS.md`
 **Parent:** 2026-08-01-countersign-the-live-human-item-migration
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-record-that-a-format-migration-is-one-way.md`
+**Queue actions:** none
 
 ## Goal
 
