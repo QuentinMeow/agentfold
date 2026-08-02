@@ -44,10 +44,10 @@ jobs:
           QUEUE_DISPLACED_ARGS=()
           if [ -n "$QUEUE_DISPLACED_TIP" ] && \
               [ "$QUEUE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
-            if ! git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}" 2>/dev/null; then
+            if ! git --no-replace-objects cat-file -e "$QUEUE_DISPLACED_TIP^{commit}" 2>/dev/null; then
               git fetch --no-tags origin "$QUEUE_DISPLACED_TIP"
             fi
-            git cat-file -e "$QUEUE_DISPLACED_TIP^{commit}"
+            git --no-replace-objects cat-file -e "$QUEUE_DISPLACED_TIP^{commit}"
             QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_DISPLACED_TIP")
           fi
           python3 automation/reconcile/reconcile.py --check \
@@ -67,16 +67,16 @@ jobs:
           if [ "$QUEUE_PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
             if [ "$QUEUE_PUSH_BRANCH" = "$QUEUE_DEFAULT_BRANCH" ]; then
               QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
-            elif QUEUE_PUSH_BASE="$(git merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
+            elif QUEUE_PUSH_BASE="$(git --no-replace-objects merge-base "$QUEUE_PUSH_HEAD" "origin/$QUEUE_DEFAULT_BRANCH")"; then
               QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"
             else
               QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"
             fi
           else
-            if ! git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
+            if ! git --no-replace-objects cat-file -e "$QUEUE_PUSH_BEFORE^{commit}" 2>/dev/null; then
               git fetch --no-tags origin "$QUEUE_PUSH_BEFORE"
             fi
-            git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"
+            git --no-replace-objects cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"
             QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BEFORE...$QUEUE_PUSH_HEAD"
             QUEUE_DISPLACED_ARGS=(--displaced-tip "$QUEUE_PUSH_BEFORE")
           fi

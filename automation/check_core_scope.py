@@ -77,9 +77,17 @@ GLOBAL_STATE_MARKERS = (
 )
 
 
+# Every Git read in this gate goes through this prefix, so a `refs/replace/*` entry
+# cannot substitute a forged commit, tree, or blob for the real one the gate was asked
+# about. Without it a blob passes the "is this a commit" test and a stale core-fit
+# review passes as fresh. The source-level guard in
+# `automation/tests/test_reconcile_queue.py` holds that line.
+RAW_GIT = ("git", "--no-replace-objects")
+
+
 def git(*args, repo=REPO):
     result = subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=False
+        [*RAW_GIT, *args], cwd=repo, text=True, capture_output=True, check=False
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
@@ -462,7 +470,7 @@ def review_revision_findings(
     pending_paths=(), task_id="", selected_task_blobs=None, repo=REPO,
 ):
     resolved = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}"],
+        [*RAW_GIT, "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}"],
         cwd=repo, text=True, capture_output=True, check=False,
     )
     if resolved.returncode:
@@ -475,7 +483,7 @@ def review_revision_findings(
         ]
     current = git("rev-parse", "--verify", f"{current_revision}^{{commit}}", repo=repo).strip()
     ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", reviewed_commit, current],
+        [*RAW_GIT, "merge-base", "--is-ancestor", reviewed_commit, current],
         cwd=repo, text=True, capture_output=True, check=False,
     )
     if ancestry.returncode:

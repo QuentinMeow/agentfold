@@ -48,6 +48,13 @@ TEST_GLOBS = (
     "automation/**/tests/test_*.py",
 )
 GIT_BOUNDARY_MARKER = "AgentFold isolated test view; not a Git repository.\n"
+# Any Git read that compares the index against a committed tree goes through this
+# prefix: without it a `refs/replace/*` entry can make the staged diff look empty and
+# narrow the pre-commit lane down to no tests at all. Reads that only touch the index,
+# the worktree, the config, or a repository location may stay bare, because a
+# replacement entry has nothing to substitute in them. The source-level guard in
+# `automation/tests/test_reconcile_queue.py` holds that line.
+RAW_GIT = ("git", "--no-replace-objects")
 # Written into the isolated scratch HOME by install_isolated_git_configuration(), which
 # explains why. Both `auto` keys are needed: Git through 2.54 gates the background spawn
 # on `maintenance.auto` alone, while newer Git falls back to `gc.auto` when
@@ -157,7 +164,10 @@ INPUT_TEST_OWNERS = (
     ),
     (
         b"automation/check_core_scope.py",
-        ("automation/tests/test_check_core_scope.py",),
+        (
+            "automation/tests/test_check_core_scope.py",
+            "automation/tests/test_reconcile_queue.py",
+        ),
     ),
     (
         b"automation/cochange-ledger.txt",
@@ -189,7 +199,10 @@ INPUT_TEST_OWNERS = (
     ),
     (
         b"automation/run_tests.py",
-        ("automation/tests/test_run_tests.py",),
+        (
+            "automation/tests/test_reconcile_queue.py",
+            "automation/tests/test_run_tests.py",
+        ),
     ),
 )
 # Any other path under these groups owns every discovered test in the group: only that
@@ -580,7 +593,7 @@ def staged_test_selection(all_test_files, repository=None):
         index_path = selected_git_index_path(repository, selector_environment)
         initial_index_fingerprint = index_fingerprint(index_path)
         diff = subprocess.run(
-            ["git", "diff", "--cached", "--name-status", "-z", "-M"],
+            [*RAW_GIT, "diff", "--cached", "--name-status", "-z", "-M"],
             cwd=repository,
             env=selector_environment,
             stdout=subprocess.PIPE,
