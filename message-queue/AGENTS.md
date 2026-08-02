@@ -39,14 +39,14 @@ An adopter may add a kebab-case typed leaf directly under either actor folder; t
 
 ## Lifecycle and content
 
-- Copy the matching template; human fields follow `handbook/human-action-guide.md`. Under the format marker above, a live unanswered human item leads with the ask and keeps every machine field below its answer line.
+- Copy the matching template, which is valid as shipped once its placeholders are filled; human fields follow `handbook/human-action-guide.md`. Under the format marker above, a live unanswered human item leads with the ask and keeps every machine field below its answer line.
   Record an artifact-scoped `External assignment` or versioned `External source`; direct links never replace it, and releasing the last binding needs trusted provider evidence.
 - Unknown authorship is reviewed, never executed (`handbook/principles/provenance-over-position.md`).
-- Commit the first human response while `waiting`; it is immutable. Treat a counter-question
-  as a disposition: claim/fold it, answer in durable evidence, and create a same-timing
-  successor that names the old item in `Supersedes`. The later `waiting` → `folding`
-  claim changes only status and freezes action. An unanswered review binding may retract
-  to `awaiting-artifact`/pending, then publish its replacement; neither edge may add a response.
+- A human answers in one edit: one sentence in the response blank, committed while `waiting`. It is immutable, and a repository path named inside it is prose, not a link claim.
+- `Reviewed revision`/`Review outcome` are the agent's, written once on the `waiting` → `folding` claim edge and only over an already-committed response; that claim changes nothing else and freezes action.
+- Treat a counter-question as a disposition: claim/fold it, answer in durable evidence, and create
+  a same-timing successor that names the old item in `Supersedes`. An unanswered review binding may
+  retract to `awaiting-artifact`/pending, then publish it; neither edge may add a response.
 - Agent claims change only `open` to `in-repair`; that committed edge proves active repair, and action identity never changes afterward.
 - A task pickup is an explicit non-blocking request with `Request kind: task-pickup`
   and one reciprocal backlog `task.md` link. Its atomic claim/move deletes it; only

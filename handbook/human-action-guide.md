@@ -37,6 +37,28 @@ paths move and are not durable context; only a pickup may use one as live contex
 because its claim commit deletes that request. Retry records may quote one only as
 evidence of broken state.
 
+## One edit is the whole answer
+
+The reader replaces one blank with one sentence and commits. Nothing else on the page is
+theirs, and a repository path they name inside that sentence is prose the folding agent
+reads, never a link the commit must resolve. Any item whose acceptance depends on a
+second hand-written field is filed wrong: it cannot be answered from a phone, and there
+is no repair, because the first response is immutable and human text is not editable.
+
+A review's `Reviewed revision` and `Review outcome` are therefore supplied by the agent,
+in the one `waiting` → `folding` claim commit, and only over a response the parent commit
+already carried. Both are write-once: the binding repeats the frozen `Review revision`, so
+the classification can never be re-pointed at other bytes, and the outcome can never be
+amended. Everything those fields buy survives — `queue_deletion_problem` still refuses to
+resolve a review that is unbound or lacks a terminal outcome, and a boundary still needs
+`approved`. What moved is who writes them and when.
+
+The reconciler cannot read English, so it cannot verify that `approved` is a truthful
+reading of "Looks good to me". It bounds the lie instead of preventing it: the outcome
+lands in a separate, attributable commit, beside the human's immutable words, and cannot
+exist at all until their response is already committed
+(`memory/known-issues/2026-07-31-review-outcome-classification-is-attested.md`).
+
 The summary must be sufficient to act; the full-context link is for depth, not a missing
 prerequisite. A recommendation is evidence, not permission to hide an alternative.
 
@@ -124,8 +146,9 @@ review still judges that semantic fidelity.
 Chat answers are first transcribed into the item. Task and handover projections never
 carry a second status or answer slot.
 
-Commit the response while status is `waiting`, then claim it in a separate one-line
-`Status: folding` commit. Every item predeclares `Resolution evidence`; a review's
+Commit the response while status is `waiting`, then claim it in a separate `Status:
+folding` commit that changes only the status and, for a review, the two agent-owned
+binding fields above. Every item predeclares `Resolution evidence`; a review's
 path is distinct from its target. Deletion changes that evidence in its commit. An
 unanswered review whose artifact changes first retracts to `awaiting-artifact` with
 pending binding and blank response fields; a later commit republishes the replacement.
