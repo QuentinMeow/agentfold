@@ -1,6 +1,6 @@
 # Repair the three pull-request branches the repaired scope gate still refuses
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-08-01, by claude, from replaying every blocked pull request against the repaired projection gate — task 2026-08-01-admit-a-candidates-whole-task-scope
 **Action:** File the missing task record for the branch named task/2026-07-31-redo-stranded-review-disposition (or rename that branch), and rewrite the "What to review" section of pull requests 41 and 45 to project every live human queue action their scope now binds.
 **Full context:** `automation/AGENTS.md`
