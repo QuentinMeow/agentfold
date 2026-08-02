@@ -904,3 +904,167 @@ pre-commit: OK
 11 of 11 files pass with 29 real verdicts in the ledger, which is the state the earlier
 assertion made impossible. No `--no-verify` was used at any point; the first commit attempt
 was refused and is recorded above rather than bypassed.
+
+---
+
+# Stage 0 transcripts — the four sections steps 1 through 8 owed
+
+**Verified:** 2026-08-02 by claude, task 2026-07-25-complete-stage-0-verification-transcripts
+
+Everything above this rule is the gating-experiment session's own record and is unchanged
+byte for byte. Everything below is pasted terminal output from runs made on 2026-08-02.
+
+Two commits are named throughout. The before-state runs were made at `17c1e16`, the parent
+of `e52f68e`, in a detached worktree checked out at that commit, so the checker they ran is
+the pre-fix checker. The after-state runs were made at `5fa7221`, the tip of `main` at the
+time, so the checker they ran is today's.
+
+Every run created one untracked fixture file, invoked the checker, and deleted the fixture.
+Each fixture was created, checked, and deleted on one shell line, so a failed command left
+nothing behind; nothing was ever committed, and each block ends with the
+`git status --short` that shows the tree came back clean. Git-ignored `tmp/` could not hold these fixtures, which is
+why they sit under a scanned path instead: `live_markdown_files` in
+`automation/reconcile/reconcile.py` calls `path_is_git_ignored` and skips every ignored
+untracked path, so a fixture in an ignored directory is never scanned and a clean run over
+it proves nothing at all. That collision with the scratch-discipline guardrail is filed as
+`message-queue/needs-agent/requests/non-blocking-let-a-reconciler-fixture-obey-scratch-discipline.md`
+rather than fixed here.
+
+## the anchor hole, before the fix
+
+At `17c1e16`, `check_links` matched every link candidate against
+`re.fullmatch(r"[\w./-]+", cand)`. That character class contains no `#`, and the function
+contained no split on one, so a candidate carrying a fragment failed the match and was
+skipped whole before the existence test — neither its path nor its anchor was ever looked
+at.
+
+```
+$ git log --oneline -1 --no-decorate
+17c1e16 harness: claim the markdown co-change mining task
+
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 finding(s)
+
+$ printf '# Anchor hole fixture\n\nA link to [an absent file](docs/designs/absent-file.md#absent-anchor).\n' > docs/stage0-anchor-hole-fixture.md
+$ python3 automation/reconcile/reconcile.py --check; echo "exit=$?"
+reconcile: 0 finding(s)
+exit=0
+$ rm -f docs/stage0-anchor-hole-fixture.md
+$ git status --short
+```
+
+A clean report is not by itself evidence of a hole, because a file the reconciler never
+scanned prints exactly the same thing. The control is the same absent path with the
+fragment removed, written to the same filename, at the same commit:
+
+```
+$ printf '# Anchor hole fixture — control\n\nThe same absent path with no fragment: [absent](docs/designs/absent-file.md).\n' > docs/stage0-anchor-hole-fixture.md
+$ python3 automation/reconcile/reconcile.py --check; echo "exit=$?"
+[link-check] docs/stage0-anchor-hole-fixture.md: `docs/designs/absent-file.md` does not exist
+    fix: fix the path, create the target, or unquote if not a path
+reconcile: 1 finding(s)
+exit=1
+$ rm -f docs/stage0-anchor-hole-fixture.md
+$ git status --short
+```
+
+The file was scanned and the checker was awake at that commit. Only the `#` made the dead
+path invisible.
+
+Re-runner's note: the first block above does not reproduce at today's tip, because the hole
+it demonstrates is closed. It belongs to the range ending at `17c1e16`; `e52f68e` is the
+commit that closes it, and the next two sections are the same fixtures run today. Note also
+that the before-state reports `0 finding(s)` while today's reports `0 blocking finding(s)` —
+severity tiers arrived after `17c1e16`, and that difference in the summary line is real
+output, not a transcription slip.
+
+## link-check: a missing path carried behind a fragment
+
+```
+$ git log --oneline -1 --no-decorate
+5fa7221 harness: file the scratch-discipline fixture contradiction
+
+$ printf '# Anchor hole fixture\n\nA link to [an absent file](docs/designs/absent-file.md#absent-anchor).\n' > docs/stage0-anchor-hole-fixture.md
+$ python3 automation/reconcile/reconcile.py --check; echo "exit=$?"
+[link-check] docs/stage0-anchor-hole-fixture.md: `docs/designs/absent-file.md` does not exist
+    fix: fix the path, create the target, or unquote if not a path
+reconcile: 1 blocking finding(s)
+exit=1
+$ rm -f docs/stage0-anchor-hole-fixture.md
+$ git status --short
+```
+
+Byte-identical fixture content to the first before-state block. It printed `0 finding(s)`
+at `17c1e16` and names the missing path today.
+
+## link-check: an unknown fragment in a file that exists
+
+A second and distinct finding, with different message text and a different fix line: here
+the path resolves and the heading anchor does not.
+
+```
+$ printf '# Anchor fragment fixture\n\nA link to [a real file, unknown heading](docs/designs/markdown-edge-graph.md#no-such-heading-here).\n' > docs/stage0-anchor-fragment-fixture.md
+$ python3 automation/reconcile/reconcile.py --check; echo "exit=$?"
+[link-check] docs/stage0-anchor-fragment-fixture.md: `docs/designs/markdown-edge-graph.md` has no `no-such-heading-here` heading anchor
+    fix: point the link at a heading in `docs/designs/markdown-edge-graph.md` or add one whose slug is `no-such-heading-here`
+reconcile: 1 blocking finding(s)
+exit=1
+$ rm -f docs/stage0-anchor-fragment-fixture.md
+$ git status --short
+```
+
+Both `git status --short` lines print nothing: the fixtures are gone and the tree is clean.
+
+## agents-budget over automation/AGENTS.md
+
+Step 8 bought a new tool-table row by tightening prose rather than by dropping a rule, and
+the claim under test is that the file ended at exactly its permitted length. A whole-tree
+`--check` reports that as silence, which proves nothing on its own, so the check's own
+measurement is printed instead: `check_agents_budget` compares
+`len(repo_text(md).splitlines())` against `LEAF_AGENTS_BUDGET`, and both numbers are shown.
+
+```
+$ git log --oneline -1 --no-decorate
+5fa7221 harness: file the scratch-discipline fixture contradiction
+
+$ wc -l automation/AGENTS.md
+      60 automation/AGENTS.md
+
+$ python3 - <<'PY'
+import sys
+sys.path.insert(0, "automation/reconcile")
+import reconcile as r
+p = r.REPO / "automation/AGENTS.md"
+print("LEAF_AGENTS_BUDGET :", r.LEAF_AGENTS_BUDGET)
+print("measured lines     :", len(r.repo_text(p).splitlines()))
+print("agents-budget findings over the whole tree:")
+found = list(r.check_agents_budget())
+print("   ", found if found else "(none)")
+PY
+LEAF_AGENTS_BUDGET : 60
+measured lines     : 60
+agents-budget findings over the whole tree:
+    (none)
+```
+
+60 of 60. The claim that one more line is a finding is itself a claim, so it is run rather
+than asserted — the file is staged with one line added, checked, and restored:
+
+```
+$ printf 'One extra line, to show the budget is exactly where it says it is.\n' >> automation/AGENTS.md
+$ git add -- automation/AGENTS.md
+$ wc -l automation/AGENTS.md
+      61 automation/AGENTS.md
+$ python3 automation/reconcile/reconcile.py --check; echo "exit=$?"
+[agents-budget] automation/AGENTS.md: 61 lines exceeds the 60-line budget
+    fix: move depth into a linked doc (handbook/principles/progressive-disclosure.md)
+reconcile: 1 blocking finding(s)
+exit=1
+$ git checkout HEAD -- automation/AGENTS.md
+$ git status --short
+$ wc -l automation/AGENTS.md
+      60 automation/AGENTS.md
+```
+
+The budget is exactly where the constant says it is, and `automation/AGENTS.md` sits one
+line below the finding.
