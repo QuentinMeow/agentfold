@@ -63,12 +63,14 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** <waiting | folding>
+**Status:** waiting
 **Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
 **Full context:** `<repo-relative path to the durable source>`
 **Resolution evidence:** `<durable non-queue file that folding this answer will change>`
 **Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
-<!-- Then exactly one timing field matching the filename:
+<!-- Status ships as `waiting`, the only status a newly filed item may hold; the
+folding agent moves it to `folding` on its claim edge.
+Then exactly one timing field matching the filename:
 blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
 future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
 non-blocking-* -> neither; If you do nothing above is the unattended outcome.

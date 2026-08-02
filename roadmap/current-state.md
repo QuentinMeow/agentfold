@@ -66,7 +66,16 @@ What is true today, mapped to the desired-state lines.
   Tasks declare live queue actions, every unclaimed backlog task has an agent pickup
   message, and human items mechanically require differences, a concrete example, an
   unattended/boundary outcome, and a full-context pointer. Reviews cannot accept a
-  response before their exact artifact exists. PRs #7, #11, and #12 are admitted on
+  response before their exact artifact exists.
+- **Answering (2026-07-31)**: a human answers any item in one edit — one sentence in the
+  response blank, committed while `waiting`, and a path named inside it is prose rather
+  than a link claim. A review's `Reviewed revision` and `Review outcome` are supplied by
+  the agent's `folding` claim, admitted only over an already-committed response, only on
+  that edge, only once, and only repeating the frozen `Review revision`; both are still
+  required before the item may resolve or cross a boundary. Whether the recorded outcome
+  truthfully reads the human's sentence is an agent attestation, recorded as a known
+  issue rather than implied. Every `templates/queue/` file is copy-and-fill valid, with
+  no field a check reads left inside an HTML comment. PRs #7, #11, and #12 are admitted on
   main; their still-unanswered human review items are now bound to immutable ranges
   without treating those provider merges as review answers. PRs #8 and #10 landed on
   PR #7's already-merged branch and were superseded by the hardened main recoveries.

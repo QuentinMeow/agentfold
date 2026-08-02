@@ -190,6 +190,11 @@ REVIEW_OUTCOMES = {
 }
 REVIEW_SUCCESSOR_OUTCOMES = {"changes-requested", "not-approved"}
 REVIEW_TERMINAL_OUTCOMES = {"approved", "rejected", "abandoned"}
+# The two review fields the folding agent supplies, never the human. Keeping them
+# out of the human's own commit is what lets a review be answered in one edit
+# (`handbook/human-action-guide.md`); `review_terminal_binding_write` bounds when
+# and how an agent may fill them.
+AGENT_REVIEW_BINDING_FIELDS = ("Reviewed revision", "Review outcome")
 GIT_RANGE_RE = re.compile(
     r"^(?:root:(?:[0-9a-f]{40}|[0-9a-f]{64})|"
     r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
@@ -2565,6 +2570,22 @@ def normalize_claim_status(text):
     )
 
 
+def normalize_claim_binding(text):
+    """Blank the agent-supplied review binding lines for claim comparison.
+
+    The `waiting` -> `folding` claim is a one-line status commit for every actor
+    except a review, where that same commit is also where the agent records the
+    terminal binding. Only `review_terminal_binding_write` may unlock this, so the
+    claim stays "status plus exactly the binding it is allowed to add".
+    """
+    return re.sub(
+        r"^(\*\*(?:" + "|".join(AGENT_REVIEW_BINDING_FIELDS) + r"):\*\*)[ \t]*.*$",
+        r"\1 <claim-binding>",
+        text,
+        flags=re.M,
+    )
+
+
 def claim_identity(text, actor, leaf):
     got = text_fields(text)
     keys = {
@@ -2706,11 +2727,66 @@ def first_concrete_response(fields):
     return None
 
 
+def review_outcome_value(value):
+    """Normalize a review outcome, reading every unfilled blank as `pending`.
+
+    A filed review shows `Review outcome` as a slot the folding agent fills, so an
+    empty value, `______`, and `<...>` all mean the same thing: nothing has been
+    classified yet. Resolving them here keeps that judgment in one place instead of
+    letting each reader invent its own comparison — the omission default was already
+    `pending`, and a literal blank meant the same thing to a human but not to code.
+    """
+    value = (value or "").strip()
+    return value if has_concrete_value(value) else "pending"
+
+
 def unanswered_review(fields):
     return bool(
         first_concrete_response(fields) is None
         and not has_concrete_value(fields.get("Reviewed revision", ""))
-        and fields.get("Review outcome", "pending") in {"", "pending"}
+        and review_outcome_value(fields.get("Review outcome", "")) == "pending"
+    )
+
+
+def review_terminal_binding_write(prior, current):
+    """Whether `current` only adds the agent's one-time terminal review binding.
+
+    The human answers a review in one edit — one sentence after `**Your review:**`
+    and nothing else (`handbook/human-action-guide.md`). `Reviewed revision` and
+    `Review outcome` are then supplied by the agent's `folding` claim, so exactly
+    one committed edge may fill them, and it is admissible only when:
+
+    * the human's own response was already committed in the parent, so an agent can
+      never author a response and classify it in the same commit;
+    * every other response field — including the response text itself and the
+      `Review target`/`Review revision` binding the human answered against — stays
+      byte-identical, so the classification cannot be re-pointed at other bytes;
+    * the binding was previously unset, making the write once-only; and
+    * the new binding repeats the already-frozen `Review revision` exactly.
+
+    What this cannot check is whether the recorded outcome is a truthful reading of
+    the human's sentence: no rule here understands English. It bounds the forgery to
+    a separate, attributable commit sitting beside immutable human text
+    (`memory/known-issues/2026-07-31-review-outcome-classification-is-attested.md`).
+
+    Both arguments are `human_response_fields` mappings.
+    """
+    if first_concrete_response(prior) is None:
+        return False
+    for key in prior:
+        if key in AGENT_REVIEW_BINDING_FIELDS:
+            continue
+        if prior.get(key, "") != current.get(key, ""):
+            return False
+    if has_concrete_value(prior.get("Reviewed revision", "")) \
+            or review_outcome_value(prior.get("Review outcome", "")) != "pending":
+        return False
+    revision = current.get("Review revision", "").strip()
+    return bool(
+        REVIEW_REVISION_RE.fullmatch(revision)
+        and current.get("Reviewed revision", "").strip() == revision
+        and review_outcome_value(current.get("Review outcome", ""))
+        in REVIEW_OUTCOMES
     )
 
 
@@ -2819,7 +2895,10 @@ def queue_parent_state_regression_problem(before, after):
     prior_response = human_response_fields(before)
     current_response = human_response_fields(after)
     if first_concrete_response(prior_response) is not None \
-            and current_response != prior_response:
+            and current_response != prior_response \
+            and not review_terminal_binding_write(
+                prior_response, current_response
+            ):
         return (
             "human response or its immutable review binding changed "
             "after the first concrete response"
@@ -2920,13 +2999,27 @@ def queue_mutation_problem(
                     "awaiting-artifact -> waiting publication transition"
                 )
         response_changed = current_response != prior_response
+        binding_write = review_terminal_binding_write(
+            prior_response, current_response
+        )
+        if binding_write and not (
+            prior_status == "waiting" and current_status == "folding"
+        ):
+            # The binding is the folding claim's payload, so it has exactly one
+            # legal edge. Allowing it later would let an agent classify a response
+            # long after the claim receipt `claimed_lifecycle_problem` matched.
+            return (
+                "the agent review binding may only be recorded on the "
+                "waiting -> folding claim edge"
+            )
         if first_concrete_response(prior_response) is not None \
-                and response_changed:
+                and response_changed and not binding_write:
             return (
                 "human response or its immutable review binding changed "
                 "after the first concrete response"
             )
-        if current_status == "folding" and response_changed:
+        if current_status == "folding" and response_changed \
+                and not binding_write:
             return "the waiting -> folding claim changed more than status"
 
     source_timing = delivery_class(Path(source).name)
@@ -3427,7 +3520,19 @@ def claimed_lifecycle_problem(path, text, prior_revision, actor, leaf):
                     continue  # a claim commit changes only the status line
                 if text_fields(previous).get("Status", "").strip() != initial:
                     continue
-                if normalize_claim_status(previous) != normalize_claim_status(current):
+                # A review's claim commit also carries the agent's terminal
+                # binding, which is the only content a claim may add. Blank those
+                # two lines for the comparison exactly when this edge earned it.
+                normalize = (
+                    normalize_claim_binding
+                    if review_terminal_binding_write(
+                        human_response_fields(previous),
+                        human_response_fields(current),
+                    )
+                    else (lambda value: value)
+                )
+                if normalize_claim_status(normalize(previous)) \
+                        != normalize_claim_status(normalize(current)):
                     continue
                 if claim_identity(current, actor, leaf) != final_identity:
                     return "action identity or response changed after it was claimed"
@@ -5000,9 +5105,10 @@ def check_queue_schema():
             target = got["Review target"].strip()
             revision = got.get("Review revision", "").strip()
             reviewed_revision = got.get("Reviewed revision", "").strip()
-            # Pending delivery predates this response-classification field. Treat
-            # omission as pending; a concrete response still requires a terminal value.
-            outcome = got.get("Review outcome", "pending").strip()
+            # Pending delivery predates this response-classification field, and a
+            # filed item shows it as a blank the folding agent fills. Omission,
+            # emptiness, and a placeholder all read as pending.
+            outcome = review_outcome_value(got.get("Review outcome", ""))
             parsed_target = review_target(target)
             local_candidates = (
                 [parsed_target[1]]
@@ -5114,35 +5220,50 @@ def check_queue_schema():
                             "local **Review revision:** does not match target bytes",
                             f"bind the review to `{expected}`",
                         )
+                # The human answers in one edit and stops. `Reviewed revision` and
+                # `Review outcome` are the folding agent's to supply, so a
+                # `waiting` item carrying only a response is complete. `folding` is
+                # the agent's own commit, so the binding is required there — which
+                # is also what stops an agent from claiming an unclassified review
+                # and stranding it, since `queue_deletion_problem` demands the
+                # terminal outcome again before the item may resolve.
+                bound = (
+                    has_concrete_value(reviewed_revision)
+                    or outcome != "pending"
+                )
                 if has_concrete_value(response):
-                    if reviewed_revision != revision:
-                        yield Finding(
-                            "queue-schema",
-                            item.relative_to(REPO),
-                            "review response is not bound to the requested revision",
-                            "copy Review revision into Reviewed revision with the response",
-                        )
-                    if outcome not in REVIEW_OUTCOMES:
-                        yield Finding(
-                            "queue-schema",
-                            item.relative_to(REPO),
-                            "review response needs an explicit terminal "
-                            "**Review outcome:**",
-                            "use approved, changes-requested, rejected, or "
-                            "abandoned (legacy not-approved means changes-requested)",
-                        )
-                    elif outcome in REVIEW_TERMINAL_OUTCOMES \
-                            and context_path_candidates(
-                                got.get("Successor action", "")
-                            ):
-                        yield Finding(
-                            "queue-schema",
-                            item.relative_to(REPO),
-                            f"**Review outcome:** {outcome} is terminal but "
-                            "**Successor action:** is present",
-                            "remove the successor or classify the response as "
-                            "changes-requested",
-                        )
+                    if status == "folding" or bound:
+                        if reviewed_revision != revision:
+                            yield Finding(
+                                "queue-schema",
+                                item.relative_to(REPO),
+                                "review response is not bound to the "
+                                "requested revision",
+                                "copy Review revision into Reviewed revision "
+                                "with the folding claim",
+                            )
+                        if outcome not in REVIEW_OUTCOMES:
+                            yield Finding(
+                                "queue-schema",
+                                item.relative_to(REPO),
+                                "review response needs an explicit terminal "
+                                "**Review outcome:**",
+                                "use approved, changes-requested, rejected, or "
+                                "abandoned (legacy not-approved means "
+                                "changes-requested)",
+                            )
+                        elif outcome in REVIEW_TERMINAL_OUTCOMES \
+                                and context_path_candidates(
+                                    got.get("Successor action", "")
+                                ):
+                            yield Finding(
+                                "queue-schema",
+                                item.relative_to(REPO),
+                                f"**Review outcome:** {outcome} is terminal but "
+                                "**Successor action:** is present",
+                                "remove the successor or classify the response as "
+                                "changes-requested",
+                            )
                 elif has_concrete_value(reviewed_revision):
                     yield Finding(
                         "queue-schema",
@@ -8633,6 +8754,19 @@ def check_links():
             text = re.sub(
                 r"^\*\*(?:Resolution evidence|Successor action|"
                 r"Supersedes|Follow-up review|Depends on):\*\*[^\n]*$",
+                "",
+                text,
+                flags=re.M,
+            )
+            # A human answers in one edit, and naming a file in that sentence is
+            # the most natural thing to write — often a file the answer is asking
+            # someone to create, which by definition does not exist yet. Their own
+            # commit must not be rejected for it, and no repair exists if it is:
+            # the first response is immutable and agents may not edit human text
+            # (`message-queue/AGENTS.md`). The path stays readable to the agent
+            # folding the answer; only its existence stops being a commit gate.
+            text = re.sub(
+                r"^\*\*(?:Your answer|Your review):\*\*[^\n]*$",
                 "",
                 text,
                 flags=re.M,

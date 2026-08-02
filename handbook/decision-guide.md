@@ -22,8 +22,11 @@ screen, and will answer from their phone. Therefore:
 4. **A recommendation and dependency timing.** Say which option you'd pick and why in
    one sentence. The filename and its matching timing block carry when the choice stops
    work; `message-queue/AGENTS.md` owns that rule.
-5. **The answer slot is literal**: end with `**Your answer:** ______`. Accept a letter,
-   sentence, or counter-question; the first concrete response is immutable. For a
+5. **The answer slot is literal, and it is the only thing they fill**: end with
+   `**Your answer:** ______`. Replacing that blank and committing is a complete answer —
+   if anything else on the page has to be hand-written for the commit to pass, the item
+   is unanswerable from a phone and filed wrong (`human-action-guide.md`). Accept a
+   letter, sentence, or counter-question; the first concrete response is immutable. For a
    counter-question, claim and fold that disposition, answer it in the named durable
    evidence, then create a new same-timing item whose `Supersedes` names the old path.
    Never edit human text; claim `folding` with a status-only commit.
