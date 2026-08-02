@@ -2795,8 +2795,20 @@ def queue_gating_migration(
             return False
     if parse_date(current.get("Answer by", "").strip()) is None:
         return False
-    return queue_action_identity(source, before) == queue_action_identity(
-        destination, after
+    # The unattended-outcome sentence is the one thing the weakening makes
+    # false: an item that said "this does not merge until you answer" must not
+    # keep saying it once merging no longer waits. Both spellings are mutable
+    # here for that reason, and only that field is — `Why this matters` and the
+    # ask itself stay frozen, so this cannot become a licence to reword a
+    # question on the way past the ratchet.
+    _key, outcome = projection_value(current, 1)
+    if not has_concrete_value(outcome):
+        return False
+    mutable = (HUMAN_PROJECTION_FIELDS[1], LEGACY_HUMAN_PROJECTION_FIELDS[1])
+    return queue_action_identity(
+        source, before, extra_mutable_fields=mutable
+    ) == queue_action_identity(
+        destination, after, extra_mutable_fields=mutable
     )
 
 
@@ -2837,6 +2849,13 @@ def queue_mutation_problem(
     if queue_action_identity(source, before) != queue_action_identity(
         destination, after
     ) and not human_projection_context_migration(
+        source,
+        destination,
+        before,
+        after,
+        prior_revision,
+        revision,
+    ) and not queue_gating_migration(
         source,
         destination,
         before,

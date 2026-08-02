@@ -2791,6 +2791,8 @@ class ReconcileQueueTests(unittest.TestCase):
             "**Filed:** 2026-07-23\n"
             "**Action:** choose the source disposition\n"
             "**Full context:** `docs/source.md`\n"
+            "**Why-you-might-care:** The disposition controls the source.\n"
+            "**If-you-do-nothing:** This layer does not merge.\n"
             "**Resolution evidence:** `docs/source.md`\n"
             + overrides.get(
                 "boundary",
@@ -2822,6 +2824,11 @@ class ReconcileQueueTests(unittest.TestCase):
             count=1,
             flags=re.M,
         )
+        if "outcome" in overrides:
+            text = text.replace(
+                "**If-you-do-nothing:** This layer does not merge.",
+                overrides["outcome"],
+            )
         destination.write_text(text, encoding="utf-8")
         self.git(root, "add", "-A")
         RECONCILE.start_git_snapshot_cache()
@@ -2849,6 +2856,33 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = self.gating_migration_repo(root, activate=False)
             self.assertEqual(1, len(findings), self.messages(findings))
             self.assertIn("timing was weakened", findings[0].message)
+
+    def test_gating_migration_may_correct_the_unattended_outcome(self):
+        """The one sentence the weakening makes false may be corrected with it.
+
+        An item that said "this layer does not merge" must not keep saying it
+        once merging no longer waits for the answer.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(
+                root,
+                outcome="**If-you-do-nothing:** The merged layer stands and the "
+                "task completes without your judgment on record.",
+            )
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_gating_migration_may_not_reword_the_question(self):
+        """Only the unattended outcome moves; the ask stays frozen."""
+        with self.repo() as root:
+            self.init_git(root)
+            findings = self.gating_migration_repo(
+                root,
+                outcome="**Why-you-might-care:** Something else entirely.\n"
+                "**If-you-do-nothing:** The merged layer stands.",
+            )
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("action identity changed", findings[0].message)
 
     def test_gating_migration_refuses_an_ordinary_boundary(self):
         """Only a boundary the new schema forbids may take this edge."""
