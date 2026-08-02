@@ -238,6 +238,25 @@ reconcile: 0 blocking finding(s)
 tests: 13/13 files passed
 ```
 
+One `reconcile-and-test` run on this branch failed, and the failure is the known merge-ref
+recompute race, not this change. The push-event run on the same head passed
+(`reconcile: 0 blocking finding(s)`, `tests: 13/13 files passed`, job 91495817216); the
+pull-request-event run on that identical head reported:
+
+```
+QUEUE_CHANGE_RANGE: 51da3f71aed185ceca4eb7df4a3e5d12f5367134...2f8dc7728c33f0f0d817e3fdf9b251139f7c64c0
+reconcile: Git snapshot error: captured candidate is neither the --range head nor an exact base+head synthetic merge
+##[error]Process completed with exit code 2.
+```
+
+The range base comes from the event payload, which freezes the base branch tip at event
+time, while GitHub recomputes `refs/pull/68/merge` against whatever the base branch is
+when the job checks it out. Between the two, another agent landed on the trunk, so the
+merge commit's parents were `814e4ad…` and this head rather than `51da3f71…` and this
+head. Re-running the job cannot clear it: the payload is fixed. Exit 2 is the "cannot run"
+status, not a finding. Task `2026-08-01-stop-the-merge-ref-recompute-from-failing-a-stack`
+is open against exactly this.
+
 The pull-request body was checked against the provider boundary gate before it was posted,
 with the flags the workflow itself uses:
 
