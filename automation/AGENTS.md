@@ -47,9 +47,9 @@ Rules:
   Adapters pass `--at-transition <name>` for external boundaries such as merge.
   Handover projection activates from `history/AGENTS.md`; staged/CI diffs make each new
   handover project the live human queue. Git-edge checks freeze every pre-existing handover at
-  adoption, including legacy records and intermediate/parallel history. Entry schema
-  versions preserve creation-time grammar; a newly rejecting grammar needs a new
-  version instead of retroactive validation.
+  adoption, including legacy records and intermediate/parallel history. A record's suffix is the
+  entry version its own creation snapshot declared; a withdrawn, reused, or parallel number never
+  respells immutable bytes. Rejections ratchet at the admission edge; no later version drops one.
 - Retry filing preserves claimed/rejected content on rerun; garbage collection removes
   only exact generator identities whose named finding cleared. Active legacy output may
   be migrated, but untrusted legacy lookalikes are never garbage-collected.

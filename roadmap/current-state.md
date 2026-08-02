@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-07-31
+**Last-updated:** 2026-08-01
 
 What is true today, mapped to the desired-state lines.
 
@@ -186,6 +186,18 @@ What is true today, mapped to the desired-state lines.
   Two known gaps stay written down rather than papered over: an agent `future-blocking`
   item bound to `transition:merge` still gates its own task's merge by design, and an
   immutable field on a live item has no legal repair (`memory/known-issues/`).
+- **Handover entry grammar (2026-08-01)**: an immutable record is judged by the marker its
+  own creation snapshot declared, so a schema version withdrawn before the record existed —
+  or activated in parallel history and joined at the merge — no longer demands a spelling
+  the record could not have used. Two live failures forced it: PR #44 reported nine blocking
+  findings on a handover it could never legally repair, and one record already on `main`
+  carried the same latent failure. The anti-dodge property survives as a separate ratchet:
+  which *rejections* a record owes still comes from the highest version the admission edge
+  reaches, so cutting a branch early evades none, and those rejections now fire at v2 *or
+  later* rather than only at an exact v2 — a bug that had silently disabled the raw-HTML and
+  origin checks the moment `main` moved to v3. All 66 handovers reachable from `main` already
+  matched their own creation marker; no committed bytes changed
+  (`memory/decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md`).
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

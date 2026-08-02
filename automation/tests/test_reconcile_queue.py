@@ -16336,6 +16336,202 @@ class ReconcileQueueTests(unittest.TestCase):
         self.assertTrue(RECONCILE.entry_version_at_least("v3", "v2"))
         self.assertFalse(RECONCILE.entry_version_at_least("v2", "v3"))
 
+    # ------------- an immutable record keeps the suffix it was written with,
+    #               while the admission edge still ratchets every rejection
+    #               (task 2026-08-01-judge-a-handover-by-its-creation-grammar)
+
+    LEGACY_SPELLED_REVIEW = (
+        "# Review docs\n\n"
+        "**Action:** review docs\n"
+        "**Why-you-might-care:** The docs control production behavior.\n"
+        "**If-you-do-nothing:** The review remains pending.\n"
+    )
+    LEGACY_SPELLED_ENTRY = (
+        "- [review docs](../../../message-queue/needs-human/reviews/"
+        "future-blocking-review-docs.md) — Why-you-might-care: The docs "
+        "control production behavior. || If-you-do-nothing: The review "
+        "remains pending."
+    )
+
+    def write_entry_contract(self, root, version):
+        """Declare one entry-schema version on the history contract."""
+        return self.write(
+            root,
+            "history/AGENTS.md",
+            "# History contract\n\n"
+            "**Queue projection schema:** v1\n"
+            f"**Queue action-entry schema:** {version}\n",
+        )
+
+    def commit_entry_contract(self, root, version, message):
+        self.write_entry_contract(root, version)
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", message)
+        return self.git(root, "rev-parse", "HEAD")
+
+    def projection_messages_over(self, change_range):
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            with mock.patch.object(
+                RECONCILE, "CHANGE_RANGE", change_range
+            ):
+                return self.messages(
+                    RECONCILE.check_handover_queue_projection()
+                )
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_a_withdrawn_entry_version_does_not_respell_a_later_record(self):
+        """A number activated, withdrawn, then reused governs nothing between.
+
+        Reachability alone cannot say which grammar was in force: the contract
+        at the record's own commit already accounts for every activation and
+        every withdrawal on that line of history.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            self.write_entry_contract(root, "v2")
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md",
+                self.LEGACY_SPELLED_REVIEW,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate entry v2")
+            self.commit_entry_contract(root, "v3", "activate entry v3")
+            self.commit_entry_contract(root, "v2", "withdraw entry v3")
+
+            self.make_handover(
+                root,
+                "2026-07-31-1200PDT-written-under-v2",
+                self.LEGACY_SPELLED_ENTRY,
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record written while v2 was live")
+            head = self.commit_entry_contract(
+                root, "v3", "reuse v3 for the label rename"
+            )
+
+            messages = self.projection_messages_over(f"root:{head}")
+            self.assertEqual([], [
+                message for message in messages
+                if "fixed handover suffix" in message
+            ], messages)
+
+    def merged_parallel_entry_bump(
+        self, root, attention, initial="v2", bumped="v3"
+    ):
+        """Write a record on a branch cut before a later entry-version bump."""
+        self.init_git(root)
+        self.write_entry_contract(root, initial)
+        self.write(
+            root,
+            "message-queue/needs-human/reviews/"
+            "future-blocking-review-docs.md",
+            self.LEGACY_SPELLED_REVIEW,
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", f"activate entry {initial}")
+        common = self.git(root, "rev-parse", "HEAD")
+        trunk = self.git(root, "branch", "--show-current")
+
+        self.git(root, "checkout", "-b", "record", common)
+        self.make_handover(
+            root, "2026-07-31-1200PDT-parallel-record", attention
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "record written while v2 was live")
+        record_head = self.git(root, "rev-parse", "HEAD")
+
+        self.git(root, "checkout", trunk)
+        base = self.commit_entry_contract(
+            root, bumped, f"activate entry {bumped} on the trunk"
+        )
+
+        self.git(root, "checkout", "record")
+        self.git(root, "merge", "--no-ff", trunk, "-m", "join the trunk")
+        return f"{base}...{record_head}"
+
+    def test_a_parallel_entry_bump_does_not_respell_a_merged_record(self):
+        """Joining a later activation cannot demand bytes the record lacks.
+
+        Committed handover bytes are immutable, so a grammar that arrives after
+        the record was written has no satisfiable repair — the record would be
+        permanently unmergeable.
+        """
+        with self.repo() as root:
+            change_range = self.merged_parallel_entry_bump(
+                root, self.LEGACY_SPELLED_ENTRY
+            )
+            messages = self.projection_messages_over(change_range)
+            self.assertEqual([], [
+                message for message in messages
+                if "fixed handover suffix" in message
+            ], messages)
+
+    def test_a_branch_cut_early_cannot_evade_a_later_rejection(self):
+        """Anti-dodge, preserved: the admission edge still ratchets rejections.
+
+        A record's suffix is judged at the version it was written under, but
+        the rejecting clauses of every version the admission edge reaches still
+        apply, so cutting a branch before one cannot escape it. v1 -> v2 is the
+        rejecting expansion itself; v2 -> v3 proves the ratchet does not stop
+        turning once a later version renames something instead.
+        """
+        for initial, bumped in (("v1", "v2"), ("v2", "v3")):
+            with self.subTest(initial=initial, bumped=bumped), \
+                    self.repo() as root:
+                change_range = self.merged_parallel_entry_bump(
+                    root,
+                    self.LEGACY_SPELLED_ENTRY
+                    + '\n\n  <span aria-label="Approve the release"></span>',
+                    initial=initial,
+                    bumped=bumped,
+                )
+                messages = self.projection_messages_over(change_range)
+                self.assertTrue(any(
+                    "raw HTML" in message for message in messages
+                ), messages)
+
+    def test_v3_admission_keeps_every_v2_rejection(self):
+        """`history/AGENTS.md`: v3 keeps both v2 checks and renames two labels.
+
+        A version bump must never switch a rejection off, or the ratchet that
+        makes cutting a branch early pointless stops turning.
+        """
+        with self.repo() as root:
+            self.init_git(root)
+            self.write_entry_contract(root, "v3")
+            self.write(
+                root,
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md",
+                "# Review docs\n\n"
+                "**Action:** review docs\n"
+                "**Why this matters:** The docs control production behavior.\n"
+                "**If you do nothing:** The review remains pending.\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate entry v3")
+            self.make_handover(
+                root,
+                "2026-07-31-1200PDT-v3-raw-html",
+                "- [review docs](../../../message-queue/needs-human/reviews/"
+                "future-blocking-review-docs.md) — Why this matters: The docs "
+                "control production behavior. — If you do nothing: The review "
+                "remains pending.\n\n"
+                '  <span aria-label="Approve the release"></span>',
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record with raw HTML under v3")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            messages = self.projection_messages_over(f"root:{head}")
+            self.assertTrue(any(
+                "raw HTML" in message for message in messages
+            ), messages)
+
     # ---------------------------------------------------------------------
     # Honest failure reporting: a crash is not a finding, a staged violation
     # is not erased by a deleted worktree copy, and age never bricks a commit
