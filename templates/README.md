@@ -14,6 +14,7 @@ matching reconciler check in the same commit.
 | `queue/request.md` | `message-queue/needs-agent/requests/` |
 | `queue/retry.md` | `message-queue/needs-agent/retries/` |
 | `handover.md` | `history/conversations/<timestamp>-<slug>/` |
+| `pull-request.md` | the body of a pull request (no repository file — see below) |
 | `memory/fact.md` | `memory/facts/` |
 | `memory/adr.md` | `memory/decisions/` |
 | `memory/lesson.md` | `memory/lessons/<area>/` |
@@ -29,6 +30,16 @@ and committing must produce a valid item with no further edits. So every require
 is a real Markdown line: nothing a check reads is ever hidden inside an HTML comment,
 because `semantic_text()` blanks comments before `fields()` parses. Comments carry only
 guidance and optional-field syntax, and deleting them changes nothing.
+
+## The one schema whose artifact is not a repository file
+
+`pull-request.md` is the body of a pull request, so nothing in this repository holds a
+filled copy. Two files project it: `.github/pull_request_template.md`, which GitHub uses
+to pre-fill a new pull request, and `skills/explain-to-human/scenarios/pull-request.md`,
+which says how to write the prose in each slot. Change this schema first; the other two
+follow it. Its `What to review` section is the only part a check reads
+(`automation/check_action_projection.py`), and `handbook/git-workflow.md` owns what that
+check requires.
 
 ## Queue delivery timing
 
