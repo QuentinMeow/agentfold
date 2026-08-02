@@ -40,12 +40,12 @@ Each post-activation entry is one top-level bullet whose first content is
 ` — Why this matters: <field> — If you do nothing: <field>` under v3 and
 ` — Why-you-might-care: <field> || If-you-do-nothing: <field>` under v1/v2, copying both
 from that snapshot whichever spelling the item uses, in timing-then-path order; agent
-entries hold only the link and may project just work assigned here. The creation/admission
-edge selects the highest active version, as does parallel history joined with an
-activation; a rejecting grammar expansion requires a new version, never a retroactive
-change. All three markers are sticky while `history/` remains; adoption freezes every
-existing handover path, legacy records included — committed bytes are immutable, so delete
-when retention permits, never edit or rename, and correct in a new conversation path.
+entries hold only the link and may project just work assigned here. A record owes the suffix
+its creation snapshot declared — never a later, parallel, or reused withdrawn version — while
+its *rejections* ratchet at the admission edge, joined parallel history included. All three
+markers are sticky while `history/` remains; adoption freezes every existing handover path,
+legacy records included — committed bytes are immutable, so delete when retention permits,
+never edit or rename, and correct in a new conversation path.
 
 ## Other files in a conversation folder (optional)
 

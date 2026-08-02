@@ -7038,8 +7038,43 @@ def handover_projection_activations():
     return tuple(dict.fromkeys(activations))
 
 
+def handover_creation_contract_version(rel, field, versions):
+    """Return the version this record's own creation snapshot declared.
+
+    An author can read exactly one marker while writing: the one in
+    `history/AGENTS.md` in the tree that carries the record. That value already
+    accounts for every activation *and every withdrawal* on the record's own
+    line of history, so a number that was activated, rolled back, and later
+    reused governs nothing in between. No parallel or later commit can change
+    it, which is what makes it the only grammar an immutable record can be held
+    to (`automation/AGENTS.md`, `history/AGENTS.md`).
+    """
+    if CHANGE_RANGE is None:
+        created_at = staged_side_creation_commit(rel.as_posix())
+        if created_at is None:
+            return handover_schema_version(field, versions), None
+    else:
+        created_at, creation_error = handover_creation_commit(rel)
+        if creation_error:
+            return None, creation_error
+    contract = git_artifact_bytes_at(created_at, "history/AGENTS.md")
+    if contract is None:
+        return None, None
+    version = text_fields(decode_utf8_artifact(
+        contract, f"`history/AGENTS.md` at {created_at}"
+    )).get(field, "").strip()
+    return version if version in versions else None, None
+
+
 def handover_schema_version_for(rel, field, versions):
-    """Return the highest version of one schema governing a handover's creation."""
+    """Return the highest version of one schema the admission edge raises.
+
+    This is the anti-dodge floor, not the record's grammar: a history joined
+    with an activation is governed by it, so cutting a branch before a version
+    that rejects more cannot escape those rejections. It only ever ratchets up,
+    so it can never demand bytes an already-committed record lacks — that is
+    `handover_creation_contract_version`'s job.
+    """
     current_version = handover_schema_version(field, versions)
     activation_map = {
         version: handover_schema_activations(field, version)
@@ -7048,16 +7083,7 @@ def handover_schema_version_for(rel, field, versions):
     if current_version is None and not any(activation_map.values()):
         return None, None
     if CHANGE_RANGE is None:
-        created_at = staged_side_creation_commit(rel.as_posix())
-        if created_at is not None:
-            contract = git_artifact_bytes_at(created_at, "history/AGENTS.md")
-            if contract is None:
-                return None, None
-            version = text_fields(decode_utf8_artifact(
-                contract, f"`history/AGENTS.md` at {created_at}"
-            )).get(field, "").strip()
-            return version if version in versions else None, None
-        return current_version, None
+        return handover_creation_contract_version(rel, field, versions)
     created_at, creation_error = handover_creation_commit(rel)
     if creation_error:
         return None, creation_error
@@ -7095,10 +7121,24 @@ def handover_schema_version_for(rel, field, versions):
 
 
 def handover_action_entry_version_for(rel):
-    """Return the highest entry schema governing this handover's creation."""
-    return handover_schema_version_for(
+    """Return this handover's entry rejection floor, then its written grammar.
+
+    The floor ratchets at the admission edge and selects which rejecting
+    clauses apply. The grammar is what the record's creation snapshot declared
+    and selects how its suffix is spelled — the one obligation a committed
+    record can never satisfy after the fact, because its bytes are immutable.
+    The floor is never below the grammar: a snapshot that declares a version is
+    itself an activation of it.
+    """
+    floor, floor_error = handover_schema_version_for(
         rel, HANDOVER_ENTRY_FIELD, HANDOVER_ENTRY_VERSIONS
     )
+    if floor_error:
+        return None, None, floor_error
+    grammar, grammar_error = handover_creation_contract_version(
+        rel, HANDOVER_ENTRY_FIELD, HANDOVER_ENTRY_VERSIONS
+    )
+    return floor, grammar, grammar_error
 
 
 def handover_liveness_version_for(rel):
@@ -7670,6 +7710,7 @@ def handover_projection_entries(
     actor,
     live_paths,
     entry_version,
+    entry_grammar,
     raw_body=None,
 ):
     """Validate strict action-owned list entries in a new v1 handover."""
@@ -7689,14 +7730,16 @@ def handover_projection_entries(
     raw_entries, raw_outside = section_entries(
         body if raw_body is None else raw_body
     )
-    if entry_version == "v2" and action_like_rendered_prose(raw_outside):
+    if entry_version_at_least(entry_version, "v2") \
+            and action_like_rendered_prose(raw_outside):
         problems.append(
             "contains an action-like rendered question or directive outside "
             "the top-level action list"
         )
     for index, entry in enumerate(entries, start=1):
         raw_entry = raw_entries[index - 1] if index <= len(raw_entries) else ""
-        if entry_version == "v2" and contains_raw_html(raw_entry):
+        if entry_version_at_least(entry_version, "v2") \
+                and contains_raw_html(raw_entry):
             problems.append(
                 f"entry {index} contains raw HTML; strict handover action "
                 "entries permit only the sole Markdown queue link and fixed "
@@ -7777,9 +7820,10 @@ def handover_projection_entries(
 
         if actor != "needs-human":
             expected_context = ""
-        elif entry_version == "v3":
-            # v3 renders the two sentences in English. v1/v2 records keep their
-            # creation-time suffix byte for byte.
+        elif entry_grammar == "v3":
+            # v3 renders the two sentences in English. Every record keeps the
+            # suffix its own creation snapshot declared, byte for byte: a later
+            # or parallel rename cannot be applied to bytes that are immutable.
             expected_context = (
                 "— Why this matters: "
                 + queue_fields[HUMAN_PROJECTION_FIELDS[0]]
@@ -8029,6 +8073,7 @@ def check_handover_queue_projection():
         live_human = live_human_queue_paths()
         live_agent = live_agent_queue_paths()
         entry_version = None
+        entry_grammar = None
         if is_new:
             text, live_human, live_agent, creation_error = handover_creation_state(
                 handover, rel
@@ -8042,8 +8087,8 @@ def check_handover_queue_projection():
                     "preserve the add commit and pass a range containing it",
                 )
                 continue
-            entry_version, strict_error = handover_action_entry_version_for(
-                rel
+            entry_version, entry_grammar, strict_error = (
+                handover_action_entry_version_for(rel)
             )
             if strict_error:
                 yield Finding(
@@ -8141,7 +8186,8 @@ def check_handover_queue_projection():
         else:
             text = candidate_text
         strict_entries = entry_version is not None
-        if entry_version == "v2" and contains_raw_html(text):
+        if entry_version_at_least(entry_version, "v2") \
+                and contains_raw_html(text):
             yield Finding(
                 "handover-queue-projection",
                 rel,
@@ -8150,12 +8196,11 @@ def check_handover_queue_projection():
                 "cannot define or preserve queue-projection boundaries",
             )
             continue
-        if entry_version == "v2" and action_like_rendered_prose(
-            visible_outside_action_sections(
-                text,
-                ("Needs your attention", "Next steps"),
-            )
-        ):
+        outside_sections = visible_outside_action_sections(
+            text, ("Needs your attention", "Next steps")
+        )
+        if entry_version_at_least(entry_version, "v2") \
+                and action_like_rendered_prose(outside_sections):
             yield Finding(
                 "handover-queue-projection",
                 rel,
@@ -8239,6 +8284,7 @@ def check_handover_queue_projection():
                             "needs-agent",
                             live_agent,
                             entry_version,
+                            entry_grammar,
                             raw_body=raw_level_two_section_body(
                                 text, "## Next steps"
                             ),
@@ -8333,6 +8379,7 @@ def check_handover_queue_projection():
                 "needs-human",
                 live_human,
                 entry_version,
+                entry_grammar,
                 raw_body=raw_level_two_section_body(
                     text, "## Needs your attention"
                 ),
