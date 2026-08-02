@@ -23,11 +23,27 @@ a task *reached* `tasks/4_done/`, not its filed date.
 
 **Remaining scope (2026-07-30):** the tier split itself shipped under task
 2026-07-30-report-check-failures-honestly, which rewrote the same exit-code path while
-fixing three crash-reporting defects. This task could not be claimed for it: deleting
-its pickup request breaks `link-check` in a live queue item that names that path, and
-repairing that reference breaks `queue-resolution` — filed as
-`message-queue/needs-agent/requests/non-blocking-unblock-claiming-a-linked-pickup-task.md`.
-What is left here is the determinism half, criterion 4 below.
+fixing three crash-reporting defects. What is left here is the determinism half,
+criterion 4 below.
+
+**Claimability (2026-08-02):** this task was previously unclaimable — deleting its pickup
+request broke `link-check` in a live queue item naming that path, and repairing the
+reference broke `queue-resolution`. That is fixed. `check_links` now exempts every
+`message-queue/needs-human/` and `message-queue/needs-agent/` citation from any file,
+because a queue action is resolved by deleting it and so names history rather than a live
+link. A full simulated claim of this task on 2026-08-02 — folder moved, `Claimed-by:` set,
+pickup deleted, `Queue actions` cleared, `plan.md` and `worklog.md` added — reported
+`reconcile: 0 blocking finding(s)`. The task is claimable now.
+
+The request itself is still live and now `in-repair`, for a bookkeeping reason rather than
+a real one: its predeclared `Resolution evidence` is `automation/reconcile/reconcile.py`,
+and `resolution_evidence_problem` requires that file to change in the deletion commit. The
+exemption that actually fixed it landed under a different task, and
+`resolution_evidence_landed_earlier` deliberately admits only evidence committed by a task
+the item itself names — the wider lineage rule was considered and rejected by measurement
+under 2026-07-31-finish-the-replacement-ref-boundary. So a standalone deletion is refused.
+Whoever claims this task changes `reconcile.py` for criterion 4 anyway, and should delete
+that request in the same commit; that is the designed path and needs no new mechanism.
 
 ## Acceptance criteria
 
