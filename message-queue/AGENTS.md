@@ -24,15 +24,8 @@ The filename is canonical; never duplicate `Blocking`. Live timing may only esca
 `non-blocking` → `future-blocking` → `blocking`, updating every link in one commit.
 Weakening needs an authorized replacement; a concrete human response freezes timing.
 
-## Standard endpoints
-| Queue | Who acts | Contents |
-|-------|----------|----------|
-| `needs-human/decisions/` | human | one choice only the human may make |
-| `needs-human/clarifications/` | human | correction or interpretation needed |
-| `needs-human/reviews/` | human | a named judgment over a diff, artifact, or claim |
-| `needs-agent/requests/` | agent | owner or agent work request for another session |
-| `needs-agent/retries/` | agent | repair filed by the reconciler or a failed job |
-
+Standard leaves are `needs-human/{decisions,clarifications,reviews}` and
+`needs-agent/{requests,retries}`; each leaf's own `README.md` states what belongs in it.
 An adopter may add a kebab-case typed leaf directly under either actor folder; the generic actor schema
 still applies, so put its contract and template in the repository. Extra nesting is invalid, so filenames remain discoverable recursively.
 
