@@ -91,7 +91,9 @@ agent that judged its own edit cosmetic.
 *Consequence:* the wrong number stays until the owner answers, and he is asked a second
 question of the same shape as one already waiting since 2026-07-31.
 
-## Chosen — Option B, filed as `non-blocking-stop-a-principle-from-copying-the-line-budget.md`
+## Chosen — Option B
+
+Filed as `message-queue/needs-human/decisions/non-blocking-stop-a-principle-from-copying-the-line-budget.md`.
 
 Two contracts, written independently, both say to ask. `handbook/AGENTS.md`: "`principles/`
 files are **near-immutable**: changing one requires a human-approved decision … and a
@@ -106,6 +108,13 @@ is a live question about a sentence in `handbook/principles/eventual-consistency
 found it filed rather than edited, saying so in the item. Repairing mine directly would
 overturn that judgment silently, in a commit the owner reads after the fact.
 
+Re-verifying this finding turned up a second instance the audit did not list:
+`handbook/principles/design-for-forgetting.md` gives memory entries a `Review-by` date
+"(default 90 days…)", while `memory/AGENTS.md` names `templates/memory/` as "the only home
+of that number" and those templates set 90 days for facts and known issues but 180 for ADRs
+and lessons. Same class, left unedited for the same reason; the filed item carries both,
+which is why it asks about the class rather than only the one clause.
+
 **Strongest case against this.** The owner now has two open questions about principle text,
 neither of which changes a rule, and the older one has gone unanswered for two days; a
 reviewer may reasonably read this as an agent hiding behind procedure while the tree stays
@@ -117,7 +126,7 @@ exactly that general permission.
 
 | # | Outcome | Note |
 |---|---|---|
-| 1 | routed | `non-blocking-choose-the-gate-for-externally-changed-instruction-files.md`; principle unedited |
+| 1 | routed | `message-queue/needs-human/decisions/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md`; principle unedited |
 | 2 | repaired | `templates/README.md` human timing column now shows only `operation:<name>` and `transition:start task:<id>` |
 | 4 | repaired | link-check exemptions listed by source *and* by target in `handbook/naming-conventions.md`; `README.md` shortened to a pointer |
 | 5 | repaired | `roadmap/current-state.md` no longer says the merge-gate decision is pending, and no longer cites the deleted file |

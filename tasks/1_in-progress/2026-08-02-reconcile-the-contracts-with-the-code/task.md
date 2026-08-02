@@ -4,7 +4,7 @@
 **Filed:** 2026-08-02, by claude, from a contract-drift audit of every AGENTS.md, handbook file, template, and roadmap line
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md`; `message-queue/needs-human/decisions/non-blocking-stop-a-principle-from-copying-the-line-budget.md`
 
 ## Goal
 
