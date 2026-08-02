@@ -865,6 +865,99 @@ match is now the hardened one:
 `test_github_adapter_handles_root_push_and_always_runs_tests` (the workflow's
 `cat-file -e`). Both still assert what they always asserted.
 
+## Merging onto main at `00a3ea0` (2026-08-01)
+
+The task work was merged onto main with main as the first parent, at
+`00a3ea0d9b3ad0f318f3bf885c777edd0efe9590`. One content conflict, in
+`handover_current_incarnation_text`: this branch hardened its per-handover `git show`,
+and main deleted that spawn and routed the read through the reusable
+`cat-file --batch` reader. Resolved to main's version, because that reader is launched
+with `--no-replace-objects` and so is strictly stronger than the hardened `git show`
+this task set out to write.
+
+The guard this task added then caught a real gap in main's new code. Main added
+`compute_git_ignored_prefixes`, whose `git ls-files --others --ignored
+--exclude-standard --directory -z` is a fifth bare read the reviewed allowlist did not
+name:
+
+```
+$ python3 -m unittest test_reconcile_queue.ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File ".../automation/tests/test_reconcile_queue.py", line 12362, in test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+AssertionError: Lists differ: [] != [(656, 'bare Git read: git ls-files --othe[72 chars]n(')]
+
+Second list contains 1 additional elements.
+First extra element 0:
+(656, 'bare Git read: git ls-files --others --ignored --exclude-standard --directory -z', 'result = subprocess.run(')
+
+- []
++ [(656,
++   'bare Git read: git ls-files --others --ignored --exclude-standard '
++   '--directory -z',
++   'result = subprocess.run(')]
+
+----------------------------------------------------------------------
+Ran 1 test in 1.674s
+
+FAILED (failures=1)
+```
+
+That scan reads the index, the worktree and `.gitignore` and never an object's
+contents, so it joined the reviewed bare prefixes beside the untracked-path scan it
+sits next to, rather than being given the flag:
+
+```
+$ python3 -m unittest test_reconcile_queue.ReconcileQueueTests.test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object
+.
+----------------------------------------------------------------------
+Ran 1 test in 2.367s
+
+OK
+```
+
+On the merge commit `2e8893826797bd5ab0a2a2fc1fd0e528173e6f0b`:
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/check_core_scope.py --range "00a3ea0d9b3ad0f318f3bf885c777edd0efe9590...2e8893826797bd5ab0a2a2fc1fd0e528173e6f0b" --branch task/2026-07-31-finish-the-replacement-ref-boundary
+core-scope: pass (8 core path(s), task 2026-07-31-finish-the-replacement-ref-boundary; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-07-31-finish-the-replacement-ref-boundary --range "00a3ea0d9b3ad0f318f3bf885c777edd0efe9590...2e8893826797bd5ab0a2a2fc1fd0e528173e6f0b"
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/run_tests.py
+[... per-shard lane/selection output elided ...]
+OK (skipped=1)
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+test elapsed: 0.01s
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 59.68s
+```
+
+The commit that adds this section touches only this file and the worklog.
+
 ## Review verdicts (when a review was explicitly run)
 
 No independent review was invoked: `--require-review` was not selected, and this task's

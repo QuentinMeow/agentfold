@@ -85,3 +85,25 @@ filed four defects. All four reproduced; all four are fixed. Real transcripts in
   every name in a scope in one walk and memoizing the map on the scope node gives
   identical findings in 3.0s for all six guard tests.
 - Full suite 11/11 files, reconciler 0 findings.
+
+## 2026-08-01 — merge onto main (claude)
+
+- Merged the task work onto main at `00a3ea0`, main as the first parent. Transcripts in
+  `verification.md`.
+- One content conflict, in `handover_current_incarnation_text`. This branch hardened its
+  per-handover `git show`; main deleted that spawn and routed the read through the
+  reusable `cat-file --batch` reader. Resolved to main's version: that reader already
+  carries `--no-replace-objects`, so it is strictly stronger than the hardened `git show`.
+- The guard this task added earned its keep: main's new `compute_git_ignored_prefixes`
+  spawns a fifth bare read the reviewed allowlist did not name, and the guard test failed
+  on the merged tree. It reads the index, the worktree and `.gitignore` and never an
+  object's contents, so it joined the reviewed bare prefixes rather than gaining the flag,
+  exactly like the untracked-path scan already listed beside it.
+- The merge is taken from the task's own lineage rather than from an earlier integration
+  tip that had already merged an older main. That earlier tip left main and the branch
+  with two merge bases, and `queue-resolution` resolves a merge parent's boundary with a
+  single `git merge-base`; it picked the older base, where this task's pickup request did
+  not yet exist, and read the request's ordinary claim-and-delete as an unresolved
+  deletion. Merging the task lineage directly gives one unambiguous base and the same
+  tree, and the merge boundary reports 0 blocking findings.
+- Full suite 11/11 files, reconciler 0 blocking findings.
