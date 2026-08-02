@@ -66,7 +66,8 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
    name. The set and the format are the handover's "Needs your attention" section
    (`history/AGENTS.md`, `templates/handover.md`): an item an agent has claimed, or that
    already carries a committed answer, is resolved and is not re-asked. Chat is the
-   human's only push channel.
+   human's only push channel. How to write that reply — and every other thing a human
+   reads — is `skills/explain-to-human/`.
 
 ## Task lifecycle
 
@@ -82,7 +83,9 @@ Before ending any session that did work: write `history/conversations/<timestamp
 from `templates/handover.md`, update the task's `worklog.md`, file every pending human
 or cross-session action in `message-queue/`, and update `roadmap/current-state.md` if
 reality changed.
-The `skills/session-handover/` skill walks through this.
+The `skills/session-handover/` skill walks through this, and
+`skills/explain-to-human/` says how to write each of those files so a reader who was
+away can act on it without asking a follow-up question.
 
 ## Guardrails (hard invariants)
 

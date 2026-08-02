@@ -23,13 +23,17 @@ description: <what it does + "Use when …" trigger phrases>
 ## Layout inside a skill
 
 `SKILL.md` (short, routine path first) → optional `reference.md` (depth, linked from
-SKILL.md) → optional `scripts/` (self-contained; never imports from outside the skill).
+SKILL.md) → optional `scenarios/<name>.md` (one file per situation the skill routes to,
+reached from a table in `SKILL.md`) → optional `scripts/` (self-contained; never imports
+from outside the skill). Keep every route one level deep: a skill file that links a file
+that links a third is read partially or not at all.
 
 ## The shipped skills
 
 | Skill | Use when |
 |-------|----------|
 | `ask-me-anything/` | anyone asks how AgentFold works or where something lives |
+| `explain-to-human/` | writing anything a human reads — reply, PR body, queue item, handover |
 | `session-handover/` | ending any session that did work |
 | `adversarial-review/` | a merge or claim needs a trustworthy verdict |
 | `memory-gardener/` | reconciler reports overdue memory, or on a maintenance pass |
