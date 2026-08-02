@@ -48,7 +48,7 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-08-02, by claude, from task `2026-08-01-report-work-back-to-the-owner`
 **Full context:** `docs/designs/explaining-work-to-the-owner.md`
 **Resolution evidence:** `memory/decisions/2026-08-02-readability-enforcement-disposition.md`
