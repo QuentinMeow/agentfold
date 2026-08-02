@@ -199,6 +199,10 @@ INPUT_TEST_OWNERS = (
         ("automation/tests/test_inspect_workspace_boundaries.py",),
     ),
     (
+        b"automation/integrate.py",
+        ("automation/tests/test_integrate.py",),
+    ),
+    (
         b"automation/install.py",
         ("automation/tests/test_check_core_scope.py",),
     ),
