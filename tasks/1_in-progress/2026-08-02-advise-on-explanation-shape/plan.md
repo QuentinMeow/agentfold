@@ -21,4 +21,4 @@
       emitting nothing, and the `--check` / `--fail-on-advisory` exit-code contract.
 - [x] 8. Record real command output in `verification.md`; run the reconciler against the
       tree as it stands and confirm `0 blocking finding(s)` with no new advisory noise.
-- [ ] 9. Push the branch, open the pull request, append the worklog entry.
+- [x] 9. Push the branch, open the pull request, append the worklog entry.

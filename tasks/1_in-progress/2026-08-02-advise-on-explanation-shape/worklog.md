@@ -38,3 +38,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   with no advisory noise; one deliberate violation exits `0` printing `(advisory)`;
   `--fail-on-advisory` exits `1` on that same tree; the boundary gate reports all three
   body rules and still exits `0`; `python3 automation/run_tests.py` green, 12/12 files.
+- Published as [pull request #66](https://github.com/QuentinMeow/agentfold/pull/66), based
+  on `main`, with no stack under it. Its body was run through
+  `check_action_projection.py --pull-request-body-shape` before the pull request existed
+  and came back at `0 finding(s)` and `0 advisory finding(s)` — the first use of the new
+  rule was on the change that added it. Two sentences had to be rewritten first: the
+  existing action-detector reads line-first, so a wrapped line beginning `repair for such
+  a finding …` scanned as a bare imperative. The task is left in `1_in-progress` for the
+  owner to move.
