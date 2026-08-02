@@ -59,7 +59,7 @@ agentfold/
 ├── history/             # one folder per conversation, each with a short handover.md
 ├── memory/              # long-term memory: facts/, decisions/ (ADRs), lessons/, known-issues/
 ├── roadmap/             # desired-state.md vs current-state.md — the gap is the backlog
-├── skills/              # portable skills (ask-me-anything, session-handover, …)
+├── skills/              # portable skills (explain-to-human, session-handover, …)
 ├── automation/          # git hooks, the reconciler, the installer
 ├── templates/           # single source of truth for every file schema above
 └── services/            # the example product code — one folder per service
@@ -100,6 +100,8 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 | Memory expires and gets re-verified or deleted | `Review-by` dates + reconciler + gardener skill |
 | Example services stay green | `automation/run_tests.py` in the pre-commit hook + CI |
 | Merges get adversarial review (in `autonomous` mode) | `skills/adversarial-review/` protocol — suggested, not machine-checked |
+| Every pull request carries the reader's own to-do list, each item linking a live queue file | `check_action_projection.py` at the provider boundary |
+| Anything a human reads is written to one standard | `skills/explain-to-human/` protocol — suggested, not machine-checked |
 
 Everything an agent might forget is either checked mechanically or written down where
 the next agent will trip over it. That's the whole trick.
