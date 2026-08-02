@@ -6,6 +6,20 @@
 **Repository scope:** core
 **Queue actions:** none
 
+> **Closed 2026-08-02 by folding into its parent, on this task's own instruction.** The
+> Goal below ends "This task is only worth doing if that migration proceeds… close it as
+> not-needed with that reason recorded." The migration has not begun: its task is unclaimed
+> in `0_backlog` and no live item has been rewritten.
+>
+> Folding rather than discarding, because the parent's design criterion pointed here for the
+> property it has to account for. The symmetry argument now lives in that parent's own
+> `task.md` under "The migration is one-way, and the recovery path has to be chosen here",
+> and this task's four acceptance criteria — the `git revert` reproduction, the choice
+> between a countersigned reversal edge and a supersede-based recovery, the reasoning for
+> rejecting the other, and the end-to-end fixture — are now the body of the parent criterion
+> that replaced the link. They are unticked below because they were moved, not done.
+> `verification.md` proves both fold preconditions held.
+
 ## Goal
 
 Any mechanism that lets one commit rewrite live queue items — the kind

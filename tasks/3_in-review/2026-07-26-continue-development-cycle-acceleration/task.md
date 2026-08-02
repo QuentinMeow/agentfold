@@ -6,6 +6,20 @@
 **Repository scope:** core
 **Queue actions:** none
 
+> **Closed 2026-08-02 as a session brief, not as unfinished work.** This is a brief for one
+> long sitting — it sets a session length, prescribes how that session should run its tests,
+> and tells it to publish one pull request and leave a handover. A repository cannot satisfy
+> any of that, and the sitting happened. Its measured premises have also decayed: it argues
+> from a 214–221 second suite, and the suite measures 121.11 seconds today.
+>
+> Nothing here is deleted by closing it. `worklog.md` carries a criterion-by-criterion table
+> naming where each idea went, and `verification.md` carries the measurements and the
+> commands that prove each destination exists. The one live residue — the 60-second budget
+> for a small automation change — is task `2026-07-27-configure-test-gates-and-time-budgets`,
+> which is unclaimed in `0_backlog` with its own pickup request and its `**Parent:**` set to
+> this task. Read the criteria below as the brief that was given, with that table as the
+> record of what became of it.
+
 ## Goal
 
 Make the repository's development loop proportionate to change risk: a small change should
