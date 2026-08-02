@@ -25,16 +25,16 @@ not silently dropped.
 
 ## Acceptance criteria
 
-- [ ] `handbook/human-action-guide.md` is restructured with a stated rule per section,
+- [x] `handbook/human-action-guide.md` is restructured with a stated rule per section,
       at least one concrete example per non-obvious rule, and provider-specific depth in
       its own linked section.
-- [ ] Every normative statement present before the rewrite is still present after it —
+- [x] Every normative statement present before the rewrite is still present after it —
       proven by a rule-by-rule inventory recorded in `verification.md`.
-- [ ] `handbook/decision-guide.md` and the `templates/queue/` guidance comments agree with
+- [x] `handbook/decision-guide.md` and the `templates/queue/` guidance comments agree with
       the rewritten guide and restate none of it.
-- [ ] Uncommon terms are glossed in parentheses at first use in each rewritten file.
-- [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
-- [ ] `python3 automation/run_tests.py` passes.
+- [x] Uncommon terms are glossed in parentheses at first use in each rewritten file.
+- [x] `python3 automation/reconcile/reconcile.py --check` reports 0 blocking findings.
+- [x] `python3 automation/run_tests.py` passes.
 
 ## Links
 
