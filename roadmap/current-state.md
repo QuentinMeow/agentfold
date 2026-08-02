@@ -149,6 +149,16 @@ What is true today, mapped to the desired-state lines.
   with corrected context, because a live queue item's action text cannot be edited in
   place. The Stage 0 transcripts are still owed, and mining also surfaced a live drift
   plus a fivefold restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
+  The mining task reached `tasks/4_done/` on 2026-08-01 without closing that gap, so the
+  ordering action that held the backfill task unclaimed is resolved on its own terms
+  (2026-08-02): its verification file was re-read, and all four owed sections — the
+  anchor-hole before-state, both new `link-check` findings, and the `agents-budget` run
+  over `automation/AGENTS.md` — are still absent, so the backfill task's scope narrows to
+  nothing and stands at four. `grep -n "agents-budget\|link-check"` over that file matches
+  only the header sentence that says they are missing. The backfill task
+  `2026-07-25-complete-stage-0-verification-transcripts` is now claimable through its
+  pickup request alone, and no session can now collide in that file, because the task that
+  owned it is done.
 - **Task scope at the pull-request boundary (2026-08-01)**: the projection gate and the
   reconciler required opposite things of the same commit, and six open pull requests were
   stopped by it. `check_queue_task_reciprocity` requires a live queue item declaring

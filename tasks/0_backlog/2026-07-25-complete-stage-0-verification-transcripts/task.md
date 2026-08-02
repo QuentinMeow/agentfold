@@ -4,7 +4,7 @@
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-finish-mining-task-before-transcript-backfill.md`, `message-queue/needs-agent/requests/non-blocking-pick-up-complete-stage-0-verification-transcripts.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-complete-stage-0-verification-transcripts.md`
 
 ## Goal
 
