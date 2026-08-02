@@ -140,6 +140,20 @@ What is true today, mapped to the desired-state lines.
   with corrected context, because a live queue item's action text cannot be edited in
   place. The Stage 0 transcripts are still owed, and mining also surfaced a live drift
   plus a fivefold restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
+- **Task scope at the pull-request boundary (2026-08-01)**: the projection gate and the
+  reconciler required opposite things of the same commit, and six open pull requests were
+  stopped by it. `check_queue_task_reciprocity` requires a live queue item declaring
+  `task:<id>` to appear in that task's `Queue actions`, so filing one edits a second task's
+  record; the projection gate then refused the candidate outright — exit 2, not a finding —
+  for mapping to more than one task folder. Plural scope is now ordinary: the gate binds
+  every task the trusted range carries, a task-named branch must be among them, and the
+  projection covers the union. The merge boundary had the same root and now skips an
+  unanswered action the range itself filed, matched by action identity so a timing
+  escalation still counts, and never an answered one. Replaying all six pull requests:
+  three pass, two report a finding about their own description, and one is still refused
+  because its branch names a task filed in no commit on any branch. Still over-broad, and
+  written down rather than fixed: a `task:<id>` merge boundary activates for any non-task
+  branch that edits that task's record.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
   `desired-state.md` lines 3–8.

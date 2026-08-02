@@ -164,7 +164,7 @@ class ActionProjectionTests(unittest.TestCase):
         body,
         *titles,
         allowed_url_prefixes=(),
-        task_id=None,
+        task_scope=None,
         candidate_revision=None,
         external_actions=(),
         external_assignments=(),
@@ -180,7 +180,7 @@ class ActionProjectionTests(unittest.TestCase):
             titles or ("What to review",),
             repo=root,
             allowed_url_prefixes=allowed_url_prefixes,
-            task_id=task_id,
+            task_scope=task_scope,
             candidate_revision=candidate_revision,
             external_actions=external_actions,
             external_assignments=external_assignments,
@@ -967,7 +967,7 @@ class ActionProjectionTests(unittest.TestCase):
                 self.findings(
                     root,
                     "## What to review\n\nNo human action requested.\n",
-                    task_id=f"task/{task_id}",
+                    task_scope=f"task/{task_id}",
                 ),
             )
 
@@ -988,7 +988,7 @@ class ActionProjectionTests(unittest.TestCase):
                 f"1. [Review the unrelated item]"
                 f"({unrelated.relative_to(root).as_posix()})\n"
             )
-            findings = self.findings(root, body, task_id=task_id)
+            findings = self.findings(root, body, task_scope=task_id)
             self.assertEqual(1, len(findings))
             self.assertIn("omit scoped live queue item", findings[0])
             self.assertIn(required_path, findings[0])
@@ -1120,7 +1120,7 @@ class ActionProjectionTests(unittest.TestCase):
                     root,
                     f"{ask}\n\n## What to review\n\n"
                     "No queued action requested.\n",
-                    task_id=task_id,
+                    task_scope=task_id,
                     queue_actor="any",
                     required_queue_actor="needs-human",
                 )
@@ -2162,7 +2162,7 @@ class ActionProjectionTests(unittest.TestCase):
             findings = self.findings(
                 root,
                 "## What to review\n\nNo human action requested.\n",
-                task_id=task_id,
+                task_scope=task_id,
                 candidate_revision=candidate,
             )
             self.assertEqual(1, len(findings))
@@ -2224,7 +2224,7 @@ class ActionProjectionTests(unittest.TestCase):
                     root,
                     "## What to review\n\n"
                     f"1. [Review the boundary.]({path})\n",
-                    task_id=task_id,
+                    task_scope=task_id,
                 )
 
     def test_task_action_units_allow_ordinary_agent_plan_work(self):
@@ -2791,7 +2791,7 @@ class ActionProjectionTests(unittest.TestCase):
                 self.findings(
                     root,
                     body,
-                    task_id=task_id,
+                    task_scope=task_id,
                     queue_actor="any",
                     required_queue_actor="needs-human",
                 ),
@@ -2799,7 +2799,7 @@ class ActionProjectionTests(unittest.TestCase):
             findings = self.findings(
                 root,
                 body,
-                task_id=task_id,
+                task_scope=task_id,
                 queue_actor="any",
             )
             self.assertEqual(1, len(findings))
@@ -2853,7 +2853,7 @@ class ActionProjectionTests(unittest.TestCase):
                             "## What to review\n\n"
                             f"1. [{label}]({path})\n"
                         ),
-                        task_id=task_id,
+                        task_scope=task_id,
                         queue_actor="any",
                         required_queue_actor="needs-human",
                         external_assignments=assignment,
@@ -2871,7 +2871,7 @@ class ActionProjectionTests(unittest.TestCase):
                         "1. [Review assigned bot work.]"
                         f"({matching_path})\n"
                     ),
-                    task_id=task_id,
+                    task_scope=task_id,
                     queue_actor="any",
                     required_queue_actor="needs-human",
                     external_assignments=assignment,
@@ -3305,7 +3305,7 @@ class ActionProjectionTests(unittest.TestCase):
                 self.findings(
                     root,
                     "## What to review\n\nNo queued action requested.\n",
-                    task_id=task_id,
+                    task_scope=task_id,
                     queue_actor="any",
                     required_queue_actor="needs-human",
                 ),
@@ -3313,7 +3313,7 @@ class ActionProjectionTests(unittest.TestCase):
             findings = self.findings(
                 root,
                 "## What to review\n\nNo human action requested.\n",
-                task_id=task_id,
+                task_scope=task_id,
                 queue_actor="any",
                 required_queue_actor="needs-human",
             )
@@ -3664,6 +3664,142 @@ class ActionProjectionTests(unittest.TestCase):
                     ]),
                 )
 
+    def test_cli_task_branch_binds_every_task_the_candidate_carries(self):
+        """A second task record in the candidate widens the scope, not refuses it.
+
+        `check_queue_task_reciprocity` requires a queue item bound to `task:<id>`
+        to be listed in that task's `Queue actions`, so filing one necessarily
+        edits another task's record. Refusing the resulting candidate left no
+        legal commit.
+        """
+        branch_task = "2026-07-23-branch-task"
+        linked_task = "2026-07-23-reciprocally-linked-task"
+        with self.repo() as root:
+            branch_item = self.queue_item(
+                root,
+                name="future-blocking-review-branch-work.md",
+                action="Review the branch work.",
+            )
+            linked_item = self.queue_item(
+                root,
+                name="future-blocking-review-linked-task.md",
+                action="Review the reciprocally linked task.",
+            )
+            branch_path = branch_item.relative_to(root).as_posix()
+            linked_path = linked_item.relative_to(root).as_posix()
+            self.task_record(root, branch_task, "none")
+            self.task_record(root, linked_task, "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task state")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.task_record(root, branch_task, f"`{branch_path}`")
+            self.task_record(root, linked_task, f"`{linked_path}`")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "link both tasks reciprocally")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            args = [
+                "--from-env", "BODY",
+                "--action-section", "What to review",
+                "--queue-actor", "any",
+                "--required-queue-actor", "needs-human",
+                "--branch", f"task/{branch_task}",
+                "--base-revision", base,
+                "--candidate-revision", candidate,
+            ]
+            self.assertEqual(
+                frozenset({branch_task, linked_task}),
+                PROJECTION.inferred_changed_task_ids(
+                    base, candidate, repo=root
+                ),
+            )
+            output = io.StringIO()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        "No queued action requested.\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(output):
+                self.assertEqual(1, PROJECTION.main(args))
+            self.assertIn(branch_path, output.getvalue())
+            self.assertIn(linked_path, output.getvalue())
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        f"1. [Review the branch work.]({branch_path})\n"
+                        "2. [Review the reciprocally linked task.]"
+                        f"({linked_path})\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, PROJECTION.main(args))
+
+    def test_cli_non_task_branch_binds_every_task_the_candidate_carries(self):
+        first_task = "2026-07-23-first-carried-task"
+        second_task = "2026-07-23-second-carried-task"
+        with self.repo() as root:
+            first_item = self.queue_item(
+                root,
+                name="future-blocking-review-first-task.md",
+                action="Review the first task.",
+            )
+            second_item = self.queue_item(
+                root,
+                name="future-blocking-review-second-task.md",
+                action="Review the second task.",
+            )
+            first_path = first_item.relative_to(root).as_posix()
+            second_path = second_item.relative_to(root).as_posix()
+            self.task_record(root, first_task, "none")
+            self.task_record(root, second_task, "none")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base task state")
+            base = self.git(root, "rev-parse", "HEAD")
+            self.task_record(root, first_task, f"`{first_path}`")
+            self.task_record(root, second_task, f"`{second_path}`")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "carry both task records")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            args = [
+                "--from-env", "BODY",
+                "--action-section", "What to review",
+                "--queue-actor", "any",
+                "--required-queue-actor", "needs-human",
+                "--branch", "harness/two-tasks-at-once",
+                "--base-revision", base,
+                "--candidate-revision", candidate,
+            ]
+            output = io.StringIO()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        "No queued action requested.\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(output):
+                self.assertEqual(1, PROJECTION.main(args))
+            self.assertIn(first_path, output.getvalue())
+            self.assertIn(second_path, output.getvalue())
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "BODY": (
+                        "## What to review\n\n"
+                        f"1. [Review the first task.]({first_path})\n"
+                        f"2. [Review the second task.]({second_path})\n"
+                    ),
+                },
+            ), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, PROJECTION.main(args))
+
     def test_cli_task_branch_requires_immutable_scope_evidence(self):
         task_id = "2026-07-23-empty-task-branch"
         with self.repo() as root:
@@ -3730,8 +3866,8 @@ class ActionProjectionTests(unittest.TestCase):
             self.git(root, "commit", "-m", "change task projection")
             candidate = self.git(root, "rev-parse", "HEAD")
             self.assertEqual(
-                task_id,
-                PROJECTION.inferred_changed_task_id(
+                frozenset({task_id}),
+                PROJECTION.inferred_changed_task_ids(
                     base, candidate, repo=root
                 ),
             )
