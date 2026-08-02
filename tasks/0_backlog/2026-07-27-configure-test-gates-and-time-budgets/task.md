@@ -1,10 +1,10 @@
 # Keep routine harness feedback within a configurable time budget
 
-**Claimed-by:** codex
+**Claimed-by:** unclaimed
 **Filed:** 2026-07-27, by codex, from the owner's test-cycle request in chat
 **Parent:** 2026-07-26-continue-development-cycle-acceleration
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-configure-test-gates-and-time-budgets.md`
 
 ## Goal
 
@@ -16,6 +16,13 @@ configured target, automatically file one deduplicated investigation task with r
 evidence so slowdowns cannot become the unnoticed new normal.
 
 ## What the investigation found
+
+> **Stale as of 2026-08-02 — re-measure before implementing.** This section describes the
+> serial, process-heavy runner as it was on 2026-07-27. Parallelisation and staged
+> selection have merged since, and the full suite now measures 75.87 seconds. The 60-second
+> routine target in the Goal and in the first acceptance criterion was derived from the old
+> numbers and is not a decided target; `worklog.md` records the measurement and what it
+> unsettles.
 
 The current pre-commit hook always runs core-scope admission, the reconciler, and the full
 isolated repository suite in sequence. The latest recorded clean measurements put the
