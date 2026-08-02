@@ -43,6 +43,27 @@ each is a change to text the owner reads and none of them may be made silently:
   sentence. The templates no longer ask for it; the live files and their leaf README
   still do. Rewriting the README belongs with the files it describes, not before them.
 
+## The migration is one-way, and the recovery path has to be chosen here
+
+Folded in on 2026-08-02 from task `2026-08-01-record-that-a-format-migration-is-one-way`,
+which was closed as not separately needed. Its whole content was this property and the
+choice it forces, and both belong to whoever performs the migration — so they now live
+here rather than one link away.
+
+Any mechanism that lets one commit rewrite live queue items admits exactly one edge: the
+one that turns the format marker on. Reverting that commit is a second rewrite of the same
+live items, on an edge where the marker is already active in the parent, so
+`queue_mutation_problem` refuses it as "action identity changed while the queue item
+remained live". The migration can be performed and cannot be undone by `git revert`. The
+ordinary escape from a bad commit does not exist here.
+
+This is not a defect to fix by loosening the identity rule; the rule is what protects a
+live ask. It is a property to design around, and there are exactly two ways to do that:
+either the migration mechanism admits its own reversal edge under the same countersigned
+evidence, or the recovery path is "supersede the items rather than restore them". Pick one
+here, before anyone needs it at three in the morning, and exercise the chosen path in a
+fixture rather than arguing it in prose.
+
 ## Acceptance criteria
 
 - [ ] One `needs-human/` queue item shows, per file, the exact before and after of every
@@ -58,8 +79,12 @@ each is a change to text the owner reads and none of them may be made silently:
       anyone to copy a hash
 - [ ] `design.md` states how `queue_mutation_problem` admits the rewrite, and why that
       mechanism cannot be replayed or aimed at any file the answer did not cover
-- [ ] `design.md` accounts for the one-way property recorded in task
-      `2026-08-01-record-that-a-format-migration-is-one-way`
+- [ ] `design.md` chooses between admitting a countersigned reversal edge and defining a
+      supersede-based recovery path for the one-way property stated above, says why the
+      other was rejected, and exercises the chosen path end to end in a fixture. A
+      `verification.md` reproduction of the refusal — a migration commit, a `git revert` of
+      it, and the real finding the reconciler emits on the revert — is what makes that
+      choice evidence rather than assertion
 - [ ] `python3 automation/reconcile/reconcile.py --check` reports 0 findings and
       `python3 automation/run_tests.py` passes every file, with both real outputs in
       `verification.md`
