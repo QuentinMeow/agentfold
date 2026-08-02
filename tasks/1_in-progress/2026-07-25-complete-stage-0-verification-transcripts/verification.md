@@ -171,3 +171,13 @@ The staged lane selects no test file because every staged path is a record path;
 suite in the section above is the test evidence, and it was run separately. The commit that
 adds this section runs the hook once more and nothing records that run — the recursion has
 to stop somewhere and it stops here. No `--no-verify` was used at any point.
+
+The commit id in that last block is the one Git assigned when the hook ran. The branch was
+rebased onto `main` afterwards, so the id you will find in the branch history is different
+and the original is reachable only from this session's reflog. The rebase replayed the same
+patch rather than changing it, which `range-diff` reports as an equality:
+
+```
+$ git range-diff d49b307~1..d49b307 dee80df~1..dee80df
+1:  d49b307 = 1:  dee80df docs: record the four missing Stage 0 verification transcripts
+```
