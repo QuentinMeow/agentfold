@@ -10,21 +10,41 @@ and the GitHub mechanics that make the body render the way you intend.
 
 ## Section order
 
-Fixed. A reader who stops after any section has a coherent picture of everything above it.
+The order of the sections that appear is fixed. Two of them are conditional: the stack
+note only when this is a stacked pull request, and `Notes` only when it has content.
 
-| # | Section | Folded? | Owns |
-|---|---|---|---|
-| 0 | Title | — | one imperative sentence naming the change |
-| 1 | Stack note | no | which layer of a stack this is, if it is one |
-| 2 | `## TL;DR` | no | numbered list, each item a before → after |
-| 3 | `## What to review` | no | the reader's own to-do list, ranked |
-| 4 | `## What changed and why` | yes | the self-contained full explanation |
-| 5 | `## Changes` | yes | the summary list and the file table |
-| 6 | `## Verification` | yes | real commands and their real output |
-| 7 | `## Notes` | yes | dead ends, follow-ups, anything optional |
+| # | Section | Present | Folded | Rough budget |
+|---|---|---|---|---|
+| 0 | Title | always | — | one sentence |
+| 1 | Stack note | only when stacked | no | 5 lines |
+| 2 | `## TL;DR` | always | no | 3–6 items |
+| 3 | `## What to review` | always | no | 1–5 entries, or the no-action sentence |
+| 4 | `## What changed and why` | always | yes | under 600 words |
+| 5 | `## Changes` | always | yes | one row per reason |
+| 6 | `## Verification` | always | yes | real output, uncut |
+| 7 | `## Notes` | only when non-empty | yes | short |
 
-Sections 4 to 7 open with `<details>`. Nothing above section 4 is folded, because a folded
-section is a section most readers never open.
+**How a folded section is written.** Its `##` heading stays *outside* the fold, and the
+`<details>` block opens immediately under it:
+
+```markdown
+## What changed and why
+
+<details>
+<summary>The whole picture — no other reading required</summary>
+
+…content…
+
+</details>
+```
+
+The heading outside is what a reader scans and what tells them the section exists without
+expanding it. It is also load-bearing for the boundary check, which treats a section as
+running until the next heading of the same or higher level: a fold with no heading above it
+is parsed as part of `What to review` and rejected. The `<summary>` line is not a second
+title — it says what expanding buys, in a few words.
+
+Nothing above section 4 is folded, because a folded section is one most readers never open.
 
 ## Title
 
@@ -33,6 +53,12 @@ behaviour. It is layer 1 of the three-layer rule, so it must stand alone.
 
 - No: `Fix bug`, `Update reconciler`, `Moving code from A to B`.
 - Yes: `Stop a branch from blocking itself on a review it filed`.
+
+**The title is not the commit subject.** A commit subject is written for someone reading
+`git log` who will look at the diff next; the title is written for someone who will not.
+`Judge a handover at the grammar it was written under` is a good commit subject and a bad
+title; `Stop a format change from making every older branch unmergeable` is the title for
+the same commit.
 
 ## TL;DR
 
@@ -48,12 +74,23 @@ rather than a changelog.
    check skips an action the range itself created, and reports it at the next boundary.
 2. **Three stuck branches can merge.** Before: `task/…-let-a-human-answer` and two others
    were permanently refused. After: all three pass the merge probe.
-3. **Nothing that was already answered is skipped.** A review filed before the branch was
-   cut still blocks exactly as it did.
+3. **Nothing already answered is skipped.** Before and after, a review filed before the
+   branch was cut blocks exactly as it did.
 ```
 
-Bold the first clause of each item so the list is readable at a glance. If an item cannot
-be written as a before and an after, it is not a summary item — move it to `## Changes`.
+Bold the first **sentence** of each item — a fragment in bold reads as a broken heading.
+The 25-word ceiling is per sentence, not per item: an item is two or three short sentences,
+and splitting the before from the after into separate items breaks the pairing.
+
+If an item cannot be written as a before and an after, it is not a summary item — move it
+to `## Changes`. The one exception is a *no-change* claim, which is written as "Before and
+after, X" so the reader can see it was checked rather than forgotten.
+
+**When the change has no observable behaviour** — a records-only commit, a documentation
+edit, a rename — say that in the first item rather than manufacturing a before and an after.
+"Nothing behaves differently; this only changes what the repository records about X" is a
+complete and honest summary, and the `Verification` section then says what was checked
+instead of what was tested.
 
 ## What to review
 
@@ -73,6 +110,11 @@ act on. It is also machine-checked at the provider boundary, so its shape is not
 Order the items so the most consequential is first. For each one, indent two lines: why it
 matters, and what happens if it is ignored. Both are copied from the queue item itself, so
 this section originates nothing — it projects.
+
+> Careful: a handover projects the same two fields, but with a byte-exact grammar that a
+> check enforces (`history/AGENTS.md`). Here the wording is free prose. Do not copy a
+> pull-request entry into a handover, or the reverse — they look almost identical and only
+> one of them is checked.
 
 ```markdown
 ## What to review
@@ -132,6 +174,10 @@ directory whose files changed for two different reasons is two rows.
 Use `<br>` to stack file names in a cell; a fenced code block does not render inside a
 table cell. Never leave a cell empty — write `none`.
 
+The `Why` column is the one place mechanism is allowed, because the row already names the
+files it is about. Say what the change makes those files do, in one clause; the effect for
+the reader belongs in the list above the table, not repeated per row.
+
 ## Verification
 
 Folded. Real commands and their real output, copied, never summarised into a claim. If
@@ -182,6 +228,98 @@ diff and reviews work that is already approved below.
 If the stack members all target `main` instead, say that the diff includes the layers
 below and give a compare link scoped to this layer:
 `https://github.com/OWNER/REPO/compare/<base-branch>...<this-branch>`.
+
+## One complete body, end to end
+
+Every rule above is visible in this example. The seams between sections are what a rule
+list cannot show, so read this before drafting your first one.
+
+````markdown
+TITLE: Stop a format change from making every older branch unmergeable
+
+## TL;DR
+
+1. **A branch cut before a format change can be merged again.** Before, the merge check
+   judged a handover (the record an agent leaves at the end of a session) against the
+   newest format anywhere in history. Now it judges each record against the format its own
+   commit declared.
+2. **One open pull request and one record already on `main` were the live casualties.**
+   Before: #44 was refused outright and a record on `main` carried the same latent failure.
+   After: both pass, judged at the format they were written under.
+3. **Cutting a branch early still escapes nothing.** Before and after, the rules that
+   *reject* a record come from the highest format the merge itself reaches.
+4. **Nothing already refused is now accepted.** A record written under the current format
+   is checked exactly as it was.
+
+## What to review
+
+1. [Say whether judging a record at its own format is the right rule](https://github.com/OWNER/REPO/blob/<sha>/message-queue/needs-human/reviews/non-blocking-review-record-grammar.md)
+   - Why this matters: it decides whether an old record can ever be re-judged by a newer rule.
+   - If you do nothing: the rule stands and the two blocked branches merge; nothing stops.
+
+## What changed and why
+
+<details>
+<summary>The whole picture — no other reading required</summary>
+
+**What this is.** Every session leaves a handover: a short file recording what happened,
+written once and never edited afterwards. A checker validates each handover's wording
+against a numbered format, and the format number is bumped when the wording rules change.
+
+**How it behaved before.** The checker picked the highest format number it could reach
+anywhere in Git history and judged every handover against it — including handovers written
+months earlier. A record written under format 1 was told to use wording invented in format
+3, and the only repair the checker named was editing the file, which this repository
+forbids.
+
+**What forced the change.** Two branches became permanently unmergeable. Neither had done
+anything wrong: both were cut before a format bump and carried correct records for their
+time.
+
+**How it behaves now.** Each record is judged against the format declared in the commit
+that created it. The same two branches now pass.
+
+**What was decided, and why.** Judging by creation format could have been done by
+re-writing old records instead; that was rejected because committed records are immutable
+here, and rewriting them would destroy the audit trail the records exist for.
+
+**What this does not change.** Rules that *reject* content still come from the newest
+format the merge reaches, so cutting a branch early is not a way to escape a new
+restriction. Only the required wording is pinned to creation.
+
+</details>
+
+## Changes
+
+<details>
+<summary>What a reader would notice, then the files</summary>
+
+- Two blocked branches pass the merge check.
+- An old record is no longer told to use wording invented after it was written.
+
+| Area | Files | Why |
+|---|---|---|
+| Format resolution | `automation/reconcile/reconcile.py` | Reads the format marker from the record's creation commit rather than the newest reachable one. |
+| Tests | `automation/tests/test_reconcile_queue.py` | Four cases: withdrawn format, parallel-history format, early branch cannot evade a rejection, current record unchanged. |
+
+</details>
+
+## Verification
+
+<details>
+<summary>Commands actually run, and their real output</summary>
+
+```
+$ python3 automation/run_tests.py
+tests: 12/12 files passed
+```
+
+The four new cases were also run against the previous checker by extracting the parent
+commit's tree; all four fail there, which is what makes them a regression test rather than
+a description. CI was not run — this is a local result only.
+
+</details>
+````
 
 ## Done when
 

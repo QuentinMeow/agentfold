@@ -81,6 +81,10 @@ effect.
 **The test:** delete every proper noun from your sentence. If nothing meaningful survives,
 you described mechanism.
 
+The test applies to prose. A table row whose first column already names the files is
+allowed to describe mechanism in its last column — the row's identity supplies the context
+the sentence would otherwise need.
+
 ## Before and after
 
 Every claim that something changed owes the reader two states. Without both, the reader
@@ -105,15 +109,15 @@ that changed. A step in isolation cannot be judged.
 
 ## Jargon: gloss, or do not use
 
-Assume the reader knows general software engineering — commit, branch, test, API, cache,
-race condition — and knows nothing specific to this system. Every term that is local to
-this repository, this domain, or this change gets a parenthetical gloss the first time it
-appears in each document.
+Assume the reader knows general software engineering and nothing specific to this system.
+This is the exemption list — never gloss these, because expanding them reads as
+condescension: commit, branch, merge, test, API, cache, race condition, schema, index,
+timeout, retry. Everything local to this repository, this domain, or this change gets a
+parenthetical gloss the first time it appears in each document.
 
 Rules that keep glossing from becoming noise:
 
 - **Gloss at first use, once per document.** Not once per section, not every time.
-- **Never gloss a universal term.** Expanding "API" reads as condescension.
 - **Use one name for one thing.** Alternating between "queue item", "action file", and
   "message" makes a reader look for three things. Pick one and keep it.
 - **Attach a noun to every "this" and "that".** "This retry", not "this".
@@ -143,7 +147,9 @@ the term is new in this document.
 already holds the concept, or the example would only restate the sentence.
 
 **Never write two examples of the same point.** The second one does not reinforce; it
-signals that you did not trust the first.
+signals that you did not trust the first. Replaying one example twice — once showing the
+old behaviour and once the new — is a single example, and is the standard way to show a
+change.
 
 A worked example has three parts and no more: the input, what the system did, the output.
 
@@ -170,9 +176,13 @@ A reader deciding whether to approve a change needs the *effect* of the root cau
 the root-cause investigation. "The lock was held across an I/O call, so two agents could
 both pass the check" is inline. The four hours of tracing that established it is a link.
 
-**Every link states what is behind it and why the reader does not have to open it.** A
-bare link is an unstated dependency, and a reader who has to open it to understand the
-sentence is reading an incomplete document.
+**Every evidence link states what is behind it and why the reader does not have to open
+it.** A bare link is an unstated dependency, and a reader who has to open it to understand
+the sentence is reading an incomplete document.
+
+The exception is a link the reader is being sent to on purpose — the queue item they are
+being asked to answer. That link is the action, not evidence, so its label is the action
+and no "you need not open this" is added to it.
 
 - Bare: "See `docs/designs/queue-resolution-order-independence.md`."
 - Annotated: "The full ordering proof is in
@@ -217,8 +227,9 @@ skimming misreads.
   "Race condition" in one column forces the reader to re-parse each row.
 - Never leave a cell blank. Write `none` or `not applicable`.
 - Put the identifying column first.
-- **Do not use bullets where the two facts are causally linked.** Bullets hide the
-  connective tissue. If B happens because of A, write the sentence that says so.
+- **Do not use bullets where two facts are causally linked.** Bullets hide the connective
+  tissue: if B happens because of A, write the sentence that says so. Lists of genuinely
+  independent items — files, out-of-scope things, options — are exactly what lists are for.
 
 Reach for a diagram only when the thing you are explaining is a *path* — an ordering, or a
 branch — rather than a state. For a state comparison, a before/after table is better and
@@ -246,6 +257,10 @@ Write a number, a confidence, and the one clause of evidence behind it:
 Round to multiples of 5. Separate the two things people conflate: **likelihood** is how
 probable the outcome is; **confidence** is how good your evidence is. You can be highly
 confident that something is unlikely.
+
+**When you have no basis for a number, say that instead.** "Unknown — I did not measure
+this" is a complete and honest answer. A number invented to satisfy this rule is a
+fabricated measurement, which is worse than the hedge it replaced.
 
 Never report a status as green while an open risk contradicts it. If the status is good
 and a risk is open, say what would have to be true for the risk to close.
