@@ -4425,8 +4425,10 @@ def queue_deletion_problem(path, text, prior_revision, revision):
             historical_future = historical_queue_timing(
                 path, text, prior_revision, "future-blocking"
             )
+            closed_on_a_boundary = False
             if historical_future is not None \
                     and outcome in REVIEW_TERMINAL_OUTCOMES:
+                closed_on_a_boundary = True
                 boundary_problem = review_cleanup_boundary_problem(
                     path,
                     text,
@@ -4439,6 +4441,7 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                     return boundary_problem
             elif delivery_class(Path(path).name) == "blocking" \
                     and outcome in REVIEW_TERMINAL_OUTCOMES:
+                closed_on_a_boundary = True
                 boundary_problem = review_cleanup_boundary_problem(
                     path,
                     text,
@@ -4458,7 +4461,18 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                         "negative review needs durable cancellation evidence: "
                         + cancellation_problem
                     )
-            return None
+            # Cleanup needs the crossed receipt for a boundary review and
+            # changed evidence otherwise (`message-queue/AGENTS.md`). Only the
+            # boundary branches above were enforced, so a review that never
+            # carried one could be answered and deleted with nothing outside
+            # the queue to show for it — and this model makes `non-blocking-`
+            # the ordinary timing for a human review, so that is now the common
+            # case rather than the rare one.
+            if closed_on_a_boundary:
+                return None
+            return resolution_evidence_problem(
+                path, text, prior_revision, revision
+            )
         return resolution_evidence_problem(
             path, text, prior_revision, revision
         )

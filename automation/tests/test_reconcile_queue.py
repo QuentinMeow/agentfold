@@ -4249,6 +4249,9 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Queue resolution schema:** v1\n",
                 )
                 target = self.write(root, "docs/source.md", "# Reviewed\n")
+                evidence = self.write(
+                    root, "docs/disposition.md", "# Pending\n"
+                )
                 digest = "sha256:" + hashlib.sha256(
                     target.read_bytes()
                 ).hexdigest()
@@ -4264,6 +4267,7 @@ class ReconcileQueueTests(unittest.TestCase):
                     "**Filed:** 2026-07-23\n"
                     "**Action:** review exact bytes\n"
                     "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/disposition.md`\n"
                     "**Review target:** `docs/source.md`\n"
                     f"**Review revision:** {digest}\n"
                     f"**Reviewed revision:** {digest}\n"
@@ -4283,6 +4287,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.git(root, "commit", "-m", "claim review")
                 if changes_target:
                     target.write_text("# Changed after review\n", encoding="utf-8")
+                # A folded answer always lands somewhere durable, so the ordinary
+                # deletion here is the one that changes its predeclared evidence.
+                evidence.write_text("# Approved\n", encoding="utf-8")
                 item.unlink()
                 self.git(root, "add", "-A")
 
@@ -4292,6 +4299,79 @@ class ReconcileQueueTests(unittest.TestCase):
                 finally:
                     RECONCILE.stop_git_snapshot_cache()
                 self.assertEqual(rejected, bool(findings))
+
+    def test_non_blocking_review_cannot_be_folded_into_nothing(self):
+        """A human answer always lands somewhere outside the queue.
+
+        The contract has always said cleanup changes the predeclared evidence,
+        but only the boundary-bearing branches enforced it — and this model makes
+        `non-blocking-` the ordinary timing for a human review, so a review could
+        now be answered and deleted with nothing to show for it.
+        """
+        for changes_evidence, rejected in ((False, True), (True, False)):
+            with self.subTest(changes_evidence=changes_evidence), \
+                    self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "message-queue/AGENTS.md",
+                    "**Queue resolution schema:** v1\n",
+                )
+                target = self.write(root, "docs/source.md", "# Reviewed\n")
+                evidence = self.write(
+                    root, "docs/disposition.md", "# Pending\n"
+                )
+                digest = "sha256:" + hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                path = (
+                    "message-queue/needs-human/reviews/"
+                    "non-blocking-review.md"
+                )
+                item = self.write(
+                    root,
+                    path,
+                    "# Review\n\n"
+                    "**Status:** waiting\n"
+                    "**Filed:** 2026-07-23\n"
+                    "**Action:** review exact bytes\n"
+                    "**Full context:** `docs/source.md`\n"
+                    "**Resolution evidence:** `docs/disposition.md`\n"
+                    "**Review target:** `docs/source.md`\n"
+                    f"**Review revision:** {digest}\n"
+                    f"**Reviewed revision:** {digest}\n"
+                    "**Review outcome:** approved\n"
+                    "**If unanswered:** leave the reviewed bytes unchanged\n"
+                    "**Your review:** approve\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "record approved review")
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Status:** waiting", "**Status:** folding"
+                    ),
+                    encoding="utf-8",
+                )
+                self.git(root, "add", path)
+                self.git(root, "commit", "-m", "claim review")
+                if changes_evidence:
+                    evidence.write_text("# Approved\n", encoding="utf-8")
+                item.unlink()
+                self.git(root, "add", "-A")
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_queue_resolution())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(
+                    rejected, bool(findings), self.messages(findings)
+                )
+                if rejected:
+                    self.assertIn(
+                        "resolution evidence was not created or changed",
+                        findings[0].message,
+                    )
 
     def test_git_range_approval_satisfies_merge_only_for_queue_only_tail(self):
         with self.repo() as root:
