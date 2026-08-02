@@ -393,6 +393,45 @@ before `1c40c3f` (the grammar), and `4d2f8aa` (the migration) is exactly one com
 because `queue_gating_migration` recognises the weakening only in the commit that adds
 the schema marker.
 
+## Repeated at the commit that carries the handover
+
+The runs above were made at `0747f54`. Repeated at `9c0c7e6`, the branch head that
+carries this file, the handover, and the move to `3_in-review`:
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+EXIT=0
+
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge
+[queue-boundary] message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md: unresolved future-blocking action reached transition:merge: the action still needs its recorded actor
+    fix: resolve the action with fresh boundary evidence or reclassify its timing before crossing the boundary
+reconcile: 1 blocking finding(s)
+EXIT=1
+
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge \
+    --branch task/2026-08-01-stop-human-answers-from-gating-git-edges \
+    --range 0e63bbe69981c55a5436b27dfcc1976ccb763920...9c0c7e6dea927a6a20d1d1b20b3b6b83653edc1a
+reconcile: 0 blocking finding(s)
+PR-shaped EXIT=0
+
+$ python3 automation/run_tests.py
+[… 3 lines elided: the probe pre-flight …]
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 31.90s
+```
+
 ## Core-scope gate
 
 ```
