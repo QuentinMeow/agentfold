@@ -124,6 +124,34 @@ Ran 12 tests in 3.361s
 OK
 ```
 
+## CI on pull request #66
+
+```
+$ gh pr checks 66
+Authoritative action projection from trusted workflow code   pass   7s
+Current review-state action projection                       pass   7s
+External source release admission                            pass   7s
+reconcile-and-test                                           pass  34s
+```
+
+One thing that run does **not** prove, and the reason is structural: a
+`pull_request_target` job runs the workflow file and checks out the gate from the *base*
+branch, which is `main`. `main` does not carry `--pull-request-body-shape` yet, so this
+pull request's own description was checked by the old gate and the CI log holds no
+`explanation-shape:` line for it. The workflow change and the gate change land in the same
+commit, so the flag and the code that reads it arrive together and the first body the
+deployed rule sees is the one after this merges. The rule itself was exercised locally
+against this pull request's body before it was opened:
+
+```
+$ python3 automation/check_action_projection.py --file <this PR body> \
+    --action-section "What to review" --queue-actor any \
+    --task-id 2026-08-02-advise-on-explanation-shape --pull-request-body-shape \
+    --label draft-body
+action-projection: 0 finding(s)
+explanation-shape: 0 advisory finding(s) (not blocking)
+```
+
 ## Review verdicts (when a review was explicitly run)
 
 None. No adversarial panel and no independent core-fit review were run:
