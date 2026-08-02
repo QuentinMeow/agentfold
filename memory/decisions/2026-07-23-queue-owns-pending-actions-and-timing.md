@@ -6,6 +6,7 @@
 **Description:** Every pending human or durable cross-session agent action has one canonical queue item; its filename says when unresolved work blocks
 **Review-by:** 2027-02-15
 **Supersedes:** `memory/decisions/2026-07-22-queue-folders-named-by-who-acts-next.md`
+**Amended-by:** `memory/decisions/2026-08-01-human-answers-never-gate-a-git-edge.md` (which boundaries a `needs-human/` item may bind, now closed to `transition:start` on a `0_backlog` task and `operation:<name>`; the actor/kind/timing model and the three prefixes stand)
 
 ## Context
 
