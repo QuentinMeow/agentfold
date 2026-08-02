@@ -134,6 +134,12 @@ enforcement already exists and works is the pull-request action section, because
 invariant is structural (one entry, one queue link) rather than semantic. If a specific
 readability rule turns out to have a structural proxy, that becomes its own task.
 
+The owner has since settled the enforcement level and it is no longer this document's to
+propose: the structurally visible rules become advisory reconciler findings that print but
+never fail a commit. The decision, its alternatives, and what it deliberately leaves
+unchecked are in
+[the readability-enforcement decision](../../memory/decisions/2026-08-02-readability-enforcement-disposition.md).
+
 **Put the rules in the root `AGENTS.md`.** Rejected: it is budgeted at 140 lines and read
 in full by every agent on every boot. Material needed at one moment in a session is exactly
 what progressive disclosure says belongs behind a task-conditioned pointer.

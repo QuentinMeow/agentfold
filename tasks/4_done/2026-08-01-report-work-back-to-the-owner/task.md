@@ -4,7 +4,7 @@
 **Filed:** 2026-08-01, by claude, from the owner's chat request to stop having to ask what was done
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/decisions/non-blocking-check-the-readability-rules-or-leave-them-to-review.md`; `message-queue/needs-human/decisions/non-blocking-re-ask-the-older-questions-in-plainer-words.md`
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-re-ask-the-older-questions-in-plainer-words.md`
 
 ## Goal
 
