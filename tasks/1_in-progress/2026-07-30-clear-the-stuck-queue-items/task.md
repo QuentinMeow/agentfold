@@ -4,7 +4,7 @@
 **Filed:** 2026-07-30, by claude, from chat
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
 
 ## Goal
 

@@ -2,6 +2,7 @@
 
 **Queue resolution schema:** v1
 **Human-attention format:** v1
+**Human gating schema:** v1
 Every pending human action and durable cross-session agent action lives here, one per file.
 PRs, issues, chat, tasks, and handovers may link a live item, never originate an ask.
 Background stays durable; the item owns delivery/state and an unfolded response (`handbook/principles/files-as-messages.md`).

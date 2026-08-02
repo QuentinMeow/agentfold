@@ -5,7 +5,7 @@
 **Filed:** 2026-07-24, by codex, from linked-worktree corruption observed during the layered workspace research session
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md`; `message-queue/needs-human/decisions/future-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
+**Queue actions:** `message-queue/needs-human/reviews/non-blocking-review-test-runner-git-environment-isolation.md`
 
 ## Goal
 
@@ -61,7 +61,7 @@ symlink-creation limitation and may require Developer Mode or WSL.
 - [x] The focused regression, repository test suite, reconciler, and a real
       linked-worktree commit probe pass without changing the common repository config,
       refs, or worktree index.
-- [ ] [After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, inspect the exact Git range and approve it, request a named change, or reject it before merge.](../../../message-queue/needs-human/reviews/future-blocking-review-test-runner-git-environment-isolation.md)
+- [ ] [After the preceding PR has merged, this PR's base is stable, and this item becomes waiting, inspect the exact Git range and approve it, request a named change, or reject it before merge.](../../../message-queue/needs-human/reviews/non-blocking-review-test-runner-git-environment-isolation.md)
 
 ## Links
 

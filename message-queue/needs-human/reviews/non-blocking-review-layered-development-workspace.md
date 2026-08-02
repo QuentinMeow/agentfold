@@ -10,11 +10,10 @@
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Answer by:** 2026-10-22
-**Blocks at:** transition:merge task:2026-07-24-layered-development-workspace
-**Until then:** The draft PR may be inspected and revised, but this layer does not merge.
+**If unanswered:** The layered workspace design and its read-only topology inspector stand as merged, and its task completes without your judgment on record.
 **Look-at:** the zone/authority model in `docs/designs/layered-development-workspace.md`; the bounded claims and failure behavior in `automation/inspect_workspace_boundaries.py`; focused cases in `automation/tests/test_inspect_workspace_boundaries.py`
 **Why-you-might-care:** This design shapes how public, private, restricted, raw, and temporary workspace content may eventually compose without pretending Git convenience mechanisms are confidentiality boundaries.
-**If-you-do-nothing:** This PR remains unmerged, and the deferred coordination tasks are not published.
+**If-you-do-nothing:** The merged design and its inspector stand, and its task completes without your judgment on record.
 
 ## What you need to know
 

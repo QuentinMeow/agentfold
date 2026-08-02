@@ -5,7 +5,7 @@
 **Filed:** 2026-07-23, by codex, from the owner's architecture correction in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`; `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`; `message-queue/needs-human/reviews/future-blocking-rereview-human-action-files.md`; `message-queue/needs-human/decisions/future-blocking-dispose-merge-reviews-whose-boundary-already-passed.md`
+**Queue actions:** `message-queue/needs-agent/requests/future-blocking-continue-first-class-message-queue-review.md`; `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md`; `message-queue/needs-human/reviews/non-blocking-rereview-human-action-files.md`
 
 ## Goal
 
@@ -32,7 +32,7 @@ or never blocks.
 - [x] The owner's answers about guard modes and review clarity are folded into durable
       design/decision records through the queue lifecycle.
 - [x] The full repository test runner passes with real evidence in `verification.md`.
-- [ ] [After the repair is published as one exact revision, judge whether every human-attention file is understandable and answerable on its own, and approve it, name the remaining ambiguity, or reject the format.](../../../message-queue/needs-human/reviews/future-blocking-rereview-human-action-files.md)
+- [ ] [After the repair is published as one exact revision, judge whether every human-attention file is understandable and answerable on its own, and approve it, name the remaining ambiguity, or reject the format.](../../../message-queue/needs-human/reviews/non-blocking-rereview-human-action-files.md)
       A fresh final independent adversarial review also completes before merge.
 
 ## Links

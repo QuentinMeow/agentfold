@@ -12,10 +12,9 @@
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Answer by:** 2026-10-29
-**Blocks at:** transition:merge task:2026-07-23-first-class-message-queue
-**Until then:** Implementation, tests, and independent review may continue.
+**If unanswered:** The repaired format stays the repository standard and its task completes without your judgment on record.
 **Why-you-might-care:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.
-**If-you-do-nothing:** The repair may be designed, implemented, and tested, but the redesigned format does not become the standard and the task does not merge.
+**If-you-do-nothing:** The repaired format becomes and stays the repository standard without your judgment on record.
 
 ## What you need to know
 
