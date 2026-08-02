@@ -48,12 +48,12 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-08-01, by claude, from task `2026-08-01-standardize-pull-request-bodies`
 **Full context:** `skills/explain-to-human/scenarios/pull-request.md`
 **Resolution evidence:** `memory/decisions/2026-08-02-the-pull-request-shape-disposition.md`
-**Review target:** `templates/pull-request.md`
-**Review revision:** sha256:d74449fb2e68355662ee92404365c49e6dd9414f0b2360ea7b4f2d4bd763b0b3
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Answer by:** 2026-10-30

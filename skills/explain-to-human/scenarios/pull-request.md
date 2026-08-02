@@ -146,11 +146,6 @@ The merge commit is recomputed whenever the head or the base moves, so links pin
 old one go stale — most often when a parent in a stack merges and the child's base changes.
 The check reports it, and refreshing the body is the whole fix.
 
-That pinning has a practical consequence: **write or refresh the body after your final
-push**, using the revision that push produced. Pushing again after writing the body leaves
-the links pinned to a commit that is no longer the candidate, and the boundary check fails
-until the body is updated.
-
 ### Everywhere else in the body is indicative
 
 The same check refuses any sentence outside this section that reads as a request or a

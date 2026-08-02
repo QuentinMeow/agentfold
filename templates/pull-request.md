@@ -19,8 +19,9 @@ Four rules the shape exists to serve:
    including a stack note, so write "the stack lands bottom-up", never "merge bottom-up".
 4. Links must be absolute. GitHub does not rewrite a relative link in a pull-request
    body, and the boundary check accepts a URL only under the candidate's own
-   `https://<host>/<owner>/<repo>/blob/<full-sha>/` prefix. Write the body after the
-   final push, so that revision is the one CI will check.
+   `https://<host>/<owner>/<repo>/blob/<full-sha>/` prefix. That commit is the one
+   GitHub computes at `refs/pull/<number>/merge`, not your branch head, so open the
+   pull request first and read it with `git ls-remote origin refs/pull/<number>/merge`.
 
 Title (not part of the body): one complete imperative sentence naming the behaviour that
 changed. Not `Fix bug`, not `Update the reconciler`.

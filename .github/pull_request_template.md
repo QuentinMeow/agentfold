@@ -4,8 +4,9 @@ GitHub adapter. The schema is `templates/pull-request.md`; the craft is
 
 Delete every comment, including this one, before submitting.
 Title: one complete imperative sentence naming the behaviour that changed.
-Write the body after your final push — the queue links below must be pinned to the
-commit CI will check.
+Write the body after opening the pull request: the queue links below must be pinned to
+the commit at `refs/pull/<number>/merge`, which `git ls-remote` reports and which is not
+your branch head.
 No question or instruction aimed at the reader may appear outside "What to review".
 -->
 
