@@ -1,10 +1,10 @@
 # Record the missing Stage 0 verification transcripts as real command output
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude (session 2026-08-02, branch task/2026-07-25-complete-stage-0-verification-transcripts)
 **Filed:** 2026-07-25, by claude, from the Stage 0 gating experiment of the mined co-change layer — `docs/designs/markdown-edge-graph.md`
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-complete-stage-0-verification-transcripts.md`
+**Queue actions:** none
 
 ## Goal
 
