@@ -34,3 +34,7 @@ this file is the task's progress bar. Replan by editing; note big replans in wor
 - [x] 10. Verification — write a real `needs-human` item exactly as the corrected
       `templates/README.md` table describes and show `reconcile.py --check` accepting it;
       record that plus `automation/run_tests.py` output in `verification.md`.
+- [x] 11. Findings 15-22, added mid-task from a cold-boot trial: verify each in a scratch
+      clone or against the source, take the ones that hold, and record any refutation in
+      `design.md`. Finding 15 — the missing installer step — is the one with a
+      demonstrable failure, so it gets real output in `verification.md`.

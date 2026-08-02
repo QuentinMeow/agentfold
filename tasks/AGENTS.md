@@ -29,10 +29,10 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   action links. Queue files own delivery/status and reciprocal task context.
 - Every unclaimed backlog task links a non-blocking `Request kind: task-pickup`;
   claiming resolves and deletes it in the claim commit.
-- **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the
-  task from backlog to in-progress, and resolve its pickup request; push, then start.
-  One agent per task, one branch per task (`task/<task-id>`, `handbook/git-workflow.md`);
-  a rejected push means someone beat you — pick another.
+- **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the task
+  from backlog to in-progress, add the `plan.md` and `worklog.md` that status folder requires,
+  and resolve its pickup request; push, then start. One agent per task, one branch per task
+  (`task/<task-id>`, `handbook/git-workflow.md`); a rejected push means someone beat you.
 - `2_blocked` requires a live `blocking-*` **agent** item in `Queue actions` naming
   `task:<id>` in `Blocks now`; no human action justifies it. Only a task such an item names
   owes a claim: it may sit in `1_in-progress` only while that item carries a committed

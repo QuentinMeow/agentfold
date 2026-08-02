@@ -154,6 +154,70 @@ Two deliberate non-changes inside repaired findings:
   commit. Removing it left three dangling adapter symlinks under the gitignored `.claude/`,
   `.cursor/`, and `.agents/` skill directories; those were removed too.
 
+## Findings 15–22, added mid-task from a cold-boot trial
+
+A separate agent cloned the repository fresh, followed `AGENTS.md` with no other context,
+and completed a task; the coordinator added what tripped it. All eight were re-verified
+here before repair, and one of the coordinator's supporting numbers is wrong.
+
+**15 — the boot sequence never says to run the installer. Repaired, and the worst of the
+eight.** `AGENTS.md` asserted "(the pre-commit hook runs it)" while nothing reachable from
+`AGENTS.md` told a stranger to create that hook. Demonstrated in a scratch clone: a commit
+that adds a broken backticked link to `roadmap/current-state.md` — which `--check` reports
+as one blocking finding — was accepted with no hook output at all, because `core.hooksPath`
+is unset and `.git/hooks/` holds only samples. `python3 automation/install.py` is now boot
+step 1, which is what makes the guardrail's parenthetical true rather than aspirational.
+
+**16 — `CONTRIBUTING.md` unrouted. Repaired, narrowly.** The repo map lists folders, not
+files, so its absence there is consistent; what was missing is that the opening paragraph
+introduces `README.md` as the human surface and leaves its companion unmentioned. One
+clause now names both and says neither carries agent instructions. `CONTRIBUTING.md` does
+restate rules that live in `handbook/git-workflow.md`, `tasks/AGENTS.md`, and
+`templates/`, which is a single-source finding of its own; it is out of scope here and is
+not repaired.
+
+**17 — the ritual's "open only what is relevant" at boot. Repaired; the count is wrong.**
+The coordinator reported 36 of 40 `needs-agent/requests/` items as task pickups. On this
+branch it is 25 of 41 by `**Request kind:** task-pickup`, and 24 by filename prefix — a
+clear majority, not almost all. The repair says "most", which is what the evidence
+supports.
+
+**18 — three files disagree about the claim commit. Repaired; the code is the arbiter.**
+`check_task_structure` requires `plan.md` and `worklog.md` the moment a task sits in
+`1_in-progress`, so the claim commit must create both. This session hit it live: the first
+claim attempt reported `missing plan.md` and `missing worklog.md`. `tasks/AGENTS.md` and
+both places in `handbook/git-workflow.md` now say so. The live pickup requests that also
+state a "Done when" are left alone: an open agent item's action text is its identity.
+
+**19 — the two-lane table never placed the other task files. Repaired.** The lane sentence
+now splits one task folder explicitly, which also documents why a plan is born on `main`
+and edited on a branch: the reconciler forces the first copy into the claim commit. That is
+a file lifecycle, not the two-branches-one-file collision the conflict section forbids.
+
+**20 — `handbook/git-workflow.md` is too long. Repaired by a narrow split.** Only the
+GitHub issue/comment/formal-review/diff-thread bullet moved, verbatim, to
+`handbook/github-projection.md`; the file went from 172 to 139 lines. The `What to review`
+boundary rules stayed, because `templates/README.md` points at `git-workflow.md` for
+exactly those and moving them would have broken a live pointer. Nothing cited the moved
+bullet by file, and the new file is routed from the repo map, `handbook/AGENTS.md`, and the
+`skills/ask-me-anything/` table.
+
+**21 — "repo-relative" means two things. Repaired, including in the code.** A `Full context`
+value containing `..` is dropped by `context_path_candidates` and the item is then reported
+as having no source, so the two conventions are not interchangeable in the direction that
+matters. The phrase is now "root-relative" in the four queue templates and in both
+reconciler messages, whose `fix:` line says a `../` path is dropped rather than resolved;
+`templates/handover.md` names its own links file-relative; and
+`handbook/naming-conventions.md` defines both and says which surface takes which. One test
+fixture matched the old placeholder wording and was updated with it.
+
+**22 — ticking acceptance criteria in done tasks. Repaired at the schema, not by a rule in
+a contract.** 25 of 48 done tasks have ticked boxes and 23 do not. `templates/task/task.md`
+owns this file's schema, so the rule lives there: tick as met, all ticked by `3_in-review`
+or `verification.md` names the dropped one, and no check reads them. Stating it in
+`tasks/AGENTS.md` instead would have cost a line in a file at 60 of its 60-line budget, to
+duplicate a schema.
+
 ## Core fit
 
 **Agent substitution:** pass — every tracked change is repository Markdown that any agent

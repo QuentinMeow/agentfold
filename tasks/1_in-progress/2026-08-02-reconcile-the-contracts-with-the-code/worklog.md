@@ -33,3 +33,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   shaped items written from the corrected `templates/README.md` table are accepted, and the
   same two rewritten as the old table described them are refused with the exact finding an
   agent obeying that table would have hit.
+- After the first pull request was open, the coordinator added findings 15–22 from a
+  separate cold-boot trial. All eight were re-verified and all eight were repaired. Finding
+  15 is the serious one: a fresh clone has no pre-commit gate, which `verification.md`
+  demonstrates by landing a commit `--check` refuses. One supporting number was refuted —
+  task pickups are 25 of 41 agent requests here, not 36 of 40 — so the repair says "most".
+- Finding 20's split moved only the GitHub issue/comment/review bullet, verbatim, out of
+  `handbook/git-workflow.md` (172 → 139 lines). The `What to review` boundary rules stayed
+  because `templates/README.md` points at that file for exactly them.
+- Finding 21 reached into `automation/reconcile/reconcile.py`: a `Full context` value
+  containing `..` is silently dropped, so the message now says "root-relative" and its fix
+  line says a `../` path is dropped rather than resolved. One test fixture matched the old
+  template wording and moved with it; the full suite was re-run.

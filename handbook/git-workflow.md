@@ -15,15 +15,20 @@ cheap to roll back.
 
 Coordination commits use the prefix `harness:` (e.g. `harness: file decision on quote
 storage`). A directory does not choose the lane: `tasks/AGENTS.md` is a reviewed system
-contract, while `tasks/1_in-progress/<id>/task.md` is live coordination. This split keeps
+contract, while `tasks/1_in-progress/<id>/task.md` is live coordination. One task folder
+splits the same way. `task.md`'s claim and status, and the `plan.md` and `worklog.md` its
+claim commit has to create because the reconciler requires both from `1_in-progress`, are
+coordination and go straight to `main`. The rest of the folder — `design.md`,
+`verification.md`, later `plan.md` and `worklog.md` edits, and any rewrite of the task's
+own goal or criteria — are reviewed writes on the task branch. This split keeps
 the action bus real-time while behavioral and descriptive changes stay reviewable.
 
 ## Conflict avoidance (by construction, not by care)
 
 - **One item, one file** — concurrent agents create files, never edit shared ones.
 - **One agent per task** — claim in one coordination commit: set `**Claimed-by:**`, move
-  backlog to in-progress, and resolve its pickup request; if the push is rejected,
-  another agent won, so pick another task.
+  backlog to in-progress, add `plan.md` and `worklog.md`, and resolve its pickup request;
+  if the push is rejected, another agent won, so pick another task.
 - **One worktree per agent** — parallel agents use `git worktree add ../<task-id>
   task/<task-id>`, never share a checkout.
 - **Service boundaries** — a task branch touches one service; cross-service work is
@@ -35,9 +40,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 
 - Imperative subject ≤ 72 chars saying *what*; body saying *why*; task id included on
   every commit belonging to a task (`task: 2026-07-22-add-quote-cache`).
-- Commit at verifiable milestones: claim, plan written, each test-green step,
-  verification recorded. Small commits are the rollback granularity — a giant commit
-  is a giant revert.
+- Commit at verifiable milestones: the claim (which already carries the first `plan.md`
+  and `worklog.md`), each test-green step, verification recorded. Small commits are the
+  rollback granularity — a giant commit is a giant revert.
 - Never commit through a failing pre-commit hook. A `--no-verify` bypass must be
   reported in the handover with a reason.
 
@@ -115,45 +120,8 @@ a child is open, and the rule below explains what that costs when it goes wrong.
   `Fix the login race` is not itself an ask. Questions, TODOs, explicit obligations,
   authority commands such as `Review this change`, and requests in its title or body
   still require queue projection.
-- Every open GitHub issue is a structurally forced, content-versioned external source;
-  neither English phrasing nor `No queued action requested.` can suppress it. The issue
-  body may project a canonical link directly, or an agent may transcribe its prose.
-  In both cases at least one actor-correct item carries the exact `External source`;
-  a presentation link never replaces the durable binding. Each path selects
-  `needs-human/` or `needs-agent/`; an informational issue may select a non-blocking
-  triage item. Assignment adapters map GitHub `User` accounts and teams to `needs-human`, map
-  `Bot` accounts to `needs-agent`, and fail closed on unknown account types or missing
-  identities. Every non-empty conversation comment on an issue or PR is structural
-  `needs-agent` triage, regardless of author or wording. Comment edits version identity;
-  deletion or artifact closure ends it. Open issues replay on issue and non-PR comment
-  events, while open-PR comments replay on candidate updates. These inbound sources are
-  unscoped: they carry only their own action and cannot stand in for a task's complete
-  set. Removing a source's final live binding is a separate exact-tree admission check:
-  a trusted provider adapter must classify that exact version as released; current or
-  unavailable state fails closed. GitHub resolves global node IDs from trusted base
-  code and replays review/thread state as needed. This required check prevents a
-  candidate-local deletion from waiting for a later comment event to rediscover the
-  orphan. Direct pushes can land before their post-push result, so hard enforcement also
-  requires rules that admit changes only through the protected required check. Current
-  formal reviews and unresolved diff threads also enforce `needs-agent/`.
-  Every non-empty effective formal review creates an agent-triage source instead of
-  asking a prose heuristic whether the human meant work; its queue item may be
-  non-blocking. `CHANGES_REQUESTED` is forced even with an empty body, directly from
-  either review connection; unresolved threads remain forced when current state replays.
-  Provider-authored prose may project canonical links directly; every active source
-  still has one or more live items with the adapter's exact versioned `External source`
-  binding. Editing the source creates a new identity. A bound item
-  stays live until the effective review is superseded/dismissed or the thread resolves.
-  `pull_request_target`, issue, and issue-comment checks run trusted default/base
-  workflow code. Candidate and target jobs replay current review/conversation state on
-  supported PR/review events, including merge-queue enqueue, so a later push cannot
-  clear an unqueued request. GitHub emits no Actions event for thread resolve/unresolve:
-  hard assurance that a currently unresolved thread cannot merge requires native
-  “Require conversation resolution before merging”; without it, the ceiling is “state
-  projected at the last supported event.” Neither mechanism proves every transient
-  reopen-then-resolve toggle was queued. Direct review events also lack a target-context
-  variant, so a separately controlled provider gate remains necessary against hostile
-  workflow tampering. The workflow uses only its token, never a local CLI login.
+- What a GitHub adapter forces into the queue from issues, comments, formal reviews, and
+  diff threads, and the limits of that assurance, is `handbook/github-projection.md`.
 - Review gate by mode (`collaboration-modes.md`): `autonomous` → adversarial panel
   majority; `async` → tests + reconciler, panel for one-way doors; `pair` → the human.
 

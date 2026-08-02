@@ -39,8 +39,16 @@ everyone reads.
 - Frontmatter is bold-key lines — `**Status:** in-progress` — not YAML. It renders on
   GitHub, survives any markdown editor, and parses with one regex (ADR:
   `memory/decisions/2026-07-22-bold-key-frontmatter.md`).
-- Cross-references are repo-relative paths in backticks or markdown links. Coded
-  references ("see §6b", "rule R5") are banned; use the target's name.
+- Cross-references are paths in backticks or markdown links. Coded references
+  ("see §6b", "rule R5") are banned; use the target's name.
+- Two path conventions exist and are not interchangeable, so name which one you mean.
+  **Root-relative** is from the repository root (`handbook/git-workflow.md`) and is what
+  every machine-read field takes: a `Full context` written with `../` is dropped rather
+  than resolved, and the item is reported as having no source. **File-relative** is from
+  the file's own folder (`../../../message-queue/…`) and is required only where a link
+  must be clickable from where it sits — the `Needs your attention` and `Next steps`
+  projections in `templates/handover.md`. Prose links may use either; the link check
+  tries both.
 - The reconciler's link check verifies a cited path exists, and it exempts by target as
   well as by source, so knowing only the folder list will mislead you.
   - By source, whole files: `templates/`, `history/`, `memory/decisions/`,

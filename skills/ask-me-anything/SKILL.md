@@ -23,6 +23,7 @@ can say (`handbook/principles/progressive-disclosure.md`).
 | Where the project is heading | `roadmap/desired-state.md` vs `current-state.md` |
 | How quality is enforced | `automation/AGENTS.md` + `handbook/principles/systems-over-instructions.md` |
 | Git / branches / rollback | `handbook/git-workflow.md` |
+| What GitHub issues, comments, and reviews force into the queue | `handbook/github-projection.md` |
 | Adopting this in another repo | `handbook/adoption-guide.md` |
 | A file format | the matching file in `templates/` |
 

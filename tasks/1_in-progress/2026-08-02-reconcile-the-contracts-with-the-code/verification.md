@@ -198,6 +198,91 @@ were removed with it; `find … -type l ! -exec test -e {} \; -print | wc -l` th
 
 No finding turned out to be already fixed, and none was refuted.
 
+## Finding 15: a fresh clone has no commit gate
+
+Two scratch clones of this repository, neither of which ran `automation/install.py`. The
+second one commits a change `--check` reports as blocking, and lands it.
+
+```
+$ git clone -q /Users/quentinmiao/code/ai-harness freshclone && cd freshclone
+$ git config --get core.hooksPath
+$ echo "(exit $?)"
+(exit 1)
+$ ls .git/hooks/
+applypatch-msg.sample     commit-msg.sample     fsmonitor-watchman.sample
+post-update.sample        pre-applypatch.sample pre-commit.sample
+pre-push.sample           pre-rebase.sample     pre-receive.sample
+prepare-commit-msg.sample update.sample
+```
+
+```
+$ cd freshclone2
+$ printf -- '- A link the reconciler must refuse: `handbook/this-file-does-not-exist.md`\n' >> roadmap/current-state.md
+$ git add roadmap/current-state.md && git commit -m "probe: a commit the reconciler refuses"
+[main ee8bdae] probe: a commit the reconciler refuses
+ 1 file changed, 1 insertion(+)
+$ python3 automation/reconcile/reconcile.py --check
+[link-check] roadmap/current-state.md: `handbook/this-file-does-not-exist.md` does not exist
+    fix: fix the path, create the target, or unquote if not a path
+reconcile: 1 blocking finding(s)
+```
+
+The commit printed no hook output because no hook exists. Running the installer is what
+creates the gate the root guardrail describes:
+
+```
+$ python3 automation/install.py
+git hooks: core.hooksPath -> automation/hooks
+CLAUDE.md shims: 12 in place
+skill adapters: .claude, .cursor, .agents -> skills/
+install: done (idempotent — re-run whenever skills or AGENTS.md files change)
+$ git config --get core.hooksPath
+automation/hooks
+```
+
+## Findings 17, 20 and 22: the counts behind those repairs
+
+```
+$ ls message-queue/needs-agent/requests/*.md | wc -l
+      41
+$ grep -l "^\*\*Request kind:\*\* task-pickup" message-queue/needs-agent/requests/*.md | wc -l
+      25
+```
+
+25 of 41, not the 36 of 40 the added findings reported — a majority, which is what the
+repair claims, rather than almost all.
+
+```
+$ wc -l handbook/git-workflow.md handbook/github-projection.md
+     139 handbook/git-workflow.md
+      48 handbook/github-projection.md
+```
+
+172 lines before the split; the 39-line GitHub bullet moved verbatim.
+
+```
+$ ticked=0; unticked=0
+$ for f in tasks/4_done/*/task.md; do if grep -q '^- \[x\]' "$f"; then ticked=$((ticked+1)); elif grep -q '^- \[ \]' "$f"; then unticked=$((unticked+1)); fi; done
+$ echo "ticked=$ticked unticked=$unticked total=$(ls -d tasks/4_done/*/ | wc -l)"
+ticked=25 unticked=23 total=      48
+```
+
+## Reconciler and tests after findings 15–22
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+
+$ python3 automation/run_tests.py
+tests: 12/12 files passed
+test elapsed: 112.82s
+exit=0
+```
+
+The suite was re-run because finding 21 changed `automation/reconcile/reconcile.py` and one
+fixture in `automation/tests/test_reconcile_queue.py` that matched the old placeholder
+wording.
+
 ## Review verdicts
 
 None run. `automation/check_core_scope.py --require-review` was not selected; the core-scope
