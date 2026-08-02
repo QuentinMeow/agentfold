@@ -253,9 +253,21 @@ The range base comes from the event payload, which freezes the base branch tip a
 time, while GitHub recomputes `refs/pull/68/merge` against whatever the base branch is
 when the job checks it out. Between the two, another agent landed on the trunk, so the
 merge commit's parents were `814e4ad…` and this head rather than `51da3f71…` and this
-head. Re-running the job cannot clear it: the payload is fixed. Exit 2 is the "cannot run"
-status, not a finding. Task `2026-08-01-stop-the-merge-ref-recompute-from-failing-a-stack`
-is open against exactly this.
+head. Neither re-running the job nor pushing again clears it: the base is frozen at the
+revision the pull request was opened against, so it stays stale for as long as the trunk
+keeps moving. Exit 2 is the "cannot run" status, not a finding.
+
+It is also not specific to this branch. At the same moment, three of the five open pull
+requests showed the identical split — the push run green, the merge-boundary run failed:
+
+```
+--- PR 68 ---  reconcile-and-test  fail   ...  reconcile-and-test  pass
+--- PR 67 ---  reconcile-and-test  fail   ...  reconcile-and-test  pass
+--- PR 65 ---  reconcile-and-test  fail   ...  reconcile-and-test  pass
+```
+
+PR 65 is `task/2026-08-01-stop-the-merge-ref-recompute-from-failing-a-stack`, the task open
+against exactly this behaviour; it fails on itself.
 
 The pull-request body was checked against the provider boundary gate before it was posted,
 with the flags the workflow itself uses:
