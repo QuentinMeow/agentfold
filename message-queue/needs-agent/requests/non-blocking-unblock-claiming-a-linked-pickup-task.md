@@ -1,6 +1,6 @@
 # Let a backlog task be claimed when another queue item names its pickup request
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-07-30, by claude, from task 2026-07-30-report-check-failures-honestly
 **Action:** Give the claim ritual a path that keeps both invariants — for example, teach the link check that a resolved pickup request is a lifecycle path like Resolution evidence, or forbid queue items from naming another item's pickup path — then claim task 2026-07-22-severity-tiers-for-reconciler-findings.
 **Full context:** `tasks/AGENTS.md`
