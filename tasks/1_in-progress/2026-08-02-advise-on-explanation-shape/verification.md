@@ -29,7 +29,25 @@ governed: 43  earlier-generation: 11
 The eleven skipped items are the ones written under the pre-rename field spelling, which
 records-are-immutable puts outside today's templates. The other forty-three are checked
 and every one of them passes as written — no correct file had to be edited to keep the
-tree quiet.
+tree quiet. **The split is unchanged by the review repair below**: it was 43/11 before
+narrowing the agent-side carve-out and is 43/11 after, because the one genuinely
+grandfathered agent request is filed 2026-07-24 and still qualifies.
+
+## The review probe that the first version let through
+
+An independent review of this branch wrote a brand-new `needs-agent` request dated today,
+omitted `## What you need to know`, and added one line copied from the single live legacy
+request — `**Why-you-might-care:** Nothing; this is a probe.` — and the first version of
+the rule reported nothing. Reproduced against the repaired rule, with the same file staged:
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+[explanation-shape] message-queue/needs-agent/requests/non-blocking-reviewer-probe-imitation.md: missing section `## What you need to know`  (advisory)
+    fix: copy the sections and their order from `templates/queue/request.md`
+reconcile: 0 blocking finding(s), 1 advisory (not blocking)
+```
+
+Exit code: 0. That probe file was deleted afterwards.
 
 ## One deliberate violation: exit 0, printed as advisory
 

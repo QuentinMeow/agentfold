@@ -303,6 +303,15 @@ SECTION_HEADING_RE = re.compile(r"^##[ \t]+(\S.*?)[ \t]*$", re.M)
 # is the same "new typed leaves inherit the actor's generic schema" already in
 # `automation/AGENTS.md`.
 QUEUE_TEMPLATES = "templates/queue"
+# The day `explanation-shape` landed, which is the day an agent request gained a
+# section rule at all. An item filed before it was written under a schema that had no
+# such rule and keeps that schema; an item filed on or after it is checked, whatever
+# field spelling it copied from an older neighbour. The date is what makes the
+# agent-side carve-out shrink instead of grow: without it, one human-only field copied
+# from the single live legacy request switches the rule off for every new agent item,
+# and for an agent request nothing else has ever read its sections at all —
+# `check_queue_schema` scopes every section rule behind `if actor != "needs-human"`.
+EXPLANATION_SHAPE_ACTIVATION = datetime.date(2026, 8, 2)
 CONTEXT_BACKTICK_RE = re.compile(r"`([^`\s]+)`")
 HANDOVER_HUMAN_LINK_RE = re.compile(
     r"message-queue/needs-human/[a-z0-9][a-z0-9-]*/"
@@ -1192,17 +1201,30 @@ def current_queue_template_governs(actor, text):
     """Whether today's templates define this item's section shape.
 
     A written record is immutable, so an item filed under the earlier field
-    spelling keeps the schema it was written under — the same judgment
-    `check_human_attention` makes with `human_attention_format_applies`, extended
-    to the agent side, where one live request still carries those fields. Asking
-    such an item for today's sections would demand an edit the immutability rule
-    forbids, and the repair would be to rewrite history rather than to write
-    better.
+    spelling keeps the schema it was written under: asking it for today's sections
+    would demand an edit the immutability rule forbids, and the repair would be to
+    rewrite history rather than to write better.
+
+    On the human side that judgment already exists, so this delegates to it rather
+    than inventing a second one. On the agent side there was none, and a bare
+    "carries a legacy field" test turned out to be a hole rather than a carve-out:
+    the one live legacy request is exactly the file an agent copies as a model, so
+    a brand-new request that inherited its `Why-you-might-care:` line would have
+    switched the rule off for itself. The field alone is therefore not enough — the
+    item must also have been *filed* before the rule existed. `Filed` is a real
+    calendar date on every item, held there by a blocking `queue-schema` rule, and
+    it is readable in a plain `--check` run, which the Git-range creation-commit
+    helpers are not: they need a `--range` or a merge parent and return nothing in
+    the pre-commit path, where this check does most of its work. An item with no
+    readable date is checked, not excused.
     """
     if actor == "needs-human":
         return human_attention_format_applies(actor, text)
     got = text_fields(text)
-    return not any(key in got for key in LEGACY_HUMAN_PROJECTION_FIELDS)
+    if not any(key in got for key in LEGACY_HUMAN_PROJECTION_FIELDS):
+        return True
+    filed = parse_leading_date(got.get("Filed", ""))
+    return filed is None or filed >= EXPLANATION_SHAPE_ACTIVATION
 
 
 def choice_labels(headings):

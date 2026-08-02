@@ -78,10 +78,31 @@ generic schema.
 **Only items the current templates govern are checked.** A live human item written in the
 pre-rename spelling (`Why-you-might-care` / `If-you-do-nothing`) keeps the schema it was
 written under, exactly as `check_human_attention` already decides with
-`human_attention_format_applies`. The same test extends to `needs-agent`, where one live
-request still carries those fields. Ten of the thirteen live `needs-human` items and one
-of the forty-one live `needs-agent` requests are in that earlier generation; checking them
+`human_attention_format_applies`. Ten of the thirteen live `needs-human` items and one of
+the forty-one live `needs-agent` requests are in that earlier generation; checking them
 against today's templates would ask for an edit the immutability rule forbids.
+
+**The agent side needs a date as well as a field, and this is the subtle part.** On the
+human side the predicate already existed and is reused. On the agent side there was none,
+and the first version of this — "the item carries a legacy projection field" — was a hole
+rather than a carve-out. The single live legacy request is precisely the file an agent
+copies as a model, so a brand-new request that inherited its `Why-you-might-care:` line
+switched the rule off for itself; and for an agent request nothing else has ever read its
+sections, because `check_queue_schema` scopes every section rule behind
+`if actor != "needs-human": continue`. A review probe demonstrated it: a request dated
+today, missing `## What you need to know`, carrying that one line, produced zero findings.
+
+The carve-out now needs the legacy field **and** a `Filed` date before
+`EXPLANATION_SHAPE_ACTIVATION`, the day the rule landed. Two alternatives lost. Keying on
+the creation commit is what `handover_creation_commit` and `staged_side_creation_commit`
+do, and it is the more principled signal, but both need a `--range` or a merge parent and
+return nothing in a plain `--check` — which is the pre-commit path, where this check does
+most of its work — so the rule would have gone silently inert exactly where it matters.
+Dropping the agent carve-out entirely would report the one genuine legacy request forever,
+against a file whose only repair is rewriting a record. `Filed` is agent-written and so
+could be backdated; that is accepted, because a false date in a record is a far larger
+violation than a missing heading, and the realistic failure here is imitation rather than
+malice. An item whose `Filed` date cannot be read is checked, not excused.
 
 ### The boundary-gate half
 
@@ -95,6 +116,32 @@ The flag exists because the same program checks issue bodies and conversation co
 Those are not pull requests, they have no section schema, and reporting `missing section
 ## Verification` on a drive-by comment would be noise that trains readers to ignore the
 line.
+
+**The workflow probes for the flag rather than passing it unconditionally.** A
+`pull_request_target` run resolves the workflow file and the checked-out gate separately,
+and a pull request's `base.sha` demonstrably lags the base branch tip — two open pull
+requests reported a `base.sha` one commit behind `origin/main`, and one stayed behind
+across a `synchronize` seven minutes after the newer commit landed. So a workflow that
+hard-codes `--pull-request-body-shape` can meet a gate that predates the flag, and argparse
+answers that with `error: unrecognized arguments` and **exit 2** — the one status this
+repository reserves for a check that could not run at all. An advisory readability line
+would then be failing pull requests that have nothing wrong with them, which is precisely
+the outcome the decision behind this task forbids. So the step asks the gate what it
+accepts:
+
+```sh
+SHAPE=()
+python3 automation/check_action_projection.py --help \
+  | grep -q -- --pull-request-body-shape && SHAPE=(--pull-request-body-shape)
+```
+
+A capability probe is the right shape rather than a version pin because the two artifacts
+have no shared version to pin to: the workflow and the gate arrive from whatever commits
+the provider chose, and neither can name the other's. A probe asks the only question that
+matters — does the program in front of me accept this argument — and answers it from the
+program itself, so it stays correct under every ordering, including a rollback. The cost is
+that a genuine typo in the flag name degrades to silence instead of failing loudly; the
+tests hold the spelling on both sides so the typo cannot survive a suite run.
 
 **Reported the same way, gated differently.** Each line prints
 `[explanation-shape] <label>: <message>  (advisory)`, matching the reconciler's marker
@@ -119,6 +166,30 @@ any time, and because it would make a provider gate depend on a skill file. The 
 the choice taken is that the schema and the gate can disagree; a test pins both constants
 against the schema, so a disagreement is a test failure rather than a silently wrong
 report.
+
+**Both pins are bidirectional, which the first version of one was not.** The range pin
+already broke in both directions. The optional-section pin only asserted that `Notes` was
+in the tuple, so a review probe could append a second section to the schema carrying the
+same "Delete this section, heading included" comment and watch every test stay green while
+the gate began demanding that section of a conforming body. The test now derives the set of
+sections the schema marks deletable and asserts set equality with the tuple, so a schema
+that gains or loses a deletable section fails the suite instead of the next pull request.
+
+### Known limits
+
+Three shapes the rules do not see, recorded so nobody re-discovers them as bugs:
+
+- A `##` heading nested inside a `<details>` fold counts as present. `<details>` opens an
+  HTML block that ends at the blank line the schema requires after `</summary>`, so the
+  content below it is ordinary Markdown to every parser here. A body that hides
+  `## Verification` inside another section's fold passes.
+- A duplicated `## TL;DR` is deduplicated rather than reported. Order is compared over a
+  de-duplicated list so that a missing section is reported once as missing instead of twice
+  as disorder; repetition is the price.
+- A bulleted `## TL;DR` counts as zero numbered items and is reported as such. This is the
+  intended reading — the schema asks for numbered items and a bulleted list has none — and
+  the finding says `a bulleted list counts as none` when the count is zero, so the message
+  cannot be mistaken for a miscount.
 
 ### What this deliberately does not do
 

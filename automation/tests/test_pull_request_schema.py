@@ -324,14 +324,42 @@ class PullRequestSchemaTest(unittest.TestCase):
         how many summary items the schema asks for. The gate names them in its own
         source; if the schema ever says something else, this fails instead of the
         gate quietly reporting the wrong thing.
+
+        The optional-section half is asserted in **both** directions. Checking only
+        that `Notes` is in the tuple let a second deletable section be added to the
+        schema with every test still green, while the gate immediately began
+        demanding that section of a body that conformed to the schema.
         """
         raw = TEMPLATE.read_text(encoding="utf-8")
         low, high = PROJECTION.PULL_REQUEST_SUMMARY_RANGE
         self.assertEqual((3, 6), (low, high))
         self.assertIn("Three to six numbered items", raw)
-        self.assertEqual(("Notes",), PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS)
-        notes = raw[raw.index("## Notes"):]
-        self.assertIn("Delete this section, heading included", notes)
+
+        deletable = self.deletable_schema_sections(raw)
+        self.assertEqual({"Notes"}, deletable)
+        self.assertEqual(
+            deletable,
+            set(PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS),
+            "every section the schema marks deletable must be optional to the "
+            "gate, and nothing else may be",
+        )
+
+    @staticmethod
+    def deletable_schema_sections(raw):
+        """Return every schema section whose own guidance says to delete it."""
+        marker = "Delete this section, heading included"
+        sections = {}
+        current = None
+        for line in raw.splitlines():
+            if line.startswith("## "):
+                current = line[len("## "):].strip()
+                sections.setdefault(current, [])
+            elif current is not None:
+                sections[current].append(line)
+        return {
+            name for name, body in sections.items()
+            if marker in "\n".join(body)
+        }
 
 
 if __name__ == "__main__":

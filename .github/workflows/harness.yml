@@ -251,6 +251,16 @@ jobs:
               '
           )"
           export ACTION_PROJECTION_ASSIGNMENTS
+          # This workflow and the gate it runs can come from different commits: a
+          # `pull_request_target` run resolves workflow code and checked-out gate
+          # code separately, so a workflow that hard-codes an argument the gate
+          # does not have turns an advisory readability line into `exit 2`, a
+          # check that cannot run. Ask the gate what it accepts instead.
+          SHAPE=()
+          if python3 automation/check_action_projection.py --help \
+              | grep -q -- --pull-request-body-shape; then
+            SHAPE=(--pull-request-body-shape)
+          fi
           python3 automation/check_action_projection.py \
             --from-env ACTION_PROJECTION_BODY \
             --additional-summary-env ACTION_PROJECTION_TITLE \
@@ -262,7 +272,7 @@ jobs:
             --base-revision "$ACTION_PROJECTION_BASE_REVISION" \
             --candidate-revision "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             --allowed-url-prefix "$ACTION_PROJECTION_REVISION_URL" \
-            --pull-request-body-shape \
+            "${SHAPE[@]}" \
             --label github-pull-request-description
       - name: Collect current formal reviews and unresolved diff threads
         if: ${{ github.event_name == 'pull_request_target' }}

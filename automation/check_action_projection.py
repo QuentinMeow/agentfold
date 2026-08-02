@@ -1000,6 +1000,7 @@ def body_shape_findings(text, repo=REPO):
             f"`## {PULL_REQUEST_SUMMARY_SECTION}` carries {count} numbered "
             f"item(s); the schema asks for {low} to {high}, each naming a state "
             "before and a state after"
+            + ("; a bulleted list counts as none" if not count else "")
         )
     return findings
 

@@ -46,3 +46,47 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   existing action-detector reads line-first, so a wrapped line beginning `repair for such
   a finding …` scanned as a bare imperative. The task is left in `1_in-progress` for the
   owner to move.
+
+## 2026-08-02 (continued) — the repair an independent review found (claude)
+
+This entry continues the session above, which ended when the machine it ran on crashed. The
+work below was in the worktree uncommitted at that point, with its `design.md` and
+`verification.md` sections already written; it is committed here with this entry and no
+change to what it found.
+
+- **The agent-side carve-out was a hole, not a carve-out.** A review probe filed a
+  brand-new `needs-agent` request dated today, omitted `## What you need to know`, and
+  copied one line — `**Why-you-might-care:**` — from the single live legacy request. The
+  rule reported nothing. The legacy request is precisely the file an agent copies as a
+  model, and for an agent request nothing else has ever read its sections, because
+  `check_queue_schema` scopes every section rule behind `if actor != "needs-human"`.
+- The carve-out now needs the legacy field **and** a `Filed` date before
+  `EXPLANATION_SHAPE_ACTIVATION`. Two alternatives lost, both recorded in `design.md`:
+  keying on the creation commit is the more principled signal but returns nothing in a
+  plain `--check`, which is the pre-commit path where this check does most of its work, so
+  the rule would have gone silently inert exactly where it matters; and dropping the
+  carve-out entirely would report the one genuine legacy request forever, against a file
+  whose only repair is rewriting a record. The 43/11 governed split is unchanged by the
+  narrowing — the one grandfathered agent request is filed 2026-07-24 and still qualifies.
+- **The workflow probes for the flag instead of passing it unconditionally.** A
+  `pull_request_target` run resolves workflow code and checked-out gate code separately,
+  and a pull request's `base.sha` demonstrably lags the base branch tip. A workflow that
+  hard-codes `--pull-request-body-shape` can therefore meet a gate that predates it, and
+  argparse answers with `error: unrecognized arguments` and **exit 2** — the status this
+  repository reserves for a check that could not run at all. An advisory readability line
+  would have been failing pull requests with nothing wrong with them, which is the outcome
+  the decision behind this task forbids.
+- **One test pin was one-directional and is now bidirectional.** The optional-section pin
+  only asserted `Notes` was in the tuple, so a probe could add a second deletable section
+  to the schema and watch every test stay green while the gate began demanding it of a
+  conforming body. It now derives the deletable set from the schema and asserts set
+  equality.
+- Recorded three shapes the rules deliberately do not see under `design.md` → *Known
+  limits*, so nobody re-discovers them as bugs: a `##` heading nested in a `<details>` fold
+  counts as present, a duplicated `## TL;DR` is deduplicated rather than reported, and a
+  bulleted `## TL;DR` counts as zero items. The last now says so in the finding text.
+- Six tests added across `test_reconcile_queue.py`, `test_pull_request_schema.py`, and
+  `test_github_action_projection_workflow.py`. `python3 automation/run_tests.py` green,
+  12/12 files; `reconcile.py --check` 0 blocking.
+- The task stays in `1_in-progress` for the owner to move; pull request #66 is updated in
+  place rather than reopened.
