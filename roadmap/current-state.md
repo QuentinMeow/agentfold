@@ -200,8 +200,9 @@ What is true today, mapped to the desired-state lines.
   every committed human response byte-identical afterwards; both stranded reviews are still
   unanswered and are now answerable at any time. What this does **not** do is make any of
   it enforceable: the `main-projection` ruleset is still `enforcement: disabled` with no
-  required check, so every merge gate here remains advisory until the owner answers
-  `message-queue/needs-human/decisions/non-blocking-turn-on-the-merge-gate-this-repository-already-runs.md`.
+  required check, so every merge gate here remains advisory. That is now the owner's
+  deliberate choice rather than an open question, recorded in
+  [the advisory-gate decision](../memory/decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md).
   Two known gaps stay written down rather than papered over: an agent `future-blocking`
   item bound to `transition:merge` still gates its own task's merge by design, and an
   immutable field on a live item has no legal repair (`memory/known-issues/`).

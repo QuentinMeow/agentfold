@@ -7,7 +7,7 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 ## Lifecycle
 
 ```
-0_backlog → 1_in-progress → 3_in-review → 4_done
+0_backlog ↔ 1_in-progress ↔ 3_in-review → 4_done
                   ↕
               2_blocked (only while an unresolved blocking-* agent action stops it)
 ```
@@ -31,11 +31,12 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   claiming resolves and deletes it in the claim commit.
 - **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the
   task from backlog to in-progress, and resolve its pickup request; push, then start.
-  One agent per task; a rejected push means someone beat you — pick another.
-- One git branch per task: `task/<task-id>` (`handbook/git-workflow.md`).
+  One agent per task, one branch per task (`task/<task-id>`, `handbook/git-workflow.md`);
+  a rejected push means someone beat you — pick another.
 - `2_blocked` requires a live `blocking-*` **agent** item in `Queue actions` naming
-  `task:<id>` in `Blocks now`; no human action justifies it. `1_in-progress` is valid
-  only after a committed one-line `open` → `in-repair` agent claim. Open blockers require `2_blocked`.
+  `task:<id>` in `Blocks now`; no human action justifies it. Only a task such an item names
+  owes a claim: it may sit in `1_in-progress` only while that item carries a committed
+  one-line `open` → `in-repair` claim, and an open blocker otherwise requires `2_blocked`.
 - Every post-adoption Git edge rechecks task structure. `transition:start` from `0_backlog`
   is the only human boundary a task can cross: its review binds a stable local artifact and
   stays live in the crossing commit, cleanup needs the task past that receipt, and returning

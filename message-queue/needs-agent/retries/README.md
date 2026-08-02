@@ -4,8 +4,9 @@ The repair queue: broken invariants detected by the reconciler
 (`automation/reconcile/reconcile.py`) and jobs that failed partway. Each file names the
 broken invariant and the fix; repairs are idempotent. Agents handle items touching
 their session's area; never delete one without fixing it or recording a rejection
-reason in the file. Reconciler-filed items are garbage-collected automatically once
-their finding clears.
+reason in the file. Filing and garbage collection both happen only under
+`--file-retries`, which neither the pre-commit hook nor CI passes, so nothing arrives
+or clears here on its own today.
 
 Generated files use `blocking-reconcile-<check>-<subject>.md`; stable finding identity
 excludes the timing prefix. `--check` itself no longer fails on advisory findings

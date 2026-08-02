@@ -116,8 +116,8 @@ was away can act without asking a follow-up question.
   external providers, and unrelated adopted repositories; personal setup, user-global
   state, and single-provider/product workflows stay outside core. The Git boundary gate
   binds this judgment to the task (`templates/task/design.md`).
-- **Records are immutable**: a decided ADR is never rewritten — a reversal is a new file
-  linking the old one.
+- **Records are immutable**: a decided ADR is never rewritten — a reversal is a new file, and
+  the old one takes only the back-link, status, and `Review-by` bump `memory/AGENTS.md` requires.
 - **Scratch discipline**: throwaway files go under git-ignored `tmp/`, never the repo root.
 - **The reconciler is the referee**: `automation/reconcile/reconcile.py --check` must
   pass before any commit (the pre-commit hook runs it). Don't bypass with `--no-verify`;

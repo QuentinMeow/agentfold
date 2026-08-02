@@ -15,10 +15,7 @@ everyone reads.
 - Numbered prefixes **only** for ordered pipelines where sorting is the point:
   `tasks/0_backlog/ … 4_done/`. Everywhere else, no numbers — they churn on insert.
 - Route queue folders by stable properties: who acts next, then message kind. Dependency
-  timing is visible in the filename and may only escalate with `git mv`; update every
-  live link in that coordination commit. Weakening resolves the old identity and creates
-  an authorized replacement (ADR:
-  `memory/decisions/2026-07-23-live-queue-obligations-only-weaken-with-evidence.md`).
+  timing is not a folder — it lives in the filename, below.
 
 ## Files
 
@@ -28,7 +25,9 @@ everyone reads.
   humans read wall clocks, not UTC).
 - Queue items: exactly `blocking-<kebab-slug>.md`,
   `future-blocking-<kebab-slug>.md`, or `non-blocking-<kebab-slug>.md`; no date or
-  numbering. The prefix says when unresolved work stops, not how severe it is.
+  numbering. The prefix says when unresolved work stops, not how severe it is. What each
+  one means, and which way a live one may move, is stated once in
+  `message-queue/AGENTS.md`.
 - Reserved names, exact meaning: `AGENTS.md` (agent contract of its folder),
   `README.md` (human doc of its folder), `SKILL.md` (skill entry point), `task.md`,
   `plan.md`, `design.md`, `worklog.md`, `verification.md`, `handover.md`.
@@ -40,11 +39,22 @@ everyone reads.
 - Frontmatter is bold-key lines — `**Status:** in-progress` — not YAML. It renders on
   GitHub, survives any markdown editor, and parses with one regex (ADR:
   `memory/decisions/2026-07-22-bold-key-frontmatter.md`).
-- Cross-references are repo-relative paths in backticks or markdown links. The
-  reconciler's link check verifies they exist everywhere except the directories it
-  exempts — `templates/`, `history/`, `memory/decisions/`, `needs-agent/retries/`, and
-  dot-directories — so a link written there is a courtesy to the reader, not a checked
-  claim. Coded references ("see §6b", "rule R5") are banned; use the target's name.
+- Cross-references are repo-relative paths in backticks or markdown links. Coded
+  references ("see §6b", "rule R5") are banned; use the target's name.
+- The reconciler's link check verifies a cited path exists, and it exempts by target as
+  well as by source, so knowing only the folder list will mislead you.
+  - By source, whole files: `templates/`, `history/`, `memory/decisions/`,
+    `message-queue/needs-agent/retries/`, and dot-directories. Inside any other
+    `message-queue/` file it also skips the lifecycle fields (`Resolution evidence`,
+    `Supersedes`, `Successor action`, `Follow-up review`, `Depends on`) and the human's
+    own answer line, which name artifacts that need not exist yet.
+  - By target, from anywhere: any path under `message-queue/needs-human/` or
+    `message-queue/needs-agent/`, because resolving an action deletes its file; any
+    `../`-relative link; and any candidate with no known file extension whose top-level
+    entry is untracked, which is how prose like `and/or` escapes being read as a path.
+  - A link in either class is a courtesy to the reader, not a checked claim. An absolute
+    path is the one candidate reported rather than skipped: it names a machine, not this
+    repository, so unquote it.
 
 ## Scratch
 
