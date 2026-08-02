@@ -255,6 +255,61 @@ $ wc -l message-queue/AGENTS.md
   branch was rebuilt from its claim commit `062ad01`, which is preserved unchanged along
   with `a7e9541`. The abandoned tip `ef4958b` is still reachable by object id.
 
+## Merging onto main at `d1feea8` (2026-08-01)
+
+The task work was merged onto main with main as the first parent, at
+`d1feea863843e350a6efd95e67107c9252346f3c`. Six files conflicted; the substantive one
+joined this task's action-entry schema v3 with main's new liveness schema. Both are live
+in the merged tree and the whole suite covers both. On the merge commit
+`b61e5df254422acd73db37529d58d3ef0f5000ae`:
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/check_core_scope.py --range "d1feea863843e350a6efd95e67107c9252346f3c...b61e5df254422acd73db37529d58d3ef0f5000ae" --branch task/2026-07-31-redesign-human-action-files
+core-scope: pass (9 core path(s), task 2026-07-31-redesign-human-action-files; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-07-31-redesign-human-action-files --range "d1feea863843e350a6efd95e67107c9252346f3c...b61e5df254422acd73db37529d58d3ef0f5000ae"
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 automation/run_tests.py
+[... per-shard lane/selection output elided ...]
+PASS automation/tests/test_probe.py
+tests: 1/1 files passed
+test elapsed: 0.01s
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 11/11 files passed
+test elapsed: 77.00s
+```
+
+The merge also went through the installed pre-commit hook, so `--staged` core scope, the
+reconciler and the staged test lane passed on it before it existed. The commit that adds
+this section touches only this file and the worklog.
+
+One test changed for expectation rather than behaviour.
+`test_entry_schema_rank_is_monotone` asserted the ordering through `entry_schema_rank`, a
+ranking helper this task added; main's parameterised namespace already ranks by tuple
+position through `entry_version_at_least`, so the duplicate helper was dropped and the
+test — now `test_entry_schema_order_is_monotone` — asserts the same ordering, `v3`
+included, through the surviving one.
+
 ## Review verdicts (when a review was explicitly run)
 
 Not applicable. Independent core-fit review is manual and was not invoked

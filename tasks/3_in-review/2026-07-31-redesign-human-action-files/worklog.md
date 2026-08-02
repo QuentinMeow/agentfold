@@ -72,3 +72,36 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   the countersigned migration, the placeholder hole in `has_concrete_value` (verified:
   "none" reads as unanswered, and every response-protection check keys on that
   predicate), and the fact that such a migration cannot be reverted.
+
+## 2026-08-01 — merge onto main (claude)
+
+- Merged the task work onto main at `d1feea8`, main as the first parent. Transcripts in
+  `verification.md`.
+- The substantive merge was in the handover projection machinery, where this task and
+  main's `2026-07-30-project-only-unresolved-human-actions` changed the same code for
+  different reasons. This task added action-entry schema **v3**, which renames the two
+  rendered suffix labels. main split the single version namespace into two: entry schema
+  for projection *syntax*, and a new **Queue liveness schema** for *which* human actions
+  a projection contains. The two are orthogonal, so both are kept —
+  `HANDOVER_ENTRY_VERSIONS` gains `v3`, main's parameterised `handover_schema_version`
+  serves both namespaces, and `history/AGENTS.md` declares both markers.
+- `entry_schema_rank` was dropped rather than merged. main's `entry_version_at_least`
+  already ranks by tuple position and is the helper the shared code path calls, so
+  keeping a second ranking function would have meant two answers to one question. Its
+  test now asserts the same monotonicity, including `v3`, through that helper.
+- `history/AGENTS.md` is on the 60-line leaf budget and the union of the two paragraphs
+  did not fit. The three lines came out of a restatement rather than a rule: handover
+  immutability was stated twice, mid-paragraph and again in the freeze sentence, and now
+  reads once.
+- The three queue templates conflicted the other way. This task rewrote them around the
+  nine-point checklist; main had just removed the restated prefix list from them in
+  favour of a pointer to `message-queue/AGENTS.md`. Kept this task's structure with
+  main's pointer — reinstating the restatement would undo a change main merged on purpose.
+- The merge is taken from the task's own lineage rather than from an earlier integration
+  tip that had already merged an older main. That earlier tip left main and the branch
+  with two merge bases, and `queue-resolution` resolves a merge parent's boundary with a
+  single `git merge-base`; it picked the older base and read an unrelated pickup request's
+  ordinary claim-and-delete as an unresolved deletion. Merging the task lineage directly
+  gives one unambiguous base and the same tree, and the merge boundary reports 0 blocking
+  findings.
+- Full suite 11/11 files, reconciler 0 blocking findings.
