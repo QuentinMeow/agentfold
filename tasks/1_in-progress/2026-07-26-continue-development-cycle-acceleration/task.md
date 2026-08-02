@@ -1,10 +1,10 @@
 # Keep small-change feedback under one minute and continue bottleneck work
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-07-26, by codex, from the owner's continuation request in chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-continue-development-cycle-acceleration.md`
+**Queue actions:** none
 
 ## Goal
 
