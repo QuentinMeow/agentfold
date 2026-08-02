@@ -54,4 +54,4 @@ the exact failure this task existed to fix. Revisit if a misclassification ever 
 The full write-up of both options is in the `design.md` of task
 2026-07-31-let-a-human-answer-in-one-edit.
 
-**Your answer:** ______
+**Your answer:** Option A — keep it the default way. I don't really think this will be a big problem.

@@ -67,7 +67,7 @@ Answer in plain words — one sentence is enough. You do not need to copy anythi
 particular vocabulary; the agent that folds your answer does the bookkeeping and will show
 you how it read your words before acting.
 
-**Your answer:** ______
+**Your answer:** Option C — allow merge even when CI is red. The reason is that this repo isn't yet mature and we want fast development cycle (mainly AI agents). I will switch to option B when I think this repo is stable.
 
 ## For the record
 
