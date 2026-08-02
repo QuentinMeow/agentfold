@@ -1,3 +1,4 @@
+import ast
 import atexit
 import contextlib
 import datetime
@@ -72,6 +73,480 @@ def git_fixture_skeleton():
         atexit.register(shutil.rmtree, holder, True)
         _GIT_FIXTURE_SKELETON = build_git_fixture_skeleton(Path(holder))
     return _GIT_FIXTURE_SKELETON
+
+
+AUTOMATION = Path(__file__).resolve().parents[1]
+# The gates whose Git reads the source-level guard below scans. Each one runs in the
+# pre-commit hook or in pull-request CI, and each can be pointed at a revision the
+# author of the repository state chose, so each is a place a `refs/replace/*` entry
+# could substitute a forged object for the real one.
+GUARDED_GIT_MODULES = (
+    ("automation/reconcile/reconcile.py", MODULE_PATH),
+    ("automation/check_action_projection.py", AUTOMATION / "check_action_projection.py"),
+    ("automation/check_core_scope.py", AUTOMATION / "check_core_scope.py"),
+    ("automation/run_tests.py", AUTOMATION / "run_tests.py"),
+)
+# The two stdlib doors to another program. Nothing else in this stdlib-only repository
+# can start one, so scanning both names every spawn a guarded module can perform.
+SUBPROCESS_SPAWNS = frozenset((
+    "run", "call", "check_call", "check_output", "Popen",
+    "getoutput", "getstatusoutput",
+))
+OS_SPAWNS = frozenset((
+    "popen", "system", "startfile",
+    "execl", "execle", "execlp", "execlpe",
+    "execv", "execve", "execvp", "execvpe",
+    "spawnl", "spawnle", "spawnlp", "spawnlpe",
+    "spawnv", "spawnve", "spawnvp", "spawnvpe",
+    "posix_spawn", "posix_spawnp",
+))
+GIT_PROGRAM_NAMES = frozenset(("git", "git.exe"))
+# Stands in for an argument the scan cannot fold to one string — a variable object id,
+# an f-string, a path built at runtime. It never equals a flag, so a hole anywhere in
+# an argument list keeps that list out of the allowlist below.
+UNREADABLE_ARGUMENT = "<expr>"
+# The exact bare Git argument lists each module may still spell, and why each is safe:
+# every one reads the index, the worktree, the local configuration, or a repository
+# location. None of them reads an object's contents, so a replacement entry has nothing
+# to substitute in them. Anything else must carry `--no-replace-objects` in position 1.
+BARE_GIT_PREFIXES = {
+    "automation/reconcile/reconcile.py": frozenset((
+        ("git", "ls-files", "--stage", "-z"),
+        ("git", "ls-files", "--stage", "-z", "--", UNREADABLE_ARGUMENT),
+        ("git", "rev-parse", "--verify", "--quiet", "HEAD"),
+        ("git", "rev-parse", "--git-path", UNREADABLE_ARGUMENT),
+        ("git", "diff-files", "--quiet", "--ignore-submodules=all", "--"),
+        (
+            "git", "ls-files", "--others",
+            "--exclude-per-directory=.gitignore", "-z",
+        ),
+        (
+            "git", "ls-files", "--others", "--ignored", "--exclude-standard",
+            "--directory", "-z",
+        ),
+        ("git", "hash-object", "-t", "tree", "--stdin"),
+    )),
+    "automation/check_action_projection.py": frozenset(),
+    "automation/check_core_scope.py": frozenset(),
+    "automation/run_tests.py": frozenset((
+        ("git", "ls-files", "--stage", "-z"),
+        ("git", "rev-parse", "--git-path", "index"),
+        ("git", "rev-parse", "--git-dir"),
+        ("git", "--git-dir=.", "rev-parse", "--git-dir"),
+        ("git", "rev-parse", "--local-env-vars"),
+        ("git", "config", "--get", UNREADABLE_ARGUMENT),
+        (
+            "git", "-c", UNREADABLE_ARGUMENT, "ls-files", "-z",
+            "--cached", "--others", "--exclude-standard",
+        ),
+    )),
+}
+
+
+# The provider adapter runs Git in a shell rather than through Python, so the guard
+# above cannot see it. `git fetch` moves objects over the network and decides nothing,
+# so it is the one subcommand allowed to run without the flag there.
+WORKFLOW_GIT_COMMAND = re.compile(r"(?<![\w./-])git\s+(?P<rest>[^\n|;&]*)")
+WORKFLOW_BARE_GIT_SUBCOMMANDS = frozenset(("fetch",))
+
+
+def workflow_git_commands(text):
+    """Return (line, flags, subcommand) for every Git command in a shell workflow."""
+    commands = []
+    for match in WORKFLOW_GIT_COMMAND.finditer(text):
+        line = text.count("\n", 0, match.start()) + 1
+        flags = []
+        subcommand = None
+        for token in match.group("rest").split():
+            if token.startswith("-"):
+                flags.append(token)
+                continue
+            subcommand = token
+            break
+        commands.append((line, tuple(flags), subcommand))
+    return commands
+
+
+def guard_source_text(source, node):
+    """Return the source a node was parsed from, so a finding names itself.
+
+    ``ast.get_source_segment`` arrived in Python 3.8; on 3.7 the node carries no
+    end position, so the whole line it starts on is the closest honest answer.
+    """
+    if hasattr(ast, "get_source_segment"):
+        segment = ast.get_source_segment(source, node)
+        if segment:
+            return " ".join(segment.split())
+    lines = source.splitlines()
+    if 0 < node.lineno <= len(lines):
+        return " ".join(lines[node.lineno - 1].split())
+    return ""
+
+
+def guard_spawn_aliases(tree):
+    """Map the local names in one module that reach `subprocess` and `os` spawns."""
+    modules = {}
+    functions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in ("subprocess", "os"):
+                    modules[alias.asname or root] = root
+        elif isinstance(node, ast.ImportFrom):
+            if node.level or node.module not in ("subprocess", "os"):
+                continue
+            spawns = SUBPROCESS_SPAWNS if node.module == "subprocess" else OS_SPAWNS
+            for alias in node.names:
+                if alias.name in spawns:
+                    functions[alias.asname or alias.name] = \
+                        node.module + "." + alias.name
+    return modules, functions
+
+
+def guard_spawn_target(call, modules, functions):
+    """Name the spawn this call performs, or None when it starts no program."""
+    function = call.func
+    if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+        module = modules.get(function.value.id)
+        if module == "subprocess" and function.attr in SUBPROCESS_SPAWNS:
+            return "subprocess." + function.attr
+        if module == "os" and function.attr in OS_SPAWNS:
+            return "os." + function.attr
+        return None
+    if isinstance(function, ast.Name):
+        return functions.get(function.id)
+    return None
+
+
+def guard_parent_map(tree):
+    """Map every node to its parent so a call can find the scope it sits in."""
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def guard_enclosing_scope(node, parents):
+    """Return the module or function body a node belongs to."""
+    current = parents.get(node)
+    while current is not None and not isinstance(
+        current, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    ):
+        current = parents.get(current)
+    return current
+
+
+def guard_scope_nodes(scope):
+    """Walk a scope's own nodes, never entering a nested definition."""
+    if scope is None or isinstance(scope, ast.Lambda):
+        return
+    pending = list(getattr(scope, "body", ()))
+    while pending:
+        node = pending.pop()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (
+                ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+            )):
+                continue
+            pending.append(child)
+
+
+def guard_name_values(name, scope):
+    """Return the values bound to `name` here, or None when it cannot be read.
+
+    A name is readable only when every binding of it is a plain assignment and the
+    only methods called on it are `append` and `extend`, which can add to the tail
+    of a list but can never change the program at its head.
+
+    One walk of the scope answers for every name in it, and the answer is memoized
+    on the scope node. Resolving a module-level name walks the whole module body,
+    and these files ask about dozens of names, so without this the scan costs half
+    a minute instead of a second.
+    """
+    memo = getattr(scope, "_guard_name_values", None)
+    if memo is None:
+        memo = guard_scope_name_values(scope)
+        scope._guard_name_values = memo
+    return memo.get(name, [])
+
+
+def guard_scope_name_values(scope):
+    """Resolve every name bound in one scope, in a single walk of it."""
+    values = {}
+    bindings = {}
+    unreadable = set()
+    for node in guard_scope_nodes(scope):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bindings[node.id] = bindings.get(node.id, 0) + 1
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    values.setdefault(target.id, []).append(node.value)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr not in ("append", "extend")
+        ):
+            unreadable.add(node.func.value.id)
+    resolved = {}
+    for name, count in bindings.items():
+        bound = values.get(name, [])
+        resolved[name] = (
+            None if name in unreadable or count != len(bound) else bound
+        )
+    for name in unreadable:
+        resolved[name] = None
+    return resolved
+
+
+def guard_argv_shapes(node, scope, module_scope, depth=0):
+    """Return every element list this argument expression can hold, or None.
+
+    Only a list or tuple display can be read — directly, through a conditional,
+    or through a local name bound to one. A concatenation, a `list(...)` call, a
+    string, or an f-string is not a reviewable argument list and returns None.
+    """
+    if depth > 3:
+        return None
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [list(node.elts)]
+    if isinstance(node, ast.IfExp):
+        shapes = []
+        for branch in (node.body, node.orelse):
+            resolved = guard_argv_shapes(branch, scope, module_scope, depth + 1)
+            if resolved is None:
+                return None
+            shapes.extend(resolved)
+        return shapes
+    if isinstance(node, ast.Name):
+        values = None
+        for candidate in (scope, module_scope):
+            if candidate is None:
+                continue
+            resolved = guard_name_values(node.id, candidate)
+            if resolved is None:
+                return None
+            if resolved:
+                values = resolved
+                break
+        if not values:
+            return None
+        shapes = []
+        for value in values:
+            resolved = guard_argv_shapes(value, scope, module_scope, depth + 1)
+            if resolved is None:
+                return None
+            shapes.extend(resolved)
+        return shapes
+    return None
+
+
+def guard_string_values(node, scope, module_scope, depth=0):
+    """Return every string this expression can evaluate to, or None if unreadable."""
+    if depth > 3:
+        return None
+    if isinstance(node, ast.Str):
+        return {node.s}
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and (node.value.id, node.attr) == ("sys", "executable")
+    ):
+        # This interpreter, resolved by CPython itself; it is never Git.
+        return {"sys.executable"}
+    if isinstance(node, (ast.BoolOp, ast.IfExp)):
+        branches = (
+            node.values if isinstance(node, ast.BoolOp) else (node.body, node.orelse)
+        )
+        found = set()
+        for branch in branches:
+            resolved = guard_string_values(branch, scope, module_scope, depth + 1)
+            if resolved is None:
+                return None
+            found |= resolved
+        return found
+    if isinstance(node, ast.Call):
+        function = node.func
+        called = (
+            function.attr if isinstance(function, ast.Attribute)
+            else function.id if isinstance(function, ast.Name)
+            else None
+        )
+        # `shutil.which("sysctl")` and `str(x)` name whatever their argument names.
+        if called in ("which", "str") and node.args:
+            return guard_string_values(node.args[0], scope, module_scope, depth + 1)
+        return None
+    if isinstance(node, ast.Name):
+        values = None
+        for candidate in (scope, module_scope):
+            if candidate is None:
+                continue
+            resolved = guard_name_values(node.id, candidate)
+            if resolved is None:
+                return None
+            if resolved:
+                values = resolved
+                break
+        if not values:
+            return None
+        found = set()
+        for value in values:
+            resolved = guard_string_values(value, scope, module_scope, depth + 1)
+            if resolved is None:
+                return None
+            found |= resolved
+        return found
+    return None
+
+
+def guard_sequence_strings(node, scope, module_scope, depth=0):
+    """Fold a splatted name into its exact string tuple, or None."""
+    shapes = guard_argv_shapes(node, scope, module_scope, depth)
+    if shapes is None or len(shapes) != 1:
+        return None
+    folded = []
+    for element in shapes[0]:
+        values = guard_string_values(element, scope, module_scope, depth + 1)
+        if values is None or len(values) != 1:
+            return None
+        folded.append(next(iter(values)))
+    return tuple(folded)
+
+
+def guard_module_constant(source, name):
+    """Fold one module-level tuple-of-strings constant, or None if unreadable."""
+    tree = ast.parse(source)
+    values = guard_name_values(name, tree)
+    if not values or len(values) != 1:
+        return None
+    return guard_sequence_strings(values[0], tree, tree)
+
+
+def guard_fold_argv(elements, scope, module_scope):
+    """Fold one argument list into (programs it can run, its constant tokens).
+
+    Returns None when the program at position 0 cannot be read from the source.
+    """
+    if not elements:
+        return None
+    programs = None
+    tokens = []
+    for position, element in enumerate(elements):
+        if isinstance(element, ast.Starred):
+            sequence = guard_sequence_strings(element.value, scope, module_scope)
+            if sequence is None:
+                if position == 0:
+                    return None
+                tokens.append(UNREADABLE_ARGUMENT)
+                continue
+            if position == 0:
+                if not sequence:
+                    return None
+                programs = {sequence[0]}
+            tokens.extend(sequence)
+            continue
+        values = guard_string_values(element, scope, module_scope)
+        if position == 0:
+            if values is None:
+                return None
+            programs = values
+        tokens.append(
+            next(iter(values)) if values and len(values) == 1
+            else UNREADABLE_ARGUMENT
+        )
+    return programs, tuple(tokens)
+
+
+def guard_is_git_program(name):
+    """Report whether a program name runs Git, whatever directory it names."""
+    return name.replace("\\", "/").rsplit("/", 1)[-1].lower() in GIT_PROGRAM_NAMES
+
+
+def scan_git_spawns(source):
+    """Read every spawn in `source`, separating unreadable ones from Git ones.
+
+    Returns `(unreadable, git_reads)`. `unreadable` holds one
+    `(line, why, source text)` per spawn whose program or argument list cannot be
+    read from the source at all; `git_reads` holds one `(line, tokens, source
+    text)` per spawn that does run Git, with its argument list folded to constant
+    tokens. The scan starts at the call sites rather than at list literals, so an
+    argument list written as a tuple, a variable, a concatenation, a `list(...)`
+    call, or a shell string is judged rather than skipped.
+    """
+    tree = ast.parse(source)
+    parents = guard_parent_map(tree)
+    modules, functions = guard_spawn_aliases(tree)
+    unreadable = []
+    git_reads = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        spawn = guard_spawn_target(node, modules, functions)
+        if spawn is None:
+            continue
+        text = guard_source_text(source, node)
+        scope = guard_enclosing_scope(node, parents)
+        for keyword in node.keywords:
+            if keyword.arg == "shell" \
+                    and getattr(keyword.value, "value", True) is not False:
+                unreadable.append(
+                    (node.lineno, spawn + " runs a shell command line", text)
+                )
+        argument = node.args[0] if node.args else None
+        if argument is None:
+            for keyword in node.keywords:
+                if keyword.arg in ("args", "cmd", "command"):
+                    argument = keyword.value
+                    break
+        if argument is None:
+            unreadable.append(
+                (node.lineno, spawn + " names no argument list", text)
+            )
+            continue
+        shapes = guard_argv_shapes(argument, scope, tree)
+        if shapes is None:
+            unreadable.append((
+                node.lineno,
+                spawn + " takes an argument list this scan cannot read",
+                text,
+            ))
+            continue
+        for shape in shapes:
+            folded = guard_fold_argv(shape, scope, tree)
+            if folded is None:
+                unreadable.append(
+                    (node.lineno, spawn + " hides the program it runs", text)
+                )
+                continue
+            programs, tokens = folded
+            if any(guard_is_git_program(name) for name in programs):
+                git_reads.append((node.lineno, tokens, text))
+    return sorted(unreadable), sorted(git_reads)
+
+
+def unhardened_git_spawns(source, allowed_prefixes=frozenset()):
+    """Report every spawn in `source` that could read through `refs/replace/*`.
+
+    Each finding is `(line, why, the source text)`: a spawn the scan cannot read
+    at all, or a Git read that neither carries `--no-replace-objects` in position
+    1 nor matches one reviewed bare prefix.
+    """
+    unreadable, git_reads = scan_git_spawns(source)
+    findings = list(unreadable)
+    for lineno, tokens, text in git_reads:
+        if len(tokens) >= 2 and tokens[1] == "--no-replace-objects":
+            continue
+        if tokens in allowed_prefixes:
+            continue
+        findings.append((lineno, "bare Git read: " + " ".join(tokens), text))
+    return sorted(findings)
 
 
 VALID_DECISION = """# Choose the admission boundary
@@ -341,7 +816,8 @@ class ReconcileQueueTests(unittest.TestCase):
         )
         self.assertIn('QUEUE_CHANGE_RANGE="root:$QUEUE_PUSH_HEAD"', workflow)
         self.assertIn(
-            'git cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"', workflow
+            'git --no-replace-objects cat-file -e "$QUEUE_PUSH_BEFORE^{commit}"',
+            workflow,
         )
         self.assertIn(
             'QUEUE_CHANGE_RANGE="$QUEUE_PUSH_BASE...$QUEUE_PUSH_HEAD"',
@@ -9957,8 +10433,9 @@ class ReconcileQueueTests(unittest.TestCase):
             )
             self.assertEqual(
                 1,
-                sum(command[:5] == [
-                    "git", "ls-tree", "-r", "--name-only", "-z"
+                sum(command[:6] == [
+                    "git", "--no-replace-objects",
+                    "ls-tree", "-r", "--name-only", "-z",
                 ] for command in commands),
                 commands,
             )
@@ -11519,6 +11996,574 @@ class ReconcileQueueTests(unittest.TestCase):
                 "neither the --range head nor an exact base+head synthetic merge",
                 stderr.getvalue(),
             )
+
+    @staticmethod
+    def forget_git_object_reads():
+        """Ask Git again, as a fresh reconciler process against this repository.
+
+        Answers keyed by a full object ID are cached for the whole process and
+        the blob reader stays open across invocations, so a second read inside
+        one test would replay the first read instead of asking the repository
+        as it now stands. A `refs/replace/*` entry installed between two reads
+        is only observable once those answers are dropped — which is exactly
+        what the next reconciler process would do.
+        """
+        RECONCILE._GIT_IMMUTABLE_CACHE_REPO = None
+        RECONCILE.scope_immutable_git_caches()
+
+    def test_replace_ref_cannot_forge_synthetic_candidate_parents(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "common")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "range-head")
+            self.write(root, "head.md", "# Head\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "head")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "range-base", common)
+            self.write(root, "base.md", "# Base\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "candidate")
+            self.write(root, "candidate.md", "# Candidate\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "raw one-parent candidate")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            tree = self.git(root, "rev-parse", "HEAD^{tree}")
+            replacement = self.git(
+                root, "commit-tree", tree,
+                "-p", base, "-p", head,
+                "-m", "forged synthetic parents",
+            )
+
+            def verdict():
+                self.forget_git_object_reads()
+                stderr = io.StringIO()
+                with mock.patch.dict(
+                    RECONCILE.CHECKS, {}, clear=True
+                ), contextlib.redirect_stderr(stderr):
+                    result = RECONCILE.main([
+                        "--check", "--range", f"{base}...{head}"
+                    ])
+                return result, stderr.getvalue()
+
+            without_replace = verdict()
+            self.git(root, "replace", candidate, replacement)
+            try:
+                with_replace = verdict()
+            finally:
+                self.git(root, "replace", "-d", candidate)
+
+            self.assertEqual(without_replace, with_replace)
+            self.assertEqual(2, without_replace[0])
+            self.assertIn(
+                "neither the --range head nor an exact base+head synthetic merge",
+                without_replace[1],
+            )
+
+    def test_replace_ref_cannot_hide_staged_admission_changes(self):
+        cases = (
+            (
+                "queue deletion",
+                "message-queue/needs-agent/requests/blocking-repair.md",
+            ),
+            (
+                "queue mutation",
+                "message-queue/needs-agent/requests/blocking-repair.md",
+            ),
+            (
+                "handover mutation",
+                "history/conversations/2026-07-23-1200UTC-example/"
+                "handover.md",
+            ),
+            (
+                "task mutation",
+                "tasks/1_in-progress/2026-07-23-example/task.md",
+            ),
+            (
+                "task artifact rename",
+                "tasks/1_in-progress/2026-07-23-example/design.md",
+            ),
+        )
+        for case, path in cases:
+            with self.subTest(case=case), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                item = self.write(root, path, "# Repair\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "file action")
+                head = self.git(root, "rev-parse", "HEAD")
+                parent = self.git(root, "rev-parse", "HEAD^")
+
+                if case == "queue deletion":
+                    item.unlink()
+                    expected = [path]
+                    verdict = lambda: RECONCILE.staged_deleted_queue_paths(
+                        head
+                    )
+                elif case == "queue mutation":
+                    item.write_text("# Rewritten repair\n", encoding="utf-8")
+                    expected = [(path, path)]
+                    verdict = lambda: RECONCILE.staged_mutated_queue_paths(
+                        head
+                    )
+                elif case == "handover mutation":
+                    item.write_text("# Rewritten handover\n", encoding="utf-8")
+                    expected = [path]
+                    verdict = lambda: RECONCILE.staged_mutated_handover_paths(
+                        head
+                    )
+                elif case == "task mutation":
+                    item.write_text("# Rewritten task\n", encoding="utf-8")
+                    expected = {"2026-07-23-example"}
+                    verdict = lambda: RECONCILE.task_ids_changed_on_edge(
+                        head, None
+                    )
+                else:
+                    destination = path.replace("design.md", "proposal.md")
+                    item.rename(root / destination)
+                    expected = [(path, destination)]
+                    verdict = lambda: RECONCILE.task_artifact_renames_on_edge(
+                        head, None
+                    )
+                self.git(root, "add", "-A")
+
+                index_tree = self.git(root, "write-tree")
+                replacement = self.git(
+                    root, "commit-tree", index_tree,
+                    "-p", parent,
+                    "-m", "forge index-matching HEAD",
+                )
+                without_replace = verdict()
+                self.git(root, "replace", head, replacement)
+                try:
+                    with_replace = verdict()
+                finally:
+                    self.git(root, "replace", "-d", head)
+
+                self.assertEqual(expected, without_replace)
+                self.assertEqual(without_replace, with_replace)
+
+    def test_replace_ref_cannot_forge_git_review_object(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            blob = self.git(root, "rev-parse", "HEAD:docs/source.md")
+
+            def verdict():
+                self.forget_git_object_reads()
+                return RECONCILE.git_review_revision_problems(f"git:{blob}")
+
+            without_replace = verdict()
+            self.git(root, "replace", "-f", blob, base)
+            try:
+                with_replace = verdict()
+            finally:
+                self.git(root, "replace", "-d", blob)
+
+            self.assertEqual(without_replace, with_replace)
+            self.assertTrue(any("not a commit" in problem
+                                for problem in without_replace))
+
+    def test_replace_ref_cannot_forge_git_review_ancestry(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            tree = self.git(root, "write-tree")
+            unrelated = self.git(
+                root, "commit-tree", tree, "-m", "unrelated root"
+            )
+            revision = f"git:{base}...{unrelated}"
+
+            def verdict():
+                self.forget_git_object_reads()
+                return RECONCILE.git_review_revision_problems(revision)
+
+            without_replace = verdict()
+            replacement = self.git(
+                root, "commit-tree", tree, "-p", base,
+                "-m", "forged common ancestry",
+            )
+            self.git(root, "replace", unrelated, replacement)
+            try:
+                with_replace = verdict()
+            finally:
+                self.git(root, "replace", "-d", unrelated)
+
+            self.assertEqual(without_replace, with_replace)
+            self.assertIn("base and head have no merge base", without_replace)
+
+    def test_replace_ref_cannot_hide_new_handover_in_root_or_range(self):
+        rel = Path(
+            "history/conversations/2026-07-23-1200UTC-example/handover.md"
+        )
+        for view in ("root", "range"):
+            with self.subTest(view=view), self.repo() as root:
+                self.init_git(root)
+                self.write(root, "README.md", "# Base\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "base")
+                base = self.git(root, "rev-parse", "HEAD")
+                self.write(root, rel.as_posix(), "# Handover\n")
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "add handover")
+                head = self.git(root, "rev-parse", "HEAD")
+                base_tree = self.git(root, "rev-parse", f"{base}^{{tree}}")
+                replacement = self.git(
+                    root, "commit-tree", base_tree, "-p", base,
+                    "-m", "hide handover",
+                )
+                change_range = (
+                    f"root:{head}" if view == "root" else f"{base}...{head}"
+                )
+
+                def verdict():
+                    self.forget_git_object_reads()
+                    with mock.patch.multiple(
+                        RECONCILE,
+                        CHANGE_RANGE=change_range,
+                        projection_schema_activation_commits=(
+                            lambda _candidate: ([base], None)
+                        ),
+                        governed_by_activation_join=(
+                            lambda _revision, _activations: (True, None)
+                        ),
+                    ):
+                        return RECONCILE.newly_added_handovers()
+
+                without_replace = verdict()
+                self.git(root, "replace", head, replacement)
+                try:
+                    with_replace = verdict()
+                finally:
+                    self.git(root, "replace", "-d", head)
+                self.assertEqual(({rel}, None), without_replace)
+                self.assertEqual(without_replace, with_replace)
+
+    def test_replace_ref_cannot_change_handover_or_staged_blob_baselines(self):
+        rel = Path(
+            "history/conversations/2026-07-23-1200UTC-example/handover.md"
+        )
+        queue_path = (
+            "message-queue/needs-human/reviews/non-blocking-review.md"
+        )
+        with self.repo() as root:
+            self.init_git(root)
+            source = self.write(root, "docs/source.md", "# Source\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "base")
+            base = self.git(root, "rev-parse", "HEAD")
+            handover = self.write(root, rel.as_posix(), "# Original handover\n")
+            self.write(root, queue_path, "# Review\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create handover")
+            head = self.git(root, "rev-parse", "HEAD")
+
+            handover.write_text("# Forged handover\n", encoding="utf-8")
+            (root / queue_path).unlink()
+            self.git(root, "add", "-A")
+            forged_tree = self.git(root, "write-tree")
+            replacement = self.git(
+                root, "commit-tree", forged_tree, "-p", base,
+                "-m", "forge creation snapshot",
+            )
+            self.git(root, "reset", "--hard", head)
+
+            def handover_verdict():
+                self.forget_git_object_reads()
+                with mock.patch.object(
+                    RECONCILE, "CHANGE_RANGE", f"{base}...{head}"
+                ):
+                    state = RECONCILE.handover_creation_state(handover, rel)
+                self.forget_git_object_reads()
+                with mock.patch.object(RECONCILE, "CHANGE_RANGE", None):
+                    incarnation = RECONCILE.handover_current_incarnation_text(
+                        rel
+                    )
+                return state, incarnation
+
+            handover_without = handover_verdict()
+            self.git(root, "replace", head, replacement)
+            try:
+                handover_with = handover_verdict()
+            finally:
+                self.git(root, "replace", "-d", head)
+            self.assertEqual(handover_without, handover_with)
+            state, incarnation = handover_without
+            self.assertEqual("# Original handover\n", state[0])
+            self.assertEqual({queue_path}, state[1])
+            self.assertIsNone(state[3])
+            self.assertEqual(("# Original handover\n", None), incarnation)
+
+            def staged_verdict():
+                self.forget_git_object_reads()
+                return RECONCILE.repo_artifact_bytes(source)
+
+            original_blob = self.git(
+                root, "rev-parse", "HEAD:docs/source.md"
+            )
+            forged = self.write(root, "docs/forged.md", "# Forged\n")
+            forged_blob = self.git(root, "hash-object", "-w", str(forged))
+            staged_without = staged_verdict()
+            self.git(root, "replace", original_blob, forged_blob)
+            try:
+                staged_with = staged_verdict()
+            finally:
+                self.git(root, "replace", "-d", original_blob)
+            self.assertEqual(b"# Source\n", staged_without)
+            self.assertEqual(staged_without, staged_with)
+
+    def test_no_gate_spawns_git_in_a_way_that_could_read_a_replaced_object(self):
+        """Every Git spawn these four gates make is readable, and reads honestly.
+
+        Precisely what this asserts, for `automation/reconcile/reconcile.py`,
+        `automation/check_action_projection.py`,
+        `automation/check_core_scope.py`, and `automation/run_tests.py`:
+
+        1. every `subprocess` and `os` spawn in those files presents an argument
+           list this scan can fold to constant tokens, and never a shell command
+           line;
+        2. every folded list that runs Git either carries
+           `--no-replace-objects` in position 1, or is one of the reviewed bare
+           prefixes in `BARE_GIT_PREFIXES`, each of which reads the index, the
+           worktree, the local configuration, or a repository location — never
+           an object's contents.
+
+        What it does NOT assert, and cannot:
+
+        - it reads only these four files, so a Git read from any other module,
+          from an installed program, or from a subprocess of a subprocess is
+          outside it;
+        - it reads the source, not the run, so `getattr(subprocess, "run")`,
+          `eval`, an `importlib` lookup, or a spawn function stored in a
+          variable and called through that variable is invisible to it;
+        - it says nothing about a `git` earlier on `PATH`, a `GIT_*` variable,
+          or a library that reads `.git/objects` without spawning anything.
+
+        A spawn whose program or argument list it cannot read is reported rather
+        than skipped, so those gaps fail closed inside the files it does read.
+        """
+        for relative, path in GUARDED_GIT_MODULES:
+            with self.subTest(module=relative):
+                source = path.read_text(encoding="utf-8")
+                self.assertEqual(
+                    [],
+                    unhardened_git_spawns(source, BARE_GIT_PREFIXES[relative]),
+                )
+                _unreadable, git_reads = scan_git_spawns(source)
+                self.assertNotEqual(
+                    [], git_reads,
+                    "the scan recognised no Git spawn here, so it proves nothing",
+                )
+                unused = sorted(
+                    set(BARE_GIT_PREFIXES[relative])
+                    - {tokens for _line, tokens, _text in git_reads}
+                )
+                self.assertEqual(
+                    [], unused,
+                    "a bare-prefix exemption no call site needs any more",
+                )
+
+    def test_the_provider_workflow_reads_git_the_same_way_the_gates_do(self):
+        """The shell half of the boundary, which the AST guard cannot see.
+
+        The merge and push adapters resolve a displaced tip the pusher chose,
+        and decide from it — `cat-file -e "$TIP^{commit}"` for the object's type
+        and `merge-base` for ancestry. Both answered from `refs/replace/*` while
+        the hardened blocks further down the same file did not.
+        """
+        workflow = (
+            MODULE_PATH.parents[2] / ".github/workflows/harness.yml"
+        ).read_text(encoding="utf-8")
+        commands = workflow_git_commands(workflow)
+        self.assertNotEqual([], commands)
+        bare = [
+            (line, subcommand)
+            for line, flags, subcommand in commands
+            if "--no-replace-objects" not in flags
+            and subcommand not in WORKFLOW_BARE_GIT_SUBCOMMANDS
+        ]
+        self.assertEqual([], bare)
+        self.assertIn(
+            "cat-file",
+            {subcommand for _line, _flags, subcommand in commands},
+            "the scan recognised no object read here, so it proves nothing",
+        )
+
+    def test_every_gate_names_the_same_checked_hardening_prefix(self):
+        """The flag lives in one constant per gate, and that constant carries it.
+
+        The guard reads `[*RAW_GIT, ...]` by folding the splat, so a `RAW_GIT`
+        that stopped carrying the flag would silently disarm every call site
+        spelled that way. Folding it here is the same read the guard performs.
+        """
+        for relative, path in GUARDED_GIT_MODULES:
+            with self.subTest(module=relative):
+                self.assertEqual(
+                    ("git", "--no-replace-objects"),
+                    guard_module_constant(
+                        path.read_text(encoding="utf-8"), "RAW_GIT"
+                    ),
+                )
+        self.assertEqual(("git", "--no-replace-objects"), RECONCILE.RAW_GIT)
+
+    def test_the_git_spawn_guard_catches_every_known_bypass_spelling(self):
+        """Each spelling that slipped past the list-literal scan is now caught.
+
+        The previous guard walked `ast.List` nodes only and matched the first
+        element against the literal `"git"`, so all six of these read a forged
+        object with the guard green. Each case here fails the guard now, and the
+        message carries the source text so the failure names itself.
+        """
+        cases = (
+            (
+                "tuple literal",
+                'import subprocess\n'
+                'def read(oid):\n'
+                '    return subprocess.run(("git", "cat-file", "-p", oid))\n',
+                ['bare Git read: git cat-file -p <expr>'],
+                'subprocess.run(("git", "cat-file", "-p", oid))',
+            ),
+            (
+                "name bound to the program",
+                'import subprocess\n'
+                '_GIT_BIN = "git"\n'
+                'def read(oid):\n'
+                '    return subprocess.run([_GIT_BIN, "cat-file", "-p", oid])\n',
+                ['bare Git read: git cat-file -p <expr>'],
+                'subprocess.run([_GIT_BIN, "cat-file", "-p", oid])',
+            ),
+            (
+                "shell command line",
+                'import subprocess\n'
+                'def read(oid):\n'
+                '    return subprocess.run(f"git cat-file -p {oid}", shell=True)\n',
+                [
+                    'subprocess.run runs a shell command line',
+                    'subprocess.run takes an argument list this scan cannot read',
+                ],
+                'shell=True',
+            ),
+            (
+                "list concatenation",
+                'import subprocess\n'
+                '_GIT_BIN = "git"\n'
+                'def read(oid):\n'
+                '    return subprocess.run([_GIT_BIN] + ["show", oid])\n',
+                ['subprocess.run takes an argument list this scan cannot read'],
+                '[_GIT_BIN] + ["show", oid]',
+            ),
+            (
+                "os.popen",
+                'import os\n'
+                'def read(oid):\n'
+                '    return os.popen("git cat-file -p " + oid).read()\n',
+                ['os.popen takes an argument list this scan cannot read'],
+                'os.popen("git cat-file -p " + oid)',
+            ),
+            (
+                "list() call",
+                'import subprocess\n'
+                'def read(oid):\n'
+                '    return subprocess.run(list(("git", "cat-file", "-p", oid)))\n',
+                ['subprocess.run takes an argument list this scan cannot read'],
+                'list(("git", "cat-file", "-p", oid))',
+            ),
+        )
+        for label, source, expected, quoted in cases:
+            with self.subTest(spelling=label):
+                findings = unhardened_git_spawns(source)
+                self.assertEqual(
+                    expected, [reason for _line, reason, _text in findings]
+                )
+                for _line, _reason, text in findings:
+                    self.assertIn(quoted, text)
+
+    def test_the_git_spawn_guard_still_reads_the_shapes_the_gates_use(self):
+        """The idioms these gates are written in stay readable, and stay judged."""
+        hardened = (
+            'import subprocess\n'
+            'RAW_GIT = ("git", "--no-replace-objects")\n'
+            'def read(oid):\n'
+            '    return subprocess.run([*RAW_GIT, "cat-file", "-p", oid])\n'
+        )
+        self.assertEqual([], unhardened_git_spawns(hardened))
+
+        disarmed = hardened.replace('"git", "--no-replace-objects"', '"git",')
+        self.assertEqual(
+            ['bare Git read: git cat-file -p <expr>'],
+            [reason for _line, reason, _text in unhardened_git_spawns(disarmed)],
+            "folding the splat is what makes a disarmed RAW_GIT visible",
+        )
+
+        branched = (
+            'import subprocess\n'
+            'RAW_GIT = ("git", "--no-replace-objects")\n'
+            'def read(oid, staged):\n'
+            '    command = (\n'
+            '        [*RAW_GIT, "diff", "--cached", oid]\n'
+            '        if staged else\n'
+            '        ["git", "diff-tree", oid]\n'
+            '    )\n'
+            '    return subprocess.run(command)\n'
+        )
+        self.assertEqual(
+            ['bare Git read: git diff-tree <expr>'],
+            [reason for _line, reason, _text in unhardened_git_spawns(branched)],
+            "a name bound in two branches is read through both",
+        )
+
+        non_git = (
+            'import subprocess\n'
+            'import sys\n'
+            'def run_child(path):\n'
+            '    command = [sys.executable, str(path)]\n'
+            '    command.extend(["-v"])\n'
+            '    return subprocess.run(command)\n'
+        )
+        self.assertEqual([], unhardened_git_spawns(non_git))
+
+    def test_the_git_spawn_guard_leaves_ordinary_starred_lists_alone(self):
+        """A splat outside argument-list position is not the guard's business.
+
+        The rule that reads a starred first element applies only where a spawn
+        takes its argument list. An ordinary list built from any other constant
+        used to fail this security test with no Git anywhere in it.
+        """
+        ordinary = (
+            'import subprocess\n'
+            'ORDINARY_HEADERS = ("Status", "Blocks now")\n'
+            'def rows():\n'
+            '    return [*ORDINARY_HEADERS, "note"]\n'
+        )
+        self.assertEqual([], unhardened_git_spawns(ordinary))
+
+        unreadable_splat = (
+            'import subprocess\n'
+            'def read(prefix, oid):\n'
+            '    return subprocess.run([*prefix, "cat-file", "-p", oid])\n'
+        )
+        findings = unhardened_git_spawns(unreadable_splat)
+        self.assertEqual(
+            ['subprocess.run hides the program it runs'],
+            [reason for _line, reason, _text in findings],
+        )
+        self.assertIn("cat-file", findings[0][2])
 
     def test_range_accepts_exact_synthetic_merge_candidate(self):
         with self.repo() as root:
