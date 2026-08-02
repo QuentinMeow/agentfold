@@ -1,12 +1,17 @@
 # Let a queue item resolve when its resolution evidence landed in an earlier commit
 
-**Claimed-by:** codex
+**Claimed-by:** codex (claim abandoned 2026-07-26, cleared 2026-08-02)
 **Filed:** 2026-07-26, by claude, from the coordination session that claimed and then could not resolve the handover code-span repair — `handbook/git-workflow.md`
 **Parent:** none
 **Repository scope:** core
 **Queue actions:** none
 
 ## Goal
+
+> **Closed as superseded, 2026-08-02.** Nothing below was built. The defect was repaired by
+> `2026-07-30-admit-evidence-that-landed-earlier` with a narrower rule, and the approach this
+> task chose was afterwards discarded by name. Every acceptance criterion below is unmet and
+> stays unchecked; `verification.md` holds the commands that establish the supersession.
 
 A `needs-agent` request whose work merged before its claim edge was committed can never be
 deleted by any honest commit. The deletion check requires the item's predeclared resolution
