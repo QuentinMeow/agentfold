@@ -43,20 +43,20 @@ adds no mechanism. It is scoped `records-only` for that reason.
 
 ## Acceptance criteria
 
-- [ ] The `verification.md` of task 2026-07-25-mine-markdown-cochange-couplings contains
+- [x] The `verification.md` of task 2026-07-25-mine-markdown-cochange-couplings contains
       one section per item above, each holding the exact command that was run and the real
       output it printed, inside a fenced block, pasted rather than summarised
-- [ ] The before-state section demonstrates the pre-fix behaviour at a named commit, and
+- [x] The before-state section demonstrates the pre-fix behaviour at a named commit, and
       records the real output of the run that produced it together with the exact commit or
       range that run was made against
-- [ ] WHEN a command's output no longer reproduces at the current commit, THE FILE SHALL
+- [x] WHEN a command's output no longer reproduces at the current commit, THE FILE SHALL
       record the output actually obtained plus a one-line statement that the behaviour
       changed and where, rather than a reconstruction of the historical output
-- [ ] Every fenced block added by this task is terminal output. No block is expected,
+- [x] Every fenced block added by this task is terminal output. No block is expected,
       paraphrased, or invented, and no conclusion is stated in place of a transcript
-- [ ] The file's existing gating-experiment sections are left byte-identical; this task
+- [x] The file's existing gating-experiment sections are left byte-identical; this task
       appends and does not rewrite another session's recorded output
-- [ ] `python3 automation/reconcile/reconcile.py --check` exits 0 with the result staged,
+- [x] `python3 automation/reconcile/reconcile.py --check` exits 0 with the result staged,
       and its output is itself recorded in the file
 
 ## Links
