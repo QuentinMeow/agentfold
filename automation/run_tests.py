@@ -220,6 +220,7 @@ INPUT_TEST_OWNERS = (
         b"automation/reconcile/",
         (
             "automation/tests/test_markdown_semantics.py",
+            "automation/tests/test_reconcile_open_actions.py",
             "automation/tests/test_reconcile_queue.py",
         ),
     ),
