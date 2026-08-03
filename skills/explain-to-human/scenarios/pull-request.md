@@ -26,6 +26,14 @@ note only when this is a stacked pull request, and `Notes` only when it has cont
 | 6 | `## Verification` | always | yes | real output, uncut |
 | 7 | `## Notes` | only when non-empty | yes | short |
 
+Three rows of this table are reported back at the pull-request boundary: a required section
+missing, a section out of this order, and a `## TL;DR` outside three to six numbered items.
+`automation/check_action_projection.py --pull-request-body-shape` prints each one with an
+`(advisory)` marker and never changes its own exit status because of it, so a body that
+breaks one still merges — the line is there to be seen, not to refuse
+(`memory/decisions/2026-08-02-readability-enforcement-disposition.md`). Whether the prose
+in a section was worth reading is not checked anywhere.
+
 **How a folded section is written.** Its `##` heading stays *outside* the fold, and the
 `<details>` block opens immediately under it:
 

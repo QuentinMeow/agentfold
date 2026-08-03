@@ -1004,6 +1004,42 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             merge = git(fixture.remote, "rev-parse", "refs/pull/1/merge")
             self.assertEqual(output, f"revision={merge}\n")
 
+    def test_body_shape_is_probed_for_rather_than_assumed_of_the_gate(self):
+        """The workflow and the gate it runs can arrive from different commits.
+
+        A `pull_request_target` run resolves workflow code and checked-out gate code
+        separately, and a pull request's `base.sha` lags the base branch tip, so a
+        hard-coded `--pull-request-body-shape` can meet a gate that predates the
+        flag. Argparse answers an unknown argument with exit 2 — a check that could
+        not run — which would fail pull requests over an advisory readability line.
+        """
+        step = self.step(
+            "authoritative-external-action-projection",
+            "Action projection — pull-request description and state",
+        )
+        self.assert_contains_all(step, (
+            "SHAPE=()",
+            "grep -q -- --pull-request-body-shape",
+            "SHAPE=(--pull-request-body-shape)",
+            '"${SHAPE[@]}"',
+        ))
+        self.assertNotIn("\\\n            --pull-request-body-shape \\", step)
+        # The probe is only correct while the gate really spells it that way; a
+        # typo on either side would degrade to silence instead of failing.
+        help_text = subprocess.run(
+            [
+                "python3",
+                str(REPO / "automation/check_action_projection.py"),
+                "--help",
+            ],
+            cwd=REPO,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout
+        self.assertIn("--pull-request-body-shape", help_text)
+
     def test_no_untrusted_candidate_is_ever_checked_out(self):
         for forbidden in (
             "ref: ${{ github.event.pull_request.head.sha }}",

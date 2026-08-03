@@ -129,9 +129,14 @@ INPUT_TEST_OWNERS = (
         b".github/pull_request_template.md",
         ("automation/tests/test_pull_request_schema.py",),
     ),
+    # The boundary gate derives the section order it reports on from this schema at run
+    # time, so its own tests read it too: it is their input, not a record beside them.
     (
         b"templates/pull-request.md",
-        ("automation/tests/test_pull_request_schema.py",),
+        (
+            "automation/tests/test_check_action_projection.py",
+            "automation/tests/test_pull_request_schema.py",
+        ),
     ),
     (
         b".github/scripts/collect_conversation_actions.py",

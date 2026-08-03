@@ -303,6 +303,64 @@ class PullRequestSchemaTest(unittest.TestCase):
                     text.index("## What to review"), text.index("<details>")
                 )
 
+    def test_the_advisory_shape_rules_are_derived_from_this_schema(self):
+        """The section list the gate reports on is this file's, read at run time."""
+        expected = [
+            line[len("## "):].strip()
+            for line in COMMENT_RE.sub("", TEMPLATE.read_text(encoding="utf-8"))
+            .splitlines()
+            if line.startswith("## ")
+        ]
+        self.assertEqual(expected, PROJECTION.pull_request_schema_sections())
+        self.assertIn(PROJECTION.PULL_REQUEST_SUMMARY_SECTION, expected)
+        for section in PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS:
+            self.assertIn(section, expected)
+
+    def test_the_two_unreadable_schema_facts_still_say_what_the_gate_assumes(self):
+        """Both live only in comments the parsers blank, so they are pinned here.
+
+        `templates/README.md` requires that nothing a check reads is hidden in an
+        HTML comment, and these two are: which section is deleted when empty, and
+        how many summary items the schema asks for. The gate names them in its own
+        source; if the schema ever says something else, this fails instead of the
+        gate quietly reporting the wrong thing.
+
+        The optional-section half is asserted in **both** directions. Checking only
+        that `Notes` is in the tuple let a second deletable section be added to the
+        schema with every test still green, while the gate immediately began
+        demanding that section of a body that conformed to the schema.
+        """
+        raw = TEMPLATE.read_text(encoding="utf-8")
+        low, high = PROJECTION.PULL_REQUEST_SUMMARY_RANGE
+        self.assertEqual((3, 6), (low, high))
+        self.assertIn("Three to six numbered items", raw)
+
+        deletable = self.deletable_schema_sections(raw)
+        self.assertEqual({"Notes"}, deletable)
+        self.assertEqual(
+            deletable,
+            set(PROJECTION.PULL_REQUEST_OPTIONAL_SECTIONS),
+            "every section the schema marks deletable must be optional to the "
+            "gate, and nothing else may be",
+        )
+
+    @staticmethod
+    def deletable_schema_sections(raw):
+        """Return every schema section whose own guidance says to delete it."""
+        marker = "Delete this section, heading included"
+        sections = {}
+        current = None
+        for line in raw.splitlines():
+            if line.startswith("## "):
+                current = line[len("## "):].strip()
+                sections.setdefault(current, [])
+            elif current is not None:
+                sections[current].append(line)
+        return {
+            name for name, body in sections.items()
+            if marker in "\n".join(body)
+        }
+
 
 if __name__ == "__main__":
     unittest.main()

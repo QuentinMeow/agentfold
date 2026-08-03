@@ -16021,6 +16021,341 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual([], list(RECONCILE.check_human_attention()))
             self.assertEqual([], list(RECONCILE.check_queue_schema()))
 
+    # ------------------------------------------------ explanation shape
+
+    def explanation_shape_repo(self, root, text=None):
+        """Write one live item beside the real templates its shape comes from."""
+        self.human_attention_repo(root, text)
+        for template in sorted(QUEUE_TEMPLATES.glob("*.md")):
+            self.write(
+                root,
+                f"templates/queue/{template.name}",
+                template.read_text(encoding="utf-8"),
+            )
+
+    def explanation_shape_messages(self, root, replacements=(), text=None):
+        source = self.HUMAN_ATTENTION_REVIEW if text is None else text
+        for old, new in replacements:
+            self.assertIn(old, source)
+            source = source.replace(old, new)
+        self.explanation_shape_repo(root, source)
+        return self.messages(RECONCILE.check_explanation_shape())
+
+    def test_the_leaf_to_template_pairing_agrees_with_the_table_stating_it(self):
+        """`templates/README.md` states this pairing; the code must not disagree.
+
+        `queue_leaf_template_name` derives the pairing instead of storing it, which
+        is only single-source if the derivation reproduces every row of the table
+        that already states it. Each row reads
+        ``| `queue/<file>.md` | `message-queue/<actor>/<leaf>/` |``.
+        """
+        rows = re.findall(
+            r"^\|\s*`queue/([a-z]+\.md)`\s*\|\s*"
+            r"`message-queue/needs-(?:human|agent)/([a-z]+)/`\s*\|\s*$",
+            (REPO_ROOT / "templates/README.md").read_text(encoding="utf-8"),
+            re.M,
+        )
+        self.assertEqual(
+            sorted(QUEUE_TEMPLATE_ENDPOINTS),
+            sorted(name for name, _leaf in rows),
+            "the table must still list every queue template",
+        )
+        for name, leaf in rows:
+            with self.subTest(leaf=leaf):
+                self.assertEqual(name, RECONCILE.queue_leaf_template_name(leaf))
+
+    def test_a_leaf_the_table_does_not_list_earns_no_section_rule(self):
+        """The derivation fails open: an unmapped leaf gets no requirement."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            for leaf in ("analyses", "series", "escalations", "queries", "x"):
+                with self.subTest(leaf=leaf):
+                    self.assertIsNone(
+                        RECONCILE.queue_leaf_template_sections(leaf)
+                    )
+
+    def test_explanation_shape_is_registered_as_an_advisory_check(self):
+        """The id is permanent: retry filenames embed it."""
+        self.assertIn("explanation-shape", RECONCILE.CHECKS)
+        self.assertIn("explanation-shape", RECONCILE.ADVISORY_CHECKS)
+        self.assertEqual(
+            "advisory",
+            RECONCILE.Finding("explanation-shape", "x", "", "").severity,
+        )
+
+    def test_explanation_shape_says_nothing_about_a_well_formed_item(self):
+        with self.repo() as root:
+            self.assertEqual([], self.explanation_shape_messages(root))
+
+    def test_explanation_shape_names_a_missing_section(self):
+        with self.repo() as root:
+            self.assertEqual(
+                ["missing section `## What I recommend`"],
+                self.explanation_shape_messages(
+                    root, [("## What I recommend\n", "## Notes on this\n")]
+                ),
+            )
+
+    def test_explanation_shape_names_a_section_out_of_template_order(self):
+        """The order is what a reader scans, so a swap is worth reporting."""
+        text = self.HUMAN_ATTENTION_REVIEW
+        start = text.index("## Your choices")
+        end = text.index("## What I recommend")
+        tail = text.index("Answer in plain words")
+        choices = text[start:end]
+        recommend = text[end:tail]
+        swapped = text[:start] + recommend + choices + text[tail:]
+        with self.repo() as root:
+            self.assertEqual(
+                ["section `## What I recommend` comes before `## Your choices`"],
+                self.explanation_shape_messages(root, text=swapped),
+            )
+
+    def test_explanation_shape_names_the_choice_missing_its_consequence(self):
+        """The blocking count cannot say which choice is the bare one.
+
+        `check_queue_schema` requires two concrete consequences anywhere in the
+        choices. A third choice with none satisfies that count and still leaves a
+        reader unable to picture what picking it costs.
+        """
+        with self.repo() as root:
+            messages = self.explanation_shape_messages(
+                root,
+                [(
+                    "## What I recommend\n",
+                    "### Reject\n"
+                    "The boundary is abandoned and the guard stays local.\n"
+                    "\n"
+                    "## What I recommend\n",
+                )],
+            )
+            self.assertEqual(
+                [
+                    "choice `### Reject` has no concrete "
+                    "*Example consequence:* line"
+                ],
+                messages,
+            )
+            # The blocking rule counts two consequences and passes, which is
+            # exactly the gap the per-choice line fills.
+            self.assertEqual([], self.messages(RECONCILE.check_queue_schema()))
+
+    def test_explanation_shape_reports_a_placeholder_consequence(self):
+        with self.repo() as root:
+            self.assertEqual(
+                [
+                    "choice `### Approve` has no concrete "
+                    "*Example consequence:* line"
+                ],
+                self.explanation_shape_messages(
+                    root,
+                    [(
+                        "*Example consequence:* a skipped hook still cannot "
+                        "send the object.\n",
+                        "*Example consequence:* none\n",
+                    )],
+                ),
+            )
+
+    def test_explanation_shape_reads_the_requirement_from_the_template(self):
+        """Changing the schema changes the rule, because there is one copy."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
+            template = root / "templates/queue/review.md"
+            template.write_text(
+                template.read_text(encoding="utf-8")
+                + "\n## What it costs\n\nOne paragraph.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                ["missing section `## What it costs`"],
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+
+    def test_explanation_shape_is_silent_for_a_leaf_with_no_template(self):
+        """A typed leaf an adopter adds inherits no section requirement."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            (root / "templates/queue/review.md").unlink()
+            self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
+
+    def test_explanation_shape_leaves_an_earlier_generation_item_alone(self):
+        """A record is immutable, so it keeps the schema it was written under."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root, self.LEGACY_HUMAN_ITEM)
+            self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
+
+    AGENT_REQUEST_WITHOUT_SUMMARY = (
+        "# Continue the queue-owned review\n\n"
+        "**Status:** open\n"
+        "**Filed:** {filed}, by test\n"
+        "**Action:** continue the review and fold the response\n"
+        "**Full context:** `docs/design.md`\n"
+        "**Resolution evidence:** `docs/disposition.md`\n"
+        "{projection}"
+        "**If unanswered:** The review stays open.\n\n"
+        "## Done when\n\nThe response is folded durably.\n"
+    )
+    LEGACY_AGENT_PROJECTION = (
+        "**Why-you-might-care:** It changes every action surface.\n"
+    )
+    AGENT_REQUEST_PATH = (
+        "message-queue/needs-agent/requests/"
+        "non-blocking-continue-the-review.md"
+    )
+
+    def test_explanation_shape_leaves_an_earlier_agent_item_alone(self):
+        """The same rule on the agent side, where one live request predates it."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.write(
+                root,
+                self.AGENT_REQUEST_PATH,
+                self.AGENT_REQUEST_WITHOUT_SUMMARY.format(
+                    filed="2026-07-23", projection=self.LEGACY_AGENT_PROJECTION
+                ),
+            )
+            self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
+
+    def test_a_new_agent_item_cannot_copy_its_way_out_of_the_rule(self):
+        """The hole an imitating agent would have walked through.
+
+        A brand-new request that copied the one live legacy neighbour's
+        `Why-you-might-care:` line used to switch the whole rule off for itself,
+        and for an agent request nothing else reads its sections at all —
+        `check_queue_schema` scopes every section rule behind
+        `if actor != "needs-human": continue`. The legacy field is not enough on
+        its own; the item must also have been filed before the rule existed.
+        """
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.write(
+                root,
+                self.AGENT_REQUEST_PATH,
+                self.AGENT_REQUEST_WITHOUT_SUMMARY.format(
+                    filed=RECONCILE.EXPLANATION_SHAPE_ACTIVATION.isoformat(),
+                    projection=self.LEGACY_AGENT_PROJECTION,
+                ),
+            )
+            self.assertEqual(
+                ["missing section `## What you need to know`"],
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+            # Nothing else in the registry says anything about that section.
+            self.assertEqual([], self.messages(RECONCILE.check_queue_schema()))
+
+    def test_the_agent_carve_out_turns_on_the_day_before_the_rule_landed(self):
+        """One day either side of the activation date, and nothing else."""
+        activation = RECONCILE.EXPLANATION_SHAPE_ACTIVATION
+        day = datetime.timedelta(days=1)
+        cases = (
+            (activation - day, []),
+            (activation, ["missing section `## What you need to know`"]),
+            (activation + day, ["missing section `## What you need to know`"]),
+        )
+        for filed, expected in cases:
+            with self.subTest(filed=filed.isoformat()), self.repo() as root:
+                self.explanation_shape_repo(root)
+                self.write(
+                    root,
+                    self.AGENT_REQUEST_PATH,
+                    self.AGENT_REQUEST_WITHOUT_SUMMARY.format(
+                        filed=filed.isoformat(),
+                        projection=self.LEGACY_AGENT_PROJECTION,
+                    ),
+                )
+                self.assertEqual(
+                    expected,
+                    self.messages(RECONCILE.check_explanation_shape()),
+                )
+
+    def test_an_agent_item_with_no_readable_filed_date_is_checked(self):
+        """The carve-out fails closed: an unreadable date excuses nothing."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.write(
+                root,
+                self.AGENT_REQUEST_PATH,
+                self.AGENT_REQUEST_WITHOUT_SUMMARY.format(
+                    filed="some time last month",
+                    projection=self.LEGACY_AGENT_PROJECTION,
+                ),
+            )
+            self.assertEqual(
+                ["missing section `## What you need to know`"],
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+
+    def test_explanation_shape_checks_a_current_generation_agent_item(self):
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.write(
+                root,
+                "message-queue/needs-agent/requests/"
+                "non-blocking-continue-the-review.md",
+                "# Continue the queue-owned review\n\n"
+                "**Status:** open\n"
+                "**Filed:** 2026-07-23, by test\n"
+                "**Action:** continue the review and fold the response\n"
+                "**Full context:** `docs/design.md`\n"
+                "**Resolution evidence:** `docs/disposition.md`\n"
+                "**If unanswered:** The review stays open.\n\n"
+                "## Done when\n\nThe response is folded durably.\n",
+            )
+            self.assertEqual(
+                ["missing section `## What you need to know`"],
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+
+    UNSHAPED_ITEM_PATH = (
+        "message-queue/needs-human/reviews/non-blocking-review-admission.md"
+    )
+
+    def test_explanation_shape_reports_without_failing_the_commit_gate(self):
+        """Advisory means seen, counted, and never a refusal.
+
+        The whole registry runs here, over a tree whose only violation is this
+        rule, because the exit code is the thing being asserted.
+        """
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            (root / self.HUMAN_ATTENTION_PATH).unlink()
+            self.write(
+                root,
+                self.UNSHAPED_ITEM_PATH,
+                self.HUMAN_ATTENTION_REVIEW.replace(
+                    "**Blocks at:** transition:start task:2026-07-23-example\n",
+                    "",
+                ).replace("## What I recommend\n", "## Notes on this\n"),
+            )
+            self.write(root, "memory/index.md", RECONCILE.generated_index())
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = RECONCILE.main(["--check"])
+            printed = out.getvalue()
+            self.assertEqual(0, code, printed)
+            self.assertIn(
+                f"[explanation-shape] {self.UNSHAPED_ITEM_PATH}: "
+                "missing section `## What I recommend`  (advisory)",
+                printed,
+            )
+            self.assertIn(
+                "reconcile: 0 blocking finding(s), 1 advisory (not blocking)",
+                printed,
+            )
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = RECONCILE.main(["--check", "--fail-on-advisory"])
+            printed = out.getvalue()
+            self.assertEqual(1, code, printed)
+            self.assertIn(
+                "reconcile: 0 blocking finding(s), 1 advisory (also failing)",
+                printed,
+            )
+
     # ------------------------- live items keep the schema they were written in
 
     LEGACY_HUMAN_ITEM = (
