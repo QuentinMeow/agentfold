@@ -18,6 +18,7 @@ if str(AUTOMATION) not in sys.path:
 
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
+    indentation_width,
     markdown_links,
     normalized_action_tokens,
     render_inline_code,
@@ -913,19 +914,6 @@ def rendered_action_section_body(text, start, end):
         strip_quote(rendered_lines[index], depth)
         for index in range(start + 1, min(end, len(rendered_lines)))
     ).strip()
-
-
-def indentation_width(value):
-    """Return leading indentation in CommonMark columns."""
-    width = 0
-    for character in value:
-        if character == " ":
-            width += 1
-        elif character == "\t":
-            width += 4 - (width % 4)
-        else:
-            break
-    return width
 
 
 def section_entries(body):
