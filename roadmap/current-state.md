@@ -296,3 +296,24 @@ What is true today, mapped to the desired-state lines.
   filed instead by `4d2f8aa harness: activate human gating v1 and free four crossed boundaries`.
   The gate limitation recorded above is unchanged by any of this; what is resolved is the
   repair request, not the over-broad `task:<id>` merge boundary it was filed beside.
+- **Six task branches published after an unplanned machine stop (2026-08-02)**: a crash left
+  six branches in flight. Nothing was lost and every one is now on `origin` behind a pull
+  request — 65 through 70. Two carried uncommitted worktree changes that are now committed
+  with the design and verification records they lacked: the merge-ref bound's missing upper
+  end (a bound above 2^63-1 made `[` report status 2, which `if` and `while` both read as
+  false, so the step skipped its guard and every iteration and published an empty revision
+  at exit 0) and the explanation-shape rule's imitation hole (a new agent item that copied
+  one legacy field line from the single live legacy request switched the rule off for
+  itself). Three of the six show one red `reconcile-and-test`, all three the same stale-base
+  race and none of them the branch's own doing: on the identical commit the `push` and
+  `pull_request_target` events pass and only `pull_request` fails, at the step that reads a
+  `base.sha` GitHub has already moved past. That race is filed as
+  `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` and is not repaired here.
+- **Archive tags are no longer laptop-local (2026-08-02)**: of the six archive tags the
+  2026-08-02 branch-clearing session created to preserve retired branch content, only one
+  had ever been pushed. All six are now on `origin`, together with eight new
+  `archive/2026-07-27-test-gate-stash-<0..7>-<slug>` tags holding intermediate states of the
+  shelved test-gate task. Those eight were previously reachable only through the stash
+  reflog — one `git gc` or one stray `git stash drop` from gone — and they carry files no
+  other tag contains. The task they belong to stays in `0_backlog` with its
+  re-measure-before-implementing notice intact; the tags are reference, not a starting point.
