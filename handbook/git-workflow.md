@@ -29,7 +29,9 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 - **Service boundaries** — a task branch touches one service; cross-service work is
   split into linked tasks. When two branches need the same file, stack them rather than
   running them independently (see "Publishing" below). Screen a landing set for cross-leg
-  collisions before merging any of it.
+  collisions before merging any of it: `automation/integrate.py` pins the set, reports the
+  colliding pairs, and replays the merges through the reconciler and the tests, so a
+  failure belonging to no single branch is found before it lands rather than after.
 
 ## Commits
 
