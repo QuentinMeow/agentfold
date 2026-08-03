@@ -91,6 +91,25 @@ the configured critical checks produce complete final evidence.
       target; any exception is explicitly classified as critical rather than hidden in an
       average.
 
+## The earlier attempt's states are archived, not lost
+
+An earlier run of this task left eight Git stashes in the owner's working clone and a branch
+that never merged. None of it is on `main`, and all of it predates the staleness notice
+above, so a future claimant should treat it as reference rather than as a starting point —
+re-measure first, as that notice says.
+
+The branch's committed content is `archive/2026-07-27-configure-test-gates-and-time-budgets`.
+The eight stashes held intermediate states that tag does **not** contain, and a stash is
+reachable only through the reflog, so they sat one `git gc` or one stray `git stash drop`
+away from being gone. They are now `archive/2026-07-27-test-gate-stash-<0..7>-<slug>`, and
+every archive tag is pushed to `origin` — before 2026-08-02 only one of the six existing
+ones had been, so the rest existed on a single laptop.
+
+What those states carry and `main` does not: a test-gate runner, a gate controller, a gate
+configuration module, and a testing-gates handbook page, together with their tests. Their
+exact paths are readable from any of the tags above; they are not written here as paths,
+because none of them resolves against this tree and the link check is right to say so.
+
 ## Links
 
 - Design and rationale: `design.md`
