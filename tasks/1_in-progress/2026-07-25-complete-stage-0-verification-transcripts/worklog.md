@@ -50,3 +50,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   line wrap and against the pull-request body gate rather than a task artifact.
 - The pre-existing 906 lines are byte-identical by digest, and `--numstat` reports 164
   insertions with zero deletions.
+- Published as [pull request #70](https://github.com/QuentinMeow/agentfold/pull/70), based
+  on `main`, with no stack under it. The branch was complete and pushed when the previous
+  session's machine crashed, and every acceptance criterion was already met and checked;
+  only the pull request was missing. Nothing about the work changed to open it.
+- The body was run through `check_action_projection.py` in the same shape CI invokes it
+  (`--action-section "What to review" --queue-actor any --required-queue-actor needs-human`)
+  and came back `0 finding(s)`. One sentence had to be reworded first, and it is the third
+  sighting of the same false positive: `commands that were actually run and the real output
+  they printed` scans as a bare imperative because `run` is a work verb sitting in a
+  coordinate slot. Reworded rather than waived; the detector is untouched. Filed already as
+  2026-08-02-stop-a-wrapped-line-from-reading-as-a-command.
+- The task stays in `1_in-progress` for the owner to move.
