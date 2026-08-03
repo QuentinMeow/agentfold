@@ -68,9 +68,9 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 
 **Status:** waiting
 **Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<repo-relative path to the durable source>`
+**Full context:** `<root-relative path to the durable source>`
 **Resolution evidence:** `<non-queue path distinct from Review target>`
-**Review target:** `<repo-relative path to the exact file being judged>`
+**Review target:** `<root-relative path to the exact file being judged>`
 **Review revision:** sha256:<64 hex digits of that file's bytes>
 **Reviewed revision:** ______
 **Review outcome:** pending

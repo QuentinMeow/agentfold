@@ -63,7 +63,7 @@ def fill_queue_template(text, digest):
             return "2026-07-23"
         if "64 hex" in body:
             return digest
-        if "repo-relative path" in body:
+        if "root-relative path" in body:
             return QUEUE_TEMPLATE_TARGET
         if "non-queue path" in body or "durable" in body:
             return QUEUE_TEMPLATE_EVIDENCE

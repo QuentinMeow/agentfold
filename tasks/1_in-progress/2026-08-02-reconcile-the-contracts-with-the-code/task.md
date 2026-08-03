@@ -4,7 +4,7 @@
 **Filed:** 2026-08-02, by claude, from a contract-drift audit of every AGENTS.md, handbook file, template, and roadmap line
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md`; `message-queue/needs-human/decisions/non-blocking-stop-a-principle-from-copying-the-line-budget.md`
 
 ## Goal
 
@@ -114,6 +114,29 @@ and `Blocks now: task:<id>` are unspellable on a `needs-human/` item
     no tracked files, so Git cannot see it and `skills/AGENTS.md` does not list it. Confirm
     it is genuinely empty of content before removing it, and say what you found.
 
+### C. Added mid-task, from a cold-boot trial (findings 15-22)
+
+An agent cloned the repository fresh, followed `AGENTS.md` with no other context, and
+completed a task. What tripped it is the same class, so the coordinator added it here.
+
+15. **The boot sequence never says to run the installer**, and then the guardrail asserts
+    the hook exists. A fresh clone has `core.hooksPath` unset and only sample hooks, so no
+    gate runs at all. Every file that documents the installer is unreachable from this
+    contract.
+16. **`CONTRIBUTING.md` is in neither the repo map nor the router.** Route it or say why it
+    is human-only.
+17. **The message-queue ritual says "open only what is relevant"** at boot, before a task is
+    chosen, when most agent requests are task pickups that are not yet relevant.
+18. **Three files disagree about what the claim commit contains** — `tasks/AGENTS.md`,
+    the pickup requests' own "Done when", and `handbook/git-workflow.md`'s milestone list.
+19. **The two-lane table never says where `plan.md`, `worklog.md`, and `verification.md`
+    live**, so a task's plan can be born on `main` and then edited on a branch by guess.
+20. **`handbook/git-workflow.md` is 172 lines** and a stranger needs about 34 of them; one
+    bullet is a GitHub provider-adapter spec inside the file you open to learn how to commit.
+21. **Two templates use "repo-relative" to mean opposite things** — from the repository root
+    in `templates/queue/`, from the file's own folder in `templates/handover.md`.
+22. **Done tasks disagree about ticking acceptance criteria** and no rule says which is right.
+
 ## Acceptance criteria
 
 - [ ] Each of findings 2 and 4–14 is either repaired or explicitly declined in `design.md`
@@ -134,6 +157,9 @@ and `Blocks now: task:<id>` are unspellable on a `needs-human/` item
       files that are already near the limit.
 - [ ] `python3 automation/run_tests.py` passes, real output in `verification.md`.
 - [ ] `design.md` carries the completed core-fit receipt from `templates/task/design.md`.
+- [ ] Each of findings 15-22 is repaired or refuted in `design.md`, and finding 15 is
+      demonstrated: a scratch clone shows a commit the reconciler refuses landing with no
+      hook, and the boot sequence's first step then makes the guardrail's parenthetical true.
 
 ## Links
 

@@ -18,7 +18,7 @@ blanks before parsing and a filing agent may delete.
 **Status:** open
 **Filed:** <YYYY-MM-DD>, by <who>, from <task id / context — link>
 **Action:** <the concrete action the receiving agent should take>
-**Full context:** [<complete source>](<repo-relative path>)
+**Full context:** [<complete source>](<root-relative path>)
 **Resolution evidence:** `<durable file completion will create or change>`
 **If unanswered:** <the explicit safe outcome; this message will never stop work>
 

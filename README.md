@@ -84,7 +84,7 @@ to the right document. To adopt AgentFold in your own project (new or existing),
 |------|--------------|------------------------|----------------------|
 | `autonomous` | everything permitted | `non-blocking-*` FYI items | only separately mandated trust gates |
 | `async` (default) | everything reversible | `future-blocking-*` actions until their named boundary | `blocking-*`, or an unresolved future boundary |
-| `pair` | nothing significant | — | queued `blocking-*` action before each meaningful step |
+| `pair` | nothing significant | — | asks before each meaningful step, through a queued item; you merge |
 
 The active mode is one line in `AGENTS.md`. Details, and the exact list of what counts
 as "expensive to reverse": `handbook/collaboration-modes.md`.
@@ -95,7 +95,7 @@ as "expensive to reverse": `handbook/collaboration-modes.md`.
 |-----------|-------------|
 | Queue names/timing, action links, and queue/task/memory schemas agree | `reconcile.py` (pre-commit hook + CI) |
 | Every conversation *folder* contains a `handover.md` | reconciler finding (a session that leaves no folder is invisible to it) |
-| Links in docs point to files that exist | reconciler link check, outside the directories it exempts (`templates/`, `history/`, `memory/decisions/`, retries, dot-dirs) |
+| Links in docs point to files that exist | reconciler link check — what it exempts, by source and by target, is listed in `handbook/naming-conventions.md` |
 | Contracts stay short (line budgets on AGENTS.md, SKILL.md, this README) | reconciler budget check |
 | Memory expires and gets re-verified or deleted | `Review-by` dates + reconciler + gardener skill |
 | Example services stay green | `automation/run_tests.py` in the pre-commit hook + CI |

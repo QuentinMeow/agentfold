@@ -2,7 +2,7 @@
 # Memory index
 
 ## facts
-- [Work refused by Core admission is preserved as an `archive/*` annotated tag, not a branch](facts/archived-refs-outside-core.md) — Rejected-but-reusable work lives on annotated `archive/*` tags whose message carries the reasoning — check there before rebuilding something that looks unprecedented
+- [Work that will not merge is preserved as an `archive/*` annotated tag, not a branch](facts/archived-refs-outside-core.md) — Work that will never land — refused by Core admission, superseded, or orphaned — is kept on annotated `archive/*` tags whose message carries the reasoning; list them with `git tag -l 'archive/*'` before rebuilding something that looks unprecedented
 - [Example services are Python-stdlib-only, on purpose](facts/example-services-stay-stdlib-only.md) — services/ examples must never gain dependencies — they exist to demo the harness, not to be good software
 
 ## decisions

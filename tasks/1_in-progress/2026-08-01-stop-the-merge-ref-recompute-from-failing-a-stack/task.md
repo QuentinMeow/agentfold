@@ -21,10 +21,12 @@ does not match. Failing closed is right when the candidate is unknown; failing c
 value that is merely one poll stale is not.
 
 This is the prerequisite for ever requiring `review-state-action-projection` as a merge
-check. The companion decision item
-`message-queue/needs-human/decisions/non-blocking-turn-on-the-merge-gate-this-repository-already-runs.md`
-recommends requiring only `reconcile-and-test` today, and names this race as the reason
-the other job is excluded.
+check — which is not on the table today. On 2026-08-02 the owner decided that no status
+check is required to merge while the repository is immature, with the stated exit of
+requiring `reconcile-and-test`, and only that one, once he judges it stable
+(`memory/decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md`).
+The race is still worth fixing on its own terms: it fails the characteristic stacked pull
+request today, whether or not the job ever becomes required.
 
 ## Acceptance criteria
 
@@ -39,5 +41,5 @@ the other job is excluded.
 ## Links
 
 - `.github/workflows/harness.yml` — `review-state-action-projection`
-- `message-queue/needs-human/decisions/non-blocking-turn-on-the-merge-gate-this-repository-already-runs.md`
+- `memory/decisions/2026-08-02-the-merge-gate-stays-advisory-while-the-repository-is-immature.md`
 - `handbook/git-workflow.md` — stacked branches are the normal way to sequence work

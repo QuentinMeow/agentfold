@@ -5,34 +5,36 @@ independent service whose `AGENTS.md` is its API, coordination happens through f
 instead of live conversation, and quality is enforced by systems (hooks, tests, the
 reconciler) rather than by hoping agents follow instructions. This file is the root
 contract every agent reads before acting, and it is self-contained — acting correctly
-never requires the README. `README.md` is the human landing page: agents write it and
-may skim it for the big picture, but it never carries agent instructions (and no human
-usage guides live here). The README stays a short pitch + map: current operating depth
-lives in `handbook/`, proposed technical designs live in `docs/designs/`, and both are
-linked rather than restated (the reconciler budgets the README's lines like any
-contract).
+never requires the README. `README.md` is the human landing page and `CONTRIBUTING.md` is
+its companion for outside contributors; agents write both and may skim them, but neither
+carries agent instructions, and no human usage guide lives here. The README stays a short
+pitch + map: operating depth lives in `handbook/`, proposed designs in `docs/designs/`,
+both linked rather than restated (the reconciler budgets its lines like any contract).
 
 **Collaboration mode:** `async` — see `handbook/collaboration-modes.md` for what each
 mode permits. A task file may override the mode for that task only.
 
 ## Boot sequence
 
-1. Read this file.
-2. Run the **message-queue ritual** (below). Top-level sessions only — subagents skip it.
-3. Read the `AGENTS.md` of every folder you are about to work in. The closest
+1. Run `python3 automation/install.py` — idempotent, once per clone. Until it has run
+   there is no commit gate at all: `core.hooksPath` is unset in a fresh clone, and a
+   commit the reconciler would refuse lands silently.
+2. Read this file.
+3. Run the **message-queue ritual** (below). Top-level sessions only — subagents skip it.
+4. Read the `AGENTS.md` of every folder you are about to work in. The closest
    `AGENTS.md` up the tree from a file is the one that applies, and leaf contracts only
    add local rules to this one. Precedence and the repair for a conflicting leaf are
    stated once, in `handbook/principles/folder-as-a-service.md`.
-4. Skim `memory/index.md`; open only entries relevant to your task. If
+5. Skim `memory/index.md`; open only entries relevant to your task. If
    `memory/lessons/<area>/` exists for the area you are working in, read it first.
-5. If your work changes overall architecture, read `roadmap/current-state.md` and
+6. If your work changes overall architecture, read `roadmap/current-state.md` and
    `roadmap/desired-state.md`.
 
 ## Repo map
 
 | Path | What it is |
 |------|------------|
-| `handbook/` | Design principles, collaboration modes, git workflow, naming rules, adoption guide |
+| `handbook/` | Design principles, collaboration modes, git workflow, GitHub projection, naming rules, adoption guide |
 | `docs/` | Durable software and harness designs; proposals, not accepted decisions |
 | `message-queue/` | Canonical pending human↔agent and durable agent↔agent actions, split by **who acts next** |
 | `tasks/` | Work items; a task's status **is** the folder it sits in (`0_backlog` … `4_done`) |
@@ -50,7 +52,8 @@ Filenames first — open only what is relevant. Full lifecycle: `message-queue/A
 
 1. List filenames recursively under `message-queue/needs-agent/`. Claim and act on
    relevant requests/retries, or convert a request to a task; delete only with the
-   completed action or an explicit in-file rejection.
+   completed action or an explicit in-file rejection. Most are `task-pickup` requests,
+   which become relevant only once you are choosing what to work on.
 2. Scan recursively under `message-queue/needs-human/` for filled `**Your answer:**` or
    `**Your review:**` lines. A human answers in one edit — one sentence in that blank,
    committed while status is `waiting`, and nothing else. Claim it next with a
@@ -116,8 +119,8 @@ was away can act without asking a follow-up question.
   external providers, and unrelated adopted repositories; personal setup, user-global
   state, and single-provider/product workflows stay outside core. The Git boundary gate
   binds this judgment to the task (`templates/task/design.md`).
-- **Records are immutable**: a decided ADR is never rewritten — a reversal is a new file
-  linking the old one.
+- **Records are immutable**: a decided ADR is never rewritten — a reversal is a new file, and
+  the old one takes only the back-link, status, and `Review-by` bump `memory/AGENTS.md` requires.
 - **Scratch discipline**: throwaway files go under git-ignored `tmp/`, never the repo root.
 - **The reconciler is the referee**: `automation/reconcile/reconcile.py --check` must
   pass before any commit (the pre-commit hook runs it). Don't bypass with `--no-verify`;

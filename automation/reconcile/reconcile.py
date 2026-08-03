@@ -5074,8 +5074,8 @@ def check_queue_schema():
             yield Finding(
                 "queue-schema",
                 item.relative_to(REPO),
-                "**Full context:** does not point to an existing repo-relative file",
-                "link at least one durable source with a backticked path or markdown link",
+                "**Full context:** does not point to an existing root-relative file",
+                "link one durable source as a path from the repository root; a ../ path is dropped, not resolved",
             )
         if actor != "needs-human":
             continue
@@ -5097,8 +5097,8 @@ def check_queue_schema():
             yield Finding(
                 "queue-schema",
                 item.relative_to(REPO),
-                "**Full context:** does not point to an existing repo-relative file",
-                "link at least one durable source with a backticked path or markdown link",
+                "**Full context:** does not point to an existing root-relative file",
+                "link one durable source as a path from the repository root; a ../ path is dropped, not resolved",
             )
         if leaf == "reviews" and "Review target" in got:
             status = got.get("Status", "").strip()

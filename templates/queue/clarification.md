@@ -65,7 +65,7 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 
 **Status:** waiting
 **Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<repo-relative path to the durable source>`
+**Full context:** `<root-relative path to the durable source>`
 **Resolution evidence:** `<durable non-queue file that folding this answer will change>`
 **Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
 <!-- Status ships as `waiting`, the only status a newly filed item may hold; the

@@ -17,7 +17,10 @@ what to build/fix/change, and why it matters. Link the relevant service contract
 ## Acceptance criteria
 
 <Checkable statements — each verifiable by a command, a test, or a concrete
-observation. "WHEN <condition>, THE SYSTEM SHALL <behavior>" phrasing works well.>
+observation. "WHEN <condition>, THE SYSTEM SHALL <behavior>" phrasing works well.
+Tick each box when its criterion is actually met, so the list reads as progress. By
+`3_in-review` every box is ticked, or `verification.md` names the one that was dropped
+and why. No check reads these boxes.>
 
 - [ ] <criterion>
 - [ ] <criterion>

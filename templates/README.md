@@ -54,9 +54,14 @@ field — the field syntax, which is a schema and so lives here:
 
 | Filename prefix | `needs-agent/` timing fields | `needs-human/` timing field |
 |-----------------|------------------------------|-----------------------------|
-| `blocking-` | `**Blocks now:** <task:<id> \| transition:<name> \| operation:<name>>`, replacing `If unanswered` | the same one line, added below the answer |
-| `future-blocking-` | `**Blocks at:** <UTC YYYY-MM-DD \| event:<name> \| transition:<name>> [task:<id>]` and `**Until then:** <the explicit safe path while work continues>`, replacing `If unanswered` | `**Blocks at:** ...` alone, added below the answer |
+| `blocking-` | `**Blocks now:** <task:<id> \| transition:<name> \| operation:<name>>`, replacing `If unanswered` | `**Blocks now:** operation:<name>` alone, added below the answer |
+| `future-blocking-` | `**Blocks at:** <UTC YYYY-MM-DD \| event:<name> \| transition:<name>> [task:<id>]` and `**Until then:** <the explicit safe path while work continues>`, replacing `If unanswered` | `**Blocks at:** transition:start task:<id>` alone, added below the answer |
 | `non-blocking-` | `**If unanswered:** <the explicit safe outcome>` (already shipped) | none — `If you do nothing` above the fold already states it |
+
+The `needs-human/` column is narrower on purpose, and those two spellings are the whole
+of it: one act with no undo, or the start of a task still in `0_backlog`. Every other
+human question is `non-blocking-`, because nothing a human owes holds a Git edge
+(`message-queue/AGENTS.md`). A human item also carries `**Answer by:**` at every prefix.
 
 Every `**Your answer:**`/`**Your review:**` blank is the only line a human fills, so a
 review ships `Reviewed revision` and `Review outcome` as slots the folding agent

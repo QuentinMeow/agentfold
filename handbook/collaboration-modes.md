@@ -9,9 +9,9 @@ may override it for that task via a `**Mode:**` field.
 | Who drives | agent | agent | human |
 | Agent decides alone | everything | everything **reversible** | trivial steps only |
 | Agent files & continues | optional `non-blocking-*` review | one-way door → `future-blocking-*` decision on the act itself; every other question is `non-blocking-*` and merges with it | — |
-| Agent stops and waits | only a separately mandated trust gate | an unstarted `0_backlog` task with a live start review, or one act with no undo — never a merge, a task move, or a completion | before every meaningful step, after filing its `blocking-*` item |
+| Agent stops and waits | only a separately mandated trust gate | an unstarted `0_backlog` task with a live start review, or one act with no undo — never a merge, a task move, or a completion | before every meaningful step, on the live answer to the item it filed |
 | Human reviews | queue projections, usually non-blocking | queue items, ordered by timing prefix | live projections of queued actions |
-| Merge gate | adversarial-review majority (`skills/adversarial-review/`) | tests + reconciler; panel for one-way doors | the human |
+| Merge gate | adversarial-review majority (`skills/adversarial-review/`) | tests + reconciler; panel for one-way doors | the human, live — the agent does not merge unasked |
 | Costs | most tokens, zero human time | balanced | fewest tokens, most control |
 
 ## One-way doors (what `async` mode must not decide alone)
@@ -45,4 +45,9 @@ git revert and the retry queue are for.
 - **`pair`**: the agent proposes, the human disposes. Optimize for short steps and
   cheap questions. Create the queue item before asking live; chat is a projection and
   the response is folded through the file before work resumes. Handover prose may stay
-  brief, but no action or decision exists only in chat.
+  brief, but no action or decision exists only in chat. The waiting is this mode's
+  behaviour, never a filename: the queue grammar is mode-blind, so a `needs-human/` item
+  filed here still binds only `transition:start` on a `0_backlog` task or
+  `operation:<name>` for one act with no undo, and everything else is `non-blocking-`
+  (`message-queue/AGENTS.md`). A human gates a merge here by being the one who merges,
+  not by a queue item that says a merge waits — no item may say that in any mode.
