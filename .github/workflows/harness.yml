@@ -582,14 +582,108 @@ jobs:
         env:
           ACTION_PROJECTION_PR_NUMBER: ${{ github.event.pull_request.number }}
           ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.sha }}
+          ACTION_PROJECTION_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          ACTION_PROJECTION_EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+          ACTION_PROJECTION_RESOLVE_ATTEMPTS: "5"
+          ACTION_PROJECTION_RESOLVE_DELAY_SECONDS: "5"
         run: |
-          git fetch --no-tags origin \
-            "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"
-          ACTION_PROJECTION_CANDIDATE_REVISION="$(
-            git --no-replace-objects rev-parse --verify "FETCH_HEAD^{commit}"
-          )"
-          test "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
-            "$ACTION_PROJECTION_EXPECTED_REVISION"
+          # github.sha is the merge commit GitHub had already computed when
+          # this event fired, and refs/pull/N/merge is mutable. Merging a
+          # parent pull request moves this one's base, GitHub recomputes the
+          # merge ref, and the two revisions stop being equal for a reason
+          # that has nothing to do with the change — so bare equality failed
+          # the single most ordinary event in a stack. Equality stays the fast
+          # path; a differing candidate is admitted only through the binding
+          # authoritative-external-action-projection already uses, because a
+          # merge commit's parent ids are covered by its own object id: two
+          # parents exactly, the second one this event's head, the first one
+          # containing this event's base. A candidate that fails that binding
+          # is re-resolved a bounded number of times and then fails the job.
+          # Exhausting the bound is a failure, never a pass.
+          if [ -z "$ACTION_PROJECTION_EXPECTED_HEAD" ] ||
+              [ -z "$ACTION_PROJECTION_EXPECTED_BASE" ]; then
+            echo "pull-request payload carries no head or base revision" >&2
+            exit 1
+          fi
+          for ACTION_PROJECTION_BOUND in \
+              "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" \
+              "$ACTION_PROJECTION_RESOLVE_DELAY_SECONDS"; do
+            case "$ACTION_PROJECTION_BOUND" in
+              '' | *[!0-9]*)
+                echo "merge-ref resolution bounds must be whole numbers" >&2
+                exit 1
+                ;;
+            esac
+          done
+          # An upper bound as well as a lower one: 9223372036854775807 is a
+          # whole number `[` compares happily, and a loop that would run that
+          # many times is indistinguishable from an unbounded one.
+          if [ "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" -lt 1 ] ||
+              [ "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" -gt 100 ]; then
+            echo "merge-ref resolution needs 1 to 100 attempts" >&2
+            exit 1
+          fi
+          ACTION_PROJECTION_ATTEMPT=1
+          while [ "$ACTION_PROJECTION_ATTEMPT" -le \
+              "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" ]; do
+            ACTION_PROJECTION_REJECTION=""
+            ACTION_PROJECTION_CANDIDATE_REVISION=""
+            if git fetch --no-tags origin \
+                "refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"; then
+              ACTION_PROJECTION_CANDIDATE_REVISION="$(
+                git --no-replace-objects rev-parse --verify --quiet \
+                  "FETCH_HEAD^{commit}"
+              )" || ACTION_PROJECTION_CANDIDATE_REVISION=""
+            fi
+            if [ -z "$ACTION_PROJECTION_CANDIDATE_REVISION" ]; then
+              ACTION_PROJECTION_REJECTION="merge ref resolves to no commit"
+            elif [ "$ACTION_PROJECTION_CANDIDATE_REVISION" = \
+                "$ACTION_PROJECTION_EXPECTED_REVISION" ]; then
+              break
+            elif ! ACTION_PROJECTION_MERGED_HEAD="$(
+                git --no-replace-objects rev-parse --verify --quiet \
+                  "$ACTION_PROJECTION_CANDIDATE_REVISION^2^{commit}"
+              )"; then
+              ACTION_PROJECTION_REJECTION="merge candidate is not a merge commit"
+            elif git --no-replace-objects rev-parse --verify --quiet \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION^3^{commit}" \
+                > /dev/null; then
+              ACTION_PROJECTION_REJECTION="merge candidate has more than two parents"
+            elif [ "$ACTION_PROJECTION_MERGED_HEAD" != \
+                "$ACTION_PROJECTION_EXPECTED_HEAD" ]; then
+              ACTION_PROJECTION_REJECTION="merge candidate does not merge this event's head"
+            elif ! git --no-replace-objects merge-base --is-ancestor \
+                "$ACTION_PROJECTION_EXPECTED_BASE" \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION^1"; then
+              ACTION_PROJECTION_REJECTION="merge candidate does not contain this event's base"
+            else
+              echo "merge ref was recomputed after this event;" \
+                "candidate re-resolved to" \
+                "$ACTION_PROJECTION_CANDIDATE_REVISION"
+              break
+            fi
+            echo "$ACTION_PROJECTION_REJECTION" >&2
+            if [ "$ACTION_PROJECTION_ATTEMPT" -ge \
+                "$ACTION_PROJECTION_RESOLVE_ATTEMPTS" ]; then
+              echo "merge ref stayed unbound across" \
+                "$ACTION_PROJECTION_RESOLVE_ATTEMPTS resolutions" >&2
+              exit 1
+            fi
+            sleep "$ACTION_PROJECTION_RESOLVE_DELAY_SECONDS"
+            ACTION_PROJECTION_ATTEMPT=$((ACTION_PROJECTION_ATTEMPT + 1))
+          done
+          # Reaching here has to mean a `break` bound a candidate. Falling out
+          # of the loop instead must never publish one, and inferring that from
+          # the absence of a failure is not enough: `[` reports a status of 2,
+          # not 1, when an operand overflows intmax, `if` and `while` both read
+          # that as false, and a bound above 2^63-1 therefore skipped the guard
+          # above *and* every iteration. So establish the candidate positively
+          # rather than trusting the loop, which closes that class of misparse
+          # whatever produces it.
+          if [ -z "$ACTION_PROJECTION_CANDIDATE_REVISION" ]; then
+            echo "no candidate revision was bound" >&2
+            exit 1
+          fi
           printf 'revision=%s\n' "$ACTION_PROJECTION_CANDIDATE_REVISION" \
             >> "$GITHUB_OUTPUT"
       - name: Collect current formal reviews and unresolved diff threads

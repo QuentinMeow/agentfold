@@ -42,7 +42,18 @@ def workflow_job(workflow, name):
 
 
 def step_shell_script(step):
-    """Return one step's literal `run:` block with its block indent removed."""
+    """Return one step's literal `run:` block with its block indent removed.
+
+    Fidelity hazard worth knowing before trusting a green run: the block ends
+    at the first non-blank line indented less than `RUN_BLOCK_INDENT`. That is
+    how a `run:` block actually ends in YAML, but it means a later edit that
+    breaks the indent mid-script yields a *prefix* of the step rather than an
+    error — and a prefix can still satisfy every assertion made about the part
+    that survived. A behavioural test that suddenly stops exercising a guard
+    it used to reach will not say so. `test_review_state_candidate_is_
+    established_not_inferred` pins the last lines of the review-state script
+    for exactly this reason: a truncated block no longer contains them.
+    """
     _before, separator, remainder = step.partition(RUN_BLOCK_MARKER)
     if not separator:
         return ""
@@ -548,8 +559,16 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         self.assert_contains_all(fetch, (
             "ACTION_PROJECTION_EXPECTED_REVISION: ${{ github.sha }}",
+            "ACTION_PROJECTION_EXPECTED_HEAD: "
+            "${{ github.event.pull_request.head.sha }}",
+            "ACTION_PROJECTION_EXPECTED_BASE: "
+            "${{ github.event.pull_request.base.sha }}",
             '"refs/pull/$ACTION_PROJECTION_PR_NUMBER/merge"',
-            'rev-parse --verify "FETCH_HEAD^{commit}"',
+            '"FETCH_HEAD^{commit}"',
+            '"$ACTION_PROJECTION_CANDIDATE_REVISION^2^{commit}"',
+            '"$ACTION_PROJECTION_CANDIDATE_REVISION^3^{commit}"',
+            "merge-base --is-ancestor \\",
+            '"$ACTION_PROJECTION_CANDIDATE_REVISION^1"',
         ))
         self.assertNotIn(
             "ref: ${{ github.event.pull_request.head.sha }}", job
@@ -773,6 +792,179 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
                         self.assertEqual(output, "")
                         if message:
                             self.assertIn(message, stderr)
+
+    def review_state_candidate_script(self):
+        """The literal shell of the review-state candidate step."""
+        script = step_shell_script(self.step(
+            "review-state-action-projection",
+            "Fetch event-bound PR merge candidate without checking it out",
+        ))
+        self.assertTrue(script, "review-state candidate step has no script")
+        return script
+
+    def test_review_state_candidate_survives_a_merge_ref_recompute(self):
+        """A recomputed merge ref is still this event's code, so it passes.
+
+        github.sha names the merge commit GitHub had already computed when the
+        event fired. Merging the parent pull request of a stack moves this
+        one's base, GitHub recomputes refs/pull/N/merge onto the new base, and
+        the fetched candidate becomes a different commit for a reason that has
+        nothing to do with the change. It still merges this event's head and
+        still contains this event's base, so it is still bound to this event
+        and the step admits it under its new revision.
+        """
+        script = self.review_state_candidate_script()
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            event_merge = git(fixture.remote, "rev-parse", "refs/pull/1/merge")
+            recomputed = git(fixture.remote, "rev-parse", "refs/pull/2/merge")
+            self.assertNotEqual(event_merge, recomputed)
+            for label, number, admitted in (
+                ("merge ref still names the event revision", "1", event_merge),
+                ("merge ref recomputed onto a moved base", "2", recomputed),
+            ):
+                with self.subTest(admitted=label):
+                    code, output, stderr = fixture.run_step(script, {
+                        "ACTION_PROJECTION_PR_NUMBER": number,
+                        "ACTION_PROJECTION_EXPECTED_REVISION": event_merge,
+                        "ACTION_PROJECTION_EXPECTED_HEAD": fixture.head,
+                        "ACTION_PROJECTION_EXPECTED_BASE": fixture.base,
+                        "ACTION_PROJECTION_RESOLVE_ATTEMPTS": "3",
+                        "ACTION_PROJECTION_RESOLVE_DELAY_SECONDS": "0",
+                    })
+                    self.assertEqual(code, 0, stderr)
+                    self.assertEqual(output, f"revision={admitted}\n")
+
+    def test_review_state_candidate_still_fails_a_genuine_mismatch(self):
+        """Re-resolution admits a moved base and nothing else."""
+        script = self.review_state_candidate_script()
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            event_merge = git(fixture.remote, "rev-parse", "refs/pull/1/merge")
+            rejected = (
+                ("head raced ahead of the event", "3",
+                 fixture.head, fixture.base,
+                 "does not merge this event's head"),
+                ("merge ref is not a merge commit", "4",
+                 fixture.head, fixture.base,
+                 "is not a merge commit"),
+                ("merge ref has a third parent", "5",
+                 fixture.head, fixture.base,
+                 "has more than two parents"),
+                ("base is not contained in the merge", "2",
+                 fixture.head, fixture.unrelated,
+                 "does not contain this event's base"),
+                ("merge ref does not resolve", "9",
+                 fixture.head, fixture.base,
+                 "merge ref resolves to no commit"),
+                ("payload carries no head revision", "2",
+                 "", fixture.base,
+                 "carries no head or base revision"),
+                ("payload carries no base revision", "2",
+                 fixture.head, "",
+                 "carries no head or base revision"),
+            )
+            for label, number, head, base, message in rejected:
+                with self.subTest(rejected=label):
+                    code, output, stderr = fixture.run_step(script, {
+                        "ACTION_PROJECTION_PR_NUMBER": number,
+                        "ACTION_PROJECTION_EXPECTED_REVISION": event_merge,
+                        "ACTION_PROJECTION_EXPECTED_HEAD": head,
+                        "ACTION_PROJECTION_EXPECTED_BASE": base,
+                        "ACTION_PROJECTION_RESOLVE_ATTEMPTS": "2",
+                        "ACTION_PROJECTION_RESOLVE_DELAY_SECONDS": "0",
+                    })
+                    self.assertNotEqual(code, 0, output)
+                    self.assertEqual(output, "")
+                    self.assertIn(message, stderr)
+
+    def test_review_state_merge_ref_resolution_is_bounded(self):
+        """The retry is a bound, not a wait until the two values agree."""
+        fetch = self.step(
+            "review-state-action-projection",
+            "Fetch event-bound PR merge candidate without checking it out",
+        )
+        self.assert_contains_all(fetch, (
+            'ACTION_PROJECTION_RESOLVE_ATTEMPTS: "5"',
+            'ACTION_PROJECTION_RESOLVE_DELAY_SECONDS: "5"',
+        ))
+        script = self.review_state_candidate_script()
+        for unbounded in ("while :", "while true", "while [ 1 ]"):
+            with self.subTest(unbounded=unbounded):
+                self.assertNotIn(unbounded, script)
+        with tempfile.TemporaryDirectory() as root:
+            fixture = MergeRefFixture(root)
+            event_merge = git(fixture.remote, "rev-parse", "refs/pull/1/merge")
+            environment = {
+                "ACTION_PROJECTION_PR_NUMBER": "3",
+                "ACTION_PROJECTION_EXPECTED_REVISION": event_merge,
+                "ACTION_PROJECTION_EXPECTED_HEAD": fixture.head,
+                "ACTION_PROJECTION_EXPECTED_BASE": fixture.base,
+                "ACTION_PROJECTION_RESOLVE_DELAY_SECONDS": "0",
+            }
+            code, output, stderr = fixture.run_step(script, {
+                **environment, "ACTION_PROJECTION_RESOLVE_ATTEMPTS": "3",
+            })
+            self.assertNotEqual(code, 0, output)
+            self.assertEqual(output, "")
+            self.assertEqual(
+                stderr.count("does not merge this event's head"), 3
+            )
+            self.assertIn("stayed unbound across 3 resolutions", stderr)
+            for attempts, message in (
+                ("0", "needs 1 to 100 attempts"),
+                ("101", "needs 1 to 100 attempts"),
+                # `[` reports status 2, not 1, when an operand overflows
+                # intmax, and both `if` and `while` read that as false — so
+                # this bound skips the range guard and every iteration, and
+                # only the positive check after the loop refuses it.
+                ("9223372036854775808", "no candidate revision was bound"),
+                ("99999999999999999999", "no candidate revision was bound"),
+                # 9223372036854775807 — one below the overflow — belongs to
+                # this class too: `[` compares it happily, and a loop of that
+                # length is an unbounded one with extra steps. It is *not*
+                # probed here on purpose. Any value above the cap exercises
+                # the same guard, and `101` does it in the same microsecond,
+                # whereas that one would hang this suite for the age of the
+                # universe if a future edit ever removed the cap. A test that
+                # hangs on a regression reports nothing.
+                ("", "bounds must be whole numbers"),
+                ("many", "bounds must be whole numbers"),
+                ("-3", "bounds must be whole numbers"),
+                (" 2", "bounds must be whole numbers"),
+                ("2 ", "bounds must be whole numbers"),
+                ("+2", "bounds must be whole numbers"),
+                ("2.5", "bounds must be whole numbers"),
+                ("0x2", "bounds must be whole numbers"),
+            ):
+                with self.subTest(attempts=attempts):
+                    code, output, stderr = fixture.run_step(script, {
+                        **environment,
+                        "ACTION_PROJECTION_RESOLVE_ATTEMPTS": attempts,
+                    })
+                    self.assertNotEqual(code, 0, output)
+                    self.assertEqual(output, "")
+                    self.assertIn(message, stderr)
+
+    def test_review_state_candidate_is_established_not_inferred(self):
+        """Publishing a revision requires binding one, not merely not failing.
+
+        Every guard in the loop is a way to *reject* a candidate, so a path
+        that skips the loop entirely skips all of them. Falling out of the
+        loop must therefore refuse to publish rather than emit whatever the
+        loop variable happens to hold.
+        """
+        script = self.review_state_candidate_script()
+        self.assert_contains_all(script, (
+            'if [ -z "$ACTION_PROJECTION_CANDIDATE_REVISION" ]; then\n'
+            '  echo "no candidate revision was bound" >&2\n'
+            '  exit 1\n'
+            'fi\n',
+            "printf 'revision=%s\\n' "
+            '"$ACTION_PROJECTION_CANDIDATE_REVISION"',
+        ))
+        guard = script.index('echo "no candidate revision was bound"')
+        self.assertLess(guard, script.index("printf 'revision="))
 
     def test_source_release_push_candidate_is_the_revision_the_push_names(self):
         script = step_shell_script(self.step(
