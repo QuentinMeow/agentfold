@@ -1,10 +1,10 @@
 # Generate one ordered list of every open action, so the owner never hunts for what is left
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-08-02, by claude, from the owner's chat request to be an agent manager rather than a planner
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-generate-the-open-action-list.md`
+**Queue actions:** none
 
 ## Goal
 
