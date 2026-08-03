@@ -195,7 +195,11 @@ class StagedTestSelectionTests(unittest.TestCase):
             (b"automation/hooks/pre-commit", ("test_run_tests.py",)),
             (
                 b"automation/reconcile/reconcile.py",
-                ("test_markdown_semantics.py", "test_reconcile_queue.py"),
+                (
+                    "test_markdown_semantics.py",
+                    "test_reconcile_open_actions.py",
+                    "test_reconcile_queue.py",
+                ),
             ),
             (b"automation/mine_cochange.py", ("test_mine_cochange.py",)),
             (b"automation/cochange-ledger.txt", ("test_mine_cochange.py",)),
@@ -295,6 +299,7 @@ class StagedTestSelectionTests(unittest.TestCase):
         self.assertEqual(
             (
                 "test_markdown_semantics.py",
+                "test_reconcile_open_actions.py",
                 "test_reconcile_queue.py",
                 "test_quote_cli.py",
             ),

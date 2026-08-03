@@ -16330,6 +16330,13 @@ class ReconcileQueueTests(unittest.TestCase):
                 ).replace("## What I recommend\n", "## Notes on this\n"),
             )
             self.write(root, "memory/index.md", RECONCILE.generated_index())
+            # Both generated projections have to be current, or their own
+            # blocking checks would be the thing this exit code reports.
+            self.write(
+                root,
+                "message-queue/open-actions.md",
+                RECONCILE.generated_open_actions(),
+            )
 
             out = io.StringIO()
             with contextlib.redirect_stdout(out):

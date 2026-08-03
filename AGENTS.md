@@ -36,7 +36,7 @@ mode permits. A task file may override the mode for that task only.
 |------|------------|
 | `handbook/` | Design principles, collaboration modes, git workflow, GitHub projection, naming rules, adoption guide |
 | `docs/` | Durable software and harness designs; proposals, not accepted decisions |
-| `message-queue/` | Canonical pending human↔agent and durable agent↔agent actions, split by **who acts next** |
+| `message-queue/` | Canonical pending human↔agent and durable agent↔agent actions, split by **who acts next**; `open-actions.md` is their generated digest |
 | `tasks/` | Work items; a task's status **is** the folder it sits in (`0_backlog` … `4_done`) |
 | `history/` | One folder per conversation/session; each must contain a `handover.md` |
 | `memory/` | Long-term project memory: `facts/`, `decisions/` (ADRs), `lessons/`, `known-issues/`; `index.md` is generated |
