@@ -124,6 +124,11 @@ CORE_FIT_REVIEW_REVISION_RE = re.compile(
     r"(?P<revision>(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))$",
     re.M,
 )
+ASCII_MARKDOWN_BLANK_LINE_RE = re.compile(r"^[ \t]*(?:\r\n|\r|\n)?$")
+IDENTITY_PLACEHOLDERS = frozenset({
+    "unclaimed", "none yet", "none-yet", "tbd", "todo", "none",
+    "n/a", "na", "unknown",
+})
 
 
 def commonmark_lines(text):
@@ -291,18 +296,20 @@ def semantic_text(text):
 
 
 def identity_key(identity):
-    """Return the shared non-punctuation identity tokens for a reviewer/claimant."""
-    normalized = unicodedata.normalize("NFKC", identity or "").casefold()
+    """Return shared human-visible identity tokens, excluding placeholders."""
+    rendered = rendered_human_text(identity or "")
+    visible = strip_default_ignorable_characters(rendered)
+    normalized = unicodedata.normalize("NFKC", visible).casefold()
+    normalized = " ".join(normalized.split())
+    if not normalized or normalized in IDENTITY_PLACEHOLDERS \
+            or re.fullmatch(r"_+", normalized):
+        return ()
     return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
 
 
 def claimant_identity_key(claimant):
-    """Return no identity for the task schema's unclaimed/placeholder values."""
-    value = (claimant or "").strip()
-    if not value or "<" in value or value.casefold() in {"unclaimed", "none yet"} \
-            or re.fullmatch(r"_+", value):
-        return ()
-    return identity_key(value)
+    """Compatibility name for the same claimant/reviewer identity grammar."""
+    return identity_key(claimant)
 
 
 def independent_reviewer_identity(reviewer, claimant):
@@ -310,6 +317,20 @@ def independent_reviewer_identity(reviewer, claimant):
     reviewer_key = identity_key(reviewer)
     claimant_key = claimant_identity_key(claimant)
     return bool(reviewer_key and claimant_key and reviewer_key != claimant_key)
+
+
+def markdown_line_body(line):
+    """Remove one CommonMark line ending, including an intact CRLF pair."""
+    if line.endswith("\r\n"):
+        return line[:-2]
+    if line.endswith(("\r", "\n")):
+        return line[:-1]
+    return line
+
+
+def ascii_markdown_blank_line(line):
+    """Accept only zero or more ASCII spaces/tabs plus an optional line ending."""
+    return bool(ASCII_MARKDOWN_BLANK_LINE_RE.fullmatch(line or ""))
 
 
 def core_fit_review_evidence(text):
@@ -345,15 +366,15 @@ def core_fit_review_evidence(text):
         offsets.append(cursor)
         cursor += len(line)
 
-    def line_body(line):
-        return line[:-1] if line.endswith("\n") else line
-
     def structural_line(index):
-        return line_body(source_lines[index]) == line_body(semantic_lines[index])
+        return markdown_line_body(source_lines[index]) == markdown_line_body(
+            semantic_lines[index]
+        )
 
     section_lines = [
         index for index, line in enumerate(source_lines)
-        if line_body(line) == "## Review verdicts" and structural_line(index)
+        if markdown_line_body(line) == "## Review verdicts"
+        and structural_line(index)
     ]
     evidence["section_count"] = len(section_lines)
     if len(section_lines) != 1:
@@ -361,11 +382,14 @@ def core_fit_review_evidence(text):
 
     section_line = section_lines[0]
     content_line = section_line + 1
-    while content_line < len(source_lines) and not source_lines[content_line].strip():
+    while content_line < len(source_lines) \
+            and ascii_markdown_blank_line(source_lines[content_line]):
         content_line += 1
     if content_line >= len(source_lines) or not structural_line(content_line):
         return evidence
-    content_end = offsets[content_line] + len(line_body(semantic_lines[content_line]))
+    content_end = offsets[content_line] + len(
+        markdown_line_body(semantic_lines[content_line])
+    )
     revision = CORE_FIT_REVIEW_REVISION_RE.match(
         clean, offsets[content_line], content_end
     )
@@ -378,12 +402,14 @@ def core_fit_review_evidence(text):
     line_index = content_line + 1
     while line_index < len(source_lines):
         source_line = source_lines[line_index]
-        if not source_line.strip():
+        if ascii_markdown_blank_line(source_line):
             line_index += 1
             continue
         if not structural_line(line_index):
             break
-        body_end = offsets[line_index] + len(line_body(semantic_lines[line_index]))
+        body_end = offsets[line_index] + len(
+            markdown_line_body(semantic_lines[line_index])
+        )
         matched = CORE_FIT_REVIEW_VERDICT_RE.match(
             clean, offsets[line_index], body_end
         )

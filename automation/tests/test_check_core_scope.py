@@ -627,6 +627,58 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
+    def test_review_parser_compares_rendered_human_identities(self):
+        cases = (
+            ("author", "au\u200bthor"),
+            ("author", "<span>author</span>"),
+            ("<span>author</span>", "au\u200bthor"),
+            ("author", "<reviewer>"),
+        )
+        for claimant, reviewer in cases:
+            with self.subTest(claimant=claimant, reviewer=reviewer), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=(
+                        f"- core-fit / {reviewer}: approve — identity probe\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_rejects_reviewer_and_claimant_placeholders(self):
+        placeholders = (
+            "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
+            "unknown", "______", "<reviewer>",
+        )
+        for placeholder in placeholders:
+            for claimant, reviewer in (
+                (placeholder, "independent"),
+                ("author", placeholder),
+            ):
+                with self.subTest(claimant=claimant, reviewer=reviewer), \
+                        tempfile.TemporaryDirectory() as tmp:
+                    task = self.make_task(
+                        tmp,
+                        status="3_in-review",
+                        claimant=claimant,
+                        verification=(
+                            f"- core-fit / {reviewer}: approve — placeholder probe\n"
+                        ),
+                    )
+                    errors = SCOPE.validate_task(
+                        task, touched_core=True, require_review=True
+                    )
+                    self.assertTrue(any(
+                        "independent reviewer" in error for error in errors
+                    ), errors)
+
     def test_review_parser_stops_at_raw_hidden_or_code_content(self):
         first = "- core-fit / first: block — earlier blocker\n"
         later = "- core-fit / later: approve — must not count\n"
@@ -635,6 +687,13 @@ class CoreScopeTests(unittest.TestCase):
             "\n<div>\nhidden HTML\n</div>\n",
             "\n```text\nhidden fence\n```\n",
             "\n    hidden indented code\n",
+            "\n\u00a0\n",
+            "\n\f\n",
+            "\n\v\n",
+            "\n\u0085\n",
+            "\n\u2028\n",
+            "\n\u2060\n",
+            "\n\u200b\n",
         )
         for barrier in barriers:
             for before, expected in (("", "independent reviewer"),
@@ -650,6 +709,21 @@ class CoreScopeTests(unittest.TestCase):
                         task, touched_core=True, require_review=True
                     )
                     self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_review_parser_accepts_a_crlf_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review")
+            (task / "verification.md").write_bytes(
+                (
+                    "# Verification\r\n\r\n"
+                    "## Review verdicts\r\n\r\n"
+                    f"**Reviewed revision:** {'a' * 40}\r\n\r\n"
+                    "- core-fit / reviewer: approve — CRLF remained structural\r\n"
+                ).encode("utf-8")
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
 
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (

@@ -2523,6 +2523,77 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, sum(counts.values()), counts)
 
+    def test_task_action_units_compare_rendered_human_identities(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        cases = (
+            ("author", "au\u200bthor"),
+            ("author", "<span>author</span>"),
+            ("<span>author</span>", "au\u200bthor"),
+            ("author", "<reviewer>"),
+        )
+        with self.repo() as root:
+            for claimant, reviewer in cases:
+                with self.subTest(claimant=claimant, reviewer=reviewer):
+                    with mock.patch.object(
+                        PROJECTION,
+                        "candidate_text",
+                        return_value=f"# Example\n\n**Claimed-by:** {claimant}\n",
+                    ):
+                        counts = PROJECTION.task_action_unit_counts(
+                            prefix
+                            + f"- core-fit / {reviewer}: approve — identity probe\n",
+                            source_path,
+                            repo=root,
+                        )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_reject_reviewer_and_claimant_placeholders(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        placeholders = (
+            "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
+            "unknown", "______", "<reviewer>",
+        )
+        with self.repo() as root:
+            for placeholder in placeholders:
+                with self.subTest(claimant=placeholder):
+                    with mock.patch.object(
+                        PROJECTION,
+                        "candidate_text",
+                        return_value=(
+                            f"# Example\n\n**Claimed-by:** {placeholder}\n"
+                        ),
+                    ):
+                        counts = PROJECTION.task_action_unit_counts(
+                            prefix
+                            + "- core-fit / independent: approve — claimant probe\n",
+                            source_path,
+                            repo=root,
+                        )
+                    self.assertEqual(1, sum(counts.values()), counts)
+            placeholder_receipts = "".join(
+                f"- core-fit / {placeholder}: approve — reviewer probe\n"
+                for placeholder in placeholders
+            )
+            with mock.patch.object(
+                PROJECTION,
+                "candidate_text",
+                return_value="# Example\n\n**Claimed-by:** author\n",
+            ):
+                counts = PROJECTION.task_action_unit_counts(
+                    prefix + placeholder_receipts,
+                    source_path,
+                    repo=root,
+                )
+            self.assertEqual(len(placeholders), sum(counts.values()), counts)
+
         with self.repo() as root:
             counts = PROJECTION.task_action_unit_counts(
                 prefix + "- core-fit / reviewer: approve — missing task\n",
@@ -2573,17 +2644,48 @@ class ActionProjectionTests(unittest.TestCase):
             "\n<div>\nhidden HTML\n</div>\n",
             "\n```text\nhidden fence\n```\n",
             "\n    hidden indented code\n",
+            "\n\u00a0\n",
+            "\n\f\n",
+            "\n\v\n",
+            "\n\u0085\n",
+            "\n\u2028\n",
+            "\n\u2060\n",
+            "\n\u200b\n",
         )
         source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
         with self.repo() as root:
+            with mock.patch.object(
+                PROJECTION,
+                "candidate_text",
+                return_value="# Example\n\n**Claimed-by:** author\n",
+            ):
+                for barrier in barriers:
+                    for body in (
+                        prefix + barrier + later,
+                        prefix + first + barrier + later,
+                    ):
+                        with self.subTest(barrier=barrier, body=body):
+                            counts = PROJECTION.task_action_unit_counts(
+                                body, source_path, repo=root
+                            )
+                            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_accept_a_crlf_receipt(self):
+        text = (
+            "## Review verdicts\r\n\r\n"
+            f"**Reviewed revision:** {'a' * 40}\r\n\r\n"
+            "- core-fit / reviewer: approve — CRLF remained structural\r\n"
+        )
+        with self.repo() as root:
             self.receipt_task(root)
-            for barrier in barriers:
-                for body in (prefix + barrier + later, prefix + first + barrier + later):
-                    with self.subTest(barrier=barrier, body=body):
-                        counts = PROJECTION.task_action_unit_counts(
-                            body, source_path, repo=root
-                        )
-                        self.assertEqual(1, sum(counts.values()), counts)
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    "tasks/3_in-review/2026-07-23-example/verification.md",
+                    repo=root,
+                ),
+            )
 
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (
