@@ -808,8 +808,26 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertTrue(script, "review-state candidate step has no script")
         return script
 
+    def pull_request_candidate_script(self):
+        """The literal shell that binds the checked-out pull-request candidate."""
+        script = step_shell_script(self.step(
+            "reconcile-and-test",
+            "Bind checked-out pull-request candidate",
+        ))
+        self.assertTrue(script, "pull-request candidate step has no script")
+        return script
+
+    def core_scope_pull_request_script(self):
+        """The literal shell of the pull-request core-scope consumer."""
+        script = step_shell_script(self.step(
+            "reconcile-and-test",
+            "Core scope — deterministic boundary (agent review is manual)",
+        ))
+        self.assertTrue(script, "pull-request core-scope step has no script")
+        return script
+
     def reconciler_pull_request_script(self):
-        """The literal shell of the pull-request reconciler step."""
+        """The literal shell of the pull-request reconciler consumer."""
         script = step_shell_script(self.step(
             "reconcile-and-test",
             "Reconciler — pull-request merge boundary",
@@ -817,9 +835,9 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         self.assertTrue(script, "pull-request reconciler step has no script")
         return script
 
-    def run_reconciler_pull_request_step(
-            self, fixture, script, candidate, event_base=None, event_head=None):
-        """Run the adapter with a capture-only stand-in for the canonical gate."""
+    def run_python_adapter_step(
+            self, fixture, script, candidate, environment, capture_name):
+        """Run one consumer with a capture-only stand-in for its Python gate."""
         fake_bin = fixture.root / "fake-bin"
         fake_bin.mkdir(exist_ok=True)
         fake_python = fake_bin / "python3"
@@ -828,7 +846,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             encoding="utf-8",
         )
         fake_python.chmod(0o755)
-        capture = fixture.root / "reconciler-arguments.txt"
+        capture = fixture.root / capture_name
         if capture.exists():
             capture.unlink()
         code, output, stderr = fixture.run_step(
@@ -836,14 +854,7 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             {
                 "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
                 "FAKE_PYTHON_ARGS": str(capture),
-                "QUEUE_TASK_BRANCH": "task/fixture",
-                "QUEUE_EVENT_BASE": (
-                    fixture.base if event_base is None else event_base
-                ),
-                "QUEUE_EVENT_HEAD": (
-                    fixture.head if event_head is None else event_head
-                ),
-                "QUEUE_DISPLACED_TIP": "",
+                **environment,
             },
             checkout_revision=candidate,
         )
@@ -853,40 +864,124 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
         )
         return code, output, stderr, arguments
 
-    def test_reconciler_candidate_binds_direct_head_and_advanced_base(self):
-        """The literal adapter emits the PR leg the reconciler can bind."""
-        script = self.reconciler_pull_request_script()
+    def run_pull_request_candidate_step(
+            self, fixture, script, candidate, event_base=None, event_head=None):
+        return fixture.run_step(
+            script,
+            {
+                "PR_CANDIDATE_EVENT_BASE": (
+                    fixture.base if event_base is None else event_base
+                ),
+                "PR_CANDIDATE_EVENT_HEAD": (
+                    fixture.head if event_head is None else event_head
+                ),
+            },
+            checkout_revision=candidate,
+        )
+
+    def run_core_scope_pull_request_step(
+            self, fixture, script, candidate, change_range):
+        return self.run_python_adapter_step(
+            fixture,
+            script,
+            candidate,
+            {
+                "CORE_SCOPE_RANGE": change_range,
+                "CORE_SCOPE_BRANCH": "task/fixture",
+            },
+            "core-scope-arguments.txt",
+        )
+
+    def run_reconciler_pull_request_step(
+            self, fixture, script, candidate, change_range):
+        return self.run_python_adapter_step(
+            fixture,
+            script,
+            candidate,
+            {
+                "QUEUE_TASK_BRANCH": "task/fixture",
+                "QUEUE_CHANGE_RANGE": change_range,
+                "QUEUE_DISPLACED_TIP": "",
+            },
+            "reconciler-arguments.txt",
+        )
+
+    def test_pull_request_candidate_binds_both_consumer_ranges(self):
+        """One literal binding feeds candidate policy and exact-merge policy."""
+        binding = self.pull_request_candidate_script()
+        core_scope = self.core_scope_pull_request_script()
+        reconciler = self.reconciler_pull_request_script()
+        self.assertIn(
+            "CORE_SCOPE_RANGE: "
+            "${{ steps.pull-request-candidate.outputs.core_range }}",
+            self.step(
+                "reconcile-and-test",
+                "Core scope — deterministic boundary (agent review is manual)",
+            ),
+        )
+        self.assertIn(
+            "QUEUE_CHANGE_RANGE: "
+            "${{ steps.pull-request-candidate.outputs.reconcile_range }}",
+            self.step(
+                "reconcile-and-test",
+                "Reconciler — pull-request merge boundary",
+            ),
+        )
         with tempfile.TemporaryDirectory() as root:
             fixture = MergeRefFixture(root)
             recomputed = git(fixture.remote, "rev-parse", "refs/pull/2/merge")
-            for label, candidate, expected_range in (
+            for label, candidate, expected_core, expected_reconcile in (
                 (
                     "checked out event head",
                     fixture.head,
+                    f"{fixture.base}...{fixture.head}",
                     f"{fixture.base}...{fixture.head}",
                 ),
                 (
                     "merge recomputed onto an advanced base",
                     recomputed,
+                    f"{fixture.advanced_base}...{recomputed}",
                     f"{fixture.advanced_base}...{fixture.head}",
                 ),
             ):
                 with self.subTest(candidate=label):
-                    code, output, stderr, arguments = (
-                        self.run_reconciler_pull_request_step(
-                            fixture, script, candidate
-                        )
+                    code, output, stderr = self.run_pull_request_candidate_step(
+                        fixture, binding, candidate
                     )
                     self.assertEqual(code, 0, stderr)
-                    self.assertEqual(output, "")
-                    range_index = arguments.index("--range")
                     self.assertEqual(
-                        arguments[range_index + 1], expected_range
+                        output,
+                        f"core_range={expected_core}\n"
+                        f"reconcile_range={expected_reconcile}\n",
+                    )
+                    core_code, _output, core_stderr, core_arguments = (
+                        self.run_core_scope_pull_request_step(
+                            fixture, core_scope, candidate, expected_core
+                        )
+                    )
+                    self.assertEqual(core_code, 0, core_stderr)
+                    core_range_index = core_arguments.index("--range")
+                    self.assertEqual(
+                        core_arguments[core_range_index + 1], expected_core
+                    )
+                    reconcile_code, _output, reconcile_stderr, arguments = (
+                        self.run_reconciler_pull_request_step(
+                            fixture,
+                            reconciler,
+                            candidate,
+                            expected_reconcile,
+                        )
+                    )
+                    self.assertEqual(reconcile_code, 0, reconcile_stderr)
+                    reconcile_range_index = arguments.index("--range")
+                    self.assertEqual(
+                        arguments[reconcile_range_index + 1],
+                        expected_reconcile,
                     )
 
-    def test_reconciler_candidate_rejects_unbound_checked_out_commits(self):
+    def test_pull_request_candidate_rejects_unbound_checked_out_commits(self):
         """A moved base is admitted without weakening any parent binding."""
-        script = self.reconciler_pull_request_script()
+        script = self.pull_request_candidate_script()
         with tempfile.TemporaryDirectory() as root:
             fixture = MergeRefFixture(root)
             rejected = (
@@ -935,33 +1030,29 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             )
             for label, candidate, base, head, message in rejected:
                 with self.subTest(rejected=label):
-                    code, output, stderr, arguments = (
-                        self.run_reconciler_pull_request_step(
-                            fixture,
-                            script,
-                            candidate,
-                            event_base=base,
-                            event_head=head,
+                    code, output, stderr = (
+                        self.run_pull_request_candidate_step(
+                            fixture, script, candidate, base, head
                         )
                     )
                     self.assertNotEqual(code, 0, output)
                     self.assertEqual(output, "")
-                    self.assertEqual(arguments, [])
                     self.assertIn(message, stderr)
 
-    def test_reconciler_candidate_binding_has_no_mutable_resolution_loop(self):
+    def test_pull_request_candidate_binding_has_no_mutable_resolution_loop(self):
         """An immutable checkout fails directly rather than polling a mutable ref."""
-        script = self.reconciler_pull_request_script()
+        script = self.pull_request_candidate_script()
         for forbidden in (
                 "while ", "sleep ", "refs/pull/", "RESOLVE_ATTEMPTS"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, script)
 
-    def test_reconciler_head_guard_is_load_bearing(self):
+    def test_pull_request_candidate_head_guard_is_load_bearing(self):
         """Deleting the second-parent comparison makes the bad fixture pass."""
-        script = self.reconciler_pull_request_script()
+        script = self.pull_request_candidate_script()
         guard = (
-            '  if [ "$QUEUE_MERGED_HEAD" != "$QUEUE_EVENT_HEAD" ]; then\n'
+            '  if [ "$PR_CANDIDATE_MERGED_HEAD" != \\\n'
+            '      "$PR_CANDIDATE_EVENT_HEAD" ]; then\n'
             '    echo "merge candidate does not merge this event\'s head" >&2\n'
             '    exit 1\n'
             '  fi\n'
@@ -973,32 +1064,31 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             wrong_head = git(
                 fixture.remote, "rev-parse", "refs/pull/3/merge"
             )
-            fixed_code, _output, _stderr, fixed_arguments = (
-                self.run_reconciler_pull_request_step(
+            fixed_code, _output, _stderr = (
+                self.run_pull_request_candidate_step(
                     fixture, script, wrong_head
                 )
             )
-            weakened_code, _output, weakened_stderr, weakened_arguments = (
-                self.run_reconciler_pull_request_step(
+            weakened_code, weakened_output, weakened_stderr = (
+                self.run_pull_request_candidate_step(
                     fixture, weakened, wrong_head
                 )
             )
             self.assertNotEqual(fixed_code, 0)
-            self.assertEqual(fixed_arguments, [])
             self.assertEqual(weakened_code, 0, weakened_stderr)
-            self.assertIn("--range", weakened_arguments)
+            self.assertIn("core_range=", weakened_output)
 
-    def test_reconciler_advanced_base_admission_is_load_bearing(self):
+    def test_pull_request_candidate_advanced_base_admission_is_load_bearing(self):
         """Removing the new admission makes the stale-base fixture fail again."""
-        script = self.reconciler_pull_request_script()
-        admission = 'else\n  QUEUE_MERGED_HEAD="$(\n'
+        script = self.pull_request_candidate_script()
+        admission = 'else\n  PR_CANDIDATE_MERGED_HEAD="$(\n'
         self.assertIn(admission, script)
         without_admission = script.replace(
             admission,
             'else\n'
             '  echo "captured candidate is not the event head" >&2\n'
             '  exit 1\n'
-            '  QUEUE_MERGED_HEAD="$(\n',
+            '  PR_CANDIDATE_MERGED_HEAD="$(\n',
             1,
         )
         with tempfile.TemporaryDirectory() as root:
@@ -1006,20 +1096,19 @@ class GitHubActionProjectionWorkflowTests(unittest.TestCase):
             recomputed = git(
                 fixture.remote, "rev-parse", "refs/pull/2/merge"
             )
-            fixed_code, _output, fixed_stderr, fixed_arguments = (
-                self.run_reconciler_pull_request_step(
+            fixed_code, fixed_output, fixed_stderr = (
+                self.run_pull_request_candidate_step(
                     fixture, script, recomputed
                 )
             )
-            old_code, _output, old_stderr, old_arguments = (
-                self.run_reconciler_pull_request_step(
+            old_code, _output, old_stderr = (
+                self.run_pull_request_candidate_step(
                     fixture, without_admission, recomputed
                 )
             )
             self.assertEqual(fixed_code, 0, fixed_stderr)
-            self.assertIn("--range", fixed_arguments)
+            self.assertIn("core_range=", fixed_output)
             self.assertNotEqual(old_code, 0)
-            self.assertEqual(old_arguments, [])
             self.assertIn("not the event head", old_stderr)
 
     def test_review_state_candidate_survives_a_merge_ref_recompute(self):

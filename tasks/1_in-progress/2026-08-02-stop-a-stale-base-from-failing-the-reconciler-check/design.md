@@ -29,23 +29,28 @@ provider ref.
 
 Copy the review-state adapter's five-attempt resolution loop and check out whatever the ref
 names last. This is internally inconsistent here: `actions/checkout` has already selected
-the immutable candidate, and the earlier core-scope step has already inspected that tree.
-Changing the checkout afterward would make two gates judge different candidates.
+the immutable candidate. Resolving a second candidate inside either consumer would let core
+scope and the reconciler judge different trees.
 
 ### Bind the checked-out candidate in the pull-request adapter
 
 Keep the direct-head fast path. Otherwise require exactly two parents, require parent two
-to equal the event head, and require parent one to contain the event base. Pass
-`actual_parent1...event_head`, so the reconciler independently validates checked-out `HEAD`
-as the exact synthetic merge of those two range endpoints and computes scope from the pull
-request leg.
+to equal the event head, and require parent one to contain the event base. Perform that
+binding immediately after checkout, before either policy consumer, and emit two ranges:
+
+- `actual_parent1...candidate` for core scope, so its path diff remains the pull-request leg
+  while its candidate-side content reads — including `automation/core-scope-paths.txt` —
+  come from the checked-out merge candidate.
+- `actual_parent1...event_head` for the reconciler, so it validates checked-out `HEAD` as
+  the exact synthetic merge of those two endpoints and computes scope from the PR leg.
 
 ## Chosen approach
 
-Bind the already checked-out candidate in `.github/workflows/harness.yml` and leave
-`automation/reconcile/reconcile.py` unchanged. This reuses the parent-interrogation approach
-already used by the authoritative, source-release, and review-state adapters without
-making provider timing canonical policy.
+Bind the already checked-out candidate once, immediately after checkout, in
+`.github/workflows/harness.yml`; feed its two outputs to core scope and the reconciler; and
+leave both canonical Python gates unchanged. This reuses the parent-interrogation approach
+already used by the authoritative, source-release, and review-state adapters without making
+provider timing canonical policy.
 
 There is no retry in this step. The task's bounded-retry criterion is not applicable because
 this boundary never resolves a mutable ref: `actions/checkout` has already pinned `HEAD`.
@@ -53,9 +58,11 @@ The literal-block fixture asserts the step contains no polling loop, sleep, pull
 or attempt variable. Malformed candidates and payloads fail immediately.
 
 For example, with event base `B`, advanced base `B2` where `B` is an ancestor of `B2`, event
-head `H`, and checked-out candidate `M(B2,H)`, the adapter now emits `B2...H`; the reconciler
-accepts `M` only because its parents are exactly `{B2,H}`. A candidate `M(B2,H2)` still
-fails because its second parent is not `H`.
+head `H`, and checked-out candidate `M(B2,H)`, the adapter emits `B2...M` for core scope and
+`B2...H` for reconciliation. If `B2` registers a newly protected path, core scope loads that
+registry from `M` rather than the stale event head `H`. The reconciler accepts `M` only
+because its parents are exactly `{B2,H}`. A candidate `M(B2,H2)` still fails because its
+second parent is not `H`.
 
 ## Core fit
 

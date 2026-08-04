@@ -30,3 +30,22 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Verified the five focused fixtures, all 25 workflow-adapter tests, all 15 repository
   test files, the reconciler with zero blocking findings, and the staged core-scope receipt.
   Independent core-fit review, publishing, and merging remain for the parent session.
+
+### Correction after first adversarial review
+
+- The preceding statement that core scope had inspected the same tree was wrong. It ran in
+  the candidate checkout, but `event_base...event_head` made its candidate-side content
+  reads come from the stale event head. Two of three reviewers blocked revision `1da29e9`
+  because an advanced base could add a protected-path registration that core scope missed.
+- Moved candidate binding into its own step immediately after checkout. It now emits
+  `actual_parent1...candidate` for core scope and `actual_parent1...event_head` for the
+  reconciler, so both consumers share one bound checkout while retaining their distinct
+  range semantics.
+- The separate displaced-tip observation in `task.md` is already owned by task
+  `2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion` and projected
+  to GitHub issue #75 by
+  `message-queue/needs-agent/requests/non-blocking-track-github-issue-75-restack-provenance.md`;
+  this task does not duplicate that repair.
+- Re-ran the five focused fixtures, all 25 workflow-adapter tests, all 15 repository test
+  files, core scope, the reconciler, and diff whitespace checks after the review repair;
+  every command passed.

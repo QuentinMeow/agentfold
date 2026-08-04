@@ -27,20 +27,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Core scope — deterministic boundary (agent review is manual)
+      - name: Bind checked-out pull-request candidate
+        id: pull-request-candidate
         if: github.event_name == 'pull_request'
         env:
-          CORE_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
-          CORE_SCOPE_HEAD: ${{ github.event.pull_request.head.sha }}
-          CORE_SCOPE_BRANCH: ${{ github.head_ref }}
-        run: python3 automation/check_core_scope.py --range "$CORE_SCOPE_BASE...$CORE_SCOPE_HEAD" --branch "$CORE_SCOPE_BRANCH"
-      - name: Reconciler — pull-request merge boundary
-        if: github.event_name == 'pull_request'
-        env:
-          QUEUE_TASK_BRANCH: ${{ github.head_ref }}
-          QUEUE_EVENT_BASE: ${{ github.event.pull_request.base.sha }}
-          QUEUE_EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
-          QUEUE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+          PR_CANDIDATE_EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_CANDIDATE_EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           # actions/checkout has already pinned one immutable candidate. Usually
           # that is the merge GitHub computed when this job started, which may
@@ -48,46 +40,71 @@ jobs:
           # after the event fired. Bind that checked-out candidate by the same
           # parent shape as the other pull-request adapters: exactly two parents,
           # second parent equal to this event's head, and first parent containing
-          # this event's base. The range stays shaped as the pull-request leg so
-          # the reconciler independently validates HEAD as that exact synthetic
-          # merge. A direct head checkout remains the existing fast path.
-          if [ -z "$QUEUE_EVENT_BASE" ] || [ -z "$QUEUE_EVENT_HEAD" ]; then
+          # this event's base. Core scope receives a candidate-headed range so it
+          # loads protected-path policy from the candidate tree; the reconciler
+          # receives the PR-leg endpoints so it independently validates HEAD as
+          # their exact synthetic merge. A direct head checkout uses one range.
+          if [ -z "$PR_CANDIDATE_EVENT_BASE" ] ||
+              [ -z "$PR_CANDIDATE_EVENT_HEAD" ]; then
             echo "pull-request payload carries no head or base revision" >&2
             exit 1
           fi
-          QUEUE_CANDIDATE_REVISION="$(
+          PR_CANDIDATE_REVISION="$(
             git --no-replace-objects rev-parse --verify "HEAD^{commit}"
           )"
-          if [ "$QUEUE_CANDIDATE_REVISION" = "$QUEUE_EVENT_HEAD" ]; then
-            QUEUE_CHANGE_RANGE="$QUEUE_EVENT_BASE...$QUEUE_EVENT_HEAD"
+          if [ "$PR_CANDIDATE_REVISION" = "$PR_CANDIDATE_EVENT_HEAD" ]; then
+            PR_CANDIDATE_CORE_RANGE="${PR_CANDIDATE_EVENT_BASE}...${PR_CANDIDATE_EVENT_HEAD}"
+            PR_CANDIDATE_RECONCILE_RANGE="$PR_CANDIDATE_CORE_RANGE"
           else
-            QUEUE_MERGED_HEAD="$(
+            PR_CANDIDATE_MERGED_HEAD="$(
               git --no-replace-objects rev-parse --verify --quiet \
-                "$QUEUE_CANDIDATE_REVISION^2^{commit}"
+                "$PR_CANDIDATE_REVISION^2^{commit}"
             )" || {
               echo "merge candidate is not a merge commit" >&2
               exit 1
             }
             if git --no-replace-objects rev-parse --verify --quiet \
-                "$QUEUE_CANDIDATE_REVISION^3^{commit}" > /dev/null; then
+                "$PR_CANDIDATE_REVISION^3^{commit}" > /dev/null; then
               echo "merge candidate has more than two parents" >&2
               exit 1
             fi
-            if [ "$QUEUE_MERGED_HEAD" != "$QUEUE_EVENT_HEAD" ]; then
+            if [ "$PR_CANDIDATE_MERGED_HEAD" != \
+                "$PR_CANDIDATE_EVENT_HEAD" ]; then
               echo "merge candidate does not merge this event's head" >&2
               exit 1
             fi
-            QUEUE_CANDIDATE_BASE="$(
+            PR_CANDIDATE_BASE="$(
               git --no-replace-objects rev-parse --verify \
-                "$QUEUE_CANDIDATE_REVISION^1^{commit}"
+                "$PR_CANDIDATE_REVISION^1^{commit}"
             )"
             if ! git --no-replace-objects merge-base --is-ancestor \
-                "$QUEUE_EVENT_BASE" "$QUEUE_CANDIDATE_BASE"; then
+                "$PR_CANDIDATE_EVENT_BASE" "$PR_CANDIDATE_BASE"; then
               echo "merge candidate does not contain this event's base" >&2
               exit 1
             fi
-            QUEUE_CHANGE_RANGE="$QUEUE_CANDIDATE_BASE...$QUEUE_EVENT_HEAD"
+            PR_CANDIDATE_CORE_RANGE="${PR_CANDIDATE_BASE}...${PR_CANDIDATE_REVISION}"
+            PR_CANDIDATE_RECONCILE_RANGE="${PR_CANDIDATE_BASE}...${PR_CANDIDATE_EVENT_HEAD}"
           fi
+          printf 'core_range=%s\n' "$PR_CANDIDATE_CORE_RANGE" \
+            >> "$GITHUB_OUTPUT"
+          printf 'reconcile_range=%s\n' "$PR_CANDIDATE_RECONCILE_RANGE" \
+            >> "$GITHUB_OUTPUT"
+      - name: Core scope — deterministic boundary (agent review is manual)
+        if: github.event_name == 'pull_request'
+        env:
+          CORE_SCOPE_RANGE: ${{ steps.pull-request-candidate.outputs.core_range }}
+          CORE_SCOPE_BRANCH: ${{ github.head_ref }}
+        run: |
+          python3 automation/check_core_scope.py \
+            --range "$CORE_SCOPE_RANGE" \
+            --branch "$CORE_SCOPE_BRANCH"
+      - name: Reconciler — pull-request merge boundary
+        if: github.event_name == 'pull_request'
+        env:
+          QUEUE_TASK_BRANCH: ${{ github.head_ref }}
+          QUEUE_CHANGE_RANGE: ${{ steps.pull-request-candidate.outputs.reconcile_range }}
+          QUEUE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
           QUEUE_DISPLACED_ARGS=()
           if [ -n "$QUEUE_DISPLACED_TIP" ] && \
               [ "$QUEUE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
