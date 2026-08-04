@@ -310,3 +310,32 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and diff checks passed at implementation commit
   `189fd7ee27faef510a461678eb27fc854f77eb84`. The independent finite-model preflight found
   no remaining blocker in the ninth-panel scope.
+
+## 2026-08-04 — close composite-claimant self-review aliases (codex sol-high implementer)
+
+- The tenth panel reviewed exact revision
+  `7e3c8d2b9ea082b9289509fe64132eaaa545b272` and returned 1 approve, 2 block. The accepted
+  blockers were treating an actual composite claimant only as one combined key and using
+  equality alone, which let a component or an extended prefix/suffix spelling appear
+  independent.
+- A shared `claimant_identity_keys` helper now validates the unchanged raw identity and
+  splits literal `/`, `+`, `;`, `,`, and standalone case-insensitive ASCII `and`. ASCII
+  spaces are trimmed per component; any empty, invalid, punctuation-only, or placeholder
+  component invalidates all claimant authority.
+- The whole claimant key is the separator-free sorted multiset union of every component
+  key before component deduplication, so separator spellings agree and repeated components
+  retain multiplicity. Whole-placeholder forms such as `D/B/T`, `D and B and T`, and
+  `N/A`, plus adjacent separators and `C++`, fail closed.
+- Independence now rejects reviewer equality, either-direction multiset containment, and
+  a multiset symmetric difference of at most two against the whole claimant and every
+  component. The finite-model preflight added the one-substitution cases `author`/`auth0r`
+  and `codex planner`/`codex plannez`; intended stable labels including `correctness
+  reviewer` remain independent.
+- Core majority calculation and action neutralization call the same helper. Reviewer vote
+  replacement remains keyed only by exact reviewer identity, and a compatibility regression
+  proves distinct containment-related reviewer roles do not merge.
+- Focused 12-test, owning 315-test, full 15-file, staged 13-file, exact-range core-scope,
+  exact-range reconciler, and diff checks passed at implementation commit
+  `984af3602d171ee3b66cfbf0bdcc646330911e6f`. The final finite-model audit reported no
+  blocker; identity labels remain deliberately conservative text, not authenticated
+  principals.

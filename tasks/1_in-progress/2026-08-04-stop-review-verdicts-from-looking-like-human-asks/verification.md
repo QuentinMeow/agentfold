@@ -1192,3 +1192,114 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check 9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf..189fd7ee27faef510a461678eb27fc854f77eb84
 ```
+
+## Adversarial panel on 7e3c8d2
+
+**Reviewed revision:** 7e3c8d2b9ea082b9289509fe64132eaaa545b272
+
+Panel result: 1 approve, 2 block.
+
+- adversarial panel / composite-identity reviewer: block — the actual claimant `codex
+  planner / sol-high implementer` was represented only by its combined key, so either
+  component could appear to be a different reviewer.
+- adversarial panel / alias reviewer: block — equality-only comparison admitted
+  conservative prefix and suffix aliases such as a claimant component plus `reviewer`.
+- adversarial panel / parser reviewer: clear — revision termination and linear token
+  mapping held in the reviewed revision; no blocker was reported.
+
+Both blockers were accepted and repaired in implementation revision
+`984af3602d171ee3b66cfbf0bdcc646330911e6f`. Finite-model preflight additionally found
+separator-dependent whole keys and one-balanced-substitution aliases; the implementation
+now closes both and records the deliberate display-label false-collision tradeoff. Its
+final audit reported no remaining blocker in scope. This panel supplies no acceptance
+evidence for the repair, and `--require-review` was not invoked against it.
+
+## Composite-claimant focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimant_keys_include_whole_and_every_component automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_one_bad_composite_component_invalidates_claimant_authority automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimants_reject_component_and_multiset_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_composite_claimant_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_splits_every_explicit_coclaimant_separator automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_invalidates_one_bad_coclaimant_component automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_keeps_distinct_reviewer_role_keys_distinct automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_composite_claimant_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_invalidate_bad_composite_claimants automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_split_every_coclaimant_separator automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_ascii_boundary_and_order_self_aliases
+............
+----------------------------------------------------------------------
+Ran 12 tests in 0.225s
+
+OK
+```
+
+## Composite-claimant owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+....................................................................................................................................................................................................................................................s......................................................................
+----------------------------------------------------------------------
+Ran 315 tests in 30.539s
+
+OK (skipped=1)
+```
+
+## Composite-claimant full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 144.97s
+```
+
+## Composite-claimant pre-commit lane
+
+```
+$ git commit -m "fix: reject composite claimant self-review aliases" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+core-scope: pass (5 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 112.63s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks 984af36] fix: reject composite claimant self-review aliases
+```
+
+## Composite-claimant exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Composite-claimant exact-range reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...984af3602d171ee3b66cfbf0bdcc646330911e6f --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+## Composite-claimant diff check
+
+```
+$ git diff --check 7e3c8d2b9ea082b9289509fe64132eaaa545b272..984af3602d171ee3b66cfbf0bdcc646330911e6f
+```

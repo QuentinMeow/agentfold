@@ -17,5 +17,6 @@
 - [x] 15. Unify placeholder and voter keys, split identity/finding punctuation, and reject authority inside open HTML after the panel on `7cd22e7`, then repeat every verification lane.
 - [x] 16. Reject pending HTML, require rendered receipt evidence, and make heading discovery linear after the panel on `aa0a111`, then repeat every verification lane.
 - [x] 17. Make verdict-token mapping linear and end duplicate-revision invalidation at the first verdict after the panel on `9e9dfa2`, then repeat every verification lane.
-- [ ] 18. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 19. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 18. Reject composite-claimant component, containment, and one-substitution self aliases after the panel on `7e3c8d2`, then repeat every verification lane.
+- [ ] 19. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 20. Publish and merge; close issue #80; resume the stale-base repair.
