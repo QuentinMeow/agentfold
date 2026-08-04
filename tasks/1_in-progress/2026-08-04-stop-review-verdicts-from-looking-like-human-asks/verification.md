@@ -107,7 +107,7 @@ $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
 
-## Review verdicts (when a review was explicitly run)
+## Adversarial panel on 85a044e6
 
 **Reviewed revision:** 85a044e67c725cf03d918432514c76ba1655c984
 
@@ -128,6 +128,83 @@ core-scope: pass (6 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 ```
 
 ## Repaired reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+## Heading-boundary regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_end_receipts_at_real_h1_and_h2_boundaries automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_keep_h3_content_inside_review_verdicts automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_accepts_receipt_but_rejects_its_hostile_finding automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_ends_at_real_h1_and_h2_boundaries automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_a_revision_like_setext_heading automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_keeps_h3_content_inside_the_section
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.389s
+
+OK
+```
+
+## Heading-boundary owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+..................................................................................................................................................................................................s......................................................
+----------------------------------------------------------------------
+Ran 249 tests in 16.463s
+
+OK (skipped=1)
+```
+
+## Heading-boundary full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 68.07s
+```
+
+## Adversarial panel on 12a1f32
+
+**Reviewed revision:** 12a1f320a9916dd2223a6fe81fd5464ddc611aae
+
+Panel result: 2 approve, 1 block.
+
+- adversarial panel / reviewer 1: no blocking finding recorded.
+- adversarial panel / reviewer 2: no blocking finding recorded.
+- adversarial panel / reviewer 3: block — the Review verdicts H2 ends only at another ATX H2, so ATX H1 and setext H1/H2 content can remain inside the receipt region and hide a later approval-like human action.
+
+The block is valid and this session repairs it. `--require-review` was not invoked against
+`12a1f320a9916dd2223a6fe81fd5464ddc611aae`.
+
+## Review verdicts (when a review was explicitly run)
+
+No independent core-fit review has been run against the heading-boundary repair commit;
+that requires the new immutable revision produced after these changes.
+
+## Heading-boundary staged diff and core-scope gate
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (3 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Heading-boundary reconciler
 
 ```
 $ python3 automation/reconcile/reconcile.py --check

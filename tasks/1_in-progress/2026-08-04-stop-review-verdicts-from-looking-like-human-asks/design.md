@@ -33,8 +33,12 @@ Option B. A blocked review of the first implementation proved that sharing only 
 regex was insufficient: basename matching and whole-file normalization admitted paths and
 regions the core gate would never accept. The shared formal parser now prevents the
 validator and detector from defining competing receipt regions as well as competing line
-shapes. Equal-width token blanking remains narrow and reversible: removing one helper call
-restores the prior behavior, while broad exemptions would create a hidden-action surface.
+shapes. A second review found that a region ending only at the next ATX H2 still crossed
+real ATX H1 and setext H1/H2 boundaries. The parser now preserves the exact H2 opener but
+ends at the next real heading of level one or two, excluding the setext heading's content
+line while retaining H3 detail inside the section. Equal-width token blanking remains
+narrow and reversible: removing one helper call restores the prior behavior, while broad
+exemptions would create a hidden-action surface.
 
 ## Core fit
 

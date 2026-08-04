@@ -115,9 +115,14 @@ CORE_FIT_REVIEW_VERDICT_RE = re.compile(
     re.I | re.M,
 )
 CORE_FIT_REVIEW_SECTION_RE = re.compile(
-    r"^## Review verdicts(?:[ \t][^\r\n]*)?\r?\n"
-    r"(?P<body>.*?)(?=^##(?:[ \t]|\r?$)|\Z)",
-    re.M | re.S,
+    r"^## Review verdicts(?:[ \t][^\r\n]*)?\r?\n",
+    re.M,
+)
+CORE_FIT_REVIEW_SECTION_END_ATX_RE = re.compile(
+    r"^[ ]{0,3}#{1,2}(?:[ \t]+|$)"
+)
+CORE_FIT_REVIEW_SECTION_END_SETEXT_RE = re.compile(
+    r"^[ ]{0,3}(?:=+|-+)[ \t]*$"
 )
 CORE_FIT_REVIEW_REVISION_RE = re.compile(
     r"^\*\*Reviewed revision:\*\*[ \t]*"
@@ -309,7 +314,8 @@ def core_fit_review_evidence(text):
     if len(sections) != 1:
         return evidence
     section = sections[0]
-    body_start, body_end = section.span("body")
+    body_start = section.end()
+    body_end = _core_fit_review_section_end(clean, body_start)
     revisions = tuple(
         CORE_FIT_REVIEW_REVISION_RE.finditer(clean, body_start, body_end)
     )
@@ -324,6 +330,47 @@ def core_fit_review_evidence(text):
         )
     )
     return evidence
+
+
+def _core_fit_review_section_end(text, body_start):
+    """Return the next real H1/H2 boundary, excluding setext heading text."""
+    lines = commonmark_lines(text)
+    offsets = []
+    cursor = 0
+    for line in lines:
+        offsets.append(cursor)
+        cursor += len(line)
+    for index, line in enumerate(lines):
+        line_start = offsets[index]
+        if line_start < body_start:
+            continue
+        body = line[:-1] if line.endswith("\n") else line
+        if CORE_FIT_REVIEW_SECTION_END_ATX_RE.match(body):
+            return line_start
+        if not CORE_FIT_REVIEW_SECTION_END_SETEXT_RE.fullmatch(body) \
+                or index == 0:
+            continue
+        prior = lines[index - 1]
+        prior_body = prior[:-1] if prior.endswith("\n") else prior
+        prior_start = offsets[index - 1]
+        if prior_start < body_start \
+                or not _core_fit_setext_heading_content(prior_body):
+            continue
+        return prior_start
+    return len(text)
+
+
+def _core_fit_setext_heading_content(line):
+    """Recognize the paragraph line owned by a following setext underline."""
+    width, rest = split_indentation(line)
+    if width > 3 or not rest.strip() or rest.startswith(">"):
+        return False
+    return not (
+        ATX_HEADING_RE.match(rest)
+        or LIST_MARKER_RE.match(rest)
+        or THEMATIC_BREAK_RE.fullmatch(rest)
+        or SETEXT_UNDERLINE_RE.fullmatch(rest)
+    )
 
 
 def neutralize_core_fit_review_verdict_tokens(text):

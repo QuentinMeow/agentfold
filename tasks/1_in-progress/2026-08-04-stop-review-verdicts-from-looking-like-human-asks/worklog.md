@@ -42,3 +42,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Re-ran the full repository suite to capture its terminal result honestly: all 15 test
   files passed in 68.19 seconds. The blocked panel is evidence about the prior revision,
   not an invocation of the repaired revision's independent core-fit review.
+
+## 2026-08-04 — repair heading-aware receipt boundaries (codex sol-high implementer)
+
+- The second adversarial panel reviewed exact revision
+  `12a1f320a9916dd2223a6fe81fd5464ddc611aae` and returned 2 approve, 1 block. The
+  blocker was valid: the H2 extractor crossed ATX H1 and CommonMark setext H1/H2
+  boundaries, so a later approval-like line could inherit the receipt exception.
+- Kept the exact Review verdicts H2 opening grammar and made the shared extractor end at
+  the next real ATX H1/H2 or setext H1/H2. A setext heading's content line is excluded;
+  H3 detail remains inside the review section.
+- Added action-detector and core-scope regressions for ATX H1, ATX H2, both setext
+  underline forms, a revision-like setext heading, and an H3 canary.
+- Focused tests, all three owning modules, and the full repository suite passed; the full
+  lane ended with all 15 test files passing in 68.07 seconds.

@@ -2391,6 +2391,59 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual(expected, sum(counts.values()), counts)
 
+    def test_task_action_units_end_receipts_at_real_h1_and_h2_boundaries(self):
+        receipt = "- core-fit / owner: approve — production release\n"
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        boundaries = (
+            "# Human action\n\n",
+            "## Human action\n\n",
+            "Human action\n===\n\n",
+            "Human action\n---\n\n",
+        )
+        source_path = (
+            "tasks/3_in-review/2026-07-23-example/verification.md"
+        )
+        with self.repo() as root:
+            for boundary in boundaries:
+                with self.subTest(boundary=boundary):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix + boundary + receipt,
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            revision_heading = (
+                "## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n"
+                "---\n\n"
+                + receipt
+            )
+            counts = PROJECTION.task_action_unit_counts(
+                revision_heading, source_path, repo=root
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_keep_h3_content_inside_review_verdicts(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "### Detailed findings\n\n"
+            "- core-fit / reviewer: approve — could not break it\n"
+        )
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    "tasks/3_in-review/2026-07-23-example/verification.md",
+                    repo=root,
+                ),
+            )
+
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (
             "```\nPlease review the fenced example.\n```\n\n"

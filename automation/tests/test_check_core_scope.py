@@ -354,6 +354,64 @@ class CoreScopeTests(unittest.TestCase):
                 task, touched_core=True, require_review=True
             ))
 
+    def test_review_parser_ends_at_real_h1_and_h2_boundaries(self):
+        boundaries = (
+            "# Human action\n\n",
+            "## Human action\n\n",
+            "Human action\n===\n\n",
+            "Human action\n---\n\n",
+        )
+        for boundary in boundaries:
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        boundary
+                        + "- core-fit / owner: approve — production release\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_rejects_a_revision_like_setext_heading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                verification="- core-fit / reviewer: approve — outside section\n",
+            )
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n"
+                "---\n\n"
+                "- core-fit / reviewer: approve — outside section\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any("Reviewed revision" in error for error in errors), errors)
+            self.assertTrue(any("independent reviewer" in error for error in errors), errors)
+
+    def test_review_parser_keeps_h3_content_inside_the_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                verification=(
+                    "### Detailed findings\n\n"
+                    "- core-fit / reviewer: approve — bound review\n"
+                ),
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
     def test_anonymous_review_does_not_satisfy_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
