@@ -627,13 +627,18 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
-    def test_review_parser_compares_rendered_human_identities(self):
+    def test_review_parser_requires_allowlisted_source_identities(self):
+        decorated = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "![author](profile)", "a**uth**or", "a_uth_or", "~~author~~",
+            "`author`", "<span>author</span>", "auth&#111;r",
+            "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
+            "author\u00a0name", "author\u2028name",
+        )
         cases = (
-            ("author", "au\u200bthor"),
-            ("author", "<span>author</span>"),
-            ("<span>author</span>", "au\u200bthor"),
-            ("[author](profile)", "author"),
-            ("author", "<reviewer>"),
+            [(claimant, "independent") for claimant in decorated]
+            + [("claimant", reviewer) for reviewer in decorated]
+            + [("author", "author")]
         )
         for claimant, reviewer in cases:
             with self.subTest(claimant=claimant, reviewer=reviewer), \
@@ -656,7 +661,8 @@ class CoreScopeTests(unittest.TestCase):
     def test_review_parser_rejects_reviewer_and_claimant_placeholders(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
-            "unknown", "______", "<reviewer>", "[TBD](profile)", "T**B**D",
+            "unknown", "______", "<reviewer>", "[TBD](profile)",
+            "![TBD](profile)", "T**B**D",
         )
         for placeholder in placeholders:
             for claimant, reviewer in (
@@ -726,17 +732,39 @@ class CoreScopeTests(unittest.TestCase):
                 task, touched_core=True, require_review=True
             ))
 
+    def test_review_parser_accepts_allowlisted_unicode_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="codex planner / sol-high implementer",
+                verification=(
+                    "- core-fit / 审查者 Élodie 2 @ safety + core: approve — "
+                    "Boundary clear, tested; release-safe — no leak.\n"
+                ),
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
     def test_review_parser_rejects_decorated_reviewer_and_finding_components(self):
         reviewer_cases = (
             "[author](profile)", "[author][id]", "[author][]", "[author]",
-            "a**uth**or", "`author`", "<span>author</span>",
-            "auth&#111;r", "au\u200bthor", "[TBD](profile)", "T**B**D",
+            "![author](profile)", "![claimant](destination)",
+            "a**uth**or", "a_uth_or", "~~author~~", "`author`",
+            "<span>author</span>", "auth&#111;r", "cod\\_ex", "{author}",
+            "au\u200bthor", "author\tname", "author\u00a0name",
+            "author\u2028name", "[TBD](profile)", "![TBD](profile)",
+            "T**B**D",
         )
         finding_cases = (
             "ap[pro][cmd]ve the release",
+            "![approve](release)",
+            "Please ![approve](release)",
             "**approve** the release",
             "ap`pro`ve the release",
             "<span>approve</span> the release",
+            "ap\\_prove the release",
             "ap\u200bprove the release",
         )
         definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
@@ -762,7 +790,7 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
-    def test_review_parser_does_not_count_duplicate_vote_aliases(self):
+    def test_review_parser_does_not_count_decorated_vote_aliases(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp,
@@ -770,8 +798,8 @@ class CoreScopeTests(unittest.TestCase):
                 claimant="claimant",
                 verification=(
                     "- core-fit / author: block — found a boundary leak\n"
-                    "- core-fit / [author](one): approve — alias one\n"
-                    "- core-fit / [author](two): approve — alias two\n"
+                    "- core-fit / ![author](one): approve — image destination one\n"
+                    "- core-fit / ![author](two): approve — image destination two\n"
                 ),
             )
             errors = SCOPE.validate_task(

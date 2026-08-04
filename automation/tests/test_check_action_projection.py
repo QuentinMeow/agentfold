@@ -2523,20 +2523,25 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, sum(counts.values()), counts)
 
-    def test_task_action_units_compare_rendered_human_identities(self):
+    def test_task_action_units_require_allowlisted_source_identities(self):
         prefix = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
         )
         source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
-        cases = (
-            ("author", "au\u200bthor"),
-            ("author", "<span>author</span>"),
-            ("<span>author</span>", "au\u200bthor"),
-            ("[author](profile)", "author"),
-            ("author", "<reviewer>"),
+        decorated = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "![author](profile)", "a**uth**or", "a_uth_or", "~~author~~",
+            "`author`", "<span>author</span>", "auth&#111;r",
+            "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
+            "author\u00a0name", "author\u2028name",
         )
         with self.repo() as root:
+            cases = (
+                [(claimant, "independent") for claimant in decorated]
+                + [("claimant", reviewer) for reviewer in decorated]
+                + [("author", "author")]
+            )
             for claimant, reviewer in cases:
                 with self.subTest(claimant=claimant, reviewer=reviewer):
                     with mock.patch.object(
@@ -2560,7 +2565,8 @@ class ActionProjectionTests(unittest.TestCase):
         source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
-            "unknown", "______", "<reviewer>", "[TBD](profile)", "T**B**D",
+            "unknown", "______", "<reviewer>", "[TBD](profile)",
+            "![TBD](profile)", "T**B**D",
         )
         with self.repo() as root:
             for placeholder in placeholders:
@@ -2688,6 +2694,26 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_task_action_units_accept_allowlisted_unicode_receipt(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / 审查者 Élodie 2 @ safety + core: approve — "
+            "Boundary clear, tested; release-safe — no leak.\n"
+        )
+        with self.repo() as root:
+            self.receipt_task(
+                root, claimant="codex planner / sol-high implementer"
+            )
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    "tasks/3_in-review/2026-07-23-example/verification.md",
+                    repo=root,
+                ),
+            )
+
     def test_task_action_units_fail_closed_on_decorated_receipt_components(self):
         prefix = (
             "## Review verdicts\n\n"
@@ -2696,14 +2722,21 @@ class ActionProjectionTests(unittest.TestCase):
         source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
         reviewer_cases = (
             "[author](profile)", "[author][id]", "[author][]", "[author]",
-            "a**uth**or", "`author`", "<span>author</span>",
-            "auth&#111;r", "au\u200bthor", "[TBD](profile)", "T**B**D",
+            "![author](profile)", "![claimant](destination)",
+            "a**uth**or", "a_uth_or", "~~author~~", "`author`",
+            "<span>author</span>", "auth&#111;r", "cod\\_ex", "{author}",
+            "au\u200bthor", "author\tname", "author\u00a0name",
+            "author\u2028name", "[TBD](profile)", "![TBD](profile)",
+            "T**B**D",
         )
         finding_cases = (
             "ap[pro][cmd]ve the release",
+            "![approve](release)",
+            "Please ![approve](release)",
             "**approve** the release",
             "ap`pro`ve the release",
             "<span>approve</span> the release",
+            "ap\\_prove the release",
             "ap\u200bprove the release",
         )
         definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
@@ -2730,13 +2763,13 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
 
-    def test_task_action_units_do_not_neutralize_duplicate_vote_aliases(self):
+    def test_task_action_units_do_not_neutralize_decorated_vote_aliases(self):
         text = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
             "- core-fit / author: block — found a boundary leak\n"
-            "- core-fit / [author](one): approve — alias one\n"
-            "- core-fit / [author](two): approve — alias two\n"
+            "- core-fit / ![author](one): approve — image destination one\n"
+            "- core-fit / ![author](two): approve — image destination two\n"
         )
         with self.repo() as root:
             self.receipt_task(root, claimant="claimant")

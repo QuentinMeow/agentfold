@@ -44,46 +44,54 @@ HUMAN_ASK = "Please confirm the retention window before this lands."
 MISSING_TARGET = "automation/does-not-exist.py"
 
 
-class InlineIdentityRenderingTests(unittest.TestCase):
-    def test_markdown_html_and_invisible_aliases_share_visible_identity(self):
-        aliases = (
-            "author",
-            "[author](profile)",
-            "[author][id]",
-            "[author][]",
-            "[author]",
-            "a**uth**or",
-            "`author`",
-            "<span>author</span>",
-            "auth&#111;r",
-            "au\u200bthor",
+class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
+    def test_allows_only_documented_plain_source_alphabet(self):
+        allowed = (
+            "codex planner / sol-high implementer",
+            "Reviewer 2 @ safety + core — clear.",
+            "Élodie 审查者 ١٢ e\u0301",
+            "Clear: yes, tested; why? because! 'single' \"double\" (group).",
         )
-        expected = SEMANTICS.identity_key("author")
-        for alias in aliases:
-            with self.subTest(alias=alias):
-                self.assertEqual(expected, SEMANTICS.identity_key(alias))
-        self.assertNotIn("profile", SEMANTICS.identity_key("[author](profile)"))
-        self.assertNotIn("id", SEMANTICS.identity_key("[author][id]"))
+        for value in allowed:
+            with self.subTest(value=value):
+                self.assertTrue(
+                    SEMANTICS.review_receipt_source_text_allowed(value)
+                )
 
-    def test_rendered_placeholders_and_markup_only_names_have_no_identity(self):
+    def test_rejects_every_decorated_or_non_plain_source_shape(self):
+        rejected = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "![author](profile)", "![claimant](destination)",
+            "a**uth**or", "a_uth_or", "~~author~~", "`author`",
+            "<span>author</span>", "auth&#111;r", "cod\\_ex",
+            "{author}", "au\u200bthor", "author\tname", "author\u00a0name",
+            "author\u2028name", "author\nname", "author\ufeffname",
+        )
+        for value in rejected:
+            with self.subTest(value=value):
+                self.assertFalse(
+                    SEMANTICS.review_receipt_source_text_allowed(value)
+                )
+                self.assertEqual((), SEMANTICS.identity_key(value))
+
+    def test_normalizes_only_after_plain_source_validation(self):
+        self.assertEqual(
+            SEMANTICS.identity_key("ÉLODIE １２"),
+            SEMANTICS.identity_key("élodie 12"),
+        )
+        self.assertTrue(SEMANTICS.identity_key("审查者 Élodie 2"))
+        self.assertEqual((), SEMANTICS.identity_key("![ÉLODIE](１２)"))
+
+    def test_plain_and_formatted_placeholders_have_no_identity(self):
         placeholders = (
-            "[TBD](profile)", "T**B**D", "<reviewer>", "`TODO`",
-            "[unknown][id]", "_none_",
+            "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
+            "unknown", "______", "<reviewer>", "[TBD](profile)",
+            "![TBD](profile)", "T**B**D", "`TODO`", "[unknown][id]",
+            "_none_",
         )
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
                 self.assertEqual((), SEMANTICS.identity_key(placeholder))
-
-    def test_decorated_receipt_components_are_not_formal_plain_text(self):
-        decorated = (
-            "[author](profile)", "[author][id]", "[author][]", "[author]",
-            "a**uth**or", "`author`", "<span>author</span>",
-            "auth&#111;r", "au\u200bthor", "ap[pro][cmd]ve the release",
-        )
-        self.assertTrue(SEMANTICS.plain_review_receipt_component("plain finding"))
-        for value in decorated:
-            with self.subTest(value=value):
-                self.assertFalse(SEMANTICS.plain_review_receipt_component(value))
 
 
 class IndentedCodeViewTests(unittest.TestCase):

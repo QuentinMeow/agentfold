@@ -65,11 +65,6 @@ MARKDOWN_LINK_RE = re.compile(
         [ \t]*\)""",
     re.X,
 )
-MARKDOWN_REFERENCE_LINK_RE = re.compile(
-    r"(?<!!)(?<!\\)\[(?P<label>(?:\\.|[^\]\\])*)\]"
-    r"(?:\[(?:\\.|[^\]\\])*\])?"
-)
-MARKDOWN_EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3}|~{2})")
 HTML_VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
     "meta", "param", "source", "track", "wbr",
@@ -129,11 +124,27 @@ CORE_FIT_REVIEW_REVISION_RE = re.compile(
     r"(?P<revision>(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))$",
     re.M,
 )
+TASK_CLAIMED_BY_SOURCE_RE = re.compile(
+    r"^\*\*Claimed-by:\*\*(?P<claimant>[^\r\n]*)$",
+    re.M,
+)
 ASCII_MARKDOWN_BLANK_LINE_RE = re.compile(r"^[ \t]*(?:\r\n|\r|\n)?$")
 IDENTITY_PLACEHOLDERS = frozenset({
     "unclaimed", "none yet", "none-yet", "tbd", "todo", "none",
     "n/a", "na", "unknown",
 })
+REVIEW_RECEIPT_ALLOWED_PUNCTUATION = frozenset(
+    ".,;:?!'\"()/@+-—"
+)
+
+
+def _is_default_ignorable_character(character):
+    """Return whether Unicode defines this source character as ignorable."""
+    codepoint = ord(character)
+    return unicodedata.category(character) == "Cf" or any(
+        start <= codepoint <= end
+        for start, end in DEFAULT_IGNORABLE_NONFORMAT_RANGES
+    )
 
 
 def commonmark_lines(text):
@@ -300,41 +311,48 @@ def semantic_text(text):
     return strip_indented_code(_semantic_text(text))
 
 
-def rendered_inline_markdown_prose(text):
-    """Render the closed inline Markdown/HTML shapes used in identity checks.
+def review_receipt_source_text_allowed(text):
+    """Accept only the complete source alphabet for receipt prose.
 
-    Link labels remain visible while inline destinations and reference labels never
-    become identity. Full, collapsed, and shortcut references share one label rule;
-    inline code keeps its rendered content; emphasis markers disappear. HTML,
-    entities, and invisible Unicode use the same human-facing view as action checks.
+    Formal reviewer, claimant, and finding text may contain Unicode letters, marks,
+    and numbers; ASCII space; and the exact punctuation in
+    ``REVIEW_RECEIPT_ALLOWED_PUNCTUATION``. Everything else fails closed before any
+    normalization. That excludes every Markdown/HTML introducer used by links,
+    images, emphasis, escapes, code, tags, and entities, along with tabs, non-ASCII
+    separators, controls, and default-ignorable characters.
     """
-    rendered = rendered_human_text(text or "")
-    rendered = render_inline_code(rendered)
-    rendered = MARKDOWN_LINK_RE.sub(
-        lambda matched: matched.group("label"), rendered
-    )
-    rendered = MARKDOWN_REFERENCE_LINK_RE.sub(
-        lambda matched: matched.group("label"), rendered
-    )
-    rendered = MARKDOWN_EMPHASIS_MARKER_RE.sub("", rendered)
-    return strip_default_ignorable_characters(rendered)
-
-
-def plain_review_receipt_component(text):
-    """Require reviewer/finding source to already be its rendered plain text."""
     value = text or ""
-    return bool(value) and rendered_inline_markdown_prose(value) == value
+    if not value:
+        return False
+    for character in value:
+        if _is_default_ignorable_character(character):
+            return False
+        if (character == " "
+                or character in REVIEW_RECEIPT_ALLOWED_PUNCTUATION):
+            continue
+        if unicodedata.category(character)[0] in {"L", "M", "N"}:
+            continue
+        return False
+    return True
 
 
 def identity_key(identity):
-    """Return shared human-visible identity tokens, excluding placeholders."""
-    visible = rendered_inline_markdown_prose(identity or "")
-    normalized = unicodedata.normalize("NFKC", visible).casefold()
+    """Return source-safe identity tokens, excluding placeholders."""
+    source = identity or ""
+    if not review_receipt_source_text_allowed(source):
+        return ()
+    normalized = unicodedata.normalize("NFKC", source).casefold()
     normalized = " ".join(normalized.split())
     if not normalized or normalized in IDENTITY_PLACEHOLDERS \
             or re.fullmatch(r"_+", normalized):
         return ()
     return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
+
+
+def claimed_by_identity_source(text):
+    """Return the sole claimant suffix without erasing source whitespace."""
+    values = TASK_CLAIMED_BY_SOURCE_RE.findall(semantic_text(text or ""))
+    return values[0] if len(values) == 1 else None
 
 
 def claimant_identity_key(claimant):
@@ -452,8 +470,8 @@ def core_fit_review_evidence(text):
                 evidence["reviewed_revision"] = None
                 verdicts = []
             break
-        if not plain_review_receipt_component(matched.group("reviewer")) \
-                or not plain_review_receipt_component(matched.group("finding")):
+        if not review_receipt_source_text_allowed(matched.group("reviewer")) \
+                or not review_receipt_source_text_allowed(matched.group("finding")):
             break
         verdicts.append(matched)
         line_index += 1
@@ -693,12 +711,7 @@ def strip_default_ignorable_characters(text):
     output = []
     normalized = unicodedata.normalize("NFKC", text or "")
     for character in normalized:
-        codepoint = ord(character)
-        if unicodedata.category(character) == "Cf":
-            continue
-        if any(
-                start <= codepoint <= end
-                for start, end in DEFAULT_IGNORABLE_NONFORMAT_RANGES):
+        if _is_default_ignorable_character(character):
             continue
         output.append(character)
     return "".join(output)

@@ -18,6 +18,7 @@ if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
 from markdown_semantics import (
+    claimed_by_identity_source,
     core_fit_review_evidence,
     identity_key,
     independent_reviewer_identity,
@@ -314,7 +315,7 @@ def validate_task(
             reviewed_revision = review_evidence["reviewed_revision"]
             if review_revision_check:
                 errors.extend(review_revision_check(reviewed_revision))
-        claimant = task_fields.get("Claimed-by", "")
+        claimant = claimed_by_identity_source(task_text)
         latest = {}
         for matched in review_evidence["verdicts"]:
             reviewer = matched.group("reviewer")

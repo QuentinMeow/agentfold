@@ -23,7 +23,11 @@ and one or more consecutive core-fit verdicts above form one contiguous formal b
 Keep only blank lines between those elements. The first nonblank non-verdict ends the
 formal block; put explanations and any non-core-fit review notes after it.
 
-Reviewer identities and findings are plain text only. Markdown links (inline, reference,
-collapsed, or shortcut), emphasis, inline code, HTML/entities, or invisible formatting
-make that line non-formal, end the block, and leave its verdict under ordinary human-action
-detection. This restriction keeps displayed prose and formal evidence from disagreeing.
+Claimants, reviewer identities, and findings use a closed source-text alphabet: Unicode
+letters, marks, and numbers; ASCII space; and only `. , ; : ? ! ' " ( ) / @ + - —` as
+punctuation. Tabs, non-ASCII separators, controls, invisible characters, and every other
+character are invalid. Brackets, angle brackets, backslash, backtick, asterisk, underscore,
+tilde, braces, and ampersand therefore exclude every Markdown link, image, reference,
+escape, emphasis, code span, HTML tag, and entity by construction. An invalid claimant has
+no review identity; an invalid reviewer or finding ends the formal block and leaves its
+verdict under ordinary human-action detection.

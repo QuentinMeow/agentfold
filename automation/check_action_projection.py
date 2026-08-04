@@ -18,6 +18,7 @@ if str(AUTOMATION) not in sys.path:
 
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
+    claimed_by_identity_source,
     indentation_width,
     markdown_links,
     neutralize_core_fit_review_verdict_tokens,
@@ -66,10 +67,6 @@ TASK_QUEUE_ACTION_VALUE_RE = re.compile(
 )
 TASK_QUEUE_ACTION_FIELD_RE = re.compile(
     r"^\*\*Queue actions:\*\*[ \t]*(.*)$",
-    re.M,
-)
-TASK_CLAIMED_BY_FIELD_RE = re.compile(
-    r"^\*\*Claimed-by:\*\*[ \t]*(.*)$",
     re.M,
 )
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
@@ -1468,8 +1465,7 @@ def _task_projection_stripped_text(
             )
         except (OSError, RuntimeError, UnicodeError):
             task_text = ""
-        claimants = TASK_CLAIMED_BY_FIELD_RE.findall(semantic_text(task_text))
-        claimant = claimants[0].strip() if len(claimants) == 1 else None
+        claimant = claimed_by_identity_source(task_text)
         source = neutralize_core_fit_review_verdict_tokens(
             source, claimant=claimant
         )

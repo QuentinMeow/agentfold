@@ -44,13 +44,20 @@ structural `approve` or `block`, while reviewer identity and finding text remain
 the human-action detector. Removing one helper call restores the prior behavior; the
 owner's authorization approves this parser/template boundary, not a review outcome.
 
-The final compatibility boundary is deliberately plain-text-only for formal reviewer and
-finding components. A shared human-visible renderer normalizes HTML, entities, inline and
-reference/collapsed/shortcut link labels without destinations, emphasis, inline code, and
-default-ignorable Unicode for identity comparison. If rendering changes either component's
-source, the whole verdict line is non-formal and receives no neutralization. This costs
-Markdown formatting inside formal verdicts, but avoids a second partial Markdown parser in
-the action gate and makes every decorated near-miss fail closed.
+The final compatibility boundary is an explicit source-text whitelist rather than a
+partial renderer. Claimants, formal reviewers, and formal findings may contain Unicode
+letters, marks, and numbers; ASCII space; and only `. , ; : ? ! ' " ( ) / @ + - —` as
+punctuation. Tabs, non-ASCII separators, controls, default-ignorables, and every other
+character are invalid. In particular, brackets, angle brackets, backslash, backtick,
+asterisk, underscore, tilde, braces, and ampersand exclude links, images, reference
+labels, escapes, emphasis, code, HTML, and entities by construction.
+
+The same source predicate runs before claimant and reviewer identity normalization. An
+invalid claimant or reviewer has no identity; NFKC, casefolding, placeholder rejection,
+and tokenization happen only after source validation. An invalid reviewer or finding ends
+the formal block, so the verdict receives no neutralization. This costs every Markdown-
+formatted identity or finding and some uncommon plain punctuation, but it is auditable as
+a finite alphabet and does not need to predict how an extensible renderer displays source.
 
 ## Core fit
 
