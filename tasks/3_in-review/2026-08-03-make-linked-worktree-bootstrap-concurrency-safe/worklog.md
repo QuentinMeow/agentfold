@@ -66,3 +66,5 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `2f90660f33475c7df0b433355d12c41775ea7e3f`, bootstrap left `git diff-files`
   clean without a refresh and the merge-transition reconciler reported zero findings.
   Returned the task to review only after this exact provider candidate passed.
+- Refreshed the stacked candidate once more after the parent published its immutable final
+  handover; this records-only edge keeps #79 evaluated against the parent's final tip.
