@@ -21,3 +21,12 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   block/fix/re-review cycle and an independent Terra test rerun.
 - Left the parent plan in progress: issue #75's displaced-tip repair is the next serial
   implementation slice, followed by explicit expected-OID publication in issue #76.
+- Exact PR-candidate verification uncovered an unconditional-hook-`chmod` stat-cache
+  interaction after the first handover. The child task was honestly reopened, repaired,
+  given a red-on-parent/green-on-fix canary, independently re-reviewed, and returned to
+  review; final task head is `4dbb2d04eacaa482d3c806406458b99a0428fdba`.
+- PR #79's local exact merge candidate passes bootstrap, raw `git diff-files`, and the
+  merge-transition reconciler. GitHub's latest `reconcile-and-test` remains red because
+  its event carried stale base `4dbb22e...` while checkout used merge candidate `4bee4fc...`
+  whose first parent is `73492c5...`; this is the pre-existing defect tracked by issue #78,
+  not a bootstrap test failure. Planning PR #73 is green.
