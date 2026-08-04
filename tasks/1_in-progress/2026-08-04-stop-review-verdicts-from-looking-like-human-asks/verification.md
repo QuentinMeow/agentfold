@@ -925,3 +925,113 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check 7cd22e79fc6d4ec3e3c151f0093a6ef4c251c344..d27c44174db0f1bb8d13b632be3c6f307d568707
 ```
+
+## Adversarial panel on aa0a111
+
+**Reviewed revision:** aa0a111d73da9807c8473848ed2dbf2f5c9828b5
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / correctness reviewer: block — incomplete multiline raw HTML markers
+  could leave the HTML parser stack empty while pending input still nested a later claimant
+  or receipt, including a marker completed only after the authority line.
+- adversarial panel / visibility reviewer: block — receipt heading, revision, and verdict
+  lines were compared with structural Markdown but not with the rendered-human view, so
+  invisible evidence could retain formal meaning.
+- adversarial panel / complexity reviewer: block — each exact heading candidate reparsed
+  its entire source prefix, making duplicate-heading rejection quadratic.
+
+All three blockers were accepted and repaired in implementation revision
+`5b738fb1157fbdb53c2b3be9d9813d93d3eedd89`. Finite-model preflight also found malformed
+HTML parser inputs that raised `NotImplementedError`; the rendered view now falls back to
+action-visible code-masked source, while the authority helper fails closed. The final audit
+found no remaining blocker in scope. This panel supplies no acceptance evidence for the
+repair, and `--require-review` was not invoked against it.
+
+## Pending-HTML, rendered-evidence, and linear-scan focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_validate_claimant_from_unchanged_raw_source automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_neutralize_receipts_in_open_html automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_ascii_authority_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_validates_claimant_from_unchanged_raw_source automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_receipt_nested_in_open_html automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_receipt_after_closed_or_code_html automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_ascii_authority_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_a_crlf_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_duplicate_revision_inside_formal_block_fails_closed automation.tests.test_check_core_scope.CoreScopeTests.test_historical_revision_fields_outside_formal_block_are_allowed
+......................
+----------------------------------------------------------------------
+Ran 22 tests in 0.603s
+
+OK
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+...........................................................................................................................................................................................................................................s.................................................................
+----------------------------------------------------------------------
+Ran 301 tests in 16.270s
+
+OK (skipped=1)
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 56.66s
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan pre-commit lane
+
+```
+$ git commit -m "fix: reject invisible review receipt evidence" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 44.77s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks 5b738fb] fix: reject invisible review receipt evidence
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan exact-range reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...5b738fb1157fbdb53c2b3be9d9813d93d3eedd89 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+## Pending-HTML, rendered-evidence, and linear-scan diff check
+
+```
+$ git diff --check aa0a111d73da9807c8473848ed2dbf2f5c9828b5..5b738fb1157fbdb53c2b3be9d9813d93d3eedd89
+```

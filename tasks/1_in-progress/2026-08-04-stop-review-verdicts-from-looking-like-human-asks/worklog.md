@@ -256,3 +256,31 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and diff checks passed at implementation commit
   `d27c44174db0f1bb8d13b632be3c6f307d568707`. The final finite-model audit reported no
   remaining blocker in the owner-authorized receipt scope.
+
+## 2026-08-04 — close pending-HTML, visibility, and scan-complexity gaps (codex sol-high implementer)
+
+- The eighth panel reviewed exact revision
+  `aa0a111d73da9807c8473848ed2dbf2f5c9828b5` and returned 0 approve, 3 block. The
+  accepted blockers were incomplete multiline HTML markers that left only parser-pending
+  input, receipt lines checked against structural but not rendered-human text, and prefix
+  reparsing inside duplicate-heading discovery.
+- Raw HTML prefix state now records `<`-prefixed pending parser input before `close()` and
+  treats parser failures as open authority state. This covers incomplete start, end,
+  comment, processing, CDATA, declaration, quote, and custom-tag forms with LF or CRLF,
+  including a marker completed only after the claimant or receipt.
+- Malformed HTML can no longer crash the rendered-human view. That view falls back to
+  code-masked source so action words stay detectable, while claimant and receipt prefix
+  checks still reject formal authority.
+- Receipt extraction now builds source, structural, and rendered line arrays once. The
+  heading, revision, and verdict lines must be character-identical at the same logical
+  position in all three views. Duplicate heading candidates fail after one linear scan;
+  a 1,000-heading regression records zero prefix-parser calls, and a unique candidate
+  records one.
+- Compatibility regressions preserve ordinary comparisons, closed markup, void tags,
+  fenced/indented/inline-code examples, LF/CRLF receipts, and scoped historical revision
+  fields. Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range
+  reconciler, and diff checks passed at implementation commit
+  `5b738fb1157fbdb53c2b3be9d9813d93d3eedd89`.
+- The final finite-model audit found no remaining blocker, independently exercised the
+  malformed-prefix matrix, and parsed the actual 49.6 KB verification history plus a final
+  receipt as one section, one revision, and one verdict with one prefix check.

@@ -15,5 +15,6 @@
 - [x] 13. Bind claimant identity to unchanged raw source and fold Unicode marks after the panel on `2ba968f`, then repeat every verification lane.
 - [x] 14. Restrict formal authority to ASCII, close claimant-shape and identity-alias gaps after the panel on `97c35ed`, then repeat every verification lane.
 - [x] 15. Unify placeholder and voter keys, split identity/finding punctuation, and reject authority inside open HTML after the panel on `7cd22e7`, then repeat every verification lane.
-- [ ] 16. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 17. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 16. Reject pending HTML, require rendered receipt evidence, and make heading discovery linear after the panel on `aa0a111`, then repeat every verification lane.
+- [ ] 17. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 18. Publish and merge; close issue #80; resume the stale-base repair.
