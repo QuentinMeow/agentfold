@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 47 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 46 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -175,7 +175,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 39
+### Never stops work — 38
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -249,7 +249,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops, but GitHub may show stale status until another agent reconciles the projection.
 
   </details>
-- **27 backlog tasks are waiting for an agent to pick one up.**
+- **26 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -278,7 +278,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [stop-a-stale-base-from-failing-the-reconciler-check](needs-agent/requests/non-blocking-pick-up-stop-a-stale-base-from-failing-the-reconciler-check.md)
   - [stop-a-wrapped-line-from-reading-as-a-command](needs-agent/requests/non-blocking-pick-up-stop-a-wrapped-line-from-reading-as-a-command.md)
   - [bind-task-branch-pushes-to-observed-tips](needs-agent/requests/non-blocking-pick-up-bind-task-branch-pushes-to-observed-tips.md)
-  - [make-linked-worktree-bootstrap-concurrency-safe](needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md)
 
   </details>
 

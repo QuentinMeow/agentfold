@@ -1,10 +1,10 @@
 # Make linked-worktree bootstrap concurrency-safe
 
-**Claimed-by:** unclaimed
+**Claimed-by:** sol-high bootstrap implementer
 **Filed:** 2026-08-03, by codex, from task `2026-08-03-plan-multi-worktree-safety-remediation` and GitHub issue #74
 **Parent:** 2026-08-03-plan-multi-worktree-safety-remediation
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md`; `message-queue/needs-agent/requests/non-blocking-track-github-issue-74-worktree-bootstrap.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-track-github-issue-74-worktree-bootstrap.md`
 
 ## Goal
 
