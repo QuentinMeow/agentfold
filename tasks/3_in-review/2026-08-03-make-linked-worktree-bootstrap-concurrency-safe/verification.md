@@ -144,6 +144,23 @@ $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
 
+## Exact GitHub merge candidate after the stat-cache repair
+
+```
+$ python3 automation/install.py && git diff-files --quiet --ignore-submodules=all -- && python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-03-make-linked-worktree-bootstrap-concurrency-safe --range 73492c532d8b3ff5fd21402111e4bc7df32eb5a6...e0508b61729fd0914dbcc44180ccb18b07488443
+git hooks (common repository): core.hooksPath -> automation/hooks (already configured; no write)
+git hooks (this worktree): effective core.hooksPath -> automation/hooks (already effective; no write)
+CLAUDE.md shims (this worktree): 12 in place
+skill adapters (this worktree): .claude, .cursor, .agents -> skills/
+install: done (run once in every linked worktree; safe to rerun when skills or AGENTS.md files change)
+reconcile: 0 blocking finding(s)
+```
+
+The command ran in a freshly added detached worktree at GitHub merge candidate
+`2f90660f33475c7df0b433355d12c41775ea7e3f`. No Git status, diff, or index-refresh
+command ran between checkout and bootstrap; the raw `git diff-files` guard produced no
+output and exited 0 before the range-bound reconciler ran.
+
 ## Actual linked-worktree rerun
 
 ```

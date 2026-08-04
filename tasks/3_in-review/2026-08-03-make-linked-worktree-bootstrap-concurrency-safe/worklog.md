@@ -60,3 +60,9 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   the state under test. The corrected test crosses only the filesystem timestamp boundary:
   it passes with conditional `chmod`, fails with return code 1 against an unconditional
   safe copy, and passes both the nine-test focused suite and the test-only staged lane.
+- Sol xhigh approved exact revision `e0508b61729fd0914dbcc44180ccb18b07488443`;
+  Terra independently passed all nine focused tests, the reconciler, and diff check.
+- In a fresh detached worktree at GitHub merge candidate
+  `2f90660f33475c7df0b433355d12c41775ea7e3f`, bootstrap left `git diff-files`
+  clean without a refresh and the merge-transition reconciler reported zero findings.
+  Returned the task to review only after this exact provider candidate passed.
