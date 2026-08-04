@@ -2279,6 +2279,7 @@ class ActionProjectionTests(unittest.TestCase):
     def test_task_action_units_treat_core_fit_verdicts_as_receipts(self):
         text = (
             "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
             "- core-fit / first reviewer: approve — could not break it\n"
             "- core-fit / second reviewer: block - found a boundary leak\n"
         )
@@ -2303,7 +2304,9 @@ class ActionProjectionTests(unittest.TestCase):
             for receipt in receipts:
                 with self.subTest(receipt=receipt):
                     counts = PROJECTION.task_action_unit_counts(
-                        receipt,
+                        "## Review verdicts\n\n"
+                        f"**Reviewed revision:** {'a' * 40}\n\n"
+                        + receipt,
                         "tasks/3_in-review/2026-07-23-example/verification.md",
                         repo=root,
                     )
@@ -2319,7 +2322,9 @@ class ActionProjectionTests(unittest.TestCase):
             for near_miss in near_misses:
                 with self.subTest(near_miss=near_miss):
                     counts = PROJECTION.task_action_unit_counts(
-                        near_miss,
+                        "## Review verdicts\n\n"
+                        f"**Reviewed revision:** {'a' * 40}\n\n"
+                        + near_miss,
                         "tasks/3_in-review/2026-07-23-example/verification.md",
                         repo=root,
                     )
@@ -2331,6 +2336,60 @@ class ActionProjectionTests(unittest.TestCase):
                 repo=root,
             )
             self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_require_the_exact_receipt_path_and_region(self):
+        receipt = "- core-fit / reviewer: approve — could not break it\n"
+        revision = f"**Reviewed revision:** {'a' * 40}\n\n"
+        valid = "## Review verdicts\n\n" + revision + receipt
+        cases = (
+            (
+                "tasks/3_in-review/2026-07-23-example/notes/verification.md",
+                valid,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/Verification.md",
+                valid,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                valid + "\n## Other\n\n" + receipt,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                "## Review verdicts\n\n" + receipt + revision,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                valid + "\n## Review verdicts\n\n" + revision + receipt,
+                2,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                revision + receipt,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                "## Review verdicts\n\n" + revision + revision + receipt,
+                1,
+            ),
+            (
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                "## Review verdicts\n\n" + receipt,
+                1,
+            ),
+        )
+        with self.repo() as root:
+            for source_path, text, expected in cases:
+                with self.subTest(source_path=source_path, text=text):
+                    counts = PROJECTION.task_action_unit_counts(
+                        text, source_path, repo=root
+                    )
+                    self.assertEqual(expected, sum(counts.values()), counts)
 
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (

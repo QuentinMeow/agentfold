@@ -114,6 +114,16 @@ CORE_FIT_REVIEW_VERDICT_RE = re.compile(
     r"(?P<finding>.+)$",
     re.I | re.M,
 )
+CORE_FIT_REVIEW_SECTION_RE = re.compile(
+    r"^## Review verdicts(?:[ \t][^\r\n]*)?\r?\n"
+    r"(?P<body>.*?)(?=^##(?:[ \t]|\r?$)|\Z)",
+    re.M | re.S,
+)
+CORE_FIT_REVIEW_REVISION_RE = re.compile(
+    r"^\*\*Reviewed revision:\*\*[ \t]*"
+    r"(?P<revision>(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))[ \t]*$",
+    re.M,
+)
 
 
 def commonmark_lines(text):
@@ -280,6 +290,42 @@ def semantic_text(text):
     return strip_indented_code(_semantic_text(text))
 
 
+def core_fit_review_evidence(text):
+    """Parse exactly the revision-bound receipt region the core gate accepts.
+
+    The result keeps invalid section and revision counts so the gate can preserve
+    its specific diagnostics. Verdicts exist only when one real Review verdicts
+    section contains exactly one valid full-commit field, and only after that field.
+    """
+    clean = semantic_text(text)
+    sections = tuple(CORE_FIT_REVIEW_SECTION_RE.finditer(clean))
+    evidence = {
+        "semantic_text": clean,
+        "section_count": len(sections),
+        "revision_count": 0,
+        "reviewed_revision": None,
+        "verdicts": (),
+    }
+    if len(sections) != 1:
+        return evidence
+    section = sections[0]
+    body_start, body_end = section.span("body")
+    revisions = tuple(
+        CORE_FIT_REVIEW_REVISION_RE.finditer(clean, body_start, body_end)
+    )
+    evidence["revision_count"] = len(revisions)
+    if len(revisions) != 1:
+        return evidence
+    revision = revisions[0]
+    evidence["reviewed_revision"] = revision.group("revision")
+    evidence["verdicts"] = tuple(
+        CORE_FIT_REVIEW_VERDICT_RE.finditer(
+            clean, revision.end(), body_end
+        )
+    )
+    return evidence
+
+
 def neutralize_core_fit_review_verdict_tokens(text):
     """Blank only structural core-fit verdict tokens in visible Markdown.
 
@@ -289,21 +335,34 @@ def neutralize_core_fit_review_verdict_tokens(text):
     action classifier. Fenced examples and raw-HTML lookalikes stay ordinary prose
     because ``semantic_text`` does not expose them as structural receipts.
     """
+    evidence = core_fit_review_evidence(text)
+    verdicts = evidence["verdicts"]
+    if not verdicts:
+        return text or ""
     source_lines = commonmark_lines(text)
-    semantic_lines = commonmark_lines(semantic_text(text))
+    semantic = evidence["semantic_text"]
+    semantic_lines = commonmark_lines(semantic)
     if len(source_lines) != len(semantic_lines):
         return text or ""
+    verdict_tokens = {}
+    for matched in verdicts:
+        start, end = matched.span("verdict")
+        line_index = semantic.count("\n", 0, start)
+        line_start = semantic.rfind("\n", 0, start) + 1
+        verdict_tokens[line_index] = (
+            start - line_start,
+            end - line_start,
+            matched.group("verdict"),
+        )
     output = []
-    for source_line, semantic_line in zip(source_lines, semantic_lines):
-        semantic_body = semantic_line[:-1] \
-            if semantic_line.endswith("\n") else semantic_line
-        matched = CORE_FIT_REVIEW_VERDICT_RE.fullmatch(semantic_body)
-        if matched is None:
+    for line_index, source_line in enumerate(source_lines):
+        token = verdict_tokens.get(line_index)
+        if token is None:
             output.append(source_line)
             continue
         source_body = source_line[:-1] if source_line.endswith("\n") else source_line
-        start, end = matched.span("verdict")
-        if source_body[start:end].casefold() != matched.group("verdict").casefold():
+        start, end, verdict = token
+        if source_body[start:end].casefold() != verdict.casefold():
             output.append(source_line)
             continue
         output.append(

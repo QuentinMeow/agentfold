@@ -18,11 +18,10 @@ AUTOMATION = Path(__file__).resolve().parent
 if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
-from markdown_semantics import CORE_FIT_REVIEW_VERDICT_RE, semantic_text
+from markdown_semantics import core_fit_review_evidence, semantic_text
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
-FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 CORE_PREFIXES = (
     "skills/",
     "automation/",
@@ -310,30 +309,21 @@ def validate_task(
     elif require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
-        review_sections = named_sections(verification_text, "Review verdicts")
-        if len(review_sections) != 1:
+        review_evidence = core_fit_review_evidence(verification_text)
+        if review_evidence["section_count"] != 1:
             errors.append("verification.md needs exactly one real `## Review verdicts` section")
-        review_section = review_sections[0] if len(review_sections) == 1 else ""
-        revision_matches = list(re.finditer(
-            rf"^\*\*Reviewed revision:\*\*[ \t]*({FULL_COMMIT_PATTERN})[ \t]*$",
-            review_section,
-            re.M,
-        ))
-        if len(revision_matches) != 1:
+        if review_evidence["revision_count"] != 1:
             errors.append(
                 "Review verdicts needs exactly one real "
                 "`**Reviewed revision:** <commit>` field"
             )
-            verdict_source = ""
         else:
-            reviewed_revision = revision_matches[0].group(1)
-            verdict_source = review_section[revision_matches[0].end():]
+            reviewed_revision = review_evidence["reviewed_revision"]
             if review_revision_check:
                 errors.extend(review_revision_check(reviewed_revision))
-        verdicts = CORE_FIT_REVIEW_VERDICT_RE.finditer(verdict_source)
         claimant = task_fields.get("Claimed-by", "")
         latest = {}
-        for matched in verdicts:
+        for matched in review_evidence["verdicts"]:
             reviewer = matched.group("reviewer")
             verdict = matched.group("verdict")
             reviewer_key = identity_key(reviewer)

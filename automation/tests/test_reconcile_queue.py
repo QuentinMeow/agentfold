@@ -13733,6 +13733,7 @@ class ReconcileQueueTests(unittest.TestCase):
                 root,
                 task.relative_to(root) / "verification.md",
                 "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
                 "- core-fit / reviewer: approve — could not break it\n",
             )
             self.git(root, "add", ".")

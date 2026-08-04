@@ -27,3 +27,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Focused and full repository suites passed. Independent revision-bound review,
   publication, issue closure, and resuming the parent stale-base repair remain for the
   coordinating session as requested.
+
+## 2026-08-04 — repair blocked path and receipt-region scope (codex sol-high implementer)
+
+- The adversarial panel reviewed exact revision `85a044e67c725cf03d918432514c76ba1655c984`
+  and returned 0 approve, 3 block. All three reviewers found the same admission gap:
+  basename-only path matching and whole-file line normalization could hide approval-like
+  prose in nested or case-variant files and outside the formal receipt region.
+- Replaced the line-only sharing boundary with one formal parser for the real Review
+  verdicts section, its one valid full-commit field, and only verdicts after that field.
+  The detector separately requires the exact lowercase task-root verification path.
+- Added regressions for nested and case-variant paths, lines outside or before the bound
+  region, duplicate or missing sections and fields, malformed lines, and hostile findings.
+- Re-ran the full repository suite to capture its terminal result honestly: all 15 test
+  files passed in 68.19 seconds. The blocked panel is evidence about the prior revision,
+  not an invocation of the repaired revision's independent core-fit review.

@@ -330,6 +330,30 @@ class CoreScopeTests(unittest.TestCase):
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True, require_review=True))
             self.assertEqual([], SCOPE.validate_task(task, touched_core=False, require_review=True))
 
+    def test_review_parser_ignores_verdicts_before_the_revision_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification=(
+                    "- core-fit / early: block — appears before the binding\n"
+                    f"**Reviewed revision:** {'b' * 40}\n\n"
+                    "- core-fit / reviewer: approve — bound review\n"
+                ),
+            )
+            verification = task / "verification.md"
+            text = verification.read_text(encoding="utf-8")
+            verification.write_text(
+                text.replace(
+                    f"**Reviewed revision:** {REVIEWED_REVISION}\n\n",
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
     def test_anonymous_review_does_not_satisfy_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(

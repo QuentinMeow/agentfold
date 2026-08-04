@@ -20,17 +20,21 @@ unqueued ask that task admission cannot see.
 
 ### Option B — neutralize only the structural verdict token
 
-Share the core-scope gate's exact named-group grammar, and only in `verification.md`
-replace the matched `approve` or `block` token with equal-width whitespace before human-
-action classification. A benign completed verdict is inert, while the reviewer identity
-and finding remain visible and malformed lookalikes receive ordinary classification.
+Share the core-scope gate's exact section, revision-field, and named verdict grammar. Only
+for the canonical lowercase task-root `verification.md`, and only after exactly one valid
+full-commit field in exactly one real `## Review verdicts` section, replace the matched
+`approve` or `block` token with equal-width whitespace before human-action classification.
+A benign completed verdict is inert, while the reviewer identity and finding remain
+visible and every path or receipt-region lookalike receives ordinary classification.
 
 ## Chosen
 
-Option B. The shared grammar prevents the validator and detector from defining competing
-receipt shapes. Equal-width token blanking is narrow and reversible: removing one helper
-call restores the prior behavior, while broad exemptions would create a hidden-action
-surface whose safety would require a new parser.
+Option B. A blocked review of the first implementation proved that sharing only the line
+regex was insufficient: basename matching and whole-file normalization admitted paths and
+regions the core gate would never accept. The shared formal parser now prevents the
+validator and detector from defining competing receipt regions as well as competing line
+shapes. Equal-width token blanking remains narrow and reversible: removing one helper call
+restores the prior behavior, while broad exemptions would create a hidden-action surface.
 
 ## Core fit
 
