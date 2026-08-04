@@ -31,3 +31,11 @@ tilde, braces, and ampersand therefore exclude every Markdown link, image, refer
 escape, emphasis, code span, HTML tag, and entity by construction. An invalid claimant has
 no review identity; an invalid reviewer or finding ends the formal block and leaves its
 verdict under ordinary human-action detection.
+
+The claimant comes only from the sole literal top-level field's unchanged raw suffix.
+Raw comments, markup, entities, links, images, code, escapes, invisible characters, and
+duplicate fields yield no claimant identity; Markdown semantics never repair that suffix.
+After source validation, identity comparison and human-action token recognition apply NFKD
+and remove every Unicode category-M mark. Composed and decomposed names compare equally,
+accent-only distinctions conservatively collide, and marks cannot split voter names,
+placeholders, or action keywords.

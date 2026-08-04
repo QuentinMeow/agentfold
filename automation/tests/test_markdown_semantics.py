@@ -77,7 +77,11 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
     def test_normalizes_only_after_plain_source_validation(self):
         self.assertEqual(
             SEMANTICS.identity_key("ÉLODIE １２"),
-            SEMANTICS.identity_key("élodie 12"),
+            SEMANTICS.identity_key("elodie 12"),
+        )
+        self.assertEqual(
+            SEMANTICS.identity_key("Élodie"),
+            SEMANTICS.identity_key("E\u0301lodie"),
         )
         self.assertTrue(SEMANTICS.identity_key("审查者 Élodie 2"))
         self.assertEqual((), SEMANTICS.identity_key("![ÉLODIE](１２)"))
@@ -87,11 +91,57 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "`TODO`", "[unknown][id]",
-            "_none_",
+            "_none_", "T\u0301BD", "TB\u0301D", "TBD\u0301",
         )
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
                 self.assertEqual((), SEMANTICS.identity_key(placeholder))
+
+    def test_combining_marks_cannot_split_identity_or_action_tokens(self):
+        author = SEMANTICS.identity_key("author")
+        for alias in (
+            "a\u0301uthor", "au\u0301thor", "aut\u0301hor",
+            "autho\u0301r", "author\u0301",
+        ):
+            with self.subTest(alias=alias):
+                self.assertEqual(author, SEMANTICS.identity_key(alias))
+        self.assertEqual(
+            ("approve", "block"),
+            SEMANTICS.normalized_action_tokens("ap\u0301prove blo\u0301ck"),
+        )
+
+    def test_claimant_identity_comes_from_one_unchanged_raw_field(self):
+        self.assertEqual(
+            " author",
+            SEMANTICS.claimed_by_identity_source(
+                "# Task\n\n**Claimed-by:** author\n"
+            ),
+        )
+        invalid_claimants = (
+            "au<!-- hidden -->thor",
+            "author<!-- trailing -->",
+            "<span>author</span>",
+            "auth&#111;r",
+            "[author](profile)",
+            "![author](profile)",
+            "`author`",
+            "cod\\_ex",
+            "au\u200bthor",
+        )
+        for claimant in invalid_claimants:
+            with self.subTest(claimant=claimant):
+                self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+                    f"# Task\n\n**Claimed-by:** {claimant}\n"
+                ))
+        self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+            "# Task\n\n**Claimed-by:** author\n**Claimed-by:** second\n"
+        ))
+        self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+            "# Task\n\n<!--\n**Claimed-by:** author\n-->\n"
+        ))
+        self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+            "# Task\n\n```text\n**Claimed-by:** author\n```\n"
+        ))
 
 
 class IndentedCodeViewTests(unittest.TestCase):

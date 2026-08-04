@@ -147,6 +147,23 @@ def _is_default_ignorable_character(character):
     )
 
 
+def fold_unicode_marks(text):
+    """Normalize compatibility forms and remove every Unicode mark.
+
+    Combining marks are presentation, not authority. Folding them before identity
+    comparison and action tokenization makes composed and decomposed text agree while
+    conservatively treating accent-only distinctions as the same identity or keyword.
+    Default-ignorable characters are removed in the same detection-only pass.
+    """
+    output = []
+    for character in unicodedata.normalize("NFKD", text or ""):
+        if _is_default_ignorable_character(character) \
+                or unicodedata.category(character).startswith("M"):
+            continue
+        output.append(character)
+    return "".join(output)
+
+
 def commonmark_lines(text):
     """Split only on CommonMark line endings; Python also splits on form feed."""
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -341,7 +358,7 @@ def identity_key(identity):
     source = identity or ""
     if not review_receipt_source_text_allowed(source):
         return ()
-    normalized = unicodedata.normalize("NFKC", source).casefold()
+    normalized = fold_unicode_marks(source).casefold()
     normalized = " ".join(normalized.split())
     if not normalized or normalized in IDENTITY_PLACEHOLDERS \
             or re.fullmatch(r"_+", normalized):
@@ -350,9 +367,31 @@ def identity_key(identity):
 
 
 def claimed_by_identity_source(text):
-    """Return the sole claimant suffix without erasing source whitespace."""
-    values = TASK_CLAIMED_BY_SOURCE_RE.findall(semantic_text(text or ""))
-    return values[0] if len(values) == 1 else None
+    """Return one raw top-level claimant suffix only when it is plain source.
+
+    The suffix is found and validated in the unmodified task bytes first. A later
+    structural cross-check proves the literal line is not inside code or hidden HTML,
+    but semantic rendering never supplies or repairs identity characters.
+    """
+    source = text or ""
+    source_lines = commonmark_lines(source)
+    matches = []
+    for line_index, line in enumerate(source_lines):
+        body = markdown_line_body(line)
+        matched = TASK_CLAIMED_BY_SOURCE_RE.fullmatch(body)
+        if matched:
+            matches.append((line_index, body, matched.group("claimant")))
+    if len(matches) != 1:
+        return None
+    line_index, raw_body, claimant = matches[0]
+    if not review_receipt_source_text_allowed(claimant):
+        return None
+
+    structural_lines = commonmark_lines(semantic_text(source))
+    if len(structural_lines) != len(source_lines) \
+            or markdown_line_body(structural_lines[line_index]) != raw_body:
+        return None
+    return claimant
 
 
 def claimant_identity_key(claimant):
@@ -701,20 +740,14 @@ def rendered_human_text(text):
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_default_ignorable_characters(text):
-    """Remove invisible Unicode controls from an already isolated prose view.
+    """Fold Unicode marks and invisible controls in an isolated prose view.
 
-    Format controls and the non-format characters in Unicode's
-    Default_Ignorable_Code_Point set can split an otherwise visible command word.
+    Format controls, default-ignorable characters, and combining marks can split an
+    otherwise visible command word or make one identity appear to be several.
     Callers must first remove Markdown destinations and code so this detection-only
     normalization cannot change structural evidence or literal examples.
     """
-    output = []
-    normalized = unicodedata.normalize("NFKC", text or "")
-    for character in normalized:
-        if _is_default_ignorable_character(character):
-            continue
-        output.append(character)
-    return "".join(output)
+    return fold_unicode_marks(text)
 
 
 def inline_code_spans(text):
@@ -993,12 +1026,12 @@ def normalized_action_tokens(text):
     """Normalize visible action words and symbols without dropping code contents."""
     clean = replace_markdown_links_with_labels(text or "")
     clean = render_inline_code(clean)
-    normalized = unicodedata.normalize("NFKC", clean).casefold()
+    normalized = fold_unicode_marks(clean).casefold()
     tokens = []
     word = []
     for character in normalized:
         category = unicodedata.category(character)
-        if character.isalnum() or category.startswith("M"):
+        if character.isalnum():
             word.append(character)
             continue
         if word:

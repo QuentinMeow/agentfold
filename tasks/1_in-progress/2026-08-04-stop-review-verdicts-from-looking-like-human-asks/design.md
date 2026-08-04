@@ -52,12 +52,22 @@ character are invalid. In particular, brackets, angle brackets, backslash, backt
 asterisk, underscore, tilde, braces, and ampersand exclude links, images, reference
 labels, escapes, emphasis, code, HTML, and entities by construction.
 
-The same source predicate runs before claimant and reviewer identity normalization. An
-invalid claimant or reviewer has no identity; NFKC, casefolding, placeholder rejection,
-and tokenization happen only after source validation. An invalid reviewer or finding ends
-the formal block, so the verdict receives no neutralization. This costs every Markdown-
-formatted identity or finding and some uncommon plain punctuation, but it is auditable as
-a finite alphabet and does not need to predict how an extensible renderer displays source.
+The claimant suffix is located on the one literal top-level field in raw `task.md` before
+any semantic view is built. Its raw characters pass the same source predicate first; a
+duplicate field, or any comment, markup, entity, link, image, code span, escape, control,
+or invisible character in the suffix leaves the task with no review identity. A later
+structural equality check only proves that the already-validated raw line was not hidden
+inside code or HTML; it never supplies repaired claimant text.
+
+After source validation, identity and action text use NFKD and remove every Unicode
+category-M mark before casefolding and tokenization. Composed and decomposed spellings
+therefore compare equally, combining marks cannot mint voter aliases or split an action
+keyword, and a mark-decorated placeholder collapses back to the rejected placeholder.
+This deliberately treats accent-only identity distinctions as equal at this authority
+boundary. An invalid reviewer or finding still ends the formal block, so the verdict
+receives no neutralization. The finite alphabet and conservative mark folding cost
+Markdown formatting, uncommon punctuation, and accent-distinct identities, but avoid
+predicting how an extensible renderer displays source.
 
 ## Core fit
 

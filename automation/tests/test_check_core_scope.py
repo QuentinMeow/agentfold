@@ -592,6 +592,8 @@ class CoreScopeTests(unittest.TestCase):
             "* core-fit / reviewer: approve — could not break it\n",
             "- Core-fit / reviewer: approve — could not break it\n",
             "- core-fit / reviewer: APPROVE — could not break it\n",
+            "- core-fit / reviewer: ap\u0301prove — could not break it\n",
+            "- core-fit / reviewer: blo\u0301ck — could not break it\n",
             "- core-fit / reviewer: approve - could not break it\n",
             "- core-fit / reviewer:  approve — could not break it\n",
         )
@@ -658,11 +660,95 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
+    def test_review_parser_validates_claimant_from_unchanged_raw_source(self):
+        invalid_claimant_fields = (
+            "**Claimed-by:** au<!-- hidden -->thor",
+            "**Claimed-by:** author<!-- trailing -->",
+            "**Claimed-by:** <span>author</span>",
+            "**Claimed-by:** auth&#111;r",
+            "**Claimed-by:** [author](profile)",
+            "**Claimed-by:** ![author](profile)",
+            "**Claimed-by:** `author`",
+            "**Claimed-by:** cod\\_ex",
+            "**Claimed-by:** au\u200bthor",
+            "**Claimed-by:** author\n**Claimed-by:** second",
+            "<!--\n**Claimed-by:** author\n-->",
+            "```text\n**Claimed-by:** author\n```",
+        )
+        for claimed_by in invalid_claimant_fields:
+            with self.subTest(claimed_by=claimed_by), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        "- core-fit / independent: approve — boundary held\n"
+                    ),
+                )
+                (task / "task.md").write_text(
+                    "# Task\n\n"
+                    + claimed_by
+                    + "\n**Filed:** 2026-07-22\n"
+                    "**Repository scope:** core\n",
+                    encoding="utf-8",
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_folds_combining_marks_in_reviewer_identity(self):
+        cases = (
+            ("author", "a\u0301uthor"),
+            ("author", "au\u0301thor"),
+            ("author", "aut\u0301hor"),
+            ("author", "autho\u0301r"),
+            ("author", "author\u0301"),
+            ("Élodie", "E\u0301lodie"),
+        )
+        for claimant, reviewer in cases:
+            with self.subTest(claimant=claimant, reviewer=reviewer), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=(
+                        f"- core-fit / {reviewer}: approve — identity probe\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_combining_mark_aliases_do_not_stuff_votes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="claimant",
+                verification=(
+                    "- core-fit / author: approve — first alias\n"
+                    "- core-fit / a\u0301uthor: approve — second alias\n"
+                    "- core-fit / au\u0301thor: block — final alias blocked\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any("approve majority" in error for error in errors), errors)
+
     def test_review_parser_rejects_reviewer_and_claimant_placeholders(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
             "unknown", "______", "<reviewer>", "[TBD](profile)",
-            "![TBD](profile)", "T**B**D",
+            "![TBD](profile)", "T**B**D", "T\u0301BD", "TB\u0301D",
+            "TBD\u0301",
         )
         for placeholder in placeholders:
             for claimant, reviewer in (

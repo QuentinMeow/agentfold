@@ -79,6 +79,11 @@ TASK_COMMIT_TOKEN_RE = re.compile(
     r"(?P<task>\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)"
     r"(?![A-Za-z0-9-])",
 )
+CORE_FIT_ACTION_VERDICT_RE = re.compile(
+    r"(?m)^[ \t]*(?:-[ \t]+)?core-fit[ \t]*/[^\r\n:]+:[ \t]+"
+    r"(?:approve|block)(?=[ \t]+—)",
+    re.I,
+)
 HEADING_RE = re.compile(
     r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
     r"(?P<title>.*?)[ \t]*#*[ \t]*$"
@@ -98,7 +103,7 @@ NO_ACTION_TEXT_BY_ACTOR = {
 }
 NO_ACTION_TEXT = NO_ACTION_TEXT_BY_ACTOR["needs-human"]
 CLEAR_ACTION_VERB_PATTERN = (
-    r"(?:accept|approve|authorize|choose|confirm|consider|"
+    r"(?:accept|approve|authorize|block|choose|confirm|consider|"
     r"(?:chime|weigh)[ \t]+in|"
     r"(?:have|take)[ \t]+"
     r"(?:(?:a|an|another|one|your)[ \t]+)?"
@@ -1266,6 +1271,11 @@ def action_like_clean_text(
         return True
     clean = strip_checked_task_list_items(clean)
     clean = strip_action_list_markers(clean)
+    if CORE_FIT_ACTION_VERDICT_RE.search(clean):
+        # A valid formal receipt already has its exact structural token blanked.
+        # Any approve/block token still in that position is a non-formal near miss
+        # and remains an action, including a source word split by combining marks.
+        return True
     if strip_leading_symbols:
         clean = "\n".join(
             re.sub(r"^[^\w]+", "", line)
@@ -1395,6 +1405,8 @@ def action_like_task_record_prose(text):
         lambda matched: matched.group(0)[:-1] + ".",
         clean,
     )
+    if CORE_FIT_ACTION_VERDICT_RE.search(clean):
+        return True
     if question_mark_count(clean) or TODO_RE.search(clean):
         return True
     return any(
