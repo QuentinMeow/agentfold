@@ -20,6 +20,7 @@ from markdown_semantics import (
     MARKDOWN_LINK_RE,
     indentation_width,
     markdown_links,
+    neutralize_core_fit_review_verdict_tokens,
     normalized_action_tokens,
     render_inline_code,
     rendered_human_text,
@@ -1447,6 +1448,8 @@ def _task_projection_stripped_text(
 ):
     """Return rendered task prose with only exact task-owned actions removed."""
     source = _without_explicit_block_quotes(text)
+    if Path(source_path).name.casefold() == "verification.md":
+        source = neutralize_core_fit_review_verdict_tokens(source)
     _semantic_source, matches = visible_markdown_link_source(source)
     allowed = set(allowed_queue_paths or ())
     valid_sources = []

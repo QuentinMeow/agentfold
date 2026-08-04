@@ -18,14 +18,10 @@ AUTOMATION = Path(__file__).resolve().parent
 if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
-from markdown_semantics import semantic_text
+from markdown_semantics import CORE_FIT_REVIEW_VERDICT_RE, semantic_text
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
-REVIEW_RE = re.compile(
-    r"^- core-fit / ([^:\r\n]+):[ \t]*(approve|block)[ \t]+[—-][ \t]+(.+)$",
-    re.I | re.M,
-)
 FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 CORE_PREFIXES = (
     "skills/",
@@ -334,10 +330,12 @@ def validate_task(
             verdict_source = review_section[revision_matches[0].end():]
             if review_revision_check:
                 errors.extend(review_revision_check(reviewed_revision))
-        verdicts = REVIEW_RE.findall(verdict_source)
+        verdicts = CORE_FIT_REVIEW_VERDICT_RE.finditer(verdict_source)
         claimant = task_fields.get("Claimed-by", "")
         latest = {}
-        for reviewer, verdict, _ in verdicts:
+        for matched in verdicts:
+            reviewer = matched.group("reviewer")
+            verdict = matched.group("verdict")
             reviewer_key = identity_key(reviewer)
             if reviewer_key and not same_reviewer_as_claimant(reviewer, claimant):
                 latest[reviewer_key] = verdict.lower()

@@ -2276,6 +2276,62 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
 
+    def test_task_action_units_treat_core_fit_verdicts_as_receipts(self):
+        text = (
+            "## Review verdicts\n\n"
+            "- core-fit / first reviewer: approve — could not break it\n"
+            "- core-fit / second reviewer: block - found a boundary leak\n"
+        )
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    "tasks/3_in-review/2026-07-23-example/verification.md",
+                    repo=root,
+                ),
+            )
+
+    def test_task_action_units_scan_core_fit_reviewer_and_finding_text(self):
+        receipts = (
+            "- core-fit / Owner, please approve: block — could not break it\n",
+            "- core-fit / reviewer: approve — Owner, please approve the release\n",
+            "- core-fit / reviewer: block — Is the boundary acceptable?\n",
+            "- core-fit / reviewer: approve — TODO ask the owner\n",
+        )
+        with self.repo() as root:
+            for receipt in receipts:
+                with self.subTest(receipt=receipt):
+                    counts = PROJECTION.task_action_unit_counts(
+                        receipt,
+                        "tasks/3_in-review/2026-07-23-example/verification.md",
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_do_not_normalize_receipt_near_misses(self):
+        near_misses = (
+            "* core-fit / reviewer: approve — could not break it\n",
+            "- core-fit/reviewer: approve — could not break it\n",
+            "- core-fit / reviewer: approve: could not break it\n",
+        )
+        with self.repo() as root:
+            for near_miss in near_misses:
+                with self.subTest(near_miss=near_miss):
+                    counts = PROJECTION.task_action_unit_counts(
+                        near_miss,
+                        "tasks/3_in-review/2026-07-23-example/verification.md",
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            counts = PROJECTION.task_action_unit_counts(
+                "- core-fit / reviewer: approve — could not break it\n",
+                "tasks/3_in-review/2026-07-23-example/design.md",
+                repo=root,
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (
             "```\nPlease review the fenced example.\n```\n\n"

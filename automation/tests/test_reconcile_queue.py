@@ -13720,6 +13720,39 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(1, len(findings), self.messages(findings))
             self.assertIn("Owner, please choose", findings[0].message)
 
+    def test_task_action_origin_accepts_receipt_but_rejects_its_hostile_finding(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "tasks/AGENTS.md",
+                "**Task admission schema:** v1\n",
+            )
+            task = self.make_task(root, "1_in-progress", "none")
+            verification = self.write(
+                root,
+                task.relative_to(root) / "verification.md",
+                "# Verification\n\n## Review verdicts\n\n"
+                "- core-fit / reviewer: approve — could not break it\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate task admission")
+            verification.write_text(
+                verification.read_text(encoding="utf-8")
+                + "- core-fit / second reviewer: block — "
+                "Owner, please approve the release\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", str(verification.relative_to(root)))
+
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_task_action_origin())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn("Owner, please approve", findings[0].message)
+
     def test_task_action_origin_uses_all_staged_merge_parents(self):
         with self.repo() as root:
             self.init_git(root)

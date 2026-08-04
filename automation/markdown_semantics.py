@@ -108,6 +108,12 @@ DEFAULT_IGNORABLE_NONFORMAT_RANGES = (
     (0xFFF0, 0xFFF8),
     (0xE0000, 0xE0FFF),
 )
+CORE_FIT_REVIEW_VERDICT_RE = re.compile(
+    r"^- core-fit / (?P<reviewer>[^:\r\n]+):[ \t]*"
+    r"(?P<verdict>approve|block)[ \t]+[—-][ \t]+"
+    r"(?P<finding>.+)$",
+    re.I | re.M,
+)
 
 
 def commonmark_lines(text):
@@ -272,6 +278,39 @@ def semantic_text(text):
     item stays visible, because a human reads it.
     """
     return strip_indented_code(_semantic_text(text))
+
+
+def neutralize_core_fit_review_verdict_tokens(text):
+    """Blank only structural core-fit verdict tokens in visible Markdown.
+
+    The shared receipt grammar remains structural evidence for the core-scope gate,
+    but ``approve`` and ``block`` are completed verdicts rather than new commands.
+    Reviewer identities and finding tails stay byte-for-byte visible to the human-
+    action classifier. Fenced examples and raw-HTML lookalikes stay ordinary prose
+    because ``semantic_text`` does not expose them as structural receipts.
+    """
+    source_lines = commonmark_lines(text)
+    semantic_lines = commonmark_lines(semantic_text(text))
+    if len(source_lines) != len(semantic_lines):
+        return text or ""
+    output = []
+    for source_line, semantic_line in zip(source_lines, semantic_lines):
+        semantic_body = semantic_line[:-1] \
+            if semantic_line.endswith("\n") else semantic_line
+        matched = CORE_FIT_REVIEW_VERDICT_RE.fullmatch(semantic_body)
+        if matched is None:
+            output.append(source_line)
+            continue
+        source_body = source_line[:-1] if source_line.endswith("\n") else source_line
+        start, end = matched.span("verdict")
+        if source_body[start:end].casefold() != matched.group("verdict").casefold():
+            output.append(source_line)
+            continue
+        output.append(
+            source_body[:start] + " " * (end - start) + source_body[end:]
+            + ("\n" if source_line.endswith("\n") else "")
+        )
+    return "".join(output)
 
 
 def _line_endings_only(value):
