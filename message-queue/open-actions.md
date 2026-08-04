@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 41 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 40 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -175,7 +175,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 33
+### Never stops work — 32
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -219,7 +219,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops. A session that has to demonstrate a check keeps writing an untracked fixture at a scanned path and deleting it in the same shell line, which works and is what the Stage 0 transcripts record — but every such session rediscovers by trial that the guardrail as written forbids the only method that produces evidence.
 
   </details>
-- **26 backlog tasks are waiting for an agent to pick one up.**
+- **25 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -247,7 +247,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [stop-a-restack-from-being-blamed-for-another-branchs-deletion](needs-agent/requests/non-blocking-pick-up-stop-a-restack-from-being-blamed-for-another-branchs-deletion.md)
   - [stop-a-stale-base-from-failing-the-reconciler-check](needs-agent/requests/non-blocking-pick-up-stop-a-stale-base-from-failing-the-reconciler-check.md)
   - [stop-a-wrapped-line-from-reading-as-a-command](needs-agent/requests/non-blocking-pick-up-stop-a-wrapped-line-from-reading-as-a-command.md)
-  - [plan-multi-worktree-safety-remediation](needs-agent/requests/non-blocking-pick-up-plan-multi-worktree-safety-remediation.md)
 
   </details>
 

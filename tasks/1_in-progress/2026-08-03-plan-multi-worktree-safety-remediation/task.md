@@ -1,10 +1,10 @@
 # Plan the multi-worktree safety remediation
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex (planner)
 **Filed:** 2026-08-03, by codex, from `history/conversations/2026-08-03-0730PDT-audit-multi-worktree-safety/handover.md`
 **Parent:** none
 **Repository scope:** records-only
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-plan-multi-worktree-safety-remediation.md`
+**Queue actions:** none
 
 ## Goal
 
