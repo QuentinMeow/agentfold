@@ -1035,3 +1035,160 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check aa0a111d73da9807c8473848ed2dbf2f5c9828b5..5b738fb1157fbdb53c2b3be9d9813d93d3eedd89
 ```
+
+## Adversarial panel on 9e9dfa2
+
+**Reviewed revision:** 9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf
+
+Panel result: 1 approve, 2 block.
+
+- adversarial panel / correctness reviewer: block — an exact revision field after an
+  already accepted verdict still reset the receipt, although any non-verdict at that
+  point should terminate and preserve the evidence already collected.
+- adversarial panel / complexity reviewer: block — verdict neutralization called
+  `semantic.count` and `semantic.rfind` on the growing prefix for every matched verdict,
+  making a k-verdict document O(k*n).
+- adversarial panel / boundary reviewer: clear — pending-HTML, three-view visibility, and
+  duplicate-heading repairs held in the reviewed revision; no blocker was reported.
+
+Both blockers were accepted and repaired in implementation revision
+`189fd7ee27faef510a461678eb27fc854f77eb84`. The finite-model preflight independently
+exercised pre-verdict and post-verdict revision fields, large receipts, actual history,
+and the earlier HTML boundaries, then reported no remaining blocker in scope. This panel
+supplies no acceptance evidence for the repair, and `--require-review` was not invoked
+against it.
+
+## Revision-terminator and verdict-mapping focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_revision_duplicate_only_invalidates_the_preverdict_prologue automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_verdict_mapping_never_scans_the_semantic_prefix_per_match automation.tests.test_check_core_scope.CoreScopeTests.test_duplicate_revision_inside_formal_block_fails_closed automation.tests.test_check_core_scope.CoreScopeTests.test_revision_after_valid_verdict_terminates_and_preserves_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_historical_revision_fields_outside_formal_block_are_allowed automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_action_projection.ActionProjectionTests.test_revision_immediately_after_verdict_terminates_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_ignore_historical_revision_after_terminator
+........
+----------------------------------------------------------------------
+Ran 8 tests in 4.693s
+
+OK
+```
+
+## Revision-terminator and verdict-mapping owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+.............................................................................................................................................................................................................................................s...........................................................................
+----------------------------------------------------------------------
+Ran 305 tests in 32.740s
+
+OK (skipped=1)
+```
+
+## Complete-neutralizer before-and-after observation
+
+```
+$ python3 - <<'PY'
+import subprocess
+import time
+import types
+from automation import markdown_semantics as current
+
+source_code = subprocess.check_output(
+    ["git", "show", "9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf:automation/markdown_semantics.py"],
+    text=True,
+)
+old = types.ModuleType("old_markdown_semantics")
+exec(compile(source_code, "old_markdown_semantics.py", "exec"), old.__dict__)
+
+def receipt(count, revision):
+    return (
+        "history\n\n## Review verdicts\n\n"
+        f"**Reviewed revision:** {revision * 40}\n\n"
+        + "".join(
+            "- core-fit / reviewer: approve — accepted verdict\n"
+            for _ in range(count)
+        )
+    )
+
+for count, revision in ((4000, "a"), (8000, "b")):
+    text = receipt(count, revision)
+    for label, module in (("before", old), ("after", current)):
+        started = time.perf_counter()
+        output = module.neutralize_core_fit_review_verdict_tokens(text, claimant="author")
+        elapsed = time.perf_counter() - started
+        assert output.count("reviewer: approve") == 0
+        assert output.count("accepted verdict") == count
+        print(f"{label} {count}: {elapsed:.3f}s")
+PY
+before 4000: 1.090s
+after 4000: 0.657s
+before 8000: 2.975s
+after 8000: 1.357s
+```
+
+These single-run observations are diagnostic evidence; the regression gate is the
+deterministic 16,000-verdict test that raises on any `count` or `rfind` prefix scan.
+
+## Revision-terminator and verdict-mapping full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 119.43s
+```
+
+## Revision-terminator and verdict-mapping pre-commit lane
+
+```
+$ git commit -m "fix: make review receipt neutralization linear" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+core-scope: pass (5 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 110.18s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks 189fd7e] fix: make review receipt neutralization linear
+```
+
+## Revision-terminator and verdict-mapping exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Revision-terminator and verdict-mapping exact-range reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...189fd7ee27faef510a461678eb27fc854f77eb84 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+## Revision-terminator and verdict-mapping diff check
+
+```
+$ git diff --check 9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf..189fd7ee27faef510a461678eb27fc854f77eb84
+```

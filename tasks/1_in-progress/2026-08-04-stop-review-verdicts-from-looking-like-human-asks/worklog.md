@@ -284,3 +284,29 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The final finite-model audit found no remaining blocker, independently exercised the
   malformed-prefix matrix, and parsed the actual 49.6 KB verification history plus a final
   receipt as one section, one revision, and one verdict with one prefix check.
+
+## 2026-08-04 — make verdict mapping linear and scope revision duplicates (codex sol-high implementer)
+
+- The ninth panel reviewed exact revision
+  `9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf` and returned 1 approve, 2 block. The
+  accepted blockers were one full semantic-prefix scan per verdict token and a second
+  revision field invalidating an already collected receipt instead of terminating it.
+- Verdict neutralization now builds semantic line-start offsets once and walks the ordered
+  matches with a monotone cursor. A deterministic 16,000-verdict CRLF regression makes
+  `count` or `rfind` prefix scans raise immediately and proves every structural token is
+  blanked while every finding and logical line remains.
+- An actual before/after benchmark on complete neutralization measured 4,000 verdicts at
+  1.090s before and 0.657s after, then 8,000 at 2.975s before and 1.357s after. These are
+  observations from one run, not performance thresholds.
+- A duplicate revision before the first valid verdict still fails closed. The first valid
+  verdict ends that prologue; a revision immediately afterward is the first non-verdict
+  terminator, preserves earlier evidence, and leaves later canonical verdict lines under
+  ordinary action detection. Parser, core-gate, and action-projection regressions cover
+  both sides plus the existing historical-field cases.
+- The first full-suite attempt exposed a nested test helper that made the repository's AST
+  sharder fall back to whole-file execution. Replacing it with a configured mock restored
+  explicit discovery; both sharding meta-tests and the successful full rerun passed.
+- Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed at implementation commit
+  `189fd7ee27faef510a461678eb27fc854f77eb84`. The independent finite-model preflight found
+  no remaining blocker in the ninth-panel scope.
