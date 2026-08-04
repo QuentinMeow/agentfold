@@ -4,7 +4,7 @@
 **Filed:** 2026-08-02, by claude, from an adversarial review of pull request #65 that reproduced it deterministically
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-a-restack-from-being-blamed-for-another-branchs-deletion.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-a-restack-from-being-blamed-for-another-branchs-deletion.md`; `message-queue/needs-agent/requests/non-blocking-track-github-issue-75-restack-provenance.md`
 
 ## Goal
 

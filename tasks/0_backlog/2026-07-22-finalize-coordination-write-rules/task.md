@@ -4,7 +4,7 @@
 **Filed:** 2026-07-22, by claude (design review; owner directed in chat — report: `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md`)
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-finalize-coordination-write-rules.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-finalize-coordination-write-rules.md`; `message-queue/needs-agent/requests/non-blocking-track-github-issue-77-coordination-publication.md`
 
 ## Goal
 

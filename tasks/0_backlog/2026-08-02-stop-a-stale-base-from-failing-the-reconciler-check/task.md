@@ -4,7 +4,7 @@
 **Filed:** 2026-08-02, by claude, reproduced on three separate pushes to pull request #65
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-a-stale-base-from-failing-the-reconciler-check.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-stop-a-stale-base-from-failing-the-reconciler-check.md`; `message-queue/needs-agent/requests/non-blocking-track-github-issue-78-stale-base.md`
 
 ## Goal
 
