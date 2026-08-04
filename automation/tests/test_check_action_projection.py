@@ -119,6 +119,20 @@ class ActionProjectionTests(unittest.TestCase):
             check=True,
         ).stdout.strip()
 
+    @classmethod
+    def receipt_task(cls, root, claimant="author", duplicate=False):
+        task = (
+            root / "tasks" / "3_in-review" /
+            "2026-07-23-example" / "task.md"
+        )
+        task.parent.mkdir(parents=True, exist_ok=True)
+        fields = f"**Claimed-by:** {claimant}\n"
+        if duplicate:
+            fields += "**Claimed-by:** second author\n"
+        task.write_text("# Example\n\n" + fields, encoding="utf-8")
+        cls.git(root, "add", task.relative_to(root).as_posix())
+        return task
+
     @staticmethod
     def queue_item(
         root,
@@ -2284,6 +2298,7 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / second reviewer: block - found a boundary leak\n"
         )
         with self.repo() as root:
+            self.receipt_task(root)
             self.assertEqual(
                 {},
                 PROJECTION.task_action_unit_counts(
@@ -2301,6 +2316,7 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / reviewer: approve — TODO ask the owner\n",
         )
         with self.repo() as root:
+            self.receipt_task(root)
             for receipt in receipts:
                 with self.subTest(receipt=receipt):
                     counts = PROJECTION.task_action_unit_counts(
@@ -2323,6 +2339,7 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / reviewer:  approve — could not break it\n",
         )
         with self.repo() as root:
+            self.receipt_task(root)
             for near_miss in near_misses:
                 with self.subTest(near_miss=near_miss):
                     counts = PROJECTION.task_action_unit_counts(
@@ -2388,6 +2405,7 @@ class ActionProjectionTests(unittest.TestCase):
             ),
         )
         with self.repo() as root:
+            self.receipt_task(root)
             for source_path, text, expected in cases:
                 with self.subTest(source_path=source_path, text=text):
                     counts = PROJECTION.task_action_unit_counts(
@@ -2418,6 +2436,7 @@ class ActionProjectionTests(unittest.TestCase):
             "tasks/3_in-review/2026-07-23-example/verification.md"
         )
         with self.repo() as root:
+            self.receipt_task(root)
             for boundary in boundaries:
                 with self.subTest(boundary=boundary):
                     counts = PROJECTION.task_action_unit_counts(
@@ -2448,6 +2467,7 @@ class ActionProjectionTests(unittest.TestCase):
             f"## REVIEW VERDICTS\n\n{revision}\n\n{receipt}\n",
         )
         with self.repo() as root:
+            self.receipt_task(root)
             for text in cases:
                 with self.subTest(text=text):
                     counts = PROJECTION.task_action_unit_counts(
@@ -2465,6 +2485,7 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / second: block — found a boundary leak\n"
         )
         with self.repo() as root:
+            self.receipt_task(root)
             self.assertEqual(
                 {},
                 PROJECTION.task_action_unit_counts(
@@ -2473,6 +2494,96 @@ class ActionProjectionTests(unittest.TestCase):
                     repo=root,
                 ),
             )
+
+    def test_task_action_units_require_an_independent_real_reviewer(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        cases = (
+            ("author", "- core-fit / author: approve — self review\n"),
+            ("author", "- core-fit / ---: approve — punctuation identity\n"),
+            ("unclaimed", "- core-fit / reviewer: approve — no claimant\n"),
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root:
+            for claimant, receipt in cases:
+                with self.subTest(claimant=claimant, receipt=receipt):
+                    self.receipt_task(root, claimant=claimant)
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix + receipt, source_path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            self.receipt_task(root, duplicate=True)
+            counts = PROJECTION.task_action_unit_counts(
+                prefix + "- core-fit / reviewer: approve — ambiguous claimant\n",
+                source_path,
+                repo=root,
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+        with self.repo() as root:
+            counts = PROJECTION.task_action_unit_counts(
+                prefix + "- core-fit / reviewer: approve — missing task\n",
+                source_path,
+                repo=root,
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_read_claimant_from_candidate_revision(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / reviewer: approve — independent in candidate\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root:
+            task = self.receipt_task(root, claimant="author")
+            self.git(root, "commit", "-m", "record candidate claimant")
+            candidate = self.git(root, "rev-parse", "HEAD")
+            task.write_text(
+                "# Example\n\n**Claimed-by:** reviewer\n",
+                encoding="utf-8",
+            )
+            self.git(root, "add", task.relative_to(root).as_posix())
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    text,
+                    source_path,
+                    repo=root,
+                    candidate_revision=candidate,
+                ),
+            )
+            counts = PROJECTION.task_action_unit_counts(
+                text, source_path, repo=root
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_end_receipts_at_raw_hidden_or_code_content(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n"
+        )
+        first = "- core-fit / first: block — earlier blocker\n"
+        later = "- core-fit / later: approve — must stay actionable\n"
+        barriers = (
+            "\n<!-- hidden comment -->\n",
+            "\n<div>\nhidden HTML\n</div>\n",
+            "\n```text\nhidden fence\n```\n",
+            "\n    hidden indented code\n",
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root:
+            self.receipt_task(root)
+            for barrier in barriers:
+                for body in (prefix + barrier + later, prefix + first + barrier + later):
+                    with self.subTest(barrier=barrier, body=body):
+                        counts = PROJECTION.task_action_unit_counts(
+                            body, source_path, repo=root
+                        )
+                        self.assertEqual(1, sum(counts.values()), counts)
 
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (

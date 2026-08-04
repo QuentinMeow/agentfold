@@ -68,10 +68,14 @@ TASK_QUEUE_ACTION_FIELD_RE = re.compile(
     r"^\*\*Queue actions:\*\*[ \t]*(.*)$",
     re.M,
 )
+TASK_CLAIMED_BY_FIELD_RE = re.compile(
+    r"^\*\*Claimed-by:\*\*[ \t]*(.*)$",
+    re.M,
+)
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
 TASK_REVIEW_VERIFICATION_PATH_RE = re.compile(
-    r"^tasks/(?:0_backlog|1_in-progress|2_blocked|3_in-review|4_done)/"
-    r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*/verification\.md$"
+    r"^tasks/(?P<status>0_backlog|1_in-progress|2_blocked|3_in-review|4_done)/"
+    r"(?P<task_id>\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/verification\.md$"
 )
 TASK_COMMIT_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9_-])task:\s*"
@@ -1452,8 +1456,23 @@ def _task_projection_stripped_text(
 ):
     """Return rendered task prose with only exact task-owned actions removed."""
     source = _without_explicit_block_quotes(text)
-    if TASK_REVIEW_VERIFICATION_PATH_RE.fullmatch(str(source_path)):
-        source = neutralize_core_fit_review_verdict_tokens(source)
+    receipt_path = TASK_REVIEW_VERIFICATION_PATH_RE.fullmatch(str(source_path))
+    if receipt_path:
+        task_path = (
+            f"tasks/{receipt_path.group('status')}/"
+            f"{receipt_path.group('task_id')}/task.md"
+        )
+        try:
+            task_text = candidate_text(
+                task_path, repo=repo, candidate_revision=candidate_revision
+            )
+        except (OSError, RuntimeError, UnicodeError):
+            task_text = ""
+        claimants = TASK_CLAIMED_BY_FIELD_RE.findall(semantic_text(task_text))
+        claimant = claimants[0].strip() if len(claimants) == 1 else None
+        source = neutralize_core_fit_review_verdict_tokens(
+            source, claimant=claimant
+        )
     _semantic_source, matches = visible_markdown_link_source(source)
     allowed = set(allowed_queue_paths or ())
     valid_sources = []

@@ -11,14 +11,18 @@ import fnmatch
 import re
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 
 AUTOMATION = Path(__file__).resolve().parent
 if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
-from markdown_semantics import core_fit_review_evidence, semantic_text
+from markdown_semantics import (
+    core_fit_review_evidence,
+    identity_key,
+    independent_reviewer_identity,
+    semantic_text,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
@@ -238,17 +242,6 @@ def valid_adapter(value):
     )
 
 
-def identity_key(identity):
-    normalized = unicodedata.normalize("NFKC", identity or "").casefold()
-    return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
-
-
-def same_reviewer_as_claimant(reviewer, claimant):
-    claimant_key = identity_key(claimant)
-    reviewer_key = identity_key(reviewer)
-    return bool(claimant_key and reviewer_key == claimant_key)
-
-
 def validate_task(
     task, touched_core, require_review=False, load_text=None,
     review_revision_check=None,
@@ -327,7 +320,7 @@ def validate_task(
             reviewer = matched.group("reviewer")
             verdict = matched.group("verdict")
             reviewer_key = identity_key(reviewer)
-            if reviewer_key and not same_reviewer_as_claimant(reviewer, claimant):
+            if independent_reviewer_identity(reviewer, claimant):
                 latest[reviewer_key] = verdict.lower()
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())

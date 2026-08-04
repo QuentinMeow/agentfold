@@ -290,6 +290,28 @@ def semantic_text(text):
     return strip_indented_code(_semantic_text(text))
 
 
+def identity_key(identity):
+    """Return the shared non-punctuation identity tokens for a reviewer/claimant."""
+    normalized = unicodedata.normalize("NFKC", identity or "").casefold()
+    return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
+
+
+def claimant_identity_key(claimant):
+    """Return no identity for the task schema's unclaimed/placeholder values."""
+    value = (claimant or "").strip()
+    if not value or "<" in value or value.casefold() in {"unclaimed", "none yet"} \
+            or re.fullmatch(r"_+", value):
+        return ()
+    return identity_key(value)
+
+
+def independent_reviewer_identity(reviewer, claimant):
+    """Require a real normalized reviewer identity distinct from a real claimant."""
+    reviewer_key = identity_key(reviewer)
+    claimant_key = claimant_identity_key(claimant)
+    return bool(reviewer_key and claimant_key and reviewer_key != claimant_key)
+
+
 def core_fit_review_evidence(text):
     """Parse the closed, contiguous revision-bound receipt both gates accept.
 
@@ -303,32 +325,47 @@ def core_fit_review_evidence(text):
     preserve its specific diagnostics. Match objects retain offsets into the shared
     semantic view so the action gate can blank only each structural verdict token.
     """
-    clean = semantic_text(text)
-    sections = tuple(CORE_FIT_REVIEW_SECTION_RE.finditer(clean))
+    source = text or ""
+    clean = semantic_text(source)
+    source_lines = commonmark_lines(source)
+    semantic_lines = commonmark_lines(clean)
     evidence = {
         "semantic_text": clean,
-        "section_count": len(sections),
+        "section_count": 0,
         "revision_count": 0,
         "reviewed_revision": None,
         "verdicts": (),
     }
-    if len(sections) != 1:
+    if len(source_lines) != len(semantic_lines):
         return evidence
 
-    lines = commonmark_lines(clean)
     offsets = []
     cursor = 0
-    for line in lines:
+    for line in semantic_lines:
         offsets.append(cursor)
         cursor += len(line)
 
-    section_line = clean.count("\n", 0, sections[0].start())
-    content_line = section_line + 1
-    while content_line < len(lines) and not lines[content_line].strip():
-        content_line += 1
-    if content_line >= len(lines):
+    def line_body(line):
+        return line[:-1] if line.endswith("\n") else line
+
+    def structural_line(index):
+        return line_body(source_lines[index]) == line_body(semantic_lines[index])
+
+    section_lines = [
+        index for index, line in enumerate(source_lines)
+        if line_body(line) == "## Review verdicts" and structural_line(index)
+    ]
+    evidence["section_count"] = len(section_lines)
+    if len(section_lines) != 1:
         return evidence
-    content_end = offsets[content_line] + len(lines[content_line].rstrip("\n"))
+
+    section_line = section_lines[0]
+    content_line = section_line + 1
+    while content_line < len(source_lines) and not source_lines[content_line].strip():
+        content_line += 1
+    if content_line >= len(source_lines) or not structural_line(content_line):
+        return evidence
+    content_end = offsets[content_line] + len(line_body(semantic_lines[content_line]))
     revision = CORE_FIT_REVIEW_REVISION_RE.match(
         clean, offsets[content_line], content_end
     )
@@ -339,12 +376,14 @@ def core_fit_review_evidence(text):
     evidence["reviewed_revision"] = revision.group("revision")
     verdicts = []
     line_index = content_line + 1
-    while line_index < len(lines):
-        line = lines[line_index]
-        body_end = offsets[line_index] + len(line.rstrip("\n"))
-        if not line.strip():
+    while line_index < len(source_lines):
+        source_line = source_lines[line_index]
+        if not source_line.strip():
             line_index += 1
             continue
+        if not structural_line(line_index):
+            break
+        body_end = offsets[line_index] + len(line_body(semantic_lines[line_index]))
         matched = CORE_FIT_REVIEW_VERDICT_RE.match(
             clean, offsets[line_index], body_end
         )
@@ -363,7 +402,7 @@ def core_fit_review_evidence(text):
     return evidence
 
 
-def neutralize_core_fit_review_verdict_tokens(text):
+def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
     """Blank only structural core-fit verdict tokens in visible Markdown.
 
     The shared receipt grammar remains structural evidence for the core-scope gate,
@@ -373,7 +412,10 @@ def neutralize_core_fit_review_verdict_tokens(text):
     because ``semantic_text`` does not expose them as structural receipts.
     """
     evidence = core_fit_review_evidence(text)
-    verdicts = evidence["verdicts"]
+    verdicts = tuple(
+        matched for matched in evidence["verdicts"]
+        if independent_reviewer_identity(matched.group("reviewer"), claimant)
+    )
     if not verdicts:
         return text or ""
     source_lines = commonmark_lines(text)

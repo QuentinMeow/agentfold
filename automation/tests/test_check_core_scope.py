@@ -607,6 +607,50 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
+    def test_review_parser_rejects_punctuation_reviewer_and_unclaimed_task(self):
+        cases = (
+            ("author", "- core-fit / ---: approve — punctuation identity\n"),
+            ("unclaimed", "- core-fit / reviewer: approve — no claimant\n"),
+        )
+        for claimant, verdict in cases:
+            with self.subTest(claimant=claimant), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=verdict,
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_stops_at_raw_hidden_or_code_content(self):
+        first = "- core-fit / first: block — earlier blocker\n"
+        later = "- core-fit / later: approve — must not count\n"
+        barriers = (
+            "\n<!-- hidden comment -->\n",
+            "\n<div>\nhidden HTML\n</div>\n",
+            "\n```text\nhidden fence\n```\n",
+            "\n    hidden indented code\n",
+        )
+        for barrier in barriers:
+            for before, expected in (("", "independent reviewer"),
+                                     (first, "approve majority")):
+                with self.subTest(barrier=barrier, before=before), \
+                        tempfile.TemporaryDirectory() as tmp:
+                    task = self.make_task(
+                        tmp,
+                        status="3_in-review",
+                        verification=before + barrier + later,
+                    )
+                    errors = SCOPE.validate_task(
+                        task, touched_core=True, require_review=True
+                    )
+                    self.assertTrue(any(expected in error for error in errors), errors)
+
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (
             "~~~text\n- core-fit / reviewer: approve — example only\n~~~\n",
