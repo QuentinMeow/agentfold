@@ -109,24 +109,19 @@ DEFAULT_IGNORABLE_NONFORMAT_RANGES = (
     (0xE0000, 0xE0FFF),
 )
 CORE_FIT_REVIEW_VERDICT_RE = re.compile(
-    r"^- core-fit / (?P<reviewer>[^:\r\n]+):[ \t]*"
-    r"(?P<verdict>approve|block)[ \t]+[—-][ \t]+"
-    r"(?P<finding>.+)$",
-    re.I | re.M,
-)
-CORE_FIT_REVIEW_SECTION_RE = re.compile(
-    r"^## Review verdicts(?:[ \t][^\r\n]*)?\r?\n",
+    r"^- core-fit / "
+    r"(?P<reviewer>[^\s:\r\n](?:[^:\r\n]*[^\s:\r\n])?): "
+    r"(?P<verdict>approve|block) — "
+    r"(?P<finding>\S(?:[^\r\n]*\S)?)$",
     re.M,
 )
-CORE_FIT_REVIEW_SECTION_END_ATX_RE = re.compile(
-    r"^[ ]{0,3}#{1,2}(?:[ \t]+|$)"
-)
-CORE_FIT_REVIEW_SECTION_END_SETEXT_RE = re.compile(
-    r"^[ ]{0,3}(?:=+|-+)[ \t]*$"
+CORE_FIT_REVIEW_SECTION_RE = re.compile(
+    r"^## Review verdicts$",
+    re.M,
 )
 CORE_FIT_REVIEW_REVISION_RE = re.compile(
-    r"^\*\*Reviewed revision:\*\*[ \t]*"
-    r"(?P<revision>(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))[ \t]*$",
+    r"^\*\*Reviewed revision:\*\* "
+    r"(?P<revision>(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))$",
     re.M,
 )
 
@@ -296,11 +291,17 @@ def semantic_text(text):
 
 
 def core_fit_review_evidence(text):
-    """Parse exactly the revision-bound receipt region the core gate accepts.
+    """Parse the closed, contiguous revision-bound receipt both gates accept.
 
-    The result keeps invalid section and revision counts so the gate can preserve
-    its specific diagnostics. Verdicts exist only when one real Review verdicts
-    section contains exactly one valid full-commit field, and only after that field.
+    A receipt is deliberately not a Markdown section. It is one exact top-level
+    heading, optional blank lines, one exact full-commit field as the first content,
+    optional blank lines, then one or more exact verdict lines. Blank lines may
+    separate verdicts; the first nonblank non-verdict closes the receipt. Duplicate
+    headings or full-commit fields fail closed.
+
+    The result keeps invalid heading and revision counts so the core gate can
+    preserve its specific diagnostics. Match objects retain offsets into the shared
+    semantic view so the action gate can blank only each structural verdict token.
     """
     clean = semantic_text(text)
     sections = tuple(CORE_FIT_REVIEW_SECTION_RE.finditer(clean))
@@ -313,64 +314,53 @@ def core_fit_review_evidence(text):
     }
     if len(sections) != 1:
         return evidence
-    section = sections[0]
-    body_start = section.end()
-    body_end = _core_fit_review_section_end(clean, body_start)
-    revisions = tuple(
-        CORE_FIT_REVIEW_REVISION_RE.finditer(clean, body_start, body_end)
-    )
-    evidence["revision_count"] = len(revisions)
-    if len(revisions) != 1:
-        return evidence
-    revision = revisions[0]
-    evidence["reviewed_revision"] = revision.group("revision")
-    evidence["verdicts"] = tuple(
-        CORE_FIT_REVIEW_VERDICT_RE.finditer(
-            clean, revision.end(), body_end
-        )
-    )
-    return evidence
 
-
-def _core_fit_review_section_end(text, body_start):
-    """Return the next real H1/H2 boundary, excluding setext heading text."""
-    lines = commonmark_lines(text)
+    lines = commonmark_lines(clean)
     offsets = []
     cursor = 0
     for line in lines:
         offsets.append(cursor)
         cursor += len(line)
-    for index, line in enumerate(lines):
-        line_start = offsets[index]
-        if line_start < body_start:
-            continue
-        body = line[:-1] if line.endswith("\n") else line
-        if CORE_FIT_REVIEW_SECTION_END_ATX_RE.match(body):
-            return line_start
-        if not CORE_FIT_REVIEW_SECTION_END_SETEXT_RE.fullmatch(body) \
-                or index == 0:
-            continue
-        prior = lines[index - 1]
-        prior_body = prior[:-1] if prior.endswith("\n") else prior
-        prior_start = offsets[index - 1]
-        if prior_start < body_start \
-                or not _core_fit_setext_heading_content(prior_body):
-            continue
-        return prior_start
-    return len(text)
 
-
-def _core_fit_setext_heading_content(line):
-    """Recognize the paragraph line owned by a following setext underline."""
-    width, rest = split_indentation(line)
-    if width > 3 or not rest.strip() or rest.startswith(">"):
-        return False
-    return not (
-        ATX_HEADING_RE.match(rest)
-        or LIST_MARKER_RE.match(rest)
-        or THEMATIC_BREAK_RE.fullmatch(rest)
-        or SETEXT_UNDERLINE_RE.fullmatch(rest)
+    section_line = clean.count("\n", 0, sections[0].start())
+    content_line = section_line + 1
+    while content_line < len(lines) and not lines[content_line].strip():
+        content_line += 1
+    if content_line >= len(lines):
+        return evidence
+    content_end = offsets[content_line] + len(lines[content_line].rstrip("\n"))
+    revision = CORE_FIT_REVIEW_REVISION_RE.match(
+        clean, offsets[content_line], content_end
     )
+    if not revision or revision.end() != content_end:
+        return evidence
+
+    evidence["revision_count"] = 1
+    evidence["reviewed_revision"] = revision.group("revision")
+    verdicts = []
+    line_index = content_line + 1
+    while line_index < len(lines):
+        line = lines[line_index]
+        body_end = offsets[line_index] + len(line.rstrip("\n"))
+        if not line.strip():
+            line_index += 1
+            continue
+        matched = CORE_FIT_REVIEW_VERDICT_RE.match(
+            clean, offsets[line_index], body_end
+        )
+        if not matched or matched.end() != body_end:
+            duplicate = CORE_FIT_REVIEW_REVISION_RE.match(
+                clean, offsets[line_index], body_end
+            )
+            if duplicate and duplicate.end() == body_end:
+                evidence["revision_count"] = 2
+                evidence["reviewed_revision"] = None
+                verdicts = []
+            break
+        verdicts.append(matched)
+        line_index += 1
+    evidence["verdicts"] = tuple(verdicts)
+    return evidence
 
 
 def neutralize_core_fit_review_verdict_tokens(text):

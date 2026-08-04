@@ -2317,6 +2317,10 @@ class ActionProjectionTests(unittest.TestCase):
             "* core-fit / reviewer: approve — could not break it\n",
             "- core-fit/reviewer: approve — could not break it\n",
             "- core-fit / reviewer: approve: could not break it\n",
+            "- Core-fit / reviewer: approve — could not break it\n",
+            "- core-fit / reviewer: APPROVE — could not break it\n",
+            "- core-fit / reviewer: approve - could not break it\n",
+            "- core-fit / reviewer:  approve — could not break it\n",
         )
         with self.repo() as root:
             for near_miss in near_misses:
@@ -2391,7 +2395,7 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual(expected, sum(counts.values()), counts)
 
-    def test_task_action_units_end_receipts_at_real_h1_and_h2_boundaries(self):
+    def test_task_action_units_end_receipts_at_first_nonreceipt_content(self):
         receipt = "- core-fit / owner: approve — production release\n"
         prefix = (
             "## Review verdicts\n\n"
@@ -2400,8 +2404,15 @@ class ActionProjectionTests(unittest.TestCase):
         boundaries = (
             "# Human action\n\n",
             "## Human action\n\n",
+            "### Detailed findings\n\n",
             "Human action\n===\n\n",
             "Human action\n---\n\n",
+            "> quoted paragraph\n"
+            "lazy continuation\n"
+            "---\n\n",
+            "[review]: /target\n"
+            "---\n\n",
+            "ordinary explanation\n\n",
         )
         source_path = (
             "tasks/3_in-review/2026-07-23-example/verification.md"
@@ -2427,12 +2438,31 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, sum(counts.values()), counts)
 
-    def test_task_action_units_keep_h3_content_inside_review_verdicts(self):
+    def test_task_action_units_reject_container_and_decorated_headings(self):
+        revision = f"**Reviewed revision:** {'a' * 40}"
+        receipt = "- core-fit / reviewer: approve — could not break it"
+        cases = (
+            f"> ## Review verdicts\n>\n> {revision}\n>\n> {receipt}\n",
+            f"- ## Review verdicts\n\n  {revision}\n\n  {receipt}\n",
+            f"## Review verdicts (formal)\n\n{revision}\n\n{receipt}\n",
+            f"## REVIEW VERDICTS\n\n{revision}\n\n{receipt}\n",
+        )
+        with self.repo() as root:
+            for text in cases:
+                with self.subTest(text=text):
+                    counts = PROJECTION.task_action_unit_counts(
+                        text,
+                        "tasks/3_in-review/2026-07-23-example/verification.md",
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_allow_blank_separated_contiguous_verdicts(self):
         text = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
-            "### Detailed findings\n\n"
-            "- core-fit / reviewer: approve — could not break it\n"
+            "- core-fit / first: approve — could not break it\n\n"
+            "- core-fit / second: block — found a boundary leak\n"
         )
         with self.repo() as root:
             self.assertEqual(

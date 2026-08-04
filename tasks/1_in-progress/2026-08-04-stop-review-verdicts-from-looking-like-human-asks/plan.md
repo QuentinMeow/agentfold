@@ -7,5 +7,6 @@
 - [x] 5. Run focused, full, core-scope, reconciler, and diff verification.
 - [x] 6. Repair the exact-path and formal-region gap found by the blocked review, then repeat every verification lane.
 - [x] 7. Repair the heading-boundary gap found by the second panel, then repeat every verification lane.
-- [ ] 8. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 9. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 8. Replace section inference with the owner-authorized closed contiguous grammar and cover every panel reproduction.
+- [ ] 9. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 10. Publish and merge; close issue #80; resume the stale-base repair.

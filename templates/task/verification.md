@@ -12,9 +12,13 @@ $ <exact command>
 <real output, trimmed to the meaningful part>
 ```
 
-## Review verdicts (when a review was explicitly run)
+## Review verdicts
 
 **Reviewed revision:** <full immutable commit ID reviewed by every verdict below>
 
-- <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">
-- core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required only when `--require-review` is explicitly selected>
+- core-fit / <reviewer other than Claimed-by>: <approve|block> — <one-line substitution or boundary finding>
+
+When `--require-review` is explicitly selected, the heading, reviewed-revision field,
+and one or more consecutive core-fit verdicts above form one contiguous formal block.
+Keep only blank lines between those elements. The first nonblank non-verdict ends the
+formal block; put explanations and any non-core-fit review notes after it.

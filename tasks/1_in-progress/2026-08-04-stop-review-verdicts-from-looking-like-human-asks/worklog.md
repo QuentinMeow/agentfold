@@ -79,3 +79,23 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   completed human action from this task.
 - The authorization does not approve a pull request or replace independent review; the
   implementation still owes focused and full verification plus a fresh adversarial panel.
+
+## 2026-08-04 — implement the authorized closed receipt grammar (codex sol-high implementer)
+
+- Replaced general Markdown section and heading-boundary inference with the authorized
+  literal receipt state machine: one exact top-level heading, one exact full-commit field
+  as its first content, then only exact one-line core-fit verdicts until the first nonblank
+  non-verdict.
+- Kept the task action exception at the exact lowercase task-root verification path and
+  limited neutralization to each structural `approve` or `block` token; hostile reviewer
+  identities and findings remain visible to the ordinary action detector.
+- Tightened the canonical template and line grammar, while allowing historical panel
+  revision fields outside the sole formal block. An adjacent duplicate formal field and
+  duplicate exact headings fail closed.
+- Added regressions for every prior panel reproduction, including nested/case paths,
+  malformed or misplaced structures, strict spelling, H1/H2/H3 and setext content,
+  blockquote/list containers, lazy blockquote plus thematic breaks, link references plus
+  thematic breaks, hostile findings, and the first-nonreceipt terminator.
+- Focused tests, all 15 repository test files, the reconciler, and the staged core-scope
+  gate passed. Independent review, publication, and issue closure remain with the
+  coordinating session.

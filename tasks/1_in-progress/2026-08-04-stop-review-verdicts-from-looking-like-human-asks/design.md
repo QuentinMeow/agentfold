@@ -12,13 +12,13 @@ the ordinary human-action detector.
 
 ## Options considered
 
-### Option A — exempt review receipts
+### Initial option A — exempt review receipts
 
 Skip a matched receipt line, its section, or all of `verification.md`. This removes the
 false positive, but a finding such as “owner please approve the release” becomes an
 unqueued ask that task admission cannot see.
 
-### Option B — neutralize only the structural verdict token
+### Initial option B — neutralize only the structural verdict token
 
 Share the core-scope gate's exact section, revision-field, and named verdict grammar. Only
 for the canonical lowercase task-root `verification.md`, and only after exactly one valid
@@ -29,16 +29,20 @@ visible and every path or receipt-region lookalike receives ordinary classificat
 
 ## Chosen
 
-Option B. A blocked review of the first implementation proved that sharing only the line
-regex was insufficient: basename matching and whole-file normalization admitted paths and
-regions the core gate would never accept. The shared formal parser now prevents the
-validator and detector from defining competing receipt regions as well as competing line
-shapes. A second review found that a region ending only at the next ATX H2 still crossed
-real ATX H1 and setext H1/H2 boundaries. The parser now preserves the exact H2 opener but
-ends at the next real heading of level one or two, excluding the setext heading's content
-line while retaining H3 detail inside the section. Equal-width token blanking remains
-narrow and reversible: removing one helper call restores the prior behavior, while broad
-exemptions would create a hidden-action surface.
+The owner-authorized closed form recorded in
+`memory/decisions/2026-08-04-review-receipt-parser-authorization.md`. The first three
+implementations showed that a basename check, a broad section, and a CommonMark heading
+boundary all admitted shapes the core gate should not trust. The accepted parser therefore
+does not infer Markdown structure: it recognizes one exact top-level `## Review verdicts`
+line, one exact full-commit field as the first content, and one or more consecutive exact
+core-fit verdict lines. Blank lines may separate those elements; the first nonblank
+non-verdict ends the receipt. Duplicate exact headings or full-commit fields fail closed.
+
+Only an exact lowercase task-root `tasks/<status>/<id>/verification.md` may use the
+receipt. Equal-width token blanking remains narrow and reversible: it removes only the
+structural `approve` or `block`, while reviewer identity and finding text remain visible to
+the human-action detector. Removing one helper call restores the prior behavior; the
+owner's authorization approves this parser/template boundary, not a review outcome.
 
 ## Core fit
 

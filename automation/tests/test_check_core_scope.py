@@ -330,7 +330,7 @@ class CoreScopeTests(unittest.TestCase):
             self.assertEqual([], SCOPE.validate_task(task, touched_core=True, require_review=True))
             self.assertEqual([], SCOPE.validate_task(task, touched_core=False, require_review=True))
 
-    def test_review_parser_ignores_verdicts_before_the_revision_field(self):
+    def test_review_parser_closes_when_a_verdict_precedes_the_revision_field(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp, status="3_in-review", claimant="author",
@@ -350,16 +350,24 @@ class CoreScopeTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            self.assertEqual([], SCOPE.validate_task(
+            errors = SCOPE.validate_task(
                 task, touched_core=True, require_review=True
-            ))
+            )
+            self.assertTrue(any("independent reviewer" in error for error in errors), errors)
 
-    def test_review_parser_ends_at_real_h1_and_h2_boundaries(self):
+    def test_review_parser_ends_at_first_nonreceipt_content(self):
         boundaries = (
             "# Human action\n\n",
             "## Human action\n\n",
+            "### Detailed findings\n\n",
             "Human action\n===\n\n",
             "Human action\n---\n\n",
+            "> quoted paragraph\n"
+            "lazy continuation\n"
+            "---\n\n",
+            "[review]: /target\n"
+            "---\n\n",
+            "ordinary explanation\n\n",
         )
         for boundary in boundaries:
             with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmp:
@@ -395,17 +403,35 @@ class CoreScopeTests(unittest.TestCase):
             errors = SCOPE.validate_task(
                 task, touched_core=True, require_review=True
             )
-            self.assertTrue(any("Reviewed revision" in error for error in errors), errors)
             self.assertTrue(any("independent reviewer" in error for error in errors), errors)
 
-    def test_review_parser_keeps_h3_content_inside_the_section(self):
+    def test_review_parser_rejects_container_and_decorated_headings(self):
+        revision = f"**Reviewed revision:** {'a' * 40}"
+        receipt = "- core-fit / reviewer: approve — bound review"
+        cases = (
+            f"> ## Review verdicts\n>\n> {revision}\n>\n> {receipt}\n",
+            f"- ## Review verdicts\n\n  {revision}\n\n  {receipt}\n",
+            f"## Review verdicts (formal)\n\n{revision}\n\n{receipt}\n",
+            f"## REVIEW VERDICTS\n\n{revision}\n\n{receipt}\n",
+        )
+        for text in cases:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review")
+                (task / "verification.md").write_text(text, encoding="utf-8")
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any("Review verdicts" in error for error in errors), errors)
+                self.assertTrue(any("independent reviewer" in error for error in errors), errors)
+
+    def test_review_parser_accepts_blank_separated_contiguous_verdicts(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp,
                 status="3_in-review",
                 verification=(
-                    "### Detailed findings\n\n"
-                    "- core-fit / reviewer: approve — bound review\n"
+                    "- core-fit / first: approve — could not break it\n\n"
+                    "- core-fit / second: approve — boundary remained closed\n"
                 ),
             )
             self.assertEqual([], SCOPE.validate_task(
@@ -513,6 +539,39 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertEqual([], errors)
                 self.assertEqual([revision], checked)
 
+    def test_historical_revision_fields_outside_formal_block_are_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review")
+            (task / "verification.md").write_text(
+                "# Verification\n\n"
+                "## Historical panel\n\n"
+                f"**Reviewed revision:** {'b' * 40}\n\n"
+                "- adversarial panel / reviewer: block — prior candidate failed\n\n"
+                "## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
+                "- core-fit / reviewer: approve — repaired candidate held\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
+    def test_duplicate_revision_inside_formal_block_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
+                f"**Reviewed revision:** {'b' * 40}\n\n"
+                "- core-fit / reviewer: approve — must not count\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any("Reviewed revision" in error for error in errors), errors)
+            self.assertTrue(any("independent reviewer" in error for error in errors), errors)
+
     def test_abbreviated_reviewed_revision_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
@@ -527,6 +586,26 @@ class CoreScopeTests(unittest.TestCase):
             )
             errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
             self.assertTrue(any("Reviewed revision" in error for error in errors))
+
+    def test_review_parser_rejects_noncanonical_verdict_lines(self):
+        near_misses = (
+            "* core-fit / reviewer: approve — could not break it\n",
+            "- Core-fit / reviewer: approve — could not break it\n",
+            "- core-fit / reviewer: APPROVE — could not break it\n",
+            "- core-fit / reviewer: approve - could not break it\n",
+            "- core-fit / reviewer:  approve — could not break it\n",
+        )
+        for verdict in near_misses:
+            with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", verification=verdict
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
 
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (

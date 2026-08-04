@@ -210,3 +210,51 @@ core-scope: pass (3 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
+
+## Owner-authorized closed grammar regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_normalize_receipt_near_misses automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_end_receipts_at_first_nonreceipt_content automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_container_and_decorated_headings automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_allow_blank_separated_contiguous_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_closes_when_a_verdict_precedes_the_revision_field automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_ends_at_first_nonreceipt_content automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_a_revision_like_setext_heading automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_container_and_decorated_headings automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_blank_separated_contiguous_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_historical_revision_fields_outside_formal_block_are_allowed automation.tests.test_check_core_scope.CoreScopeTests.test_duplicate_revision_inside_formal_block_fails_closed automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_noncanonical_verdict_lines automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_accepts_receipt_but_rejects_its_hostile_finding
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.301s
+
+OK
+```
+
+## Owner-authorized full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 70.88s
+```
+
+## Owner-authorized reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+## Owner-authorized staged core-scope gate
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (4 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
