@@ -16,3 +16,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   stable projection ledger is in the audit conversation's `artifacts/` folder.
 - Claimed issue #74's bootstrap task in a separate pushed coordination commit and delegated
   its vertical implementation to a Sol high worker in a real linked worktree.
+- Published stacked draft implementation pull request #79 with the task, plan, design,
+  worklog, and real verification. Its exact implementation revision survived a Sol xhigh
+  block/fix/re-review cycle and an independent Terra test rerun.
+- Left the parent plan in progress: issue #75's displaced-tip repair is the next serial
+  implementation slice, followed by explicit expected-OID publication in issue #76.
