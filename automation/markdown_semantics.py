@@ -65,6 +65,11 @@ MARKDOWN_LINK_RE = re.compile(
         [ \t]*\)""",
     re.X,
 )
+MARKDOWN_REFERENCE_LINK_RE = re.compile(
+    r"(?<!!)(?<!\\)\[(?P<label>(?:\\.|[^\]\\])*)\]"
+    r"(?:\[(?:\\.|[^\]\\])*\])?"
+)
+MARKDOWN_EMPHASIS_MARKER_RE = re.compile(r"(?<!\\)(?:\*{1,3}|_{1,3}|~{2})")
 HTML_VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
     "meta", "param", "source", "track", "wbr",
@@ -295,10 +300,35 @@ def semantic_text(text):
     return strip_indented_code(_semantic_text(text))
 
 
+def rendered_inline_markdown_prose(text):
+    """Render the closed inline Markdown/HTML shapes used in identity checks.
+
+    Link labels remain visible while inline destinations and reference labels never
+    become identity. Full, collapsed, and shortcut references share one label rule;
+    inline code keeps its rendered content; emphasis markers disappear. HTML,
+    entities, and invisible Unicode use the same human-facing view as action checks.
+    """
+    rendered = rendered_human_text(text or "")
+    rendered = render_inline_code(rendered)
+    rendered = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"), rendered
+    )
+    rendered = MARKDOWN_REFERENCE_LINK_RE.sub(
+        lambda matched: matched.group("label"), rendered
+    )
+    rendered = MARKDOWN_EMPHASIS_MARKER_RE.sub("", rendered)
+    return strip_default_ignorable_characters(rendered)
+
+
+def plain_review_receipt_component(text):
+    """Require reviewer/finding source to already be its rendered plain text."""
+    value = text or ""
+    return bool(value) and rendered_inline_markdown_prose(value) == value
+
+
 def identity_key(identity):
     """Return shared human-visible identity tokens, excluding placeholders."""
-    rendered = rendered_human_text(identity or "")
-    visible = strip_default_ignorable_characters(rendered)
+    visible = rendered_inline_markdown_prose(identity or "")
     normalized = unicodedata.normalize("NFKC", visible).casefold()
     normalized = " ".join(normalized.split())
     if not normalized or normalized in IDENTITY_PLACEHOLDERS \
@@ -421,6 +451,9 @@ def core_fit_review_evidence(text):
                 evidence["revision_count"] = 2
                 evidence["reviewed_revision"] = None
                 verdicts = []
+            break
+        if not plain_review_receipt_component(matched.group("reviewer")) \
+                or not plain_review_receipt_component(matched.group("finding")):
             break
         verdicts.append(matched)
         line_index += 1

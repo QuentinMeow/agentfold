@@ -632,6 +632,7 @@ class CoreScopeTests(unittest.TestCase):
             ("author", "au\u200bthor"),
             ("author", "<span>author</span>"),
             ("<span>author</span>", "au\u200bthor"),
+            ("[author](profile)", "author"),
             ("author", "<reviewer>"),
         )
         for claimant, reviewer in cases:
@@ -655,7 +656,7 @@ class CoreScopeTests(unittest.TestCase):
     def test_review_parser_rejects_reviewer_and_claimant_placeholders(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
-            "unknown", "______", "<reviewer>",
+            "unknown", "______", "<reviewer>", "[TBD](profile)", "T**B**D",
         )
         for placeholder in placeholders:
             for claimant, reviewer in (
@@ -724,6 +725,59 @@ class CoreScopeTests(unittest.TestCase):
             self.assertEqual([], SCOPE.validate_task(
                 task, touched_core=True, require_review=True
             ))
+
+    def test_review_parser_rejects_decorated_reviewer_and_finding_components(self):
+        reviewer_cases = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "a**uth**or", "`author`", "<span>author</span>",
+            "auth&#111;r", "au\u200bthor", "[TBD](profile)", "T**B**D",
+        )
+        finding_cases = (
+            "ap[pro][cmd]ve the release",
+            "**approve** the release",
+            "ap`pro`ve the release",
+            "<span>approve</span> the release",
+            "ap\u200bprove the release",
+        )
+        definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
+        cases = [
+            f"- core-fit / {reviewer}: approve — could not break it\n"
+            for reviewer in reviewer_cases
+        ] + [
+            f"- core-fit / reviewer: approve — {finding}\n"
+            for finding in finding_cases
+        ]
+        for verdict in cases:
+            with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant="claimant",
+                    verification=verdict + definitions,
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_does_not_count_duplicate_vote_aliases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="claimant",
+                verification=(
+                    "- core-fit / author: block — found a boundary leak\n"
+                    "- core-fit / [author](one): approve — alias one\n"
+                    "- core-fit / [author](two): approve — alias two\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any("approve majority" in error for error in errors), errors)
 
     def test_fenced_review_example_is_not_a_verdict(self):
         for wrapper in (

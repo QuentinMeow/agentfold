@@ -22,3 +22,8 @@ When `--require-review` is explicitly selected, the heading, reviewed-revision f
 and one or more consecutive core-fit verdicts above form one contiguous formal block.
 Keep only blank lines between those elements. The first nonblank non-verdict ends the
 formal block; put explanations and any non-core-fit review notes after it.
+
+Reviewer identities and findings are plain text only. Markdown links (inline, reference,
+collapsed, or shortcut), emphasis, inline code, HTML/entities, or invisible formatting
+make that line non-formal, end the block, and leave its verdict under ordinary human-action
+detection. This restriction keeps displayed prose and formal evidence from disagreeing.

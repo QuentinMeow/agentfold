@@ -44,6 +44,48 @@ HUMAN_ASK = "Please confirm the retention window before this lands."
 MISSING_TARGET = "automation/does-not-exist.py"
 
 
+class InlineIdentityRenderingTests(unittest.TestCase):
+    def test_markdown_html_and_invisible_aliases_share_visible_identity(self):
+        aliases = (
+            "author",
+            "[author](profile)",
+            "[author][id]",
+            "[author][]",
+            "[author]",
+            "a**uth**or",
+            "`author`",
+            "<span>author</span>",
+            "auth&#111;r",
+            "au\u200bthor",
+        )
+        expected = SEMANTICS.identity_key("author")
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                self.assertEqual(expected, SEMANTICS.identity_key(alias))
+        self.assertNotIn("profile", SEMANTICS.identity_key("[author](profile)"))
+        self.assertNotIn("id", SEMANTICS.identity_key("[author][id]"))
+
+    def test_rendered_placeholders_and_markup_only_names_have_no_identity(self):
+        placeholders = (
+            "[TBD](profile)", "T**B**D", "<reviewer>", "`TODO`",
+            "[unknown][id]", "_none_",
+        )
+        for placeholder in placeholders:
+            with self.subTest(placeholder=placeholder):
+                self.assertEqual((), SEMANTICS.identity_key(placeholder))
+
+    def test_decorated_receipt_components_are_not_formal_plain_text(self):
+        decorated = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "a**uth**or", "`author`", "<span>author</span>",
+            "auth&#111;r", "au\u200bthor", "ap[pro][cmd]ve the release",
+        )
+        self.assertTrue(SEMANTICS.plain_review_receipt_component("plain finding"))
+        for value in decorated:
+            with self.subTest(value=value):
+                self.assertFalse(SEMANTICS.plain_review_receipt_component(value))
+
+
 class IndentedCodeViewTests(unittest.TestCase):
     """CommonMark's rule for an indented code block, case by case."""
 

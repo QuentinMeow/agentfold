@@ -2533,6 +2533,7 @@ class ActionProjectionTests(unittest.TestCase):
             ("author", "au\u200bthor"),
             ("author", "<span>author</span>"),
             ("<span>author</span>", "au\u200bthor"),
+            ("[author](profile)", "author"),
             ("author", "<reviewer>"),
         )
         with self.repo() as root:
@@ -2559,7 +2560,7 @@ class ActionProjectionTests(unittest.TestCase):
         source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
-            "unknown", "______", "<reviewer>",
+            "unknown", "______", "<reviewer>", "[TBD](profile)", "T**B**D",
         )
         with self.repo() as root:
             for placeholder in placeholders:
@@ -2686,6 +2687,65 @@ class ActionProjectionTests(unittest.TestCase):
                     repo=root,
                 ),
             )
+
+    def test_task_action_units_fail_closed_on_decorated_receipt_components(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        reviewer_cases = (
+            "[author](profile)", "[author][id]", "[author][]", "[author]",
+            "a**uth**or", "`author`", "<span>author</span>",
+            "auth&#111;r", "au\u200bthor", "[TBD](profile)", "T**B**D",
+        )
+        finding_cases = (
+            "ap[pro][cmd]ve the release",
+            "**approve** the release",
+            "ap`pro`ve the release",
+            "<span>approve</span> the release",
+            "ap\u200bprove the release",
+        )
+        definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
+        with self.repo() as root:
+            self.receipt_task(root, claimant="claimant")
+            for reviewer in reviewer_cases:
+                with self.subTest(reviewer=reviewer):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix
+                        + f"- core-fit / {reviewer}: approve — could not break it\n"
+                        + definitions,
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+            for finding in finding_cases:
+                with self.subTest(finding=finding):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix
+                        + f"- core-fit / reviewer: approve — {finding}\n"
+                        + definitions,
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_do_not_neutralize_duplicate_vote_aliases(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / author: block — found a boundary leak\n"
+            "- core-fit / [author](one): approve — alias one\n"
+            "- core-fit / [author](two): approve — alias two\n"
+        )
+        with self.repo() as root:
+            self.receipt_task(root, claimant="claimant")
+            counts = PROJECTION.task_action_unit_counts(
+                text,
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual(2, sum(counts.values()), counts)
 
     def test_task_action_units_allow_syntactic_quotes_code_and_explanation(self):
         text = (
