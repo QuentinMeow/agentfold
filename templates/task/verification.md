@@ -48,7 +48,9 @@ may supply or repair characters. The claimant and the exact review heading must 
 outside every still-open raw HTML container. A closed container or an HTML-looking example
 inside fenced, indented, or inline code does not interfere; any unclosed visible, hidden,
 non-prose, or custom container fails closed even when a blank line made later Markdown
-structurally visible again.
+structurally visible again. An incomplete HTML-like start, end, comment, declaration, or
+processing marker also fails closed while parser input remains pending at the authority
+line, even if a later line eventually supplies `>`.
 Placeholder rejection, claimant comparison, and duplicate-voter replacement all use the
 same sorted multiset of case-folded ASCII alphanumerics. Punctuation, spacing, token
 boundaries, word order, reordered placeholders such as `yet none`, and anagram placeholders
@@ -56,3 +58,9 @@ such as `D B T` cannot create another voter. This deliberately collides anagrams
 therefore formal receipts use distinct stable role labels, not personal or display names.
 Detection of
 non-formal human actions separately removes Unicode category-M marks before tokenization.
+
+Receipt heading candidates are collected in one source/structural/rendered line scan.
+Zero or multiple visible candidates fail before any HTML-prefix parse; the sole candidate
+checks its prefix once. The heading, revision field, and every verdict line must keep the
+same literal line body at the same logical index in both structural and rendered-human
+views, so invisible receipt evidence never receives the exception.

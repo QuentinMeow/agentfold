@@ -761,6 +761,23 @@ class CoreScopeTests(unittest.TestCase):
             "<div><span>\n\n**Claimed-by:** author",
             "<DIV\n class='visible'>\n\n**Claimed-by:** author",
             "<div hidden>\r\n\r\n**Claimed-by:** author\r\n",
+            "<div\n\n**Claimed-by:** author",
+            "<div\n class='visible'\n\n**Claimed-by:** author\n>",
+            "<div class='unterminated\n\n**Claimed-by:** author\n'>",
+            "<agent-box\r\n role='review'\r\n\r\n"
+            "**Claimed-by:** author\r\n>\r\n",
+            "</div\n\n**Claimed-by:** author",
+            "<!--\n\n**Claimed-by:** author\n-->",
+            "<?\n\n**Claimed-by:** author\n?>",
+            "<![CDATA[\n\n**Claimed-by:** author\n]]>",
+            "<!DOCTYPE\n\n**Claimed-by:** author\n>",
+            "<x-box/\n\n**Claimed-by:** author",
+            "<!-\n\n**Claimed-by:** author\n>",
+            "</\n\n**Claimed-by:** author\n>",
+            "<!\n\n**Claimed-by:** author\n>",
+            "<!1\n\n**Claimed-by:** author\n>",
+            "<!_\n\n**Claimed-by:** author\n>",
+            "<![\r\n\r\n**Claimed-by:** author\r\n>\r\n",
         )
         for claimed_by in invalid_claimant_fields:
             with self.subTest(claimed_by=claimed_by), \
@@ -934,6 +951,13 @@ class CoreScopeTests(unittest.TestCase):
             "<details>\n\n", "<dialog>\n\n", "<agent-box>\n\n",
             "<div style='opacity:0'>\n\n", "<div class='hide'>\n\n",
             "<DIV\r\n class='visible'>\r\n\r\n",
+            "<div\n\n", "<div\n class='visible'\n\n",
+            "<div class='unterminated\n\n",
+            "<agent-box\r\n role='review'\r\n\r\n",
+            "</div\n\n", "<!--\n\n", "<?\n\n",
+            "<![CDATA[\n\n", "<!DOCTYPE\n\n", "<x-box/\n\n",
+            "<!-\n\n", "</\n\n", "<!\n\n", "<!1\n\n",
+            "<!_\n\n", "<![\n\n", "<![\r\n\r\n",
         )
         for prefix in open_prefixes:
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmp:
@@ -965,6 +989,9 @@ class CoreScopeTests(unittest.TestCase):
             "<div>\nvisible\n</div>\n\n",
             "```html\n<div>\n```\n\n",
             "`<div>`\n\n",
+            "ordinary source with a < b comparison\n\n",
+            "<div></div>\n\n", "<!-- closed -->\n\n",
+            "<?closed?>\n\n", "<!DOCTYPE html>\n\n",
         ):
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmp:
                 task = self.make_task(

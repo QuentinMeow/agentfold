@@ -484,8 +484,10 @@ def core_fit_review_evidence(text):
     """
     source = text or ""
     clean = semantic_text(source)
+    rendered = rendered_human_text(source)
     source_lines = commonmark_lines(source)
     semantic_lines = commonmark_lines(clean)
+    rendered_lines = commonmark_lines(rendered)
     evidence = {
         "semantic_text": clean,
         "section_count": 0,
@@ -493,7 +495,8 @@ def core_fit_review_evidence(text):
         "reviewed_revision": None,
         "verdicts": (),
     }
-    if len(source_lines) != len(semantic_lines):
+    if len(source_lines) != len(semantic_lines) \
+            or len(source_lines) != len(rendered_lines):
         return evidence
 
     offsets = []
@@ -503,24 +506,23 @@ def core_fit_review_evidence(text):
         cursor += len(line)
 
     def structural_line(index):
-        return markdown_line_body(source_lines[index]) == markdown_line_body(
-            semantic_lines[index]
-        )
-
-    def raw_html_container_open_before(index):
-        return raw_html_container_open_at_end("".join(source_lines[:index]))
+        source_body = markdown_line_body(source_lines[index])
+        return source_body == markdown_line_body(semantic_lines[index]) \
+            and source_body == markdown_line_body(rendered_lines[index])
 
     section_lines = [
         index for index, line in enumerate(source_lines)
         if markdown_line_body(line) == "## Review verdicts"
         and structural_line(index)
-        and not raw_html_container_open_before(index)
     ]
     evidence["section_count"] = len(section_lines)
     if len(section_lines) != 1:
         return evidence
 
     section_line = section_lines[0]
+    if raw_html_container_open_at_end("".join(source_lines[:section_line])):
+        evidence["section_count"] = 0
+        return evidence
     content_line = section_line + 1
     while content_line < len(source_lines) \
             and ascii_markdown_blank_line(source_lines[content_line]):
@@ -784,12 +786,20 @@ def rendered_human_text(text):
     hidden by deterministic HTML attributes. Callers must never use this view as
     evidence for Markdown headings, fields, or links.
     """
+    source = _semantic_text(text, preserve_visible_html=True)
     parser = _RenderedHumanHTMLParser()
-    parser.feed(_semantic_text(text, preserve_visible_html=True))
-    parser.close()
+    try:
+        parser.feed(source)
+        parser.close()
+        rendered = "".join(parser.output)
+    except Exception:
+        # Malformed pending markup must never crash a repository gate. Keeping the
+        # code-masked source visible is the conservative detection fallback; authority
+        # checks separately reject the pending raw-HTML prefix.
+        rendered = source
     return "".join(
         " " if unicodedata.category(character) == "Zs" else character
-        for character in "".join(parser.output)
+        for character in rendered
     )
 
 
@@ -806,9 +816,17 @@ def raw_html_container_open_at_end(text):
         )
     )
     parser = _RenderedHumanHTMLParser()
-    parser.feed(clean)
-    parser.close()
-    return bool(parser.stack)
+    try:
+        parser.feed(clean)
+    except Exception:
+        return True
+    pending = parser.rawdata
+    pending_markup = pending.lstrip().startswith("<")
+    try:
+        parser.close()
+    except Exception:
+        return True
+    return bool(parser.stack or pending_markup)
 
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)

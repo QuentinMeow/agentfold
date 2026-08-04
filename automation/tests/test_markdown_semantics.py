@@ -217,10 +217,26 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             "<div><span>\n\n**Claimed-by:** author\n",
             "<DIV\n class='visible'>\n\n**Claimed-by:** author\n",
             "<div hidden>\r\n\r\n**Claimed-by:** author\r\n",
+            "<div\n\n**Claimed-by:** author\n",
+            "<div\n class='visible'\n\n**Claimed-by:** author\n>\n",
+            "<div class='unterminated\n\n**Claimed-by:** author\n'>\n",
+            "<agent-box\r\n role='review'\r\n\r\n"
+            "**Claimed-by:** author\r\n>\r\n",
+            "</div\n\n**Claimed-by:** author\n",
+            "<!--\n\n**Claimed-by:** author\n",
+            "<?\n\n**Claimed-by:** author\n",
+            "<![CDATA[\n\n**Claimed-by:** author\n",
+            "<!DOCTYPE\n\n**Claimed-by:** author\n",
+            "<x-box/\n\n**Claimed-by:** author\n",
+            "<!-\n\n**Claimed-by:** author\n>\n",
+            "</\n\n**Claimed-by:** author\n>\n",
+            "<!\n\n**Claimed-by:** author\n>\n",
+            "<!1\n\n**Claimed-by:** author\n>\n",
+            "<!_\n\n**Claimed-by:** author\n>\n",
+            "<![\r\n\r\n**Claimed-by:** author\r\n>\r\n",
         )
         for source in hidden_containers:
             with self.subTest(source=source):
-                self.assertIn("**Claimed-by:** author", SEMANTICS.semantic_text(source))
                 self.assertIsNone(
                     SEMANTICS.claimed_by_identity_source(source)
                 )
@@ -242,6 +258,8 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             "<div>\nvisible\n</div>\n\n",
             "```html\n<div>\n```\n\n",
             "`<div>`\n\n",
+            "<div></div>\n\n", "<!-- closed -->\n\n",
+            "<?closed?>\n\n", "<!DOCTYPE html>\n\n",
         )
         for prefix in safe_prefixes:
             source = prefix + "**Claimed-by:** author\n"
@@ -263,6 +281,11 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
         for source in (
             "<div>", "<details>\n", "<dialog>\r\n", "<agent-box>\n",
             "<div><span>\n", "<DIV\n class='visible'>\n",
+            "<div", "<div\n class='visible'", "<div class='unterminated",
+            "<agent-box\r\n role='review'",
+            "</div", "<!--", "<?", "<![CDATA[", "<!DOCTYPE", "<x-box/",
+            "<!-\n\n", "</\n\n", "<!\n\n", "<!1\n\n",
+            "<!_\n\n", "<![\n\n", "<![\r\n\r\n",
         ):
             with self.subTest(open_source=source):
                 self.assertTrue(
@@ -270,16 +293,84 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
                 )
         for source in (
             "<details>visible</details>\n",
+            "<div></div>\n", "<!-- closed -->\n", "<?closed?>\n",
+            "<!DOCTYPE html>\n",
             "<div><span>visible</span></div>\n",
             "```html\n<div>\n```\n",
             "    <div>\n",
             "`<div>`\n",
             "<br><hr><img src='x'><input>\n",
+            "ordinary source\n", "a < b\n", "x < y\n", "AT&T\n",
+            "&amp\n", "<\n",
         ):
             with self.subTest(closed_or_code_source=source):
                 self.assertFalse(
                     SEMANTICS.raw_html_container_open_at_end(source)
                 )
+
+    def test_receipt_lines_must_match_structural_and_rendered_views(self):
+        revision = f"**Reviewed revision:** {'a' * 40}"
+        verdict = "- core-fit / reviewer: approve — visible receipt"
+        source = (
+            "## Review verdicts\n\n"
+            + revision
+            + "\n\n"
+            + verdict
+            + "\n"
+        )
+        cases = (
+            ("## Review verdicts", "section_count", 0),
+            (revision, "revision_count", 0),
+            (verdict, "verdicts", ()),
+        )
+        for line, field, expected in cases:
+            rendered = source.replace(line, " " * len(line), 1)
+            with self.subTest(line=line), mock.patch.object(
+                SEMANTICS, "rendered_human_text", return_value=rendered
+            ):
+                evidence = SEMANTICS.core_fit_review_evidence(source)
+                self.assertEqual(expected, evidence[field], evidence)
+
+    def test_duplicate_heading_scan_never_reparses_prefixes(self):
+        duplicates = "\n\n".join("## Review verdicts" for _ in range(1000))
+        with mock.patch.object(
+            SEMANTICS,
+            "raw_html_container_open_at_end",
+            wraps=SEMANTICS.raw_html_container_open_at_end,
+        ) as open_state:
+            evidence = SEMANTICS.core_fit_review_evidence(duplicates)
+        self.assertEqual(1000, evidence["section_count"], evidence)
+        self.assertEqual(0, open_state.call_count)
+
+        valid = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / reviewer: approve — visible receipt\n"
+        )
+        with mock.patch.object(
+            SEMANTICS,
+            "raw_html_container_open_at_end",
+            wraps=SEMANTICS.raw_html_container_open_at_end,
+        ) as open_state:
+            evidence = SEMANTICS.core_fit_review_evidence(valid)
+        self.assertEqual(1, evidence["section_count"], evidence)
+        self.assertEqual(1, open_state.call_count)
+
+    def test_multiple_visible_heading_candidates_skip_prefix_parsing(self):
+        visible_nested = (
+            "<div>\n\n"
+            "## Review verdicts\n\n"
+            "</div>\n\n"
+            "## Review verdicts\n"
+        )
+        with mock.patch.object(
+            SEMANTICS,
+            "raw_html_container_open_at_end",
+            wraps=SEMANTICS.raw_html_container_open_at_end,
+        ) as open_state:
+            evidence = SEMANTICS.core_fit_review_evidence(visible_nested)
+        self.assertEqual(2, evidence["section_count"], evidence)
+        self.assertEqual(0, open_state.call_count)
 
 
 class IndentedCodeViewTests(unittest.TestCase):

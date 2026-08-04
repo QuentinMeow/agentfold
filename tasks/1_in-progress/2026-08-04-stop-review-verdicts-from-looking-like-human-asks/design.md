@@ -69,7 +69,16 @@ claimant text. A shared prefix-state check also requires the claimant and exact 
 heading to begin outside every still-open raw HTML container. Closed containers and
 HTML-looking fenced, indented, or inline-code examples remain compatible; unclosed visible,
 hidden, non-prose, and custom containers fail closed. CommonMark may expose later Markdown
-after a blank line, but nested text is not top-level authority.
+after a blank line, but nested text is not top-level authority. Pending incomplete
+HTML-like start, end, comment, declaration, or processing markers fail closed at the
+authority line even when a later line supplies the missing `>`.
+
+Receipt extraction builds source, structural, and rendered-human line arrays once. It
+collects exact heading candidates in one linear scan and returns immediately for zero or
+multiple candidates, before parsing any prefix. The unique candidate parses its prefix
+once. The heading, revision field, and verdicts must each retain their literal line body
+at the same logical index in both derived views, which rejects human-invisible evidence
+without quadratic prefix reparsing.
 
 Duplicate exact headings fail closed across the document. A second exact full-commit field
 fails only while the formal prologue remains contiguous; the first nonblank non-verdict
