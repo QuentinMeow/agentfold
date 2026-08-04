@@ -559,6 +559,25 @@ class CoreScopeTests(unittest.TestCase):
                 task, touched_core=True, require_review=True
             ))
 
+    def test_revision_fields_inside_code_or_html_do_not_duplicate_receipt(self):
+        for historical_example in (
+            f"```text\n**Reviewed revision:** {'b' * 40}\n```\n\n",
+            f"<div>\n**Reviewed revision:** {'b' * 40}\n</div>\n\n",
+        ):
+            with self.subTest(historical_example=historical_example), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review")
+                (task / "verification.md").write_text(
+                    historical_example
+                    + "## Review verdicts\n\n"
+                    f"**Reviewed revision:** {'a' * 40}\n\n"
+                    "- core-fit / reviewer: approve — repaired candidate held\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
     def test_duplicate_revision_inside_formal_block_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(tmp, status="3_in-review")
@@ -639,6 +658,7 @@ class CoreScopeTests(unittest.TestCase):
             "`author`", "<span>author</span>", "auth&#111;r",
             "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
             "author\u00a0name", "author\u2028name", "аuthor", "authоr",
+            "review:team",
         )
         cases = (
             [(claimant, "independent") for claimant in decorated]
@@ -726,6 +746,21 @@ class CoreScopeTests(unittest.TestCase):
             "- list paragraph\n**Claimed-by:** author",
             "**Claimed-by:** author\n---",
             "**Claimed-by:** author\n===",
+            "<div>\n\n**Claimed-by:** author",
+            "<div hidden>\n\n**Claimed-by:** author",
+            "<span hidden>\n\n**Claimed-by:** author",
+            "<div aria-hidden='true'>\n\n**Claimed-by:** author",
+            "<div style='display:none'>\n\n**Claimed-by:** author",
+            "<div style='visibility:hidden'>\n\n**Claimed-by:** author",
+            "<div style='opacity:0'>\n\n**Claimed-by:** author",
+            "<div class='hide'>\n\n**Claimed-by:** author",
+            "<details>\n\n**Claimed-by:** author",
+            "<dialog>\n\n**Claimed-by:** author",
+            "<template>\n\n**Claimed-by:** author",
+            "<agent-box>\n\n**Claimed-by:** author",
+            "<div><span>\n\n**Claimed-by:** author",
+            "<DIV\n class='visible'>\n\n**Claimed-by:** author",
+            "<div hidden>\r\n\r\n**Claimed-by:** author\r\n",
         )
         for claimed_by in invalid_claimant_fields:
             with self.subTest(claimed_by=claimed_by), \
@@ -750,6 +785,55 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertTrue(any(
                     "independent reviewer" in error for error in errors
                 ), errors)
+
+    def test_review_parser_accepts_visible_canonical_claimant_lf_and_crlf(self):
+        for line_ending in ("\n", "\r\n"):
+            with self.subTest(line_ending=line_ending), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        "- core-fit / independent: approve — boundary held\n"
+                    ),
+                )
+                (task / "task.md").write_bytes(
+                    (
+                        f"# Task{line_ending}{line_ending}"
+                        f"**Claimed-by:** author{line_ending}"
+                        f"**Filed:** 2026-08-04{line_ending}"
+                        f"**Repository scope:** core{line_ending}"
+                    ).encode("utf-8")
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
+    def test_review_parser_accepts_claimant_after_closed_or_code_html(self):
+        for prefix in (
+            "<details>visible</details>\n\n",
+            "<div>\nvisible\n</div>\n\n",
+            "```html\n<div>\n```\n\n",
+            "`<div>`\n\n",
+        ):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        "- core-fit / independent: approve — boundary held\n"
+                    ),
+                )
+                (task / "task.md").write_text(
+                    prefix
+                    + "**Claimed-by:** author\n"
+                    "**Filed:** 2026-08-04\n"
+                    "**Repository scope:** core\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
 
     def test_review_parser_rejects_non_ascii_reviewer_identity(self):
         cases = (
@@ -803,7 +887,7 @@ class CoreScopeTests(unittest.TestCase):
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "T\u0301BD", "TB\u0301D",
             "TBD\u0301", "TBD.", "T.B.D.", "t-b-d", "unknown.",
-            "none, yet", "n/a.",
+            "D B T", "none, yet", "yet none", "n/a.",
         )
         for placeholder in placeholders:
             for claimant, reviewer in (
@@ -826,6 +910,78 @@ class CoreScopeTests(unittest.TestCase):
                     self.assertTrue(any(
                         "independent reviewer" in error for error in errors
                     ), errors)
+
+    def test_review_parser_rejects_embedded_colon_reviewer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="claimant",
+                verification=(
+                    "- core-fit / review:team: approve — canonical looking alias\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any(
+                "independent reviewer" in error for error in errors
+            ), errors)
+
+    def test_review_parser_rejects_receipt_nested_in_open_html(self):
+        open_prefixes = (
+            "<div>\n\n", "<div hidden>\n\n", "<span>\n\n",
+            "<details>\n\n", "<dialog>\n\n", "<agent-box>\n\n",
+            "<div style='opacity:0'>\n\n", "<div class='hide'>\n\n",
+            "<DIV\r\n class='visible'>\r\n\r\n",
+        )
+        for prefix in open_prefixes:
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        "- core-fit / reviewer: approve — nested receipt\n"
+                    ),
+                )
+                verification = (task / "verification.md").read_text(encoding="utf-8")
+                (task / "verification.md").write_text(
+                    prefix + verification,
+                    encoding="utf-8",
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "Review verdicts" in error for error in errors
+                ), errors)
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_accepts_receipt_after_closed_or_code_html(self):
+        for prefix in (
+            "<details>visible</details>\n\n",
+            "<div>\nvisible\n</div>\n\n",
+            "```html\n<div>\n```\n\n",
+            "`<div>`\n\n",
+        ):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    verification=(
+                        "- core-fit / reviewer: approve — visible receipt\n"
+                    ),
+                )
+                verification = (task / "verification.md").read_text(encoding="utf-8")
+                (task / "verification.md").write_text(
+                    prefix + verification,
+                    encoding="utf-8",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
 
     def test_review_parser_stops_at_raw_hidden_or_code_content(self):
         first = "- core-fit / first: block — earlier blocker\n"
@@ -881,7 +1037,7 @@ class CoreScopeTests(unittest.TestCase):
                 claimant="codex planner / sol-high implementer",
                 verification=(
                     "- core-fit / reviewer 2 @ safety + core: approve — "
-                    "Boundary clear, tested; release-safe, no leak.\n"
+                    "Boundary: clear, tested; release-safe, no leak.\n"
                 ),
             )
             self.assertEqual([], SCOPE.validate_task(

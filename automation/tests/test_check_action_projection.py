@@ -2539,6 +2539,7 @@ class ActionProjectionTests(unittest.TestCase):
             "`author`", "<span>author</span>", "auth&#111;r",
             "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
             "author\u00a0name", "author\u2028name", "аuthor", "authоr",
+            "review:team",
         )
         with self.repo() as root:
             cases = (
@@ -2616,6 +2617,21 @@ class ActionProjectionTests(unittest.TestCase):
             "- list paragraph\n**Claimed-by:** author\n",
             "# Task\n\n**Claimed-by:** author\n---\n",
             "# Task\n\n**Claimed-by:** author\n===\n",
+            "<div>\n\n**Claimed-by:** author\n",
+            "<div hidden>\n\n**Claimed-by:** author\n",
+            "<span hidden>\n\n**Claimed-by:** author\n",
+            "<div aria-hidden='true'>\n\n**Claimed-by:** author\n",
+            "<div style='display:none'>\n\n**Claimed-by:** author\n",
+            "<div style='visibility:hidden'>\n\n**Claimed-by:** author\n",
+            "<div style='opacity:0'>\n\n**Claimed-by:** author\n",
+            "<div class='hide'>\n\n**Claimed-by:** author\n",
+            "<details>\n\n**Claimed-by:** author\n",
+            "<dialog>\n\n**Claimed-by:** author\n",
+            "<template>\n\n**Claimed-by:** author\n",
+            "<agent-box>\n\n**Claimed-by:** author\n",
+            "<div><span>\n\n**Claimed-by:** author\n",
+            "<DIV\n class='visible'>\n\n**Claimed-by:** author\n",
+            "<div hidden>\r\n\r\n**Claimed-by:** author\r\n",
         )
         with self.repo() as root:
             for task_text in invalid_task_texts:
@@ -2626,17 +2642,26 @@ class ActionProjectionTests(unittest.TestCase):
                         prefix, source_path, repo=root
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
-            with mock.patch.object(
-                PROJECTION,
-                "candidate_text",
-                return_value="# Task\n\n**Claimed-by:** author\n",
+            for canonical_task in (
+                "# Task\n\n**Claimed-by:** author\n**Filed:** 2026-08-04\n",
+                "# Task\r\n\r\n**Claimed-by:** author\r\n"
+                "**Filed:** 2026-08-04\r\n",
+                "<details>visible</details>\n\n"
+                "**Claimed-by:** author\n**Filed:** 2026-08-04\n",
+                "```html\n<div>\n```\n\n"
+                "**Claimed-by:** author\n**Filed:** 2026-08-04\n",
             ):
-                self.assertEqual(
-                    {},
-                    PROJECTION.task_action_unit_counts(
-                        prefix, source_path, repo=root
-                    ),
-                )
+                with self.subTest(canonical_task=canonical_task), mock.patch.object(
+                    PROJECTION,
+                    "candidate_text",
+                    return_value=canonical_task,
+                ):
+                    self.assertEqual(
+                        {},
+                        PROJECTION.task_action_unit_counts(
+                            prefix, source_path, repo=root
+                        ),
+                    )
 
     def test_task_action_units_reject_non_ascii_reviewer_identity(self):
         prefix = (
@@ -2683,7 +2708,7 @@ class ActionProjectionTests(unittest.TestCase):
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "T\u0301BD", "TB\u0301D",
             "TBD\u0301", "TBD.", "T.B.D.", "t-b-d", "unknown.",
-            "none, yet", "n/a.",
+            "D B T", "none, yet", "yet none", "n/a.",
         )
         with self.repo() as root:
             for placeholder in placeholders:
@@ -2725,6 +2750,84 @@ class ActionProjectionTests(unittest.TestCase):
                 repo=root,
             )
             self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_reject_embedded_colon_reviewer(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / review:team: approve — canonical looking alias\n"
+        )
+        with self.repo() as root:
+            self.receipt_task(root, claimant="claimant")
+            counts = PROJECTION.task_action_unit_counts(
+                text,
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_do_not_neutralize_receipts_in_open_html(self):
+        receipt = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / reviewer: approve — nested receipt\n"
+        )
+        open_prefixes = (
+            "<div>\n\n", "<div hidden>\n\n", "<span>\n\n",
+            "<details>\n\n", "<dialog>\n\n", "<agent-box>\n\n",
+            "<div style='opacity:0'>\n\n", "<div class='hide'>\n\n",
+            "<DIV\r\n class='visible'>\r\n\r\n",
+        )
+        for prefix in open_prefixes:
+            text = prefix + receipt
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    text,
+                    PROJECTION.neutralize_core_fit_review_verdict_tokens(
+                        text, claimant="author"
+                    ),
+                )
+        with self.repo() as root:
+            self.receipt_task(root, claimant="author")
+            for prefix in (
+                "<details>visible</details>\n\n",
+                "```html\n<div>\n```\n\n",
+                "`<div>`\n\n",
+            ):
+                with self.subTest(safe_prefix=prefix):
+                    self.assertEqual(
+                        {},
+                        PROJECTION.task_action_unit_counts(
+                            prefix + receipt,
+                            "tasks/3_in-review/2026-07-23-example/verification.md",
+                            repo=root,
+                        ),
+                    )
+
+    def test_task_action_units_ignore_historical_revision_after_terminator(self):
+        first = f"**Reviewed revision:** {'a' * 40}\n"
+        duplicate = f"**Reviewed revision:** {'b' * 40}\n"
+        text = (
+            "## Review verdicts\n\n"
+            + first
+            + "\n- core-fit / reviewer: approve — first receipt\n\n"
+            "ordinary explanation\n\n"
+            + duplicate
+        )
+        with self.repo() as root:
+            self.receipt_task(root, claimant="author")
+            counts = PROJECTION.task_action_unit_counts(
+                text,
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual({}, counts)
+        self.assertNotEqual(
+            text,
+            PROJECTION.neutralize_core_fit_review_verdict_tokens(
+                text, claimant="author"
+            ),
+        )
 
     def test_task_action_units_read_claimant_from_candidate_revision(self):
         text = (
@@ -2816,7 +2919,7 @@ class ActionProjectionTests(unittest.TestCase):
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
             "- core-fit / reviewer 2 @ safety + core: approve — "
-            "Boundary clear, tested; release-safe, no leak.\n"
+            "Boundary: clear, tested; release-safe, no leak.\n"
         )
         with self.repo() as root:
             self.receipt_task(

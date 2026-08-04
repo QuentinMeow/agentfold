@@ -22,25 +22,37 @@ When `--require-review` is explicitly selected, the heading, reviewed-revision f
 and one or more consecutive core-fit verdicts above form one contiguous formal block.
 Keep only blank lines between those elements. The first nonblank non-verdict ends the
 formal block; put explanations and any non-core-fit review notes after it.
+An immediate second `**Reviewed revision:**` field inside that contiguous prologue fails
+closed. Exact historical revision fields after the first terminator are ordinary history
+and do not join or invalidate the already-closed receipt.
 
-Claimants, reviewer identities, and findings use a closed ASCII source alphabet: letters,
-digits, space, and only `. , ; : ? ! ' " ( ) / @ + -` as punctuation. The em dash is the
-structural delimiter outside those components. Every non-ASCII character, tab, control,
-invisible character, and other punctuation is invalid. Brackets, angle brackets, backslash,
-backtick, asterisk, underscore, tilde, braces, and ampersand therefore exclude every
-Markdown link, image, reference, escape, emphasis, code span, HTML tag, and entity by
-construction. An invalid claimant has no review identity; an invalid reviewer or finding
-ends the formal block and leaves its verdict under ordinary human-action detection.
+Claimants and reviewer identities use a closed ASCII source alphabet: letters, digits,
+space, and only `. , ; ? ! ' " ( ) / @ + -` as punctuation. Colon is excluded because it
+terminates the reviewer handle. Findings use the same alphabet plus colon. The em dash is
+the structural delimiter outside those components. Every non-ASCII character, tab,
+control, invisible character, and other punctuation is invalid. Brackets, angle brackets,
+backslash, backtick, asterisk, underscore, tilde, braces, and ampersand therefore exclude
+every Markdown link, image, reference, escape, emphasis, code span, HTML tag, and entity
+by construction. An invalid claimant has no review identity; an invalid reviewer or
+finding ends the formal block and leaves its verdict under ordinary human-action detection.
 
 The claimant comes only from the sole literal field's unchanged raw suffix, at file start
 or immediately after an ASCII-blank raw line. A preceding paragraph, blockquote, or list
 line makes it a lazy continuation and yields no identity. An immediate raw `---` or `===`
 Setext underline also yields no identity. Raw comments, markup, entities,
 links, images, code, escapes, invisible characters, non-ASCII characters, and duplicates
-also yield no claimant identity; Markdown semantics never repair that suffix. Placeholder
-comparison ignores allowed punctuation, so decorated spellings still reject. Authority
-comparison uses the sorted multiset of case-folded ASCII alphanumerics: punctuation,
-spacing, token boundaries, and word order cannot create another voter. This deliberately
-collides anagrams and therefore formal receipts use distinct stable role labels, not
-personal or display names. Duplicate-voter replacement uses the same key. Detection of
+also yield no claimant identity. The literal line body must remain character-for-character
+unchanged at the same logical line index in both the structural Markdown view and the
+rendered-human view; neither view
+may supply or repair characters. The claimant and the exact review heading must also begin
+outside every still-open raw HTML container. A closed container or an HTML-looking example
+inside fenced, indented, or inline code does not interfere; any unclosed visible, hidden,
+non-prose, or custom container fails closed even when a blank line made later Markdown
+structurally visible again.
+Placeholder rejection, claimant comparison, and duplicate-voter replacement all use the
+same sorted multiset of case-folded ASCII alphanumerics. Punctuation, spacing, token
+boundaries, word order, reordered placeholders such as `yet none`, and anagram placeholders
+such as `D B T` cannot create another voter. This deliberately collides anagrams and
+therefore formal receipts use distinct stable role labels, not personal or display names.
+Detection of
 non-formal human actions separately removes Unicode category-M marks before tokenization.

@@ -45,8 +45,9 @@ the human-action detector. Removing one helper call restores the prior behavior;
 owner's authorization approves this parser/template boundary, not a review outcome.
 
 The final compatibility boundary is an ASCII-only source whitelist rather than a partial
-renderer. Claimants, formal reviewers, and formal findings may contain ASCII letters,
-digits, space, and only `. , ; : ? ! ' " ( ) / @ + -` as punctuation. The em dash belongs
+renderer. Claimants and formal reviewers may contain ASCII letters, digits, space, and
+only `. , ; ? ! ' " ( ) / @ + -` as punctuation. Colon is excluded because it terminates
+the reviewer component. Formal findings use that alphabet plus colon. The em dash belongs
 only to the receipt's structural delimiter, outside those components. Every non-ASCII
 character is invalid, which excludes Unicode homoglyphs as well as separators, controls,
 default-ignorables, and combining marks. Brackets, angle brackets, backslash, backtick,
@@ -60,16 +61,27 @@ continuation rather than top-level authority. An immediately following raw Setex
 underline (`---` or `===`, with CommonMark indentation and ASCII whitespace) also invalidates
 the field. Its raw characters pass the source predicate
 first. A duplicate field, or any comment, markup, entity, link, image, code span, escape,
-control, invisible, or non-ASCII character leaves the task with no review identity. A
-later structural equality check only proves that the already-validated raw line was not
-hidden inside code or HTML; it never supplies repaired claimant text.
+control, invisible, or non-ASCII character leaves the task with no review identity. The
+already-validated literal line body must remain character-for-character unchanged at the
+same logical line index in both the structural Markdown view and the rendered-human view.
+Neither view supplies repaired
+claimant text. A shared prefix-state check also requires the claimant and exact receipt
+heading to begin outside every still-open raw HTML container. Closed containers and
+HTML-looking fenced, indented, or inline-code examples remain compatible; unclosed visible,
+hidden, non-prose, and custom containers fail closed. CommonMark may expose later Markdown
+after a blank line, but nested text is not top-level authority.
 
-Formal identity normalization first removes punctuation for placeholder comparison, so
-`TBD.`, `T.B.D.`, `t-b-d`, `unknown.`, `none, yet`, and `n/a.` cannot become voters. Its
-authority key is the sorted multiset of case-folded ASCII alphanumeric characters, ignoring
-punctuation, whitespace, token boundaries, and word order. The same key performs claimant
-comparison and duplicate-vote replacement. This conservative rule deliberately collides
-anagrams: receipt authors use distinct stable role labels, not personal or display names.
+Duplicate exact headings fail closed across the document. A second exact full-commit field
+fails only while the formal prologue remains contiguous; the first nonblank non-verdict
+terminates that receipt. Exact revision fields in later historical panels remain ordinary
+history and cannot join, invalidate, or receive neutralization from the earlier receipt.
+
+Formal identity normalization uses one key everywhere: the sorted multiset of case-folded
+ASCII alphanumeric characters. Placeholder rejection, claimant comparison, and
+duplicate-vote replacement therefore all ignore punctuation, whitespace, token boundaries,
+word order, and anagrams. `TBD.`, `D B T`, `none, yet`, `yet none`, and `n/a.` cannot become
+voters. This conservative rule deliberately collides anagrams: receipt authors use distinct
+stable role labels, not personal or display names.
 General human-action detection still applies NFKD and removes Unicode
 category-M marks so a malformed non-formal line cannot split an action keyword. Formal
 authority source rejects those marks and all other non-ASCII characters before identity or

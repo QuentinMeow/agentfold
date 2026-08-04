@@ -45,16 +45,29 @@ MISSING_TARGET = "automation/does-not-exist.py"
 
 
 class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
-    def test_allows_only_documented_plain_source_alphabet(self):
-        allowed = (
+    def test_identity_and_finding_use_their_documented_plain_source_alphabets(self):
+        allowed_identities = (
             "codex planner / sol-high implementer",
             "Reviewer 2 @ safety + core - clear.",
+        )
+        for value in allowed_identities:
+            with self.subTest(identity=value):
+                self.assertTrue(
+                    SEMANTICS.review_receipt_identity_source_text_allowed(value)
+                )
+                self.assertTrue(
+                    SEMANTICS.review_receipt_finding_source_text_allowed(value)
+                )
+        allowed_findings = (
             "Clear: yes, tested; why? because! 'single' \"double\" (group).",
         )
-        for value in allowed:
-            with self.subTest(value=value):
+        for value in allowed_findings:
+            with self.subTest(finding=value):
                 self.assertTrue(
-                    SEMANTICS.review_receipt_source_text_allowed(value)
+                    SEMANTICS.review_receipt_finding_source_text_allowed(value)
+                )
+                self.assertFalse(
+                    SEMANTICS.review_receipt_identity_source_text_allowed(value)
                 )
 
     def test_rejects_every_decorated_or_non_plain_source_shape(self):
@@ -70,9 +83,18 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
         for value in rejected:
             with self.subTest(value=value):
                 self.assertFalse(
-                    SEMANTICS.review_receipt_source_text_allowed(value)
+                    SEMANTICS.review_receipt_identity_source_text_allowed(value)
+                )
+                self.assertFalse(
+                    SEMANTICS.review_receipt_finding_source_text_allowed(value)
                 )
                 self.assertEqual((), SEMANTICS.identity_key(value))
+        self.assertFalse(
+            SEMANTICS.review_receipt_identity_source_text_allowed("review:team")
+        )
+        self.assertTrue(
+            SEMANTICS.review_receipt_finding_source_text_allowed("result: clear")
+        )
 
     def test_unicode_folding_is_detection_only_after_ascii_authority_validation(self):
         self.assertEqual(
@@ -113,7 +135,8 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "`TODO`", "[unknown][id]",
             "_none_", "T\u0301BD", "TB\u0301D", "TBD\u0301", "TBD.",
-            "T.B.D.", "t-b-d", "unknown.", "none, yet", "n/a.",
+            "T.B.D.", "t-b-d", "D B T", "unknown.", "none, yet",
+            "yet none", "n/a.",
         )
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
@@ -178,12 +201,85 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
                 self.assertIsNone(SEMANTICS.claimed_by_identity_source(
                     f"# Task\n\n**Claimed-by:** author\n{underline}\n"
                 ))
-        self.assertEqual(
-            " author",
-            SEMANTICS.claimed_by_identity_source(
-                "**Claimed-by:** author\n**Filed:** 2026-08-04\n"
-            ),
+        hidden_containers = (
+            "<div>\n\n**Claimed-by:** author\n",
+            "<div hidden>\n\n**Claimed-by:** author\n",
+            "<span hidden>\n\n**Claimed-by:** author\n",
+            "<div aria-hidden='true'>\n\n**Claimed-by:** author\n",
+            "<div style='display:none'>\n\n**Claimed-by:** author\n",
+            "<div style='visibility:hidden'>\n\n**Claimed-by:** author\n",
+            "<div style='opacity:0'>\n\n**Claimed-by:** author\n",
+            "<div class='hide'>\n\n**Claimed-by:** author\n",
+            "<details>\n\n**Claimed-by:** author\n",
+            "<dialog>\n\n**Claimed-by:** author\n",
+            "<template>\n\n**Claimed-by:** author\n",
+            "<agent-box>\n\n**Claimed-by:** author\n",
+            "<div><span>\n\n**Claimed-by:** author\n",
+            "<DIV\n class='visible'>\n\n**Claimed-by:** author\n",
+            "<div hidden>\r\n\r\n**Claimed-by:** author\r\n",
         )
+        for source in hidden_containers:
+            with self.subTest(source=source):
+                self.assertIn("**Claimed-by:** author", SEMANTICS.semantic_text(source))
+                self.assertIsNone(
+                    SEMANTICS.claimed_by_identity_source(source)
+                )
+        for source in (
+            "<div hidden>\n\n**Claimed-by:** author\n",
+            "<span hidden>\n\n**Claimed-by:** author\n",
+            "<div aria-hidden='true'>\n\n**Claimed-by:** author\n",
+            "<div style='display:none'>\n\n**Claimed-by:** author\n",
+            "<div style='visibility:hidden'>\n\n**Claimed-by:** author\n",
+            "<template>\n\n**Claimed-by:** author\n",
+        ):
+            with self.subTest(rendered_hidden_source=source):
+                self.assertNotIn(
+                    "**Claimed-by:** author",
+                    SEMANTICS.rendered_human_text(source),
+                )
+        safe_prefixes = (
+            "<details>visible</details>\n\n",
+            "<div>\nvisible\n</div>\n\n",
+            "```html\n<div>\n```\n\n",
+            "`<div>`\n\n",
+        )
+        for prefix in safe_prefixes:
+            source = prefix + "**Claimed-by:** author\n"
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    " author", SEMANTICS.claimed_by_identity_source(source)
+                )
+        for line_ending in ("\n", "\r\n"):
+            with self.subTest(line_ending=line_ending):
+                self.assertEqual(
+                    " author",
+                    SEMANTICS.claimed_by_identity_source(
+                        f"**Claimed-by:** author{line_ending}"
+                        f"**Filed:** 2026-08-04{line_ending}"
+                    ),
+                )
+
+    def test_raw_html_container_state_ignores_code_and_closed_containers(self):
+        for source in (
+            "<div>", "<details>\n", "<dialog>\r\n", "<agent-box>\n",
+            "<div><span>\n", "<DIV\n class='visible'>\n",
+        ):
+            with self.subTest(open_source=source):
+                self.assertTrue(
+                    SEMANTICS.raw_html_container_open_at_end(source)
+                )
+        for source in (
+            "<details>visible</details>\n",
+            "<div><span>visible</span></div>\n",
+            "```html\n<div>\n```\n",
+            "    <div>\n",
+            "`<div>`\n",
+            "<br><hr><img src='x'><input>\n",
+        ):
+            with self.subTest(closed_or_code_source=source):
+                self.assertFalse(
+                    SEMANTICS.raw_html_container_open_at_end(source)
+                )
 
 
 class IndentedCodeViewTests(unittest.TestCase):

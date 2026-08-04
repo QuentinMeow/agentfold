@@ -130,10 +130,13 @@ TASK_CLAIMED_BY_SOURCE_RE = re.compile(
 )
 ASCII_MARKDOWN_BLANK_LINE_RE = re.compile(r"^[ \t]*(?:\r\n|\r|\n)?$")
 ASCII_SETEXT_UNDERLINE_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
-IDENTITY_PLACEHOLDER_ALNUM = frozenset({
-    "unclaimed", "noneyet", "tbd", "todo", "none", "na", "unknown",
+IDENTITY_PLACEHOLDER_SPELLINGS = frozenset({
+    "unclaimed", "none yet", "tbd", "todo", "none", "n/a", "unknown",
 })
-REVIEW_RECEIPT_ALLOWED_PUNCTUATION = frozenset(
+REVIEW_RECEIPT_IDENTITY_ALLOWED_PUNCTUATION = frozenset(
+    ".,;?!'\"()/@+-"
+)
+REVIEW_RECEIPT_FINDING_ALLOWED_PUNCTUATION = frozenset(
     ".,;:?!'\"()/@+-"
 )
 
@@ -328,30 +331,55 @@ def semantic_text(text):
     return strip_indented_code(_semantic_text(text))
 
 
-def review_receipt_source_text_allowed(text):
-    """Accept only the complete source alphabet for receipt prose.
-
-    Formal reviewer, claimant, and finding text may contain ASCII letters, numbers,
-    space, and the exact punctuation in
-    ``REVIEW_RECEIPT_ALLOWED_PUNCTUATION``. Everything else fails closed before any
-    normalization. The structural em dash between verdict and finding is outside these
-    components. This excludes Unicode homoglyphs and every Markdown/HTML introducer used
-    by links, images, emphasis, escapes, code, tags, and entities, along with tabs,
-    non-ASCII separators, controls, and default-ignorable characters.
-    """
+def _review_receipt_source_text_allowed(text, punctuation):
+    """Accept one complete ASCII source alphabet before normalization."""
     value = text or ""
     if not value:
         return False
     for character in value:
         if not character.isascii() or _is_default_ignorable_character(character):
             return False
-        if (character == " "
-                or character in REVIEW_RECEIPT_ALLOWED_PUNCTUATION):
+        if character == " " or character in punctuation:
             continue
         if character.isalnum():
             continue
         return False
     return True
+
+
+def review_receipt_identity_source_text_allowed(text):
+    """Accept the closed claimant and reviewer source alphabet.
+
+    Formal identities may contain ASCII letters, numbers, space, and the exact
+    punctuation in ``REVIEW_RECEIPT_IDENTITY_ALLOWED_PUNCTUATION``. Colon is excluded
+    because it terminates the reviewer component in the receipt grammar.
+    """
+    return _review_receipt_source_text_allowed(
+        text, REVIEW_RECEIPT_IDENTITY_ALLOWED_PUNCTUATION
+    )
+
+
+def review_receipt_finding_source_text_allowed(text):
+    """Accept the closed formal-finding source alphabet.
+
+    Findings use the identity alphabet plus colon. The structural em dash between
+    verdict and finding remains outside the component alphabet.
+    """
+    return _review_receipt_source_text_allowed(
+        text, REVIEW_RECEIPT_FINDING_ALLOWED_PUNCTUATION
+    )
+
+
+def _authority_identity_multiset_key(text):
+    """Return the sorted multiset of case-folded ASCII alphanumerics."""
+    compact = "".join(re.findall(r"[a-z0-9]+", (text or "").casefold()))
+    return "".join(sorted(compact))
+
+
+IDENTITY_PLACEHOLDER_KEYS = frozenset(
+    _authority_identity_multiset_key(value)
+    for value in IDENTITY_PLACEHOLDER_SPELLINGS
+)
 
 
 def identity_key(identity):
@@ -364,15 +392,12 @@ def identity_key(identity):
     self-review or vote stuffing through spelling variants.
     """
     source = identity or ""
-    if not review_receipt_source_text_allowed(source):
+    if not review_receipt_identity_source_text_allowed(source):
         return ()
-    normalized = fold_unicode_marks(source).casefold()
-    normalized = " ".join(normalized.split())
-    placeholder_key = "".join(re.findall(r"[a-z0-9]+", normalized))
-    if not normalized or not placeholder_key \
-            or placeholder_key in IDENTITY_PLACEHOLDER_ALNUM:
+    authority_key = _authority_identity_multiset_key(source)
+    if not authority_key or authority_key in IDENTITY_PLACEHOLDER_KEYS:
         return ()
-    return ("".join(sorted(placeholder_key)),)
+    return (authority_key,)
 
 
 def claimed_by_identity_source(text):
@@ -399,12 +424,19 @@ def claimed_by_identity_source(text):
         markdown_line_body(source_lines[line_index + 1])
     ):
         return None
-    if not review_receipt_source_text_allowed(claimant):
+    if not review_receipt_identity_source_text_allowed(claimant):
+        return None
+    source_prefix = "".join(source_lines[:line_index])
+    if raw_html_container_open_at_end(source_prefix):
         return None
 
     structural_lines = commonmark_lines(semantic_text(source))
     if len(structural_lines) != len(source_lines) \
             or markdown_line_body(structural_lines[line_index]) != raw_body:
+        return None
+    rendered_lines = commonmark_lines(rendered_human_text(source))
+    if len(rendered_lines) != len(source_lines) \
+            or markdown_line_body(rendered_lines[line_index]) != raw_body:
         return None
     return claimant
 
@@ -442,7 +474,9 @@ def core_fit_review_evidence(text):
     heading, optional blank lines, one exact full-commit field as the first content,
     optional blank lines, then one or more exact verdict lines. Blank lines may
     separate verdicts; the first nonblank non-verdict closes the receipt. Duplicate
-    headings or full-commit fields fail closed.
+    headings fail closed. A second full-commit field inside the still-contiguous
+    receipt prologue also fails closed; historical fields after a terminator are
+    outside the receipt.
 
     The result keeps invalid heading and revision counts so the core gate can
     preserve its specific diagnostics. Match objects retain offsets into the shared
@@ -473,10 +507,14 @@ def core_fit_review_evidence(text):
             semantic_lines[index]
         )
 
+    def raw_html_container_open_before(index):
+        return raw_html_container_open_at_end("".join(source_lines[:index]))
+
     section_lines = [
         index for index, line in enumerate(source_lines)
         if markdown_line_body(line) == "## Review verdicts"
         and structural_line(index)
+        and not raw_html_container_open_before(index)
     ]
     evidence["section_count"] = len(section_lines)
     if len(section_lines) != 1:
@@ -524,8 +562,10 @@ def core_fit_review_evidence(text):
                 evidence["reviewed_revision"] = None
                 verdicts = []
             break
-        if not review_receipt_source_text_allowed(matched.group("reviewer")) \
-                or not review_receipt_source_text_allowed(matched.group("finding")):
+        if not review_receipt_identity_source_text_allowed(matched.group("reviewer")) \
+                or not review_receipt_finding_source_text_allowed(
+                    matched.group("finding")
+                ):
             break
         verdicts.append(matched)
         line_index += 1
@@ -751,6 +791,24 @@ def rendered_human_text(text):
         " " if unicodedata.category(character) == "Zs" else character
         for character in "".join(parser.output)
     )
+
+
+def raw_html_container_open_at_end(text):
+    """Return whether structural source ends inside an unclosed HTML container.
+
+    Fenced, indented, and inline code are blanked first, while genuine raw HTML is
+    retained. The read-only HTML parser's stack then distinguishes an earlier closed
+    container from a prefix that still nests a later claimant or receipt heading.
+    """
+    clean = strip_inline_code(
+        strip_indented_code(
+            _semantic_text(text or "", preserve_visible_html=True)
+        )
+    )
+    parser = _RenderedHumanHTMLParser()
+    parser.feed(clean)
+    parser.close()
+    return bool(parser.stack)
 
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
