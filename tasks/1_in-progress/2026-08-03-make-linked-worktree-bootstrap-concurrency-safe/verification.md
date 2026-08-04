@@ -9,6 +9,7 @@ output (root `AGENTS.md` guardrail). A reader must be able to re-run every line.
 
 ```
 $ python3 automation/tests/test_install.py -v
+test_already_executable_hook_keeps_git_index_stat_cache_clean (__main__.InstallTests) ... ok
 test_correct_shared_hook_config_is_not_rewritten (__main__.InstallTests) ... ok
 test_persistent_shared_config_lock_never_reports_success (__main__.InstallTests) ... ok
 test_real_adapter_path_is_preserved_and_fails_with_one_actionable_error (__main__.InstallTests) ... ok
@@ -19,9 +20,27 @@ test_temporary_shared_config_lock_is_retried_until_config_is_verified (__main__.
 test_worktree_hook_override_is_converged_without_rewriting_common_config (__main__.InstallTests) ... ok
 
 ----------------------------------------------------------------------
-Ran 8 tests in 8.398s
+Ran 9 tests in 6.845s
 
 OK
+```
+
+## Isolated staged lane
+
+```
+$ GIT_INDEX_FILE=/private/tmp/agentfold-bootstrap-stat-cache-index-20260803 python3 automation/run_tests.py --staged
+test lane: staged
+test reason: every staged path maps to its registered test owners
+staged paths: 2
+  automation/install.py -> test_check_core_scope.py, test_install.py
+  automation/tests/test_install.py -> test_install.py
+selected test files:
+  automation/tests/test_check_core_scope.py
+  automation/tests/test_install.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_install.py
+tests: 2/2 files passed
+test elapsed: 6.57s
 ```
 
 ## Test-runner ownership and isolation tests
@@ -61,7 +80,7 @@ PASS automation/tests/test_run_tests.py
 PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 16/16 files passed
-test elapsed: 125.01s
+test elapsed: 73.77s
 ```
 
 ## Reconciler

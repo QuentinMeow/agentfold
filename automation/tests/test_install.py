@@ -207,6 +207,21 @@ class InstallTests(unittest.TestCase):
         self.assertIn("already configured; no write", result.stdout)
         self.assert_valid_adapters(worktree)
 
+    def test_already_executable_hook_keeps_git_index_stat_cache_clean(self):
+        [worktree] = self.add_worktrees(1)
+        hook = worktree / "automation/hooks/pre-commit"
+        self.assertEqual(0o111, hook.stat().st_mode & 0o111)
+        self.assertEqual(
+            0,
+            self.git(worktree, "diff-files", "--quiet", check=False).returncode,
+        )
+
+        result = self.run_installer(worktree)
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        dirty = self.git(worktree, "diff-files", "--quiet", check=False)
+        self.assertEqual(0, dirty.returncode, dirty.stdout + dirty.stderr)
+
     def test_worktree_hook_override_is_converged_without_rewriting_common_config(self):
         [worktree] = self.add_worktrees(1)
         self.git(

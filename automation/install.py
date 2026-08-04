@@ -181,7 +181,9 @@ def main():
             print("ERROR: {0}".format(err), file=sys.stderr)
             return 1
         for hook in (REPO / "automation" / "hooks").iterdir():
-            hook.chmod(hook.stat().st_mode | 0o111)
+            mode = hook.stat().st_mode
+            if mode & 0o111 != 0o111:
+                hook.chmod(mode | 0o111)
         state = "configured" if common_changed else "already configured; no write"
         print(
             "git hooks (common repository): core.hooksPath -> {0} ({1})".format(

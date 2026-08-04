@@ -51,3 +51,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The final focused run passed all eight installer tests, the ownership lane passed all
   67 tests with its one explicit opt-in skip, the full suite passed all 16 test files, and
   the reconciler again reported zero blocking findings.
+- Fixed the merge-candidate stat-cache blocker by skipping `chmod` when a tracked hook
+  already has all executable bits. A real linked-worktree regression test now proves an
+  installer run leaves `git diff-files --quiet` clean without refreshing the index.
+- Verified the follow-up with all nine installer tests, both staged-lane owners, all 16
+  repository test files, and a final reconciler run with zero blocking findings.
