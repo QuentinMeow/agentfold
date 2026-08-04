@@ -56,3 +56,7 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   installer run leaves `git diff-files --quiet` clean without refreshing the index.
 - Verified the follow-up with all nine installer tests, both staged-lane owners, all 16
   repository test files, and a final reconciler run with zero blocking findings.
+- Removed the canary's pre-install `git diff-files` call after review showed it normalized
+  the state under test. The corrected test crosses only the filesystem timestamp boundary:
+  it passes with conditional `chmod`, fails with return code 1 against an unconditional
+  safe copy, and passes both the nine-test focused suite and the test-only staged lane.

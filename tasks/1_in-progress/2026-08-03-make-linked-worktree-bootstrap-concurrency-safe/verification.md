@@ -20,9 +20,63 @@ test_temporary_shared_config_lock_is_retried_until_config_is_verified (__main__.
 test_worktree_hook_override_is_converged_without_rewriting_common_config (__main__.InstallTests) ... ok
 
 ----------------------------------------------------------------------
-Ran 9 tests in 6.845s
+Ran 9 tests in 8.036s
 
 OK
+```
+
+## Stat-cache regression canary
+
+The fixed installer passes without any pre-install Git inspection or index refresh:
+
+```
+$ python3 automation/tests/test_install.py InstallTests.test_already_executable_hook_keeps_git_index_stat_cache_clean -v
+test_already_executable_hook_keeps_git_index_stat_cache_clean (__main__.InstallTests) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.401s
+
+OK
+```
+
+The same corrected test fails against a safe copy whose installer restores the parent
+revision's unconditional `chmod`:
+
+```
+$ python3 /private/tmp/agentfold-stat-cache-canary/automation/tests/test_install.py InstallTests.test_already_executable_hook_keeps_git_index_stat_cache_clean -v
+test_already_executable_hook_keeps_git_index_stat_cache_clean (__main__.InstallTests) ... FAIL
+
+======================================================================
+FAIL: test_already_executable_hook_keeps_git_index_stat_cache_clean (__main__.InstallTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/agentfold-stat-cache-canary/automation/tests/test_install.py", line 220, in test_already_executable_hook_keeps_git_index_stat_cache_clean
+    self.assertEqual(0, dirty.returncode, dirty.stdout + dirty.stderr)
+AssertionError: 0 != 1 :
+
+----------------------------------------------------------------------
+Ran 1 test in 1.584s
+
+FAILED (failures=1)
+```
+
+The test waits across the filesystem timestamp boundary but performs no Git read before
+bootstrap. That makes the unnecessary `chmod` change cached ctime deterministically
+without normalizing the state under test.
+
+## Corrected-test staged lane
+
+```
+$ GIT_INDEX_FILE=/private/tmp/agentfold-bootstrap-canary-final-index-20260803 python3 automation/run_tests.py --staged
+test lane: staged
+test reason: every staged path maps to its registered test owners
+staged paths: 1
+  automation/tests/test_install.py -> test_install.py
+selected test files:
+  automation/tests/test_install.py
+PASS automation/tests/test_install.py
+tests: 1/1 files passed
+test elapsed: 6.79s
 ```
 
 ## Isolated staged lane

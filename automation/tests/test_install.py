@@ -211,10 +211,9 @@ class InstallTests(unittest.TestCase):
         [worktree] = self.add_worktrees(1)
         hook = worktree / "automation/hooks/pre-commit"
         self.assertEqual(0o111, hook.stat().st_mode & 0o111)
-        self.assertEqual(
-            0,
-            self.git(worktree, "diff-files", "--quiet", check=False).returncode,
-        )
+        # Cross the one-second timestamp boundary without asking Git to inspect or
+        # refresh the index. An unnecessary chmod then changes cached ctime reliably.
+        time.sleep(1.1)
 
         result = self.run_installer(worktree)
 
