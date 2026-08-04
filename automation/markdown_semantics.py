@@ -473,9 +473,11 @@ def claimant_identity_keys(claimant):
         return ()
     whole_key = (whole_value,)
     keys = [whole_key]
+    seen = {whole_key}
     for component_key in component_keys:
-        if component_key not in keys:
+        if component_key not in seen:
             keys.append(component_key)
+            seen.add(component_key)
     return tuple(keys)
 
 
@@ -523,16 +525,21 @@ def _authority_key_multiset_distance(left, right):
         + len(right_value) - right_index
 
 
-def independent_reviewer_identity(reviewer, claimant):
-    """Require a reviewer outside every conservative composite-claimant alias."""
-    reviewer_key = identity_key(reviewer)
-    claimant_keys = claimant_identity_keys(claimant)
+def independent_reviewer_key(reviewer_key, claimant_keys):
+    """Compare one precomputed reviewer key with precomputed claimant keys."""
     return bool(reviewer_key and claimant_keys and all(
         not _authority_key_multiset_subset(reviewer_key, claimant_key)
         and not _authority_key_multiset_subset(claimant_key, reviewer_key)
         and _authority_key_multiset_distance(reviewer_key, claimant_key) > 2
         for claimant_key in claimant_keys
     ))
+
+
+def independent_reviewer_identity(reviewer, claimant):
+    """Compatibility wrapper deriving each side once before key comparison."""
+    return independent_reviewer_key(
+        identity_key(reviewer), claimant_identity_keys(claimant)
+    )
 
 
 def markdown_line_body(line):
@@ -667,9 +674,12 @@ def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
     because ``semantic_text`` does not expose them as structural receipts.
     """
     evidence = core_fit_review_evidence(text)
+    claimant_keys = claimant_identity_keys(claimant)
     verdicts = tuple(
         matched for matched in evidence["verdicts"]
-        if independent_reviewer_identity(matched.group("reviewer"), claimant)
+        if independent_reviewer_key(
+            identity_key(matched.group("reviewer")), claimant_keys
+        )
     )
     if not verdicts:
         return text or ""

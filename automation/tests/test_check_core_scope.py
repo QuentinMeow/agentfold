@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "check_core_scope.py"
 SPEC = importlib.util.spec_from_file_location("check_core_scope", MODULE_PATH)
@@ -828,6 +829,35 @@ class CoreScopeTests(unittest.TestCase):
             self.assertEqual([], SCOPE.validate_task(
                 task, touched_core=True, require_review=True
             ))
+
+    def test_review_parser_derives_claimant_keys_once_for_many_verdicts(self):
+        verdict_count = 256
+        claimant = "x" * verdict_count
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant=claimant,
+                verification="".join(
+                    "- core-fit / correctness reviewer: approve — held\n"
+                    for _ in range(verdict_count)
+                ),
+            )
+            with mock.patch.object(
+                SCOPE,
+                "claimant_identity_keys",
+                wraps=SCOPE.claimant_identity_keys,
+            ) as claimant_spy, mock.patch.object(
+                SCOPE,
+                "identity_key",
+                wraps=SCOPE.identity_key,
+            ) as reviewer_spy:
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+            self.assertEqual([], errors)
+            self.assertEqual(1, claimant_spy.call_count)
+            self.assertEqual(verdict_count, reviewer_spy.call_count)
 
     def test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes(self):
         with tempfile.TemporaryDirectory() as tmp:

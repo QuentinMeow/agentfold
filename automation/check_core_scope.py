@@ -19,9 +19,10 @@ if str(AUTOMATION) not in sys.path:
 
 from markdown_semantics import (
     claimed_by_identity_source,
+    claimant_identity_keys,
     core_fit_review_evidence,
     identity_key,
-    independent_reviewer_identity,
+    independent_reviewer_key,
     semantic_text,
 )
 
@@ -316,12 +317,13 @@ def validate_task(
             if review_revision_check:
                 errors.extend(review_revision_check(reviewed_revision))
         claimant = claimed_by_identity_source(task_text)
+        claimant_keys = claimant_identity_keys(claimant)
         latest = {}
         for matched in review_evidence["verdicts"]:
             reviewer = matched.group("reviewer")
             verdict = matched.group("verdict")
             reviewer_key = identity_key(reviewer)
-            if independent_reviewer_identity(reviewer, claimant):
+            if independent_reviewer_key(reviewer_key, claimant_keys):
                 latest[reviewer_key] = verdict.lower()
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())

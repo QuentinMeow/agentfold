@@ -206,6 +206,35 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             SEMANTICS.independent_reviewer_identity("auth0r", "author")
         )
 
+    def test_neutralizer_derives_claimant_keys_once_for_many_verdicts(self):
+        verdict_count = 256
+        claimant = "x" * verdict_count
+        claimant_keys = SEMANTICS.claimant_identity_keys(claimant)
+        source = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            + "".join(
+                "- core-fit / correctness reviewer: approve — held\n"
+                for _ in range(verdict_count)
+            )
+        )
+        with mock.patch.object(
+            SEMANTICS,
+            "claimant_identity_keys",
+            return_value=claimant_keys,
+        ) as claimant_spy, mock.patch.object(
+            SEMANTICS,
+            "identity_key",
+            wraps=SEMANTICS.identity_key,
+        ) as reviewer_spy:
+            neutralized = SEMANTICS.neutralize_core_fit_review_verdict_tokens(
+                source, claimant=claimant
+            )
+        self.assertEqual(1, claimant_spy.call_count)
+        self.assertEqual(verdict_count, reviewer_spy.call_count)
+        self.assertEqual(0, neutralized.count("reviewer: approve"))
+        self.assertEqual(verdict_count, neutralized.count(" — held"))
+
     def test_plain_and_formatted_placeholders_have_no_identity(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
