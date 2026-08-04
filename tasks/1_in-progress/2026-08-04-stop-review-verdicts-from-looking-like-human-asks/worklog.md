@@ -56,3 +56,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   underline forms, a revision-like setext heading, and an H3 canary.
 - Focused tests, all three owning modules, and the full repository suite passed; the full
   lane ended with all 15 test files passing in 68.07 seconds.
+
+## 2026-08-04 — authorization boundary (codex planner)
+
+- Three candidate implementations stayed unpublished after adversarial review found
+  basename, section-boundary, and CommonMark-container gaps. Exact evidence remains on the
+  task branch through commit `3de329d8b34bb9bb8afcd325b75b1c47612e7997`.
+- Replanned to a closed contiguous receipt grammar that needs no general Markdown outline
+  parser. The workspace safety reviewer requires fresh owner authorization before that
+  security-sensitive parser and template change.
+- Filed the authorization question in
+  `message-queue/needs-human/decisions/non-blocking-authorize-the-closed-review-receipt-parser.md`
+  and paused without bypassing the review or task-action gates.
+
+## 2026-08-04 — owner authorization folded (codex planner)
+
+- The owner selected Option A and authorized the closed contiguous review-receipt parser
+  and template design. The answer was transcribed while the canonical item was waiting,
+  then claimed in a separate folding commit.
+- Recorded the durable decision in
+  `memory/decisions/2026-08-04-review-receipt-parser-authorization.md` and released the
+  completed human action from this task.
+- The authorization does not approve a pull request or replace independent review; the
+  implementation still owes focused and full verification plus a fresh adversarial panel.
