@@ -34,6 +34,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   contract's enforced 140-line budget.
 - Published stacked draft pull request #79 against planning pull request #73 and moved
   the task to review with every acceptance criterion satisfied.
+- After the parent branch published its session handover, added this records-only follow-up
+  so GitHub recomputes #79 against the parent's current tip instead of its creation snapshot.
 - Verified the final bytes with five focused installer tests, all 67 test-runner tests
   (one explicit opt-in skip), all 16 repository test files, an actual worktree rerun, and
   the reconciler with zero blocking findings. Independent review and publication remain
