@@ -228,3 +228,31 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   word-order, and duplicate-vote cases. Focused, owning, full, staged, exact-range
   core-scope, exact-range reconciler, and diff checks passed at implementation commit
   `0326174c33d6ca35c266854235c4c7239d3f2a2d`.
+
+## 2026-08-04 — close placeholder, punctuation, and open-container gaps (codex sol-high implementer)
+
+- The seventh panel reviewed exact revision
+  `7cd22e79fc6d4ec3e3c151f0093a6ef4c251c344` and returned 0 approve, 3 block. The
+  accepted blockers were reordered/anagram placeholder spellings, a colon mismatch
+  between claimant and reviewer grammar, and claimants exposed structurally after a blank
+  line while still nested inside an open hidden HTML container.
+- Placeholder rejection now uses the exact sorted ASCII-alphanumeric multiset key used for
+  claimant comparison and duplicate-vote replacement. `yet none` and `D B T` therefore
+  cannot become voters.
+- Claimants and reviewers now share an explicit ASCII identity predicate that excludes
+  colon; findings use a separate predicate that retains colon. A canonical-looking
+  embedded-colon reviewer cannot enter either gate.
+- Claimant extraction still requires its literal line body at the same logical index in
+  both structural and rendered-human views. A shared HTML-prefix state check now also
+  rejects claimants and receipt headings under any still-open visible, hidden, non-prose,
+  nested, or custom container. Closed containers and fenced, indented, or inline-code
+  examples remain compatible, including CRLF input.
+- A finite-model preflight found the same open-container issue around the receipt heading.
+  It initially proposed global duplicate-revision counting, then retracted that proposal
+  after testing the immutable verification history and accepted decision boundary. The
+  parser retains scoped semantics: an immediate duplicate in the contiguous prologue
+  fails, while exact historical fields after a terminator remain ordinary history.
+- Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed at implementation commit
+  `d27c44174db0f1bb8d13b632be3c6f307d568707`. The final finite-model audit reported no
+  remaining blocker in the owner-authorized receipt scope.

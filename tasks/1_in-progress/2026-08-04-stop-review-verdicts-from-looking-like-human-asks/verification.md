@@ -815,3 +815,113 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check 97c35ede09d045f63a45be13ba6452cd3aa13764..0326174c33d6ca35c266854235c4c7239d3f2a2d
 ```
+
+## Adversarial panel on 7cd22e7
+
+**Reviewed revision:** 7cd22e79fc6d4ec3e3c151f0093a6ef4c251c344
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / identity-key reviewer: block — placeholder rejection used compact
+  alphanumeric order while authority used a sorted character multiset, so reordered or
+  anagram spellings such as `yet none` and `D B T` could become voters.
+- adversarial panel / grammar reviewer: block — the shared source predicate allowed colon
+  in claimant identity even though colon terminates reviewer identity in the receipt line.
+- adversarial panel / visibility reviewer: block — an open hidden HTML container could
+  cross a blank line, leave a claimant structurally visible, and still hide it from a human.
+
+All three blockers were accepted and repaired in implementation revision
+`d27c44174db0f1bb8d13b632be3c6f307d568707`. Finite-model preflight extended the HTML
+finding to receipt headings under every still-open container and verified closed/container-
+in-code compatibility. Its initial global revision-field proposal was retracted because
+the accepted contiguous grammar and immutable verification history make later exact fields
+ordinary history. The final audit found no remaining blocker in scope. This panel does not
+supply acceptance evidence for the repair, and `--require-review` was not invoked against it.
+
+## Placeholder, colon, and open-container focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_allowlisted_source_identities automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_validate_claimant_from_unchanged_raw_source automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_reviewer_and_claimant_placeholders automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_embedded_colon_reviewer automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_ascii_authority_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_neutralize_receipts_in_open_html automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_ignore_historical_revision_after_terminator automation.tests.test_check_core_scope.CoreScopeTests.test_historical_revision_fields_outside_formal_block_are_allowed automation.tests.test_check_core_scope.CoreScopeTests.test_revision_fields_inside_code_or_html_do_not_duplicate_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_duplicate_revision_inside_formal_block_fails_closed automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_requires_allowlisted_source_identities automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_validates_claimant_from_unchanged_raw_source automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_visible_canonical_claimant_lf_and_crlf automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_claimant_after_closed_or_code_html automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_reviewer_and_claimant_placeholders automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_embedded_colon_reviewer automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_receipt_nested_in_open_html automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_receipt_after_closed_or_code_html automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_ascii_authority_receipt
+............................
+----------------------------------------------------------------------
+Ran 28 tests in 0.768s
+
+OK
+```
+
+## Placeholder, colon, and open-container owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+...........................................................................................................................................................................................................................................s..............................................................
+----------------------------------------------------------------------
+Ran 298 tests in 16.171s
+
+OK (skipped=1)
+```
+
+## Placeholder, colon, and open-container full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 53.63s
+```
+
+## Placeholder, colon, and open-container pre-commit lane
+
+```
+$ git commit -m "fix: close review authority container gaps" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 46.25s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks d27c441] fix: close review authority container gaps
+```
+
+## Placeholder, colon, and open-container exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Placeholder, colon, and open-container exact-range reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...d27c44174db0f1bb8d13b632be3c6f307d568707 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+## Placeholder, colon, and open-container diff check
+
+```
+$ git diff --check 7cd22e79fc6d4ec3e3c151f0093a6ef4c251c344..d27c44174db0f1bb8d13b632be3c6f307d568707
+```
