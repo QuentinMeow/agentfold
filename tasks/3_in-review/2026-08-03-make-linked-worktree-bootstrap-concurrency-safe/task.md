@@ -29,4 +29,5 @@ Preserve real user files and avoid user-global or provider-specific configuratio
 
 - Planning task: `2026-08-03-plan-multi-worktree-safety-remediation`
 - GitHub projection: https://github.com/QuentinMeow/agentfold/issues/74
+- Draft implementation: https://github.com/QuentinMeow/agentfold/pull/79
 - Installer: `automation/install.py`

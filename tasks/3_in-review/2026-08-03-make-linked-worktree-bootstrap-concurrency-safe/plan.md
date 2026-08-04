@@ -5,4 +5,4 @@
 - [x] 3. Make concurrent clone-global setup serialize or become a correct no-op.
 - [x] 4. Verify local adapters point into each linked worktree and real files are preserved.
 - [x] 5. Run focused concurrency probes, the full suite, and independent review.
-- [ ] 6. Publish the task, design, implementation, and real verification in a draft PR.
+- [x] 6. Publish the task, design, implementation, and real verification in draft PR #79.

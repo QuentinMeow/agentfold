@@ -29,6 +29,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   correct target type; the re-review approved the content with no remaining P1/P2 finding.
 - An independent Terra worker reran all eight focused tests, the reconciler, and
   `git diff --check`; every check passed without editing the worktree.
+- Committed the implementation as `c0c7b19bb1256fb22a0dc85fc5aa5b0da6941b75`;
+  revision-bound Sol xhigh re-review approved the exact commit, including the root
+  contract's enforced 140-line budget.
+- Published stacked draft pull request #79 against planning pull request #73 and moved
+  the task to review with every acceptance criterion satisfied.
 - Verified the final bytes with five focused installer tests, all 67 test-runner tests
   (one explicit opt-in skip), all 16 repository test files, an actual worktree rerun, and
   the reconciler with zero blocking findings. Independent review and publication remain
