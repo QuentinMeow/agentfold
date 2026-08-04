@@ -330,3 +330,75 @@ core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
+
+## Adversarial panel on e073358
+
+**Reviewed revision:** e073358dec0a4f7c119597f94c61ed6adb02f0de
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / grammar reviewer: block — Python `.strip()` treats NBSP, form-feed, vertical-tab, Unicode separators, controls, and default-ignorables as blank, so hostile raw content can bridge a later verdict.
+- adversarial panel / line-ending reviewer: block — removing only one trailing character does not define LF and CRLF bodies safely enough for the closed structural grammar.
+- adversarial panel / identity reviewer: block — source-shaped identity tokens make zero-width or inline-HTML self reviewers appear distinct, leave markup-only names nonempty, and treat repository placeholders as identities.
+
+All three blockers were accepted and repaired in the next implementation revision. This
+panel does not approve that repair, and `--require-review` was not invoked against it.
+
+## Whitespace, CRLF, and rendered-identity regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_compare_rendered_human_identities automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_reviewer_and_claimant_placeholders automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_end_receipts_at_raw_hidden_or_code_content automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_a_crlf_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_read_claimant_from_candidate_revision automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_compares_rendered_human_identities automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_reviewer_and_claimant_placeholders automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_stops_at_raw_hidden_or_code_content automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_a_crlf_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 0.954s
+
+OK
+```
+
+## Whitespace, CRLF, and rendered-identity owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+..................................................................................................................................................................................................................................................s......................................................
+----------------------------------------------------------------------
+Ran 265 tests in 33.069s
+
+OK (skipped=1)
+```
+
+## Whitespace, CRLF, and rendered-identity full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 133.77s
+```
+
+## Whitespace, CRLF, and rendered-identity range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Whitespace, CRLF, and rendered-identity reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```

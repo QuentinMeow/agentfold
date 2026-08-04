@@ -121,3 +121,22 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Focused and owning-module tests, all 15 repository test files, range core-scope,
   staged pre-commit tests, the reconciler, and diff checks passed. Publication and a
   fresh independent review remain with the coordinating session.
+
+## 2026-08-04 — repair whitespace and rendered identity normalization (codex sol-high implementer)
+
+- The fourth panel reviewed exact revision
+  `e073358dec0a4f7c119597f94c61ed6adb02f0de` and returned 0 approve, 3 block.
+  The accepted blockers were Python's overbroad whitespace predicate, incomplete
+  LF/CRLF line-ending handling, and source-shaped reviewer identities that did not
+  match what a human sees or reject the repository's full placeholder vocabulary.
+- Replaced `.strip()` blank tests with an explicit ASCII Markdown predicate that accepts
+  only spaces or tabs plus an optional LF, CR, or CRLF ending. NBSP, form-feed,
+  vertical-tab, NEL, Unicode separators, default-ignorables, comments, HTML, and code
+  all terminate the receipt; a valid CRLF receipt remains accepted.
+- Made both claimant and reviewer identities pass through rendered-human HTML, removal
+  of default-ignorable characters, NFKC/casefold, and tokenization. Self-review through
+  zero-width characters or inline HTML now compares equal, markup-only identities are
+  empty, and the repository's complete placeholder vocabulary is rejected on either side.
+- Preserved normal independent reviewers, candidate-revision task lookup, and hostile
+  reviewer/finding scanning. Focused and owning tests, all 15 repository test files,
+  pre-commit, range core-scope, the reconciler, and diff checks passed.

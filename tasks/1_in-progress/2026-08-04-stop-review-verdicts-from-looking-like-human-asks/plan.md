@@ -9,5 +9,6 @@
 - [x] 7. Repair the heading-boundary gap found by the second panel, then repeat every verification lane.
 - [x] 8. Replace section inference with the owner-authorized closed contiguous grammar and cover every panel reproduction.
 - [x] 9. Repair raw-source contiguity and claimant-aware reviewer-independence blockers from the third panel, then repeat every verification lane.
-- [ ] 10. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 11. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 10. Repair ASCII-blank, CRLF, and human-visible identity blockers from the fourth panel, then repeat every verification lane.
+- [ ] 11. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 12. Publish and merge; close issue #80; resume the stale-base repair.
