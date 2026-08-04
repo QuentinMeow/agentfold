@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 49 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 51 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -175,7 +175,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 41
+### Never stops work — 43
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -249,6 +249,12 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops, but GitHub may show stale status until another agent reconciles the projection.
 
   </details>
+- [Keep GitHub issue #81 synchronized with the canonical task and close it only when the task's implementation is published or deliberately withdrawn.](needs-agent/requests/non-blocking-track-github-one-line-human-response-open-actions.md)
+  <details><summary>what happens if nobody acts</summary>
+
+  **If you do nothing:** Nothing stops, but GitHub may show stale status until another agent reconciles the projection.
+
+  </details>
 - [After the GitHub issue is filed, keep it synchronized with the canonical task and close it only when the task's implementation is published or deliberately withdrawn.](needs-agent/requests/non-blocking-track-github-review-verdict-action-classification.md)
   <details><summary>what happens if nobody acts</summary>
 
@@ -256,6 +262,12 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 - [Triage GitHub issue #80 against its canonical task and retain this source binding until trusted provider evidence proves the issue closed.](needs-agent/requests/non-blocking-triage-github-issue-80-review-verdict-action-classification.md)
+  <details><summary>what happens if nobody acts</summary>
+
+  **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.
+
+  </details>
+- [Triage GitHub issue #81 against its canonical task and retain this source binding until trusted provider evidence proves the issue closed.](needs-agent/requests/non-blocking-triage-github-issue-81-one-line-human-response-open-actions.md)
   <details><summary>what happens if nobody acts</summary>
 
   **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.

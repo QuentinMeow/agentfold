@@ -4,7 +4,7 @@
 **Filed:** 2026-08-04, by codex, from commit `a2310ce6f0104c2235ce2ea322102c7022b0f6d5`
 **Parent:** 2026-08-03-plan-multi-worktree-safety-remediation
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md`; `message-queue/needs-agent/requests/non-blocking-track-github-one-line-human-response-open-actions.md`; `message-queue/needs-agent/requests/non-blocking-triage-github-issue-81-one-line-human-response-open-actions.md`
 
 ## Goal
 
@@ -33,5 +33,6 @@ paths.
 ## Links
 
 - Concrete reproduction: commit `a2310ce6f0104c2235ce2ea322102c7022b0f6d5`
+- GitHub projection: https://github.com/QuentinMeow/agentfold/issues/81
 - Open-action generator: `automation/reconcile/reconcile.py`
 - Human response contract: `message-queue/AGENTS.md`
