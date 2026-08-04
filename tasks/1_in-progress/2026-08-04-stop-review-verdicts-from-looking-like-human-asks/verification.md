@@ -402,3 +402,104 @@ core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
+
+## Adversarial panel on 788bd4c
+
+**Reviewed revision:** 788bd4cb709c4ea4f20099013eb9ea598a39c289
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / identity-alias reviewer: block — Markdown link, reference,
+  emphasis, and inline-code aliases can make a self reviewer appear distinct, while
+  link destinations can mint apparent voters.
+- adversarial panel / placeholder reviewer: block — rendered placeholders such as
+  linked or emphasized TBD can retain source-shaped tokens and enter the voter set.
+- adversarial panel / finding reviewer: block — decorated finding text can render as an
+  approval request while source-shaped classification misses it after verdict
+  neutralization.
+
+All three blockers were accepted and repaired in the next implementation revision. This
+panel does not approve that repair, and `--require-review` was not invoked against it.
+
+## Markdown identity and decorated-component regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.InlineIdentityRenderingTests automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_compare_rendered_human_identities automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_reviewer_and_claimant_placeholders automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_fail_closed_on_decorated_receipt_components automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_neutralize_duplicate_vote_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_compares_rendered_human_identities automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_reviewer_and_claimant_placeholders automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_decorated_reviewer_and_finding_components automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_does_not_count_duplicate_vote_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict
+..............
+----------------------------------------------------------------------
+Ran 14 tests in 1.617s
+
+OK
+```
+
+## Markdown identity and decorated-component owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+.........................................................................................................................................................................................................................................................s......................................................
+----------------------------------------------------------------------
+Ran 272 tests in 43.525s
+
+OK (skipped=1)
+```
+
+## Markdown identity and decorated-component full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 139.55s
+```
+
+## Markdown identity and decorated-component pre-commit lane
+
+```
+$ git commit -m "fix: fail closed on decorated review receipts" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 109.47s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks 073b3d8] fix: fail closed on decorated review receipts
+ 6 files changed, 206 insertions(+), 4 deletions(-)
+```
+
+## Markdown identity and decorated-component range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Markdown identity and decorated-component reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```

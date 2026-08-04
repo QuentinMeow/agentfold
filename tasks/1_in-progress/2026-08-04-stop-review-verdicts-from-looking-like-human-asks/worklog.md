@@ -140,3 +140,23 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Preserved normal independent reviewers, candidate-revision task lookup, and hostile
   reviewer/finding scanning. Focused and owning tests, all 15 repository test files,
   pre-commit, range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — repair Markdown identity aliases and decorated findings (codex sol-high implementer)
+
+- The fifth panel reviewed exact revision
+  `788bd4cb709c4ea4f20099013eb9ea598a39c289` and returned 0 approve, 3 block.
+  The accepted blockers were Markdown aliases that could disguise a self reviewer or
+  mint apparent voters, rendered placeholders that could enter the voter set, and
+  decorated finding text that could hide a human action after verdict neutralization.
+- Added one shared inline-Markdown identity renderer for link labels, full/collapsed/
+  shortcut reference labels, emphasis, inline code, visible HTML text, entities, and
+  default-ignorables. Link destinations and reference destinations never contribute to
+  identity; visually equivalent identities now compare equal.
+- Kept the formal receipt grammar deliberately small and fail closed: reviewer and
+  finding components must be literal plain text. Any Markdown or HTML decoration ends
+  the formal block, so its verdict token remains visible to ordinary action detection.
+  The template and task design record this compatibility cost.
+- Added regressions for every requested alias, rendered placeholder, duplicate-voter
+  alias, a normal plain receipt, and decorated approval-shaped findings including a
+  reference-link split. Focused and owning-module tests, all 15 repository test files,
+  pre-commit, range core-scope, the reconciler, and diff checks passed.

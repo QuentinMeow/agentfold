@@ -10,5 +10,6 @@
 - [x] 8. Replace section inference with the owner-authorized closed contiguous grammar and cover every panel reproduction.
 - [x] 9. Repair raw-source contiguity and claimant-aware reviewer-independence blockers from the third panel, then repeat every verification lane.
 - [x] 10. Repair ASCII-blank, CRLF, and human-visible identity blockers from the fourth panel, then repeat every verification lane.
-- [ ] 11. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 12. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 11. Repair inline-Markdown identity aliases and decorated-finding evasion from the fifth panel, then repeat every verification lane.
+- [ ] 12. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 13. Publish and merge; close issue #80; resume the stale-base repair.
