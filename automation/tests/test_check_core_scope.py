@@ -704,6 +704,7 @@ class CoreScopeTests(unittest.TestCase):
             ("codex-planner", "codexplanner"),
             ("codex/planner", "codex planner"),
             ("codex, planner", "planner codex"),
+            ("author", "auth0r"),
         )
         for claimant, reviewer in aliases:
             with self.subTest(claimant=claimant, reviewer=reviewer), \
@@ -722,6 +723,111 @@ class CoreScopeTests(unittest.TestCase):
                 self.assertTrue(any(
                     "independent reviewer" in error for error in errors
                 ), errors)
+
+    def test_review_parser_rejects_composite_claimant_aliases(self):
+        claimant = "codex planner / sol-high implementer"
+        aliases = (
+            "codex",
+            "planner",
+            "codex planner",
+            "planner, codex",
+            "codex-planner",
+            "codex planner reviewer",
+            "sol high implementer",
+            "implementer high sol",
+            "codex planner sol high implementer",
+            "codex plannez",
+        )
+        for reviewer in aliases:
+            with self.subTest(reviewer=reviewer), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=(
+                        f"- core-fit / {reviewer}: approve — self alias\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant=claimant,
+                verification=(
+                    "- core-fit / correctness reviewer: approve — distinct role\n"
+                ),
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
+    def test_review_parser_splits_every_explicit_coclaimant_separator(self):
+        for separator in ("/", "+", ";", ",", "and", "AND"):
+            with self.subTest(separator=separator), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=f"first role {separator} second role",
+                    verification=(
+                        "- core-fit / first role: approve — component alias\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_invalidates_one_bad_coclaimant_component(self):
+        for claimant in (
+            "codex planner / ",
+            "codex planner // sol-high implementer",
+            "codex planner + TBD",
+            "codex planner, none",
+            "codex planner and ---",
+        ):
+            with self.subTest(claimant=claimant), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=(
+                        "- core-fit / correctness reviewer: approve — probe\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_keeps_distinct_reviewer_role_keys_distinct(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="author",
+                verification=(
+                    "- core-fit / reviewer: approve — first stable role\n"
+                    "- core-fit / correctness reviewer: block — second role\n"
+                    "- core-fit / safety reviewer: approve — third role\n"
+                ),
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
 
     def test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes(self):
         with tempfile.TemporaryDirectory() as tmp:

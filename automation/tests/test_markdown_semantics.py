@@ -129,6 +129,83 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             SEMANTICS.identity_key("planner/codex"),
         )
 
+    def test_composite_claimant_keys_include_whole_and_every_component(self):
+        claimant = " codex planner / sol-high implementer"
+        self.assertEqual(
+            (
+                SEMANTICS.identity_key(claimant.strip(" ")),
+                SEMANTICS.identity_key("codex planner"),
+                SEMANTICS.identity_key("sol-high implementer"),
+            ),
+            SEMANTICS.claimant_identity_keys(claimant),
+        )
+        expected = SEMANTICS.claimant_identity_keys(
+            "first role / second role"
+        )
+        for separator in ("/", "+", ";", ",", "and", "AND"):
+            with self.subTest(separator=separator):
+                keys = SEMANTICS.claimant_identity_keys(
+                    f"first role {separator} second role"
+                )
+                self.assertEqual(expected, keys)
+                self.assertIn(SEMANTICS.identity_key("first role"), keys)
+                self.assertIn(SEMANTICS.identity_key("second role"), keys)
+
+    def test_one_bad_composite_component_invalidates_claimant_authority(self):
+        malformed = (
+            "codex planner / ",
+            "/ codex planner",
+            "codex planner // sol-high implementer",
+            "codex planner + TBD",
+            "codex planner, none",
+            "codex planner and ---",
+            "codex planner / 审查者",
+            "D/B/T",
+            "D and B and T",
+            "N/A",
+            "N and A",
+            "first role, and second role",
+            "C++",
+        )
+        for claimant in malformed:
+            with self.subTest(claimant=claimant):
+                self.assertEqual(
+                    (), SEMANTICS.claimant_identity_keys(claimant)
+                )
+                self.assertFalse(
+                    SEMANTICS.independent_reviewer_identity(
+                        "correctness reviewer", claimant
+                    )
+                )
+
+    def test_composite_claimants_reject_component_and_multiset_aliases(self):
+        claimant = "codex planner / sol-high implementer"
+        self_aliases = (
+            "codex",
+            "planner",
+            "codex planner",
+            "planner, codex",
+            "codex-planner",
+            "codex planner reviewer",
+            "sol high implementer",
+            "implementer high sol",
+            "codex planner sol high implementer",
+            "codex plannez",
+        )
+        for reviewer in self_aliases:
+            with self.subTest(reviewer=reviewer):
+                self.assertFalse(
+                    SEMANTICS.independent_reviewer_identity(reviewer, claimant)
+                )
+        self.assertTrue(
+            SEMANTICS.independent_reviewer_identity(
+                "correctness reviewer", claimant
+            )
+        )
+        self.assertFalse(
+            SEMANTICS.independent_reviewer_identity("auth0r", "author")
+        )
+
     def test_plain_and_formatted_placeholders_have_no_identity(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",

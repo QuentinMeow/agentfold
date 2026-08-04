@@ -53,11 +53,21 @@ non-prose, or custom container fails closed even when a blank line made later Ma
 structurally visible again. An incomplete HTML-like start, end, comment, declaration, or
 processing marker also fails closed while parser input remains pending at the authority
 line, even if a later line eventually supplies `>`.
-Placeholder rejection, claimant comparison, and duplicate-voter replacement all use the
-same sorted multiset of case-folded ASCII alphanumerics. Punctuation, spacing, token
-boundaries, word order, reordered placeholders such as `yet none`, and anagram placeholders
-such as `D B T` cannot create another voter. This deliberately collides anagrams and
-therefore formal receipts use distinct stable role labels, not personal or display names.
+Composite claimants use literal `/`, `+`, `;`, `,`, and standalone case-insensitive ASCII
+`and` as co-claimant separators. ASCII spaces around each component are ignored. Every
+component must be nonempty, source-valid, and non-placeholder or the entire claimant has no
+authority. The whole key is the sorted multiset union of all component keys, excluding
+separators but preserving repeated-component multiplicity; the claimant exposes that key
+and every distinct component key. `D/B/T`, `D and B and T`, `N/A`, adjacent separators,
+punctuation-only components, and `C++` therefore fail closed.
+
+Reviewer keys remain sorted multisets of case-folded ASCII alphanumerics. A reviewer is not
+independent when its key equals, contains, is contained by, or differs by at most one
+balanced character substitution from any whole or component claimant key. This catches
+punctuation, spacing, word-order, anagram, prefix, suffix, and nearby-spelling aliases.
+Duplicate reviewer votes still replace only the same exact key; different stable role
+labels are not merged by containment. These rules deliberately create false collisions,
+so formal receipts use stable role labels rather than personal or display names.
 Detection of
 non-formal human actions separately removes Unicode category-M marks before tokenization.
 

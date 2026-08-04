@@ -94,12 +94,29 @@ document length n and k verdicts, rather than rescanning the semantic prefix for
 verdict. The existing CommonMark LF/CRLF/CR normalization remains the classification-view
 boundary; this change does not rewrite repository source.
 
-Formal identity normalization uses one key everywhere: the sorted multiset of case-folded
-ASCII alphanumeric characters. Placeholder rejection, claimant comparison, and
-duplicate-vote replacement therefore all ignore punctuation, whitespace, token boundaries,
-word order, and anagrams. `TBD.`, `D B T`, `none, yet`, `yet none`, and `n/a.` cannot become
-voters. This conservative rule deliberately collides anagrams: receipt authors use distinct
-stable role labels, not personal or display names.
+Formal reviewer normalization uses the sorted multiset of case-folded ASCII alphanumeric
+characters. Duplicate-vote replacement still uses that one exact reviewer key, so distinct
+stable role labels are not merged merely because one contains another.
+
+Claimant authority additionally recognizes explicit co-claimant separators `/`, `+`, `;`,
+`,`, and the standalone case-insensitive ASCII word `and`. It validates the unchanged raw
+source first, strips ASCII spaces around components, and rejects the whole claimant if any
+component is empty, invalid, punctuation-only, or a placeholder. The whole key is the
+sorted multiset union of every component key, including repeated-component multiplicity;
+separator characters and the letters of structural `and` never enter it. The helper returns
+that whole key plus every distinct component key. Thus `/` and `and` produce identical
+authority, while `D/B/T`, `D and B and T`, `N/A`, adjacent separators, and `C++` all fail
+closed.
+
+A reviewer must be distinct from the whole claimant and every component. Equality,
+punctuation or word-order aliases, either-direction character-multiset containment, and a
+multiset symmetric difference of at most two characters all reject independence. This
+closes component, prefix, suffix, extended-role, and one-substitution shapes such as
+`codex planner reviewer`, `author`/`auth0r`, and `codex planner`/`codex plannez`.
+These conservative rules deliberately create false collisions: formal receipts use
+distinct stable role labels, not personal or display names, and identity text is not an
+authenticated principal. Commas in display-name order, plus or slash in labels, standalone
+`and`, and nearby spellings therefore sacrifice convenience to fail-closed authority.
 General human-action detection still applies NFKD and removes Unicode
 category-M marks so a malformed non-formal line cannot split an action keyword. Formal
 authority source rejects those marks and all other non-ASCII characters before identity or

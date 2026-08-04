@@ -139,6 +139,10 @@ REVIEW_RECEIPT_IDENTITY_ALLOWED_PUNCTUATION = frozenset(
 REVIEW_RECEIPT_FINDING_ALLOWED_PUNCTUATION = frozenset(
     ".,;:?!'\"()/@+-"
 )
+CLAIMANT_IDENTITY_SEPARATOR_RE = re.compile(
+    r"[/+;,]|(?<![A-Za-z0-9])and(?![A-Za-z0-9])",
+    re.I,
+)
 
 
 def _is_default_ignorable_character(character):
@@ -441,16 +445,94 @@ def claimed_by_identity_source(text):
     return claimant
 
 
+def claimant_identity_keys(claimant):
+    """Return whole and component keys for one valid composite claimant.
+
+    Explicit co-claimant separators are ``/``, ``+``, ``;``, ``,`` and the
+    standalone ASCII word ``and`` (case-insensitive). ASCII spaces around each
+    component are ignored. The whole key is the separator-free multiset union of all
+    component keys, retaining repeated-component multiplicity. One empty, invalid, or
+    placeholder component or whole key invalidates the entire claimant authority
+    instead of leaving a partial identity behind.
+    """
+    source = (claimant or "").strip(" ")
+    if not review_receipt_identity_source_text_allowed(source):
+        return ()
+    components = CLAIMANT_IDENTITY_SEPARATOR_RE.split(source)
+    component_keys = []
+    for component in components:
+        component_key = identity_key(component.strip(" "))
+        if not component_key:
+            return ()
+        component_keys.append(component_key)
+
+    whole_value = "".join(sorted(
+        "".join(component_key[0] for component_key in component_keys)
+    ))
+    if not whole_value or whole_value in IDENTITY_PLACEHOLDER_KEYS:
+        return ()
+    whole_key = (whole_value,)
+    keys = [whole_key]
+    for component_key in component_keys:
+        if component_key not in keys:
+            keys.append(component_key)
+    return tuple(keys)
+
+
 def claimant_identity_key(claimant):
-    """Compatibility name for the same claimant/reviewer identity grammar."""
-    return identity_key(claimant)
+    """Compatibility name for a claimant's whole composite identity key."""
+    keys = claimant_identity_keys(claimant)
+    return keys[0] if keys else ()
+
+
+def _authority_key_multiset_subset(candidate, reference):
+    """Return whether one sorted authority multiset is contained in another."""
+    if not candidate or not reference:
+        return False
+    smaller = candidate[0]
+    larger = reference[0]
+    if len(smaller) > len(larger):
+        return False
+    position = 0
+    for character in larger:
+        if position < len(smaller) and character == smaller[position]:
+            position += 1
+    return position == len(smaller)
+
+
+def _authority_key_multiset_distance(left, right):
+    """Count unmatched characters across two sorted authority multisets."""
+    if not left or not right:
+        return None
+    left_value = left[0]
+    right_value = right[0]
+    left_index = 0
+    right_index = 0
+    unmatched = 0
+    while left_index < len(left_value) and right_index < len(right_value):
+        if left_value[left_index] == right_value[right_index]:
+            left_index += 1
+            right_index += 1
+        elif left_value[left_index] < right_value[right_index]:
+            unmatched += 1
+            left_index += 1
+        else:
+            unmatched += 1
+            right_index += 1
+    return unmatched + len(left_value) - left_index \
+        + len(right_value) - right_index
 
 
 def independent_reviewer_identity(reviewer, claimant):
-    """Require a real normalized reviewer identity distinct from a real claimant."""
+    """Require a reviewer outside every conservative composite-claimant alias."""
     reviewer_key = identity_key(reviewer)
-    claimant_key = claimant_identity_key(claimant)
-    return bool(reviewer_key and claimant_key and reviewer_key != claimant_key)
+    claimant_keys = claimant_identity_keys(claimant)
+    return bool(reviewer_key and claimant_keys and all(
+        not _authority_key_multiset_subset(reviewer_key, claimant_key)
+        and not _authority_key_multiset_subset(claimant_key, reviewer_key)
+        and _authority_key_multiset_distance(reviewer_key, claimant_key) > 2
+        for claimant_key in claimant_keys
+    ))
 
 
 def markdown_line_body(line):

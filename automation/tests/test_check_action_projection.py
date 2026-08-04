@@ -2592,6 +2592,114 @@ class ActionProjectionTests(unittest.TestCase):
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
 
+    def test_task_action_units_reject_composite_claimant_aliases(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        claimant = "codex planner / sol-high implementer"
+        aliases = (
+            "codex",
+            "planner",
+            "codex planner",
+            "planner, codex",
+            "codex-planner",
+            "codex planner reviewer",
+            "sol high implementer",
+            "implementer high sol",
+            "codex planner sol high implementer",
+            "codex plannez",
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root, mock.patch.object(
+            PROJECTION,
+            "candidate_text",
+            return_value=f"# Task\n\n**Claimed-by:** {claimant}\n",
+        ):
+            for reviewer in aliases:
+                with self.subTest(reviewer=reviewer):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix
+                        + f"- core-fit / {reviewer}: approve — self alias\n",
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            independent = (
+                "- core-fit / correctness reviewer: block — distinct role\n"
+            )
+            self.assertEqual({}, PROJECTION.task_action_unit_counts(
+                prefix + independent, source_path, repo=root
+            ))
+
+            mixed = (
+                prefix
+                + "- core-fit / codex planner: approve — self alias remains\n"
+                + independent
+            )
+            neutralized = PROJECTION.neutralize_core_fit_review_verdict_tokens(
+                mixed, claimant=claimant
+            )
+            self.assertIn("codex planner: approve", neutralized)
+            self.assertNotIn("correctness reviewer: block", neutralized)
+            self.assertIn("distinct role", neutralized)
+            counts = PROJECTION.task_action_unit_counts(
+                mixed, source_path, repo=root
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_invalidate_bad_composite_claimants(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / correctness reviewer: approve — identity probe\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        invalid = (
+            "codex planner / ",
+            "codex planner // sol-high implementer",
+            "codex planner + TBD",
+            "D/B/T",
+            "D and B and T",
+            "N/A",
+            "first role, and second role",
+            "C++",
+        )
+        with self.repo() as root:
+            for claimant in invalid:
+                with self.subTest(claimant=claimant), mock.patch.object(
+                    PROJECTION,
+                    "candidate_text",
+                    return_value=f"# Task\n\n**Claimed-by:** {claimant}\n",
+                ):
+                    counts = PROJECTION.task_action_unit_counts(
+                        text, source_path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_task_action_units_split_every_coclaimant_separator(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root:
+            for separator in ("/", "+", ";", ",", "and", "AND"):
+                claimant = f"first role {separator} second role"
+                with self.subTest(separator=separator), mock.patch.object(
+                    PROJECTION,
+                    "candidate_text",
+                    return_value=f"# Task\n\n**Claimed-by:** {claimant}\n",
+                ):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix
+                        + "- core-fit / first role: approve — self alias\n",
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
     def test_task_action_units_validate_claimant_from_unchanged_raw_source(self):
         prefix = (
             "## Review verdicts\n\n"
