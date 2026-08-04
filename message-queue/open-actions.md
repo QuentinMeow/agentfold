@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 14 questions waiting on you, 48 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 48 actions waiting on an agent. 3 others not yours right now.
 
 ## Waiting on you
 
@@ -39,7 +39,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 11
+### Never stops work — 10
 
 - [Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.](needs-human/reviews/non-blocking-review-template-first-explanation.md) — answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -119,14 +119,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** The nine principle files are the most-quoted documents here, and one of them tells agents a size limit smaller than the real one, so an agent will cut a contract that was never too long.
 
   **If you do nothing:** Nothing stops. The two files keep quoting numbers that are no longer true, and every agent that reads them inherits the wrong ones.
-
-  </details>
-- [Authorize the closed review-receipt parser and template change, or decline it.](needs-human/decisions/non-blocking-authorize-the-closed-review-receipt-parser.md) — answer by 2026-11-02
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** Without this authorization, completed independent review verdicts cannot be recorded without either a false human-action failure or an unsafe parsing exception.
-
-  **If you do nothing:** The parser repair and the dependent stale-base and bootstrap merges remain unpublished; current `main` stays unchanged and green.
 
   </details>
 
@@ -317,5 +309,13 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.
 
   **If you do nothing:** The repaired format becomes and stays the repository standard without your judgment on record.
+
+  </details>
+- [Authorize the closed review-receipt parser and template change, or decline it.](needs-human/decisions/non-blocking-authorize-the-closed-review-receipt-parser.md) — already answered — an agent owes the fold
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Without this authorization, completed independent review verdicts cannot be recorded without either a false human-action failure or an unsafe parsing exception.
+
+  **If you do nothing:** The parser repair and the dependent stale-base and bootstrap merges remain unpublished; current `main` stays unchanged and green.
 
   </details>
