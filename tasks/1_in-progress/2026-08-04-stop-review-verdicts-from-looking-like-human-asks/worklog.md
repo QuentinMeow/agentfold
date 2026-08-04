@@ -99,3 +99,25 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Focused tests, all 15 repository test files, the reconciler, and the staged core-scope
   gate passed. Independent review, publication, and issue closure remain with the
   coordinating session.
+
+## 2026-08-04 — repair raw contiguity and reviewer authority (codex sol-high implementer)
+
+- The third panel reviewed exact revision
+  `25b75c3cdd7fcb17626a79135c1b4b787fe41f0c` and returned 1 approve, 2 block.
+  Both blockers were accepted: semantic blanking could bridge nonblank raw comments,
+  HTML, or code; and action projection neutralized punctuation-only or self reviewers
+  that the core gate could not accept as independent evidence.
+- Made raw source lines own contiguity while requiring each heading, revision, and
+  verdict line to be byte-equivalent in the structural semantic view. Any nonblank raw
+  nonreceipt now closes the block, including content that the semantic view blanks.
+- Moved normalized identity and independence checks into the shared Markdown semantics
+  module. Action projection now resolves the exact sibling task file from the selected
+  index or candidate revision and fails closed unless it has one concrete claimant and a
+  distinct reviewer with non-punctuation identity tokens.
+- Added action and core regressions for comments, raw HTML, fenced and indented code
+  before the first verdict and between verdicts, plus valid independent, self,
+  punctuation-only, missing, duplicate, placeholder, candidate-revision, and hostile
+  reviewer/finding cases.
+- Focused and owning-module tests, all 15 repository test files, range core-scope,
+  staged pre-commit tests, the reconciler, and diff checks passed. Publication and a
+  fresh independent review remain with the coordinating session.

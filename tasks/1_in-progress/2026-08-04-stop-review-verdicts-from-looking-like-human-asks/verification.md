@@ -258,3 +258,75 @@ reconcile: 0 blocking finding(s)
 $ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
 core-scope: pass (4 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
 ```
+
+## Adversarial panel on 25b75c3
+
+**Reviewed revision:** 25b75c3cdd7fcb17626a79135c1b4b787fe41f0c
+
+Panel result: 1 approve, 2 block.
+
+- adversarial panel / reviewer 1: no blocking finding reported.
+- adversarial panel / security reviewer: block — semantic blanking lets a nonblank raw comment, HTML block, fence, or indented code bridge the receipt to a later verdict that is then wrongly counted and neutralized.
+- adversarial panel / correctness reviewer: block — punctuation-only and self reviewers can have their verdict token neutralized by action projection even though the core gate rejects those identities as independent evidence.
+
+Both blockers were accepted and repaired in the next implementation revision. This panel
+does not approve that repair, and `--require-review` was not invoked against it.
+
+## Raw-contiguity and reviewer-authority regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_normalize_receipt_near_misses automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_the_exact_receipt_path_and_region automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_end_receipts_at_first_nonreceipt_content automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_container_and_decorated_headings automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_allow_blank_separated_contiguous_verdicts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_an_independent_real_reviewer automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_read_claimant_from_candidate_revision automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_end_receipts_at_raw_hidden_or_code_content automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_punctuation_reviewer_and_unclaimed_task automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_stops_at_raw_hidden_or_code_content
+.............
+----------------------------------------------------------------------
+Ran 13 tests in 0.784s
+
+OK
+```
+
+## Raw-contiguity and reviewer-authority owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+............................................................................................................................................................................................................s......................................................
+----------------------------------------------------------------------
+Ran 259 tests in 14.920s
+
+OK (skipped=1)
+```
+
+## Raw-contiguity and reviewer-authority full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 56.85s
+```
+
+## Raw-contiguity and reviewer-authority range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Raw-contiguity and reviewer-authority reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
