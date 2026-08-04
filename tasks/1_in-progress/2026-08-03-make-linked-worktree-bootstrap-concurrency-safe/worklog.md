@@ -36,6 +36,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   the task to review with every acceptance criterion satisfied.
 - After the parent branch published its session handover, added this records-only follow-up
   so GitHub recomputes #79 against the parent's current tip instead of its creation snapshot.
+- Exact merge-candidate verification found that unconditional `chmod` on an already
+  executable hook dirtied Git's stat cache, so an immediate range-bound reconcile refused
+  the byte-clean checkout until `git update-index --refresh`. Moved the task back to
+  in-progress before repairing the hidden boot-sequence dependency.
 - Verified the final bytes with five focused installer tests, all 67 test-runner tests
   (one explicit opt-in skip), all 16 repository test files, an actual worktree rerun, and
   the reconciler with zero blocking findings. Independent review and publication remain
