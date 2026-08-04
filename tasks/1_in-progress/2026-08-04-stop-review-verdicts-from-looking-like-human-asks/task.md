@@ -1,10 +1,10 @@
 # Stop completed review verdicts from looking like human asks
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex planner / sol-high implementer
 **Filed:** 2026-08-04, by codex, from task `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check`
 **Parent:** 2026-08-03-plan-multi-worktree-safety-remediation
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-review-verdict-action-classification.md`; `message-queue/needs-agent/requests/non-blocking-track-github-review-verdict-action-classification.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-track-github-review-verdict-action-classification.md`; `message-queue/needs-agent/requests/non-blocking-triage-github-issue-80-review-verdict-action-classification.md`
 
 ## Goal
 

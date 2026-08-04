@@ -255,7 +255,13 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops, but GitHub may show stale status until another agent reconciles the projection.
 
   </details>
-- **27 backlog tasks are waiting for an agent to pick one up.**
+- [Triage GitHub issue #80 against its canonical task and retain this source binding until trusted provider evidence proves the issue closed.](needs-agent/requests/non-blocking-triage-github-issue-80-review-verdict-action-classification.md)
+  <details><summary>what happens if nobody acts</summary>
+
+  **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.
+
+  </details>
+- **26 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -284,7 +290,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [stop-a-wrapped-line-from-reading-as-a-command](needs-agent/requests/non-blocking-pick-up-stop-a-wrapped-line-from-reading-as-a-command.md)
   - [bind-task-branch-pushes-to-observed-tips](needs-agent/requests/non-blocking-pick-up-bind-task-branch-pushes-to-observed-tips.md)
   - [make-linked-worktree-bootstrap-concurrency-safe](needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md)
-  - [review-verdict-action-classification](needs-agent/requests/non-blocking-pick-up-review-verdict-action-classification.md)
 
   </details>
 

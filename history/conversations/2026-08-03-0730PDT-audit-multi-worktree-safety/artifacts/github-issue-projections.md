@@ -11,3 +11,4 @@ the same commit may then resolve that issue's source-bound queue item.
 | [#76](https://github.com/QuentinMeow/agentfold/issues/76) | `2026-08-03-bind-task-branch-pushes-to-observed-tips` | open |
 | [#77](https://github.com/QuentinMeow/agentfold/issues/77) | `2026-07-22-finalize-coordination-write-rules` | open |
 | [#78](https://github.com/QuentinMeow/agentfold/issues/78) | `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` | open |
+| [#80](https://github.com/QuentinMeow/agentfold/issues/80) | `2026-08-04-stop-review-verdicts-from-looking-like-human-asks` | open |
