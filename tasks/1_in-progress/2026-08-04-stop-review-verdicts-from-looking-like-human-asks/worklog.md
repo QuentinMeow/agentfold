@@ -182,3 +182,25 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   allowed punctuation and Unicode letters, duplicate image-voter aliases, and a normal
   receipt. Focused and owning-module tests, all 15 repository test files, pre-commit,
   range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — bind claimant identity to raw source and fold Unicode marks (codex sol-high implementer)
+
+- The next panel reviewed exact revision
+  `2ba968faf027df5874de8847948568102513a497` and returned 0 approve, 3 block.
+  The three accepted blockers were a claimant helper that derived identity after semantic
+  rewriting, combining marks that could mint apparent reviewer identities, and combining
+  marks that could split human-action keywords. The earlier security tool error on
+  `5c31f50` remains reproduction evidence only and is not a vote in this panel.
+- Claimant extraction now locates one literal top-level field in raw `task.md`, validates
+  its unchanged suffix against the source whitelist, and only then confirms that the raw
+  line is structurally visible. Comments, markup, entities, links, images, code, escapes,
+  default-ignorables, hidden fields, malformed suffixes, and duplicates yield no identity.
+- Identity and action detection now apply NFKD and remove every Unicode category-M mark
+  before casefolding or tokenization. Composed/decomposed spellings compare equally;
+  accent-only distinctions conservatively collide; marked placeholders and action words
+  collapse to their ordinary forms.
+- Added unit, core-gate, and action-projection regressions for every requested raw claimant
+  form, multiple combining-mark positions, alias vote stuffing, marked approve/block
+  words, marked placeholders, legitimate Unicode, and composed/decomposed equivalence.
+  Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed.

@@ -12,5 +12,6 @@
 - [x] 10. Repair ASCII-blank, CRLF, and human-visible identity blockers from the fourth panel, then repeat every verification lane.
 - [x] 11. Repair inline-Markdown identity aliases and decorated-finding evasion from the fifth panel, then repeat every verification lane.
 - [x] 12. Replace partial rendering with an explicit source-text whitelist after the panel on `5c31f50`, then repeat every verification lane.
-- [ ] 13. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 14. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 13. Bind claimant identity to unchanged raw source and fold Unicode marks after the panel on `2ba968f`, then repeat every verification lane.
+- [ ] 14. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 15. Publish and merge; close issue #80; resume the stale-base repair.
