@@ -38,9 +38,56 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           QUEUE_TASK_BRANCH: ${{ github.head_ref }}
-          QUEUE_CHANGE_RANGE: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+          QUEUE_EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          QUEUE_EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           QUEUE_DISPLACED_TIP: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
         run: |
+          # actions/checkout has already pinned one immutable candidate. Usually
+          # that is the merge GitHub computed when this job started, which may
+          # have a newer first parent than the event payload when the base moved
+          # after the event fired. Bind that checked-out candidate by the same
+          # parent shape as the other pull-request adapters: exactly two parents,
+          # second parent equal to this event's head, and first parent containing
+          # this event's base. The range stays shaped as the pull-request leg so
+          # the reconciler independently validates HEAD as that exact synthetic
+          # merge. A direct head checkout remains the existing fast path.
+          if [ -z "$QUEUE_EVENT_BASE" ] || [ -z "$QUEUE_EVENT_HEAD" ]; then
+            echo "pull-request payload carries no head or base revision" >&2
+            exit 1
+          fi
+          QUEUE_CANDIDATE_REVISION="$(
+            git --no-replace-objects rev-parse --verify "HEAD^{commit}"
+          )"
+          if [ "$QUEUE_CANDIDATE_REVISION" = "$QUEUE_EVENT_HEAD" ]; then
+            QUEUE_CHANGE_RANGE="$QUEUE_EVENT_BASE...$QUEUE_EVENT_HEAD"
+          else
+            QUEUE_MERGED_HEAD="$(
+              git --no-replace-objects rev-parse --verify --quiet \
+                "$QUEUE_CANDIDATE_REVISION^2^{commit}"
+            )" || {
+              echo "merge candidate is not a merge commit" >&2
+              exit 1
+            }
+            if git --no-replace-objects rev-parse --verify --quiet \
+                "$QUEUE_CANDIDATE_REVISION^3^{commit}" > /dev/null; then
+              echo "merge candidate has more than two parents" >&2
+              exit 1
+            fi
+            if [ "$QUEUE_MERGED_HEAD" != "$QUEUE_EVENT_HEAD" ]; then
+              echo "merge candidate does not merge this event's head" >&2
+              exit 1
+            fi
+            QUEUE_CANDIDATE_BASE="$(
+              git --no-replace-objects rev-parse --verify \
+                "$QUEUE_CANDIDATE_REVISION^1^{commit}"
+            )"
+            if ! git --no-replace-objects merge-base --is-ancestor \
+                "$QUEUE_EVENT_BASE" "$QUEUE_CANDIDATE_BASE"; then
+              echo "merge candidate does not contain this event's base" >&2
+              exit 1
+            fi
+            QUEUE_CHANGE_RANGE="$QUEUE_CANDIDATE_BASE...$QUEUE_EVENT_HEAD"
+          fi
           QUEUE_DISPLACED_ARGS=()
           if [ -n "$QUEUE_DISPLACED_TIP" ] && \
               [ "$QUEUE_DISPLACED_TIP" != "0000000000000000000000000000000000000000" ]; then
