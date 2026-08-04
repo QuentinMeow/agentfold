@@ -53,4 +53,4 @@
 ## known-issues
 - [A review outcome is an agent's attested reading of the human's sentence, not a proof](known-issues/2026-07-31-review-outcome-classification-is-attested.md) — Nothing mechanical verifies that a recorded Review outcome matches what the human actually wrote.
 - [A live queue item's immutable fields cannot be corrected, even when they are wrong](known-issues/2026-08-01-an-immutable-field-cannot-be-repaired-on-a-live-item.md) — Cross-reference and provenance fields are part of a live item's frozen action identity, so a dangling link, a pointer to a renamed sibling, and a question whose subject became moot all have no legal repair while the item is live
-- [install.py symlinks fail on Windows without developer mode](known-issues/install-symlinks-windows.md) — Agent-adapter symlinks need Windows developer mode or admin; otherwise install.py falls back with a warning
+- [install.py symlinks fail on Windows without developer mode](known-issues/install-symlinks-windows.md) — Agent-adapter symlinks need Windows developer mode or admin; otherwise install.py preserves existing paths, exits nonzero, and points to the workaround
