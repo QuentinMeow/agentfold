@@ -473,15 +473,18 @@ class CoreScopeTests(unittest.TestCase):
                     task, touched_core=True, require_review=True
                 ))
 
-    def test_unicode_review_identity_is_accepted(self):
+    def test_unicode_review_identity_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp, status="3_in-review", claimant="author",
                 verification="- core-fit / 李雷: approve — independent review\n",
             )
-            self.assertEqual([], SCOPE.validate_task(
+            errors = SCOPE.validate_task(
                 task, touched_core=True, require_review=True
-            ))
+            )
+            self.assertTrue(any(
+                "independent reviewer" in error for error in errors
+            ), errors)
 
     def test_self_review_does_not_satisfy_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -635,7 +638,7 @@ class CoreScopeTests(unittest.TestCase):
             "![author](profile)", "a**uth**or", "a_uth_or", "~~author~~",
             "`author`", "<span>author</span>", "auth&#111;r",
             "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
-            "author\u00a0name", "author\u2028name",
+            "author\u00a0name", "author\u2028name", "аuthor", "authоr",
         )
         cases = (
             [(claimant, "independent") for claimant in decorated]
@@ -660,6 +663,50 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
+    def test_review_parser_rejects_ascii_boundary_and_word_order_self_aliases(self):
+        aliases = (
+            ("O'Neil", "ONeil"),
+            ("codex-planner", "codexplanner"),
+            ("codex/planner", "codex planner"),
+            ("codex, planner", "planner codex"),
+        )
+        for claimant, reviewer in aliases:
+            with self.subTest(claimant=claimant, reviewer=reviewer), \
+                    tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp,
+                    status="3_in-review",
+                    claimant=claimant,
+                    verification=(
+                        f"- core-fit / {reviewer}: approve — self alias\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(
+                    "independent reviewer" in error for error in errors
+                ), errors)
+
+    def test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="claimant",
+                verification=(
+                    "- core-fit / O'Neil: approve — first alias vote\n"
+                    "- core-fit / Neil, O: block — replacement alias vote\n"
+                    "- core-fit / distinct role: approve — independent vote\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any(
+                "approve majority (1 approve, 1 block)" in error for error in errors
+            ), errors)
+
     def test_review_parser_validates_claimant_from_unchanged_raw_source(self):
         invalid_claimant_fields = (
             "**Claimed-by:** au<!-- hidden -->thor",
@@ -674,6 +721,11 @@ class CoreScopeTests(unittest.TestCase):
             "**Claimed-by:** author\n**Claimed-by:** second",
             "<!--\n**Claimed-by:** author\n-->",
             "```text\n**Claimed-by:** author\n```",
+            "ordinary paragraph\n**Claimed-by:** author",
+            "> block quote paragraph\n**Claimed-by:** author",
+            "- list paragraph\n**Claimed-by:** author",
+            "**Claimed-by:** author\n---",
+            "**Claimed-by:** author\n===",
         )
         for claimed_by in invalid_claimant_fields:
             with self.subTest(claimed_by=claimed_by), \
@@ -699,7 +751,7 @@ class CoreScopeTests(unittest.TestCase):
                     "independent reviewer" in error for error in errors
                 ), errors)
 
-    def test_review_parser_folds_combining_marks_in_reviewer_identity(self):
+    def test_review_parser_rejects_non_ascii_reviewer_identity(self):
         cases = (
             ("author", "a\u0301uthor"),
             ("author", "au\u0301thor"),
@@ -707,6 +759,8 @@ class CoreScopeTests(unittest.TestCase):
             ("author", "autho\u0301r"),
             ("author", "author\u0301"),
             ("Élodie", "E\u0301lodie"),
+            ("author", "аuthor"),
+            ("author", "authоr"),
         )
         for claimant, reviewer in cases:
             with self.subTest(claimant=claimant, reviewer=reviewer), \
@@ -733,9 +787,9 @@ class CoreScopeTests(unittest.TestCase):
                 status="3_in-review",
                 claimant="claimant",
                 verification=(
-                    "- core-fit / author: approve — first alias\n"
-                    "- core-fit / a\u0301uthor: approve — second alias\n"
-                    "- core-fit / au\u0301thor: block — final alias blocked\n"
+                    "- core-fit / author: block — original voter blocked\n"
+                    "- core-fit / a\u0301uthor: approve — first invalid alias\n"
+                    "- core-fit / au\u0301thor: approve — second invalid alias\n"
                 ),
             )
             errors = SCOPE.validate_task(
@@ -748,7 +802,8 @@ class CoreScopeTests(unittest.TestCase):
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "T\u0301BD", "TB\u0301D",
-            "TBD\u0301",
+            "TBD\u0301", "TBD.", "T.B.D.", "t-b-d", "unknown.",
+            "none, yet", "n/a.",
         )
         for placeholder in placeholders:
             for claimant, reviewer in (
@@ -818,20 +873,37 @@ class CoreScopeTests(unittest.TestCase):
                 task, touched_core=True, require_review=True
             ))
 
-    def test_review_parser_accepts_allowlisted_unicode_receipt(self):
+    def test_review_parser_accepts_ascii_authority_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp,
                 status="3_in-review",
                 claimant="codex planner / sol-high implementer",
                 verification=(
-                    "- core-fit / 审查者 Élodie 2 @ safety + core: approve — "
-                    "Boundary clear, tested; release-safe — no leak.\n"
+                    "- core-fit / reviewer 2 @ safety + core: approve — "
+                    "Boundary clear, tested; release-safe, no leak.\n"
                 ),
             )
             self.assertEqual([], SCOPE.validate_task(
                 task, touched_core=True, require_review=True
             ))
+
+    def test_review_parser_rejects_non_ascii_finding_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant="claimant",
+                verification=(
+                    "- core-fit / reviewer: approve — аpprove the release\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(any(
+                "independent reviewer" in error for error in errors
+            ), errors)
 
     def test_review_parser_rejects_decorated_reviewer_and_finding_components(self):
         reviewer_cases = (
@@ -841,7 +913,7 @@ class CoreScopeTests(unittest.TestCase):
             "<span>author</span>", "auth&#111;r", "cod\\_ex", "{author}",
             "au\u200bthor", "author\tname", "author\u00a0name",
             "author\u2028name", "[TBD](profile)", "![TBD](profile)",
-            "T**B**D",
+            "T**B**D", "аuthor", "authоr",
         )
         finding_cases = (
             "ap[pro][cmd]ve the release",
@@ -852,6 +924,7 @@ class CoreScopeTests(unittest.TestCase):
             "<span>approve</span> the release",
             "ap\\_prove the release",
             "ap\u200bprove the release",
+            "аpprove the release",
         )
         definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
         cases = [

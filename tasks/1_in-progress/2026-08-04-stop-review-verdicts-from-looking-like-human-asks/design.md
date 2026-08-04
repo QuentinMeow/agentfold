@@ -44,30 +44,38 @@ structural `approve` or `block`, while reviewer identity and finding text remain
 the human-action detector. Removing one helper call restores the prior behavior; the
 owner's authorization approves this parser/template boundary, not a review outcome.
 
-The final compatibility boundary is an explicit source-text whitelist rather than a
-partial renderer. Claimants, formal reviewers, and formal findings may contain Unicode
-letters, marks, and numbers; ASCII space; and only `. , ; : ? ! ' " ( ) / @ + - —` as
-punctuation. Tabs, non-ASCII separators, controls, default-ignorables, and every other
-character are invalid. In particular, brackets, angle brackets, backslash, backtick,
-asterisk, underscore, tilde, braces, and ampersand exclude links, images, reference
+The final compatibility boundary is an ASCII-only source whitelist rather than a partial
+renderer. Claimants, formal reviewers, and formal findings may contain ASCII letters,
+digits, space, and only `. , ; : ? ! ' " ( ) / @ + -` as punctuation. The em dash belongs
+only to the receipt's structural delimiter, outside those components. Every non-ASCII
+character is invalid, which excludes Unicode homoglyphs as well as separators, controls,
+default-ignorables, and combining marks. Brackets, angle brackets, backslash, backtick,
+asterisk, underscore, tilde, braces, and ampersand still exclude links, images, reference
 labels, escapes, emphasis, code, HTML, and entities by construction.
 
-The claimant suffix is located on the one literal top-level field in raw `task.md` before
-any semantic view is built. Its raw characters pass the same source predicate first; a
-duplicate field, or any comment, markup, entity, link, image, code span, escape, control,
-or invisible character in the suffix leaves the task with no review identity. A later
-structural equality check only proves that the already-validated raw line was not hidden
-inside code or HTML; it never supplies repaired claimant text.
+The claimant suffix is located on the one literal field in raw `task.md` before any
+semantic view is built. That field must start the file or immediately follow a truly
+ASCII-blank raw line; a preceding paragraph, blockquote, or list line makes it a lazy
+continuation rather than top-level authority. An immediately following raw Setext
+underline (`---` or `===`, with CommonMark indentation and ASCII whitespace) also invalidates
+the field. Its raw characters pass the source predicate
+first. A duplicate field, or any comment, markup, entity, link, image, code span, escape,
+control, invisible, or non-ASCII character leaves the task with no review identity. A
+later structural equality check only proves that the already-validated raw line was not
+hidden inside code or HTML; it never supplies repaired claimant text.
 
-After source validation, identity and action text use NFKD and remove every Unicode
-category-M mark before casefolding and tokenization. Composed and decomposed spellings
-therefore compare equally, combining marks cannot mint voter aliases or split an action
-keyword, and a mark-decorated placeholder collapses back to the rejected placeholder.
-This deliberately treats accent-only identity distinctions as equal at this authority
-boundary. An invalid reviewer or finding still ends the formal block, so the verdict
-receives no neutralization. The finite alphabet and conservative mark folding cost
-Markdown formatting, uncommon punctuation, and accent-distinct identities, but avoid
-predicting how an extensible renderer displays source.
+Formal identity normalization first removes punctuation for placeholder comparison, so
+`TBD.`, `T.B.D.`, `t-b-d`, `unknown.`, `none, yet`, and `n/a.` cannot become voters. Its
+authority key is the sorted multiset of case-folded ASCII alphanumeric characters, ignoring
+punctuation, whitespace, token boundaries, and word order. The same key performs claimant
+comparison and duplicate-vote replacement. This conservative rule deliberately collides
+anagrams: receipt authors use distinct stable role labels, not personal or display names.
+General human-action detection still applies NFKD and removes Unicode
+category-M marks so a malformed non-formal line cannot split an action keyword. Formal
+authority source rejects those marks and all other non-ASCII characters before identity or
+finding evidence exists. An invalid reviewer or finding ends the formal block, so the
+verdict receives no neutralization. The finite ASCII alphabet costs all non-ASCII names and
+findings inside the exempt receipt; Unicode explanation remains ordinary prose outside it.
 
 ## Core fit
 

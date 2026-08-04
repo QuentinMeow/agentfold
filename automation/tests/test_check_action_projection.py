@@ -2538,7 +2538,7 @@ class ActionProjectionTests(unittest.TestCase):
             "![author](profile)", "a**uth**or", "a_uth_or", "~~author~~",
             "`author`", "<span>author</span>", "auth&#111;r",
             "cod\\_ex", "{author}", "au\u200bthor", "author\tname",
-            "author\u00a0name", "author\u2028name",
+            "author\u00a0name", "author\u2028name", "аuthor", "authоr",
         )
         with self.repo() as root:
             cases = (
@@ -2561,6 +2561,36 @@ class ActionProjectionTests(unittest.TestCase):
                         )
                     self.assertEqual(1, sum(counts.values()), counts)
 
+    def test_task_action_units_reject_ascii_boundary_and_order_self_aliases(self):
+        prefix = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        aliases = (
+            ("O'Neil", "ONeil"),
+            ("codex-planner", "codexplanner"),
+            ("codex/planner", "codex planner"),
+            ("codex, planner", "planner codex"),
+        )
+        with self.repo() as root:
+            for claimant, reviewer in aliases:
+                with self.subTest(claimant=claimant, reviewer=reviewer), \
+                        mock.patch.object(
+                            PROJECTION,
+                            "candidate_text",
+                            return_value=(
+                                f"# Task\n\n**Claimed-by:** {claimant}\n"
+                            ),
+                        ):
+                    counts = PROJECTION.task_action_unit_counts(
+                        prefix
+                        + f"- core-fit / {reviewer}: approve — self alias\n",
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
     def test_task_action_units_validate_claimant_from_unchanged_raw_source(self):
         prefix = (
             "## Review verdicts\n\n"
@@ -2581,6 +2611,11 @@ class ActionProjectionTests(unittest.TestCase):
             "# Task\n\n**Claimed-by:** author\n**Claimed-by:** second\n",
             "# Task\n\n<!--\n**Claimed-by:** author\n-->\n",
             "# Task\n\n```text\n**Claimed-by:** author\n```\n",
+            "ordinary paragraph\n**Claimed-by:** author\n",
+            "> block quote paragraph\n**Claimed-by:** author\n",
+            "- list paragraph\n**Claimed-by:** author\n",
+            "# Task\n\n**Claimed-by:** author\n---\n",
+            "# Task\n\n**Claimed-by:** author\n===\n",
         )
         with self.repo() as root:
             for task_text in invalid_task_texts:
@@ -2603,7 +2638,7 @@ class ActionProjectionTests(unittest.TestCase):
                     ),
                 )
 
-    def test_task_action_units_fold_combining_marks_in_reviewer_identity(self):
+    def test_task_action_units_reject_non_ascii_reviewer_identity(self):
         prefix = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
@@ -2616,6 +2651,8 @@ class ActionProjectionTests(unittest.TestCase):
             ("author", "autho\u0301r"),
             ("author", "author\u0301"),
             ("Élodie", "E\u0301lodie"),
+            ("author", "аuthor"),
+            ("author", "authоr"),
         )
         with self.repo() as root:
             for claimant, reviewer in cases:
@@ -2645,7 +2682,8 @@ class ActionProjectionTests(unittest.TestCase):
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "T\u0301BD", "TB\u0301D",
-            "TBD\u0301",
+            "TBD\u0301", "TBD.", "T.B.D.", "t-b-d", "unknown.",
+            "none, yet", "n/a.",
         )
         with self.repo() as root:
             for placeholder in placeholders:
@@ -2773,12 +2811,12 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
-    def test_task_action_units_accept_allowlisted_unicode_receipt(self):
+    def test_task_action_units_accept_ascii_authority_receipt(self):
         text = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
-            "- core-fit / 审查者 Élodie 2 @ safety + core: approve — "
-            "Boundary clear, tested; release-safe — no leak.\n"
+            "- core-fit / reviewer 2 @ safety + core: approve — "
+            "Boundary clear, tested; release-safe, no leak.\n"
         )
         with self.repo() as root:
             self.receipt_task(
@@ -2793,6 +2831,21 @@ class ActionProjectionTests(unittest.TestCase):
                 ),
             )
 
+    def test_task_action_units_keep_non_ascii_finding_actionable(self):
+        text = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / reviewer: approve — аpprove the release\n"
+        )
+        with self.repo() as root:
+            self.receipt_task(root, claimant="claimant")
+            counts = PROJECTION.task_action_unit_counts(
+                text,
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
     def test_task_action_units_fail_closed_on_decorated_receipt_components(self):
         prefix = (
             "## Review verdicts\n\n"
@@ -2806,7 +2859,7 @@ class ActionProjectionTests(unittest.TestCase):
             "<span>author</span>", "auth&#111;r", "cod\\_ex", "{author}",
             "au\u200bthor", "author\tname", "author\u00a0name",
             "author\u2028name", "[TBD](profile)", "![TBD](profile)",
-            "T**B**D",
+            "T**B**D", "аuthor", "authоr",
         )
         finding_cases = (
             "ap[pro][cmd]ve the release",
@@ -2817,6 +2870,7 @@ class ActionProjectionTests(unittest.TestCase):
             "<span>approve</span> the release",
             "ap\\_prove the release",
             "ap\u200bprove the release",
+            "аpprove the release",
         )
         definitions = "\n[id]: /profile\n[author]: /profile\n[cmd]: /destination\n"
         with self.repo() as root:

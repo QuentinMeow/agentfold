@@ -48,8 +48,7 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
     def test_allows_only_documented_plain_source_alphabet(self):
         allowed = (
             "codex planner / sol-high implementer",
-            "Reviewer 2 @ safety + core — clear.",
-            "Élodie 审查者 ١٢ e\u0301",
+            "Reviewer 2 @ safety + core - clear.",
             "Clear: yes, tested; why? because! 'single' \"double\" (group).",
         )
         for value in allowed:
@@ -66,6 +65,7 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             "<span>author</span>", "auth&#111;r", "cod\\_ex",
             "{author}", "au\u200bthor", "author\tname", "author\u00a0name",
             "author\u2028name", "author\nname", "author\ufeffname",
+            "Élodie", "审查者", "аuthor", "authоr", "finding — detail",
         )
         for value in rejected:
             with self.subTest(value=value):
@@ -74,37 +74,59 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
                 )
                 self.assertEqual((), SEMANTICS.identity_key(value))
 
-    def test_normalizes_only_after_plain_source_validation(self):
+    def test_unicode_folding_is_detection_only_after_ascii_authority_validation(self):
         self.assertEqual(
-            SEMANTICS.identity_key("ÉLODIE １２"),
-            SEMANTICS.identity_key("elodie 12"),
+            SEMANTICS.identity_key("AUTHOR 12"),
+            SEMANTICS.identity_key("author 12"),
         )
         self.assertEqual(
-            SEMANTICS.identity_key("Élodie"),
-            SEMANTICS.identity_key("E\u0301lodie"),
+            "Elodie",
+            SEMANTICS.fold_unicode_marks("Élodie"),
         )
-        self.assertTrue(SEMANTICS.identity_key("审查者 Élodie 2"))
+        self.assertEqual(
+            SEMANTICS.fold_unicode_marks("Élodie"),
+            SEMANTICS.fold_unicode_marks("E\u0301lodie"),
+        )
+        self.assertEqual((), SEMANTICS.identity_key("Élodie"))
+        self.assertEqual((), SEMANTICS.identity_key("E\u0301lodie"))
+        self.assertEqual((), SEMANTICS.identity_key("审查者 2"))
         self.assertEqual((), SEMANTICS.identity_key("![ÉLODIE](１２)"))
+
+    def test_identity_key_ignores_ascii_boundaries_and_word_order(self):
+        aliases = (
+            "O'Neil", "ONeil", "o-neil", "O/Neil", "O Neil", "Neil, O",
+        )
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                self.assertEqual(
+                    SEMANTICS.identity_key("ONeil"),
+                    SEMANTICS.identity_key(alias),
+                )
+        self.assertEqual(
+            SEMANTICS.identity_key("codex planner"),
+            SEMANTICS.identity_key("planner/codex"),
+        )
 
     def test_plain_and_formatted_placeholders_have_no_identity(self):
         placeholders = (
             "unclaimed", "none yet", "TBD", "TODO", "none", "N/A", "NA",
             "unknown", "______", "<reviewer>", "[TBD](profile)",
             "![TBD](profile)", "T**B**D", "`TODO`", "[unknown][id]",
-            "_none_", "T\u0301BD", "TB\u0301D", "TBD\u0301",
+            "_none_", "T\u0301BD", "TB\u0301D", "TBD\u0301", "TBD.",
+            "T.B.D.", "t-b-d", "unknown.", "none, yet", "n/a.",
         )
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
                 self.assertEqual((), SEMANTICS.identity_key(placeholder))
 
-    def test_combining_marks_cannot_split_identity_or_action_tokens(self):
-        author = SEMANTICS.identity_key("author")
+    def test_combining_marks_cannot_enter_identity_or_split_action_tokens(self):
         for alias in (
             "a\u0301uthor", "au\u0301thor", "aut\u0301hor",
             "autho\u0301r", "author\u0301",
         ):
             with self.subTest(alias=alias):
-                self.assertEqual(author, SEMANTICS.identity_key(alias))
+                self.assertEqual((), SEMANTICS.identity_key(alias))
+                self.assertEqual("author", SEMANTICS.fold_unicode_marks(alias))
         self.assertEqual(
             ("approve", "block"),
             SEMANTICS.normalized_action_tokens("ap\u0301prove blo\u0301ck"),
@@ -142,6 +164,26 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
         self.assertIsNone(SEMANTICS.claimed_by_identity_source(
             "# Task\n\n```text\n**Claimed-by:** author\n```\n"
         ))
+        for lazy_prefix in (
+            "ordinary paragraph\n",
+            "> block quote paragraph\n",
+            "- list paragraph\n",
+        ):
+            with self.subTest(lazy_prefix=lazy_prefix):
+                self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+                    lazy_prefix + "**Claimed-by:** author\n"
+                ))
+        for underline in ("---", "===", "  ---  ", "   ===\t"):
+            with self.subTest(underline=underline):
+                self.assertIsNone(SEMANTICS.claimed_by_identity_source(
+                    f"# Task\n\n**Claimed-by:** author\n{underline}\n"
+                ))
+        self.assertEqual(
+            " author",
+            SEMANTICS.claimed_by_identity_source(
+                "**Claimed-by:** author\n**Filed:** 2026-08-04\n"
+            ),
+        )
 
 
 class IndentedCodeViewTests(unittest.TestCase):

@@ -129,12 +129,12 @@ TASK_CLAIMED_BY_SOURCE_RE = re.compile(
     re.M,
 )
 ASCII_MARKDOWN_BLANK_LINE_RE = re.compile(r"^[ \t]*(?:\r\n|\r|\n)?$")
-IDENTITY_PLACEHOLDERS = frozenset({
-    "unclaimed", "none yet", "none-yet", "tbd", "todo", "none",
-    "n/a", "na", "unknown",
+ASCII_SETEXT_UNDERLINE_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
+IDENTITY_PLACEHOLDER_ALNUM = frozenset({
+    "unclaimed", "noneyet", "tbd", "todo", "none", "na", "unknown",
 })
 REVIEW_RECEIPT_ALLOWED_PUNCTUATION = frozenset(
-    ".,;:?!'\"()/@+-—"
+    ".,;:?!'\"()/@+-"
 )
 
 
@@ -331,39 +331,48 @@ def semantic_text(text):
 def review_receipt_source_text_allowed(text):
     """Accept only the complete source alphabet for receipt prose.
 
-    Formal reviewer, claimant, and finding text may contain Unicode letters, marks,
-    and numbers; ASCII space; and the exact punctuation in
+    Formal reviewer, claimant, and finding text may contain ASCII letters, numbers,
+    space, and the exact punctuation in
     ``REVIEW_RECEIPT_ALLOWED_PUNCTUATION``. Everything else fails closed before any
-    normalization. That excludes every Markdown/HTML introducer used by links,
-    images, emphasis, escapes, code, tags, and entities, along with tabs, non-ASCII
-    separators, controls, and default-ignorable characters.
+    normalization. The structural em dash between verdict and finding is outside these
+    components. This excludes Unicode homoglyphs and every Markdown/HTML introducer used
+    by links, images, emphasis, escapes, code, tags, and entities, along with tabs,
+    non-ASCII separators, controls, and default-ignorable characters.
     """
     value = text or ""
     if not value:
         return False
     for character in value:
-        if _is_default_ignorable_character(character):
+        if not character.isascii() or _is_default_ignorable_character(character):
             return False
         if (character == " "
                 or character in REVIEW_RECEIPT_ALLOWED_PUNCTUATION):
             continue
-        if unicodedata.category(character)[0] in {"L", "M", "N"}:
+        if character.isalnum():
             continue
         return False
     return True
 
 
 def identity_key(identity):
-    """Return source-safe identity tokens, excluding placeholders."""
+    """Return one fail-closed authority key, excluding placeholders.
+
+    The key deliberately ignores ASCII punctuation, whitespace, token boundaries, and
+    word order. Sorting the remaining case-folded alphanumeric characters also makes
+    anagrams collide. Formal receipts therefore use stable role labels rather than
+    personal or display names: false collisions reject authority instead of allowing
+    self-review or vote stuffing through spelling variants.
+    """
     source = identity or ""
     if not review_receipt_source_text_allowed(source):
         return ()
     normalized = fold_unicode_marks(source).casefold()
     normalized = " ".join(normalized.split())
-    if not normalized or normalized in IDENTITY_PLACEHOLDERS \
-            or re.fullmatch(r"_+", normalized):
+    placeholder_key = "".join(re.findall(r"[a-z0-9]+", normalized))
+    if not normalized or not placeholder_key \
+            or placeholder_key in IDENTITY_PLACEHOLDER_ALNUM:
         return ()
-    return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
+    return ("".join(sorted(placeholder_key)),)
 
 
 def claimed_by_identity_source(text):
@@ -384,6 +393,12 @@ def claimed_by_identity_source(text):
     if len(matches) != 1:
         return None
     line_index, raw_body, claimant = matches[0]
+    if line_index and not ascii_markdown_blank_line(source_lines[line_index - 1]):
+        return None
+    if line_index + 1 < len(source_lines) and ASCII_SETEXT_UNDERLINE_RE.fullmatch(
+        markdown_line_body(source_lines[line_index + 1])
+    ):
+        return None
     if not review_receipt_source_text_allowed(claimant):
         return None
 
