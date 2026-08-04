@@ -339,3 +339,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `984af3602d171ee3b66cfbf0bdcc646330911e6f`. The final finite-model audit reported no
   blocker; identity labels remain deliberately conservative text, not authenticated
   principals.
+
+## 2026-08-04 — checkpoint one-time claimant derivation (codex sol-high implementer)
+
+- The eleventh panel reviewed exact revision
+  `ea4bb732e2e4c1d0d4c2a3733298d40652fb9215` and returned 2 approve, 1 block. The accepted
+  performance finding was that both core admission and action neutralization rebuilt and
+  resorted the full composite claimant for every verdict.
+- A new key-level independence helper accepts precomputed reviewer and claimant keys. The
+  public identity helper remains compatible and delegates after deriving each side once.
+  Action neutralization now derives claimant keys once per document; core validation does
+  so once per task and reuses the already computed reviewer key for exact vote dedup.
+- Composite component dedup now also uses a set while preserving ordered output and whole
+  repeated-component multiplicity.
+- Deterministic focused tests use a 256-character claimant and 256 verdicts. They prove
+  claimant derivation is called exactly once and reviewer key derivation exactly 256 times
+  in both action neutralization and core validation; existing composite/self/independent
+  semantics remain unchanged. The focused slice passed 5/5 in 0.221s.
+- The implementation was committed as
+  `1abfc8d2d2e9f1baf184398f0591cb7e8632eef9`. Its staged hook passed core scope,
+  reconciliation, and 13/13 registered repository test files in 79.74s.
+- At the owner's wrap-up request, no additional manual full suite was started. Remaining
+  work is the deferred owning/full/exact-range verification and final durable eleventh-panel
+  record before a new independent revision-bound panel.

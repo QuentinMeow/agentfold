@@ -1303,3 +1303,51 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check 7e3c8d2b9ea082b9289509fe64132eaaa545b272..984af3602d171ee3b66cfbf0bdcc646330911e6f
 ```
+
+## Eleventh-panel wrap-up checkpoint
+
+**Reviewed revision:** ea4bb732e2e4c1d0d4c2a3733298d40652fb9215
+
+Panel result: 2 approve, 1 block. The accepted performance finding was repeated composite
+claimant derivation inside both verdict loops. Two reviewers reported no other blocker.
+This checkpoint supplies no acceptance evidence for its repair, and `--require-review`
+was not invoked against it.
+
+## Claimant-precompute focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_neutralizer_derives_claimant_keys_once_for_many_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_derives_claimant_keys_once_for_many_verdicts automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimants_reject_component_and_multiset_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_composite_claimant_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_composite_claimant_aliases
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.221s
+
+OK
+```
+
+## Claimant-precompute staged checkpoint
+
+```
+$ git commit -m "perf: derive claimant authority once per receipt" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+core-scope: pass (4 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 79.74s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks 1abfc8d] perf: derive claimant authority once per receipt
+```
+
+Manual owning/full/exact-range lanes were deliberately deferred at the owner's wrap-up
+request and remain plan step 20.
