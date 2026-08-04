@@ -372,6 +372,69 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
         self.assertEqual(2, evidence["section_count"], evidence)
         self.assertEqual(0, open_state.call_count)
 
+    def test_revision_duplicate_only_invalidates_the_preverdict_prologue(self):
+        first = f"**Reviewed revision:** {'a' * 40}\n"
+        second = f"**Reviewed revision:** {'b' * 40}\n"
+        verdict = "- core-fit / reviewer: approve — accepted verdict\n"
+        later = "- core-fit / later reviewer: block — later action\n"
+
+        invalid = SEMANTICS.core_fit_review_evidence(
+            "## Review verdicts\n\n" + first + "\n" + second + "\n" + verdict
+        )
+        self.assertEqual(2, invalid["revision_count"], invalid)
+        self.assertIsNone(invalid["reviewed_revision"], invalid)
+        self.assertEqual((), invalid["verdicts"], invalid)
+
+        terminated_source = (
+            "## Review verdicts\n\n" + first + "\n" + verdict + "\n"
+            + second + "\n" + later
+        )
+        accepted = SEMANTICS.core_fit_review_evidence(terminated_source)
+        self.assertEqual(1, accepted["revision_count"], accepted)
+        self.assertEqual("a" * 40, accepted["reviewed_revision"], accepted)
+        self.assertEqual(1, len(accepted["verdicts"]), accepted)
+
+        neutralized = SEMANTICS.neutralize_core_fit_review_verdict_tokens(
+            terminated_source, claimant="author"
+        )
+        before_history, after_history = neutralized.split(second)
+        self.assertNotIn("reviewer: approve", before_history)
+        self.assertIn("later reviewer: block", after_history)
+
+    def test_verdict_mapping_never_scans_the_semantic_prefix_per_match(self):
+        verdict_count = 16000
+        source = (
+            "historical context\r\n\r\n"
+            "## Review verdicts\r\n\r\n"
+            f"**Reviewed revision:** {'a' * 40}\r\n\r\n"
+            + "".join(
+                "- core-fit / reviewer: approve — accepted verdict\r\n"
+                for _ in range(verdict_count)
+            )
+        )
+        evidence = SEMANTICS.core_fit_review_evidence(source)
+        self.assertEqual(verdict_count, len(evidence["verdicts"]), evidence)
+        semantic = evidence["semantic_text"]
+        guarded_semantic = mock.MagicMock()
+        guarded_semantic.__bool__.return_value = True
+        guarded_semantic.replace.return_value = semantic
+        guarded_semantic.count.side_effect = AssertionError(
+            "per-verdict count scan"
+        )
+        guarded_semantic.rfind.side_effect = AssertionError(
+            "per-verdict rfind scan"
+        )
+        evidence["semantic_text"] = guarded_semantic
+        with mock.patch.object(
+            SEMANTICS, "core_fit_review_evidence", return_value=evidence
+        ):
+            neutralized = SEMANTICS.neutralize_core_fit_review_verdict_tokens(
+                source, claimant="author"
+            )
+        self.assertEqual(0, neutralized.count("reviewer: approve"))
+        self.assertEqual(verdict_count, neutralized.count("accepted verdict"))
+        self.assertEqual(source.count("\n"), neutralized.count("\n"))
+
 
 class IndentedCodeViewTests(unittest.TestCase):
     """CommonMark's rule for an indented code block, case by case."""

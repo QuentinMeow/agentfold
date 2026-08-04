@@ -474,9 +474,9 @@ def core_fit_review_evidence(text):
     heading, optional blank lines, one exact full-commit field as the first content,
     optional blank lines, then one or more exact verdict lines. Blank lines may
     separate verdicts; the first nonblank non-verdict closes the receipt. Duplicate
-    headings fail closed. A second full-commit field inside the still-contiguous
-    receipt prologue also fails closed; historical fields after a terminator are
-    outside the receipt.
+    headings fail closed. A second full-commit field before the first verdict also
+    fails closed. Once a verdict has been collected, any non-verdict — including an
+    exact revision field — closes the receipt and remains ordinary history.
 
     The result keeps invalid heading and revision counts so the core gate can
     preserve its specific diagnostics. Match objects retain offsets into the shared
@@ -559,7 +559,7 @@ def core_fit_review_evidence(text):
             duplicate = CORE_FIT_REVIEW_REVISION_RE.match(
                 clean, offsets[line_index], body_end
             )
-            if duplicate and duplicate.end() == body_end:
+            if not verdicts and duplicate and duplicate.end() == body_end:
                 evidence["revision_count"] = 2
                 evidence["reviewed_revision"] = None
                 verdicts = []
@@ -596,11 +596,20 @@ def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
     semantic_lines = commonmark_lines(semantic)
     if len(source_lines) != len(semantic_lines):
         return text or ""
+    line_starts = []
+    cursor = 0
+    for semantic_line in semantic_lines:
+        line_starts.append(cursor)
+        cursor += len(semantic_line)
+
     verdict_tokens = {}
+    line_index = 0
     for matched in verdicts:
         start, end = matched.span("verdict")
-        line_index = semantic.count("\n", 0, start)
-        line_start = semantic.rfind("\n", 0, start) + 1
+        while line_index + 1 < len(line_starts) \
+                and line_starts[line_index + 1] <= start:
+            line_index += 1
+        line_start = line_starts[line_index]
         verdict_tokens[line_index] = (
             start - line_start,
             end - line_start,

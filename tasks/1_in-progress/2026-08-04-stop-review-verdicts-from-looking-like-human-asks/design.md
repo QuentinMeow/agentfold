@@ -81,9 +81,18 @@ at the same logical index in both derived views, which rejects human-invisible e
 without quadratic prefix reparsing.
 
 Duplicate exact headings fail closed across the document. A second exact full-commit field
-fails only while the formal prologue remains contiguous; the first nonblank non-verdict
-terminates that receipt. Exact revision fields in later historical panels remain ordinary
-history and cannot join, invalidate, or receive neutralization from the earlier receipt.
+fails only before the first valid verdict, while the formal prologue is still waiting for
+evidence. The first valid verdict ends that prologue. Afterward, the first nonblank
+non-verdict — including an exact revision field immediately after the verdict — terminates
+the receipt without erasing the verdict already collected. Exact revision fields in later
+historical panels remain ordinary history and cannot join, invalidate, or receive
+neutralization from the earlier receipt.
+
+Verdict neutralization builds semantic line-start offsets once and walks the already
+ordered verdict matches with a monotone line cursor. Mapping therefore costs O(n + k) for
+document length n and k verdicts, rather than rescanning the semantic prefix for every
+verdict. The existing CommonMark LF/CRLF/CR normalization remains the classification-view
+boundary; this change does not rewrite repository source.
 
 Formal identity normalization uses one key everywhere: the sorted multiset of case-folded
 ASCII alphanumeric characters. Placeholder rejection, claimant comparison, and

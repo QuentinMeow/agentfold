@@ -20,11 +20,13 @@ $ <exact command>
 
 When `--require-review` is explicitly selected, the heading, reviewed-revision field,
 and one or more consecutive core-fit verdicts above form one contiguous formal block.
-Keep only blank lines between those elements. The first nonblank non-verdict ends the
-formal block; put explanations and any non-core-fit review notes after it.
-An immediate second `**Reviewed revision:**` field inside that contiguous prologue fails
-closed. Exact historical revision fields after the first terminator are ordinary history
-and do not join or invalidate the already-closed receipt.
+Keep only blank lines between those elements. Before the first valid verdict, an immediate
+second `**Reviewed revision:**` field fails closed. The first valid verdict ends that
+prologue. Afterward, the first nonblank non-verdict ends the formal block, including an
+exact revision field immediately after the verdict; it does not erase verdicts already
+collected. Put explanations and non-core-fit review notes after that terminator. Exact
+historical revision fields there are ordinary history and do not join or invalidate the
+already-closed receipt.
 
 Claimants and reviewer identities use a closed ASCII source alphabet: letters, digits,
 space, and only `. , ; ? ! ' " ( ) / @ + -` as punctuation. Colon is excluded because it
@@ -64,3 +66,6 @@ Zero or multiple visible candidates fail before any HTML-prefix parse; the sole 
 checks its prefix once. The heading, revision field, and every verdict line must keep the
 same literal line body at the same logical index in both structural and rendered-human
 views, so invisible receipt evidence never receives the exception.
+Verdict neutralization builds semantic line-start offsets once and maps the already
+ordered verdict matches in one pass; it never rescans the growing document prefix for
+each verdict.

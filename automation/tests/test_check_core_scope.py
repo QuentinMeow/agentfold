@@ -594,6 +594,21 @@ class CoreScopeTests(unittest.TestCase):
             self.assertTrue(any("Reviewed revision" in error for error in errors), errors)
             self.assertTrue(any("independent reviewer" in error for error in errors), errors)
 
+    def test_revision_after_valid_verdict_terminates_and_preserves_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
+                "- core-fit / reviewer: approve — repaired candidate held\n\n"
+                f"**Reviewed revision:** {'b' * 40}\n\n"
+                "- core-fit / later reviewer: block — historical panel result\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
     def test_abbreviated_reviewed_revision_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(

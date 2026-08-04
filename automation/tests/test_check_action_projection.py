@@ -2856,6 +2856,30 @@ class ActionProjectionTests(unittest.TestCase):
             ),
         )
 
+    def test_revision_immediately_after_verdict_terminates_receipt(self):
+        first = f"**Reviewed revision:** {'a' * 40}\n"
+        historical = f"**Reviewed revision:** {'b' * 40}\n"
+        accepted = "- core-fit / reviewer: approve — accepted receipt\n"
+        later = "- core-fit / later reviewer: block — later action\n"
+        text = (
+            "## Review verdicts\n\n" + first + "\n" + accepted + "\n"
+            + historical + "\n" + later
+        )
+        source_path = "tasks/3_in-review/2026-07-23-example/verification.md"
+        with self.repo() as root:
+            self.receipt_task(root, claimant="author")
+            counts = PROJECTION.task_action_unit_counts(
+                text, source_path, repo=root
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+        neutralized = PROJECTION.neutralize_core_fit_review_verdict_tokens(
+            text, claimant="author"
+        )
+        before_history, after_history = neutralized.split(historical)
+        self.assertNotIn("reviewer: approve", before_history)
+        self.assertIn("later reviewer: block", after_history)
+
     def test_task_action_units_read_claimant_from_candidate_revision(self):
         text = (
             "## Review verdicts\n\n"
