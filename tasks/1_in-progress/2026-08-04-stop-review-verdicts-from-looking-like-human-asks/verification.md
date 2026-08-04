@@ -709,3 +709,109 @@ core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 $ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...69d37a25fd1459b8384bf255b8a181fdcda6652d --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
 reconcile: 0 blocking finding(s)
 ```
+
+## Adversarial panel on 97c35ed
+
+**Reviewed revision:** 97c35ede09d045f63a45be13ba6452cd3aa13764
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / input-grammar reviewer: block — punctuation-decorated placeholders
+  could become voters, and a raw claimant line after prose or a blockquote could remain a
+  CommonMark lazy continuation rather than top-level authority.
+- adversarial panel / identity reviewer: block — Cyrillic and mixed-script homoglyphs
+  could make a claimant and reviewer appear equal to a human while comparing as independent.
+- adversarial panel / action reviewer: block — a Cyrillic first character in `approve`
+  inside a formal finding could evade ordinary human-action detection.
+
+All three blockers were accepted and repaired in implementation revision
+`0326174c33d6ca35c266854235c4c7239d3f2a2d`. A follow-up design debate also closed ASCII
+punctuation-boundary, word-order, duplicate-voter, and immediate Setext claimant aliases
+before that commit. This panel does not approve the repair, and `--require-review` was not
+invoked against it.
+
+## ASCII authority and identity-alias focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_allowlisted_source_identities automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_ascii_boundary_and_order_self_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_validate_claimant_from_unchanged_raw_source automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_non_ascii_reviewer_identity automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_reviewer_and_claimant_placeholders automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_ascii_authority_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_keep_non_ascii_finding_actionable automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_fail_closed_on_decorated_receipt_components automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_requires_allowlisted_source_identities automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_ascii_boundary_and_word_order_self_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_validates_claimant_from_unchanged_raw_source automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_non_ascii_reviewer_identity automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_combining_mark_aliases_do_not_stuff_votes automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_reviewer_and_claimant_placeholders automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_ascii_authority_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_non_ascii_finding_source automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_decorated_reviewer_and_finding_components automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict
+............................
+----------------------------------------------------------------------
+Ran 28 tests in 1.038s
+
+OK
+```
+
+## ASCII authority and identity-alias owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+..................................................................................................................................................................................................................................s.............................................................
+----------------------------------------------------------------------
+Ran 288 tests in 17.349s
+
+OK (skipped=1)
+```
+
+## ASCII authority and identity-alias full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 64.21s
+```
+
+## ASCII authority and identity-alias staged lane
+
+```
+$ python3 automation/run_tests.py --staged
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 56.87s
+```
+
+## ASCII authority and identity-alias exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## ASCII authority and identity-alias exact-range reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...0326174c33d6ca35c266854235c4c7239d3f2a2d --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+## ASCII authority and identity-alias diff check
+
+```
+$ git diff --check 97c35ede09d045f63a45be13ba6452cd3aa13764..0326174c33d6ca35c266854235c4c7239d3f2a2d
+```

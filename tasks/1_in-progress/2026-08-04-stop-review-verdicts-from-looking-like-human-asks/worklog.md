@@ -204,3 +204,27 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   words, marked placeholders, legitimate Unicode, and composed/decomposed equivalence.
   Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
   and diff checks passed.
+
+## 2026-08-04 — close ASCII authority and identity-alias gaps (codex sol-high implementer)
+
+- The sixth panel reviewed exact revision
+  `97c35ede09d045f63a45be13ba6452cd3aa13764` and returned 0 approve, 3 block. The
+  accepted blockers were punctuation-decorated placeholders, raw claimant lines that
+  CommonMark could treat as lazy paragraph continuation, and Cyrillic or mixed-script
+  authority text that could create a voter or hide an action word.
+- Restricted claimant, reviewer, and formal finding components to a finite ASCII source
+  alphabet. The em dash remains only the receipt delimiter; Unicode explanation stays
+  outside the formal receipt, where ordinary action detection still folds marks.
+- Made claimant extraction require file start or an immediately preceding ASCII-blank
+  line and reject an immediate raw Setext underline. Placeholder comparison now removes
+  allowed punctuation before checking the repository's placeholder vocabulary.
+- A follow-up design debate found that ASCII punctuation and token boundaries could still
+  disguise self-review or duplicate voters. One conservative key now sorts the case-folded
+  ASCII alphanumeric multiset, so punctuation, spacing, word order, and anagrams collide
+  fail-closed. Formal receipts therefore use distinct stable role labels rather than
+  personal or display names.
+- Added unit, core-gate, and action-projection regressions for all reported placeholder,
+  lazy-continuation, Setext, homoglyph, malformed-finding, punctuation-boundary,
+  word-order, and duplicate-vote cases. Focused, owning, full, staged, exact-range
+  core-scope, exact-range reconciler, and diff checks passed at implementation commit
+  `0326174c33d6ca35c266854235c4c7239d3f2a2d`.
