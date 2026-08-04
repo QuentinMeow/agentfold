@@ -11,5 +11,6 @@
 - [x] 9. Repair raw-source contiguity and claimant-aware reviewer-independence blockers from the third panel, then repeat every verification lane.
 - [x] 10. Repair ASCII-blank, CRLF, and human-visible identity blockers from the fourth panel, then repeat every verification lane.
 - [x] 11. Repair inline-Markdown identity aliases and decorated-finding evasion from the fifth panel, then repeat every verification lane.
-- [ ] 12. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 13. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 12. Replace partial rendering with an explicit source-text whitelist after the panel on `5c31f50`, then repeat every verification lane.
+- [ ] 13. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 14. Publish and merge; close issue #80; resume the stale-base repair.

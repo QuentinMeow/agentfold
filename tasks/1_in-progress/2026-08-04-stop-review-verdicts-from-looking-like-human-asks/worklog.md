@@ -160,3 +160,25 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   alias, a normal plain receipt, and decorated approval-shaped findings including a
   reference-link split. Focused and owning-module tests, all 15 repository test files,
   pre-commit, range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — replace partial rendering with a source whitelist (codex sol-high implementer)
+
+- The next panel reviewed exact revision
+  `5c31f508b1166573b8f1b04c5f7410d033c0bace` and returned 0 approve with two
+  completed block verdicts. A security reviewer independently reproduced the remaining
+  finding bypass before its review tool errored. The accepted blockers were Markdown
+  image identities and destination-based vote stuffing, backslash-escaped identities,
+  and image-alt finding text that stayed human-visible after verdict neutralization.
+- Removed the partial inline renderer from the receipt-authority boundary. Formal
+  claimant, reviewer, and finding source now accepts only Unicode letters, marks, and
+  numbers; ASCII space; and the documented finite punctuation set. Tabs, non-ASCII
+  separators, controls, default-ignorables, and all Markdown/HTML introducers fail closed.
+- Applied the same source validation to the exact claimant field before NFKC, casefolding,
+  placeholder rejection, or tokenization. A decorated claimant or reviewer therefore has
+  no identity, while the canonical `codex planner / sol-high implementer` claimant and
+  ordinary Unicode reviewer names remain valid.
+- Added unit and end-to-end regressions for images, destinations, escapes, every prior
+  decorated form, formatted placeholders and findings, invalid claimant whitespace,
+  allowed punctuation and Unicode letters, duplicate image-voter aliases, and a normal
+  receipt. Focused and owning-module tests, all 15 repository test files, pre-commit,
+  range core-scope, the reconciler, and diff checks passed.

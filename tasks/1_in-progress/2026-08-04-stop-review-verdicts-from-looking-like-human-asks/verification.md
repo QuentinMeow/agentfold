@@ -503,3 +503,106 @@ core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-look
 $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
+
+## Adversarial panel on 5c31f50
+
+**Reviewed revision:** 5c31f508b1166573b8f1b04c5f7410d033c0bace
+
+Panel result: 0 approve; 2 completed block verdicts. The security reviewer independently
+reproduced the third blocker before its review tool errored, so no security vote is
+invented here.
+
+- adversarial panel / identity reviewer: block — Markdown image labels can display the
+  claimant while their destinations alter identity tokens or create apparent voters.
+- adversarial panel / source-grammar reviewer: block — backslash escapes such as
+  `cod\_ex` remain source-decorated even when the partial renderer does not change them.
+- adversarial panel / security reproduction: an image-form finding can keep release-
+  command wording human-visible after the structural verdict token is neutralized. The
+  reproduction completed; the review tool failed before returning a final verdict.
+
+Both completed blockers and the concrete security reproduction were accepted and repaired
+in the next implementation revision. This panel does not approve that repair, and
+`--require-review` was not invoked against it.
+
+## Source-whitelist regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_require_allowlisted_source_identities automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_reviewer_and_claimant_placeholders automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_allowlisted_unicode_receipt automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_fail_closed_on_decorated_receipt_components automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_do_not_neutralize_decorated_vote_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_requires_allowlisted_source_identities automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_reviewer_and_claimant_placeholders automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_accepts_allowlisted_unicode_receipt automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_decorated_reviewer_and_finding_components automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_does_not_count_decorated_vote_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_manual_independent_review_accepts_valid_verdict
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.840s
+
+OK
+```
+
+## Source-whitelist owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+........................................................................................................................................................................................................................s..........................................................
+----------------------------------------------------------------------
+Ran 275 tests in 19.623s
+
+OK (skipped=1)
+```
+
+## Source-whitelist full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 68.69s
+```
+
+## Source-whitelist pre-commit lane
+
+```
+$ git commit -m "fix: whitelist formal review receipt text" -m "task: 2026-08-04-stop-review-verdicts-from-looking-like-human-asks"
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+tests: 13/13 files passed
+test elapsed: 52.85s
+pre-commit: OK
+[task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks d1a6802] fix: whitelist formal review receipt text
+ 8 files changed, 204 insertions(+), 114 deletions(-)
+```
+
+## Source-whitelist range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range origin/main...HEAD --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Source-whitelist reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
