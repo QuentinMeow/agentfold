@@ -362,3 +362,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - At the owner's wrap-up request, no additional manual full suite was started. Remaining
   work is the deferred owning/full/exact-range verification and final durable eleventh-panel
   record before a new independent revision-bound panel.
+
+## 2026-08-05 — complete deferred claimant-precompute verification (codex terra verifier)
+
+- Resumed from exact checkpoint `d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d`
+  without changing the implementation or adding a review receipt.
+- Re-ran the deterministic 5-test performance slice, all three owning modules, and the
+  full repository suite. They passed 5/5 in 0.370s, 317 tests with one skip in 37.062s,
+  and 15/15 files in 123.93s respectively.
+- The exact task range passed the core-scope gate with 8 core paths. The first sandboxed
+  reconciler attempt exposed a recovered index stat-cache difference and then failed to
+  acquire the linked worktree index lock; the coordinating root session refreshed the
+  shared index with escalated access and the exact-range retry reported zero findings.
+- The exact-range diff check passed and the checkpoint branch was clean and tracking its
+  remote. Plan step 20 is complete. Independent exact-revision review, publication,
+  merge, issue closure, and the stale-base repair remain pending in steps 21 and 22.

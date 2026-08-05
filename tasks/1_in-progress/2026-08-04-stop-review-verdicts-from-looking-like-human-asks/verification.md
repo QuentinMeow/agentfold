@@ -1351,3 +1351,73 @@ pre-commit: OK
 
 Manual owning/full/exact-range lanes were deliberately deferred at the owner's wrap-up
 request and remain plan step 20.
+
+## Resumed verification of claimant precomputation
+
+The resumed session verified exact checkpoint revision
+`d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d`, which contains implementation revision
+`1abfc8d2d2e9f1baf184398f0591cb7e8632eef9` plus its checkpoint records. This evidence
+completes plan step 20 only; it is not an independent review receipt.
+
+### Focused claimant-precompute regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_neutralizer_derives_claimant_keys_once_for_many_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_derives_claimant_keys_once_for_many_verdicts automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimants_reject_component_and_multiset_aliases automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_composite_claimant_aliases automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_reject_composite_claimant_aliases
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.370s
+
+OK
+```
+
+### Owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_markdown_semantics
+317 tests passed, 1 skipped
+test elapsed: 37.062s
+```
+
+### Full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+tests: 15/15 files passed
+test elapsed: 123.93s
+```
+
+### Exact-range core-scope gate
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+### Sandbox index recovery and exact-range reconciler
+
+The first sandboxed reconciler attempt did not produce a valid verification result. Git
+recovered a stale index stat-cache difference, then the sandbox could not create the
+linked worktree's `index.lock`. The coordinating root session refreshed that shared index
+with escalated filesystem access before retrying:
+
+```
+$ git update-index --refresh --really-refresh
+```
+
+The retry against the exact checkpoint range passed:
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+### Exact-range diff and tracking status
+
+```
+$ git diff --check 4b467924b5832489829538164306439667e97aa0...d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d
+```
+
+```
+$ git status --short --branch
+## task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks...origin/task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+```
