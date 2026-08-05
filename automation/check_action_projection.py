@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Require external action sections to project live queue items."""
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict, deque
 import contextlib
 import functools
 import json
@@ -96,6 +96,17 @@ COMPLETED_ADVERSARIAL_PANEL_LINE_RE = re.compile(
     r"(?:[ \t]+[A-Za-z0-9][A-Za-z0-9-]*)*[ \t]+reviewer)"
     r"):[ \t]+(?P<verdict>approve|block)[ \t]+—[ \t]+"
     r"(?P<finding>\S(?:[^\r\n]*\S)?)[ \t]*$"
+)
+COMPLETED_PANEL_INLINE_IMAGE_RE = re.compile(
+    r"(?<!\\)!\[(?P<label>(?:\\.|[^\]\\])*)\]"
+    r"\([^\r\n)]*\)"
+)
+COMPLETED_PANEL_REFERENCE_LINK_RE = re.compile(
+    r"(?<!!)\[(?P<label>(?:\\.|[^\]\\])*)\]"
+    r"\[(?P<reference>(?:\\.|[^\]\\])*)\]"
+)
+COMPLETED_PANEL_REFERENCE_DEFINITION_RE = re.compile(
+    r"^[ ]{0,3}\[(?P<reference>[^\]\r\n]+)\]:[ \t]+\S"
 )
 HEADING_RE = re.compile(
     r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
@@ -247,6 +258,11 @@ KINDLY_COMMAND_PATTERN = (
 )
 COURTESY_COMMAND_PATTERN = (
     rf"(?:{PLEASE_COMMAND_PATTERN}|{KINDLY_COMMAND_PATTERN})"
+)
+CONJOINED_COURTESY_COMMAND_RE = re.compile(
+    rf"(?:^|[.!?;:—][ \t]+|\band[ \t]+)"
+    rf"{COURTESY_COMMAND_PATTERN}\b",
+    re.I | re.M,
 )
 HUMAN_ACTION_NOUN_PATTERN = (
     r"(?:advice|approval|authorization|choice|clarification|comments?|"
@@ -1436,30 +1452,89 @@ def action_like_task_record_prose(text):
     )
 
 
+def action_like_completed_review_unit_prose(text):
+    """Classify one reviewer/finding unit without receipt-prefix interference.
+
+    Completed review prose has one extra guarded shape: a courtesy command can
+    follow a benign finding clause after ASCII ``and``. The general task grammar
+    intentionally does not gain that rule, and bare conjunctions such as
+    ``Agents review and approve`` remain summaries rather than commands.
+    """
+    if action_like_task_record_prose(text):
+        return True
+    clean = rendered_human_text(text or "")
+    clean = strip_indented_code(render_inline_code(clean))
+    clean = MARKDOWN_LINK_RE.sub(
+        lambda matched: matched.group("label"),
+        clean,
+    )
+    clean = fold_unicode_marks(strip_action_emphasis(clean))
+    clean = strip_action_list_markers(clean)
+    return any(
+        CONJOINED_COURTESY_COMMAND_RE.search(variant)
+        for variant in action_prose_variants(clean)
+    )
+
+
 def _without_explicit_block_quotes(text):
     """Keep visible blockquotes actionable; fenced/inline code remains data."""
     return text or ""
 
 
 def partition_completed_adversarial_panel_units(text):
-    """Remove exact completed panel lines from task-action detection.
+    """Neutralize exact completed-panel verdict tokens for task detection.
 
     This is a classification-only compatibility view for task-root verification
     records. It grants no receipt authority. Only a literal, visible, lowercase
     adversarial-panel list line with a stable reviewer label, an exact verdict
-    delimiter, and a nonempty same-line finding qualifies. The reviewer and
-    finding remain standalone detection units, so completed evidence cannot hide
-    an ask in either component.
+    delimiter, and a nonempty same-line finding qualifies. The whole line remains
+    in the ordinary rendered-prose pipeline; only its exact structural verdict
+    token is blanked. Markdown that a human sees inside the finding is rendered in
+    this compatibility view, so decoration cannot split an action word. The
+    reviewer remains a standalone detection unit because its structural prefix
+    would otherwise keep a start-anchored command from being seen.
     """
     source_lines = commonmark_lines(text or "")
-    semantic_lines = commonmark_lines(semantic_text(text or ""))
+    semantic = semantic_text(text or "")
+    semantic_lines = commonmark_lines(semantic)
     rendered_lines = commonmark_lines(rendered_human_text(text or ""))
     if len(source_lines) != len(semantic_lines) \
             or len(source_lines) != len(rendered_lines):
         return text or "", ()
 
+    reference_definitions = {
+        " ".join(matched.group("reference").casefold().split())
+        for line in semantic_lines
+        for matched in (
+            COMPLETED_PANEL_REFERENCE_DEFINITION_RE.match(
+                markdown_line_body(line)
+            ),
+        )
+        if matched
+    }
+
+    def render_finding(finding):
+        visible = render_inline_code(finding)
+        visible = COMPLETED_PANEL_INLINE_IMAGE_RE.sub(
+            lambda matched: matched.group("label"), visible
+        )
+
+        def render_reference(matched):
+            reference = " ".join(
+                matched.group("reference").casefold().split()
+            )
+            return (
+                matched.group("label")
+                if reference in reference_definitions
+                else matched.group(0)
+            )
+
+        return COMPLETED_PANEL_REFERENCE_LINK_RE.sub(
+            render_reference, visible
+        )
+
     output = []
-    detection_units = []
+    panel_units = []
     for source_line, semantic_line, rendered_line in zip(
         source_lines, semantic_lines, rendered_lines
     ):
@@ -1474,12 +1549,22 @@ def partition_completed_adversarial_panel_units(text):
                 != structural_prefix:
             output.append(source_line)
             continue
-        output.append(source_line[len(source_body):])
-        detection_units.extend((
+        verdict_start, verdict_end = matched.span("verdict")
+        finding_start, finding_end = matched.span("finding")
+        transformed_body = (
+            source_body[:verdict_start]
+            + " " * (verdict_end - verdict_start)
+            + source_body[verdict_end:finding_start]
+            + render_finding(matched.group("finding"))
+            + source_body[finding_end:]
+        )
+        output.append(transformed_body + source_line[len(source_body):])
+        panel_units.append((
+            transformed_body,
             matched.group("reviewer"),
-            matched.group("finding"),
+            render_finding(matched.group("finding")),
         ))
-    return "".join(output), tuple(detection_units)
+    return "".join(output), tuple(panel_units)
 
 
 def task_queue_path_from_destination(destination, source_path):
@@ -1522,6 +1607,7 @@ def _task_projection_stripped_text(
     source = _without_explicit_block_quotes(text)
     receipt_path = TASK_REVIEW_VERIFICATION_PATH_RE.fullmatch(str(source_path))
     receipt_detection_units = []
+    completed_panel_units = ()
     if receipt_path:
         task_path = (
             f"tasks/{receipt_path.group('status')}/"
@@ -1539,10 +1625,6 @@ def _task_projection_stripped_text(
         )
         source, completed_panel_units = (
             partition_completed_adversarial_panel_units(source)
-        )
-        receipt_detection_units = (
-            *receipt_detection_units,
-            *completed_panel_units,
         )
     _semantic_source, matches = visible_markdown_link_source(source)
     allowed = set(allowed_queue_paths or ())
@@ -1607,7 +1689,12 @@ def _task_projection_stripped_text(
             + " " * len(projection_source)
             + rendered[offset + len(projection_source):]
         )
-    return rendered, invalid_human_projections, receipt_detection_units
+    return (
+        rendered,
+        invalid_human_projections,
+        receipt_detection_units,
+        completed_panel_units,
+    )
 
 
 def task_action_prose_units(text):
@@ -1660,7 +1747,12 @@ def task_action_unit_counts(
     Counter keys are normalized visible excerpts, so an edge checker can subtract
     the parent multiset from the candidate multiset without losing duplicate asks.
     """
-    rendered, invalid_projections, receipt_detection_units = (
+    (
+        rendered,
+        invalid_projections,
+        receipt_detection_units,
+        completed_panel_units,
+    ) = (
         _task_projection_stripped_text(
             text,
             source_path,
@@ -1670,19 +1762,45 @@ def task_action_unit_counts(
         )
     )
     units = list(task_action_prose_units(rendered))
-    units.extend(invalid_projections)
-    units.extend(receipt_detection_units)
+    panel_by_line = defaultdict(deque)
+    for panel_unit in completed_panel_units:
+        panel_by_line[panel_unit[0]].append(panel_unit)
     actionable = []
     for unit in units:
-        if not (
-            unit.startswith("Invalid human-action projection:")
-            or action_like_task_record_prose(unit)
-        ):
+        first_line = unit.split("\n", 1)[0]
+        panel_queue = panel_by_line.get(first_line)
+        panel_unit = panel_queue.popleft() if panel_queue else None
+        if panel_unit is not None:
+            _line, reviewer, finding = panel_unit
+            is_actionable = (
+                action_like_task_record_prose(unit)
+                or action_like_completed_review_unit_prose(reviewer)
+                or action_like_completed_review_unit_prose(finding)
+            )
+        else:
+            is_actionable = action_like_task_record_prose(unit)
+        if not is_actionable:
             continue
         normalized = re.sub(
             r"\s+",
             " ",
             strip_default_ignorable_characters(unit),
+        ).strip()
+        if normalized:
+            actionable.append(normalized)
+
+    for unit in invalid_projections:
+        normalized = re.sub(
+            r"\s+", " ", strip_default_ignorable_characters(unit)
+        ).strip()
+        if normalized:
+            actionable.append(normalized)
+
+    for unit in receipt_detection_units:
+        if not action_like_completed_review_unit_prose(unit):
+            continue
+        normalized = re.sub(
+            r"\s+", " ", strip_default_ignorable_characters(unit)
         ).strip()
         if normalized:
             actionable.append(normalized)

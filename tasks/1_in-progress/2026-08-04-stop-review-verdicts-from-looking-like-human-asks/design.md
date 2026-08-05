@@ -167,6 +167,25 @@ panel, source scanning is linear in total identity bytes and each reviewer perfo
 representation, so long identities cannot restore the
 old quadratic total-input work.
 
+Completed-review action classification has a narrower compatibility boundary than
+ordinary task prose. An accepted reviewer or finding component is still classified on
+its own, but gains only one extra conjunction rule: after an ASCII `and` boundary, a
+suffix beginning with the existing `please`/`kindly` courtesy-command grammar is an
+action. This catches `Could not break it and please approve the release.` without
+turning `and approved`, `and approval was recorded`, or `Agents review and approve.`
+into asks. The general task and provider grammars do not gain this rule.
+
+Historical completed adversarial panels remain classification compatibility, never
+review authority. An exact visible lowercase `approve` or `block` token is replaced by
+equal-width spaces while the full panel line continues through the ordinary rendered
+task-prose path. The finding's human-visible view resolves inline-image labels, defined
+reference-link labels, and inline-code contents in the full document context before
+classification. Reviewer and finding components are checked as structured units too.
+Whole-line and component matches collapse to at most one Counter entry for each panel
+occurrence, while two repeated hostile panel lines remain two occurrences. Exact casing,
+reviewer shape, delimiter, and visibility checks stay unchanged, so malformed and
+core-fit lookalikes remain ordinary prose.
+
 ## Core fit
 
 **Agent substitution:** pass — every agent runtime records and reads the same repository receipt grammar

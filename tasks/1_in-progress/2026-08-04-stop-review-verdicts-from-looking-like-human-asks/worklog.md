@@ -472,3 +472,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   rejected; the immediate full-object-ID retry passed nine-path core scope, reconciliation
   with zero findings, and the range diff check. The review candidate remains without an
   approving receipt or status move.
+
+## 2026-08-05 — preserve human-visible completed findings (codex sol-high implementer)
+
+- The final4 panel reviewed exact revision
+  `7ddab99d446bf6befcd26b57515325c9a49fd436` and returned 1 approve, 2 block. The
+  accepted blockers were a conjoined courtesy command missed in an accepted formal
+  finding and image, reference-link, or inline-code decoration hidden when historical
+  panel compatibility removed the complete source line.
+- Kept the whole exact historical panel line in the task-root verification
+  classification view and blanks only its exact lowercase completed verdict token.
+  The full-source context renders visible finding labels and inline-code contents;
+  reviewer and finding units receive the same scoped completed-review classifier.
+- Added only the guarded ASCII `and` plus `please`/`kindly` completed-review rule. It is
+  not part of general task or provider prose, and benign approved-evidence, recorded
+  approval, bare conjoined verbs, and code-description cases remain inert.
+- Each historical panel occurrence now contributes at most one action even when both
+  the whole-line and component paths match. Two duplicate hostile lines remain two
+  Counter occurrences. Exact lowercase `approve` and `block` token compatibility is
+  explicit; malformed panel shapes remain ordinary prose.
+- The focused six-test slice passed in 2.242s, the two owning modules passed 634 tests
+  in 227.864s, and the full isolated repository suite passed all 15 files in 145.19s.
+  The task remains in progress without an approving receipt, status move, publication,
+  or GitHub mutation.

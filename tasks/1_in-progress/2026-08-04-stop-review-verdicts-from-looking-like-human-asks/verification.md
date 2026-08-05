@@ -1865,3 +1865,76 @@ $ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439
 core-scope: pass (9 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
 reconcile: 0 blocking finding(s)
 ```
+
+## Final4 adversarial panel on 7ddab99
+
+**Reviewed revision:** 7ddab99d446bf6befcd26b57515325c9a49fd436
+
+Panel result: 1 approve, 2 block.
+
+- adversarial panel / correctness reviewer: block — Conjoined commands inside accepted findings are missed after the receipt line is blanked.
+- adversarial panel / boundary reviewer: block — Completed panel compatibility can hide decorated human action findings in task verification records.
+- adversarial panel / core fit reviewer: approve — Provider-neutral receipt authority stays confined to task-root verification, review freshness remains bound to core and task inputs, and historical panel compatibility grants no review authority.
+
+Both blockers were accepted and repaired after this exact revision. This panel supplies no
+acceptance evidence for the repair, and `--require-review` was not invoked against it.
+
+## Completed-review visibility focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_limit_completed_panel_compatibility_shape automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_render_completed_panel_findings_once automation.tests.test_check_action_projection.ActionProjectionTests.test_completed_panel_neutralizes_only_exact_lowercase_verdict_tokens automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_keep_benign_panel_conjunctions_inert automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_rejects_completed_review_hidden_commands
+......
+----------------------------------------------------------------------
+Ran 6 tests in 2.242s
+
+OK
+```
+
+The focused assertions bind each result, not only the suite exit: the formal conjoined
+command and each of the three decorated historical findings produce one action; an
+overlap found by both line and component paths produces one; two duplicate hostile lines
+produce two; both exact lowercase verdict tokens are neutralized; and benign conjunction,
+approval-record, bare-verb, inline-code, and image descriptions produce zero.
+
+## Completed-review visibility owning modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_reconcile_queue
+----------------------------------------------------------------------
+Ran 634 tests in 227.864s
+
+OK
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+```
+
+Negative snapshot tests printed their expected diagnostic lines during this run; the
+owning command completed with exit status 0.
+
+## Completed-review visibility full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 145.19s
+```

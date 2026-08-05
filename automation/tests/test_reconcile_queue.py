@@ -13839,6 +13839,63 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual(1, len(findings), self.messages(findings))
             self.assertIn("Owner, block this release", findings[0].message)
 
+    def test_task_action_origin_rejects_completed_review_hidden_commands(self):
+        records = (
+            (
+                "## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
+                "- core-fit / reviewer: approve — "
+                "Could not break it and please approve the release.\n",
+                "please approve the release",
+            ),
+            (
+                "- adversarial panel / reviewer: block — "
+                "Owner, ![approve](/release) this release.\n",
+                "Owner, approve this release",
+            ),
+            (
+                "- adversarial panel / reviewer: block — "
+                "Owner, ap[pro][cmd]ve this release.\n\n"
+                "[cmd]: /join\n",
+                "Owner, approve this release",
+            ),
+            (
+                "- adversarial panel / reviewer: block — "
+                "Owner, ap`pro`ve this release.\n",
+                "Owner, approve this release",
+            ),
+        )
+        for record, excerpt in records:
+            with self.subTest(record=record), self.repo() as root:
+                self.init_git(root)
+                self.write(
+                    root,
+                    "tasks/AGENTS.md",
+                    "**Task admission schema:** v1\n",
+                )
+                task = self.make_task(root, "1_in-progress", "none")
+                verification = self.write(
+                    root,
+                    task.relative_to(root) / "verification.md",
+                    "# Verification\n\nNo pending action.\n",
+                )
+                self.git(root, "add", ".")
+                self.git(root, "commit", "-m", "activate task admission")
+                verification.write_text(
+                    verification.read_text(encoding="utf-8")
+                    + "\n" + record,
+                    encoding="utf-8",
+                )
+                self.git(root, "add", str(verification.relative_to(root)))
+
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    findings = list(RECONCILE.check_task_action_origin())
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+                self.assertEqual(1, len(findings), self.messages(findings))
+                self.assertIn(excerpt, findings[0].message)
+
     def test_task_action_origin_uses_all_staged_merge_parents(self):
         with self.repo() as root:
             self.init_git(root)

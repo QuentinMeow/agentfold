@@ -2394,6 +2394,96 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, sum(hostile.values()), hostile)
 
+    def test_task_action_units_render_completed_panel_findings_once(self):
+        source_path = (
+            "tasks/1_in-progress/2026-07-23-example/verification.md"
+        )
+        records = (
+            "- adversarial panel / reviewer: block — "
+            "Could not break it and please approve the release.\n",
+            "- adversarial panel / reviewer: block — "
+            "Owner, ![approve](/release) this release.\n",
+            "- adversarial panel / reviewer: block — "
+            "Owner, ap[pro][cmd]ve this release.\n\n"
+            "[cmd]: /join\n",
+            "- adversarial panel / reviewer: block — "
+            "Owner, ap`pro`ve this release.\n",
+            "- adversarial panel / reviewer: block — "
+            "Owner, block — this release.\n",
+        )
+        with self.repo() as root:
+            for record in records:
+                with self.subTest(record=record):
+                    counts = PROJECTION.task_action_unit_counts(
+                        record, source_path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            duplicate = PROJECTION.task_action_unit_counts(
+                records[0] + records[0], source_path, repo=root
+            )
+            self.assertEqual(2, sum(duplicate.values()), duplicate)
+
+            overlap = records[-1]
+            _source, panel_units = (
+                PROJECTION.partition_completed_adversarial_panel_units(
+                    overlap
+                )
+            )
+            self.assertTrue(
+                PROJECTION.action_like_task_record_prose(_source)
+            )
+            self.assertTrue(
+                PROJECTION.action_like_completed_review_unit_prose(
+                    panel_units[0][2]
+                )
+            )
+            counts = PROJECTION.task_action_unit_counts(
+                overlap, source_path, repo=root
+            )
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_completed_panel_neutralizes_only_exact_lowercase_verdict_tokens(self):
+        for verdict in ("approve", "block"):
+            with self.subTest(verdict=verdict):
+                source = (
+                    f"- adversarial panel / reviewer: {verdict} — held\n"
+                )
+                rendered, units = (
+                    PROJECTION.partition_completed_adversarial_panel_units(
+                        source
+                    )
+                )
+                self.assertEqual(
+                    source.replace(verdict, " " * len(verdict)),
+                    rendered,
+                )
+                self.assertEqual(1, len(units))
+
+    def test_task_action_units_keep_benign_panel_conjunctions_inert(self):
+        source_path = (
+            "tasks/1_in-progress/2026-07-23-example/verification.md"
+        )
+        findings = (
+            "Could not break it and approval remains optional.",
+            "Could not break it and approved evidence remained stable.",
+            "Could not break it and approval was recorded.",
+            "Compared approve and block tokens.",
+            "The parser records review and release state.",
+            "The `approve` token and `block` token are documented.",
+            "The ![approve](/release) icon and block label are examples.",
+        )
+        with self.repo() as root:
+            for finding in findings:
+                with self.subTest(finding=finding):
+                    counts = PROJECTION.task_action_unit_counts(
+                        "- adversarial panel / reviewer: block — "
+                        + finding + "\n",
+                        source_path,
+                        repo=root,
+                    )
+                    self.assertEqual({}, counts)
+
     def test_task_action_units_scan_core_fit_reviewer_and_finding_text(self):
         receipts = (
             "- core-fit / Owner, please approve: block — could not break it\n",
@@ -2410,6 +2500,8 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / reviewer: block — Owner, block this release.\n",
             "- core-fit / reviewer: block — Is the boundary acceptable?\n",
             "- core-fit / reviewer: approve — TODO ask the owner\n",
+            "- core-fit / reviewer: approve — "
+            "Could not break it and please approve the release.\n",
         )
         with self.repo() as root:
             self.receipt_task(root)
@@ -2433,6 +2525,26 @@ class ActionProjectionTests(unittest.TestCase):
                 repo=root,
             )
             self.assertEqual({}, benign)
+
+            benign_conjunctions = (
+                "Could not break it and approval remains optional.",
+                "Could not break it and approved evidence remained stable.",
+                "Could not break it and approval was recorded.",
+                "Compared approve and block tokens.",
+                "The parser records review and release state.",
+                "Agents review and approve.",
+            )
+            for finding in benign_conjunctions:
+                with self.subTest(benign_finding=finding):
+                    counts = PROJECTION.task_action_unit_counts(
+                        "## Review verdicts\n\n"
+                        f"**Reviewed revision:** {'a' * 40}\n\n"
+                        "- core-fit / correctness reviewer: approve — "
+                        + finding + "\n",
+                        "tasks/3_in-review/2026-07-23-example/verification.md",
+                        repo=root,
+                    )
+                    self.assertEqual({}, counts)
 
     def test_task_action_unit_keys_preserve_accented_identities(self):
         source_path = "tasks/1_in-progress/2026-07-23-example/plan.md"
