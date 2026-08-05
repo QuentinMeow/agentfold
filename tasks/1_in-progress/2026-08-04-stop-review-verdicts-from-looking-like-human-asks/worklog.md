@@ -495,3 +495,12 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   in 227.864s, and the full isolated repository suite passed all 15 files in 145.19s.
   The task remains in progress without an approving receipt, status move, publication,
   or GitHub mutation.
+
+## 2026-08-05 — continuation handover (codex planner)
+
+- Recorded the clean checkpoint `df0a5de03d37c5046354513b011ccb4578d571c7` and the
+  completed verification evidence for the next session in the
+  [continuation handover](../../../history/conversations/2026-08-05-1330PDT-continue-review-receipt-parser/handover.md).
+- Remaining sequence: obtain a fresh three-way independent review of that exact revision,
+  record only its receipt and worklog evidence, move the task to review, then push, open,
+  merge, and close GitHub issue #80.
