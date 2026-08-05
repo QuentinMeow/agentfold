@@ -413,3 +413,34 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   was running. The same tree was tested throughout; the takeover session did not amend
   that commit. This follow-up records independent evidence only. Final revision-bound
   review, publication, and merge remain pending.
+
+## 2026-08-05 — repair the final panel blockers (codex sol-high implementer)
+
+- The final panel reviewed exact revision
+  `a87701ccbb493c561eece7691997703f0ec394cb` and returned 0 approve, 3 block. The
+  accepted blockers were the template's missing claimant-component ceiling, unbounded
+  identity-key lengths preserving quadratic comparison work, and addressed `block`
+  commands missed inside accepted reviewer or finding units.
+- Replaced sorted identity strings with fixed 36-bin ASCII-alphanumeric count vectors.
+  The sentinel and outer tuple shape, multiset equality, containment, anagram, distance,
+  placeholder, component-union, and duplicate-vote semantics remain unchanged. Long
+  claimant and 64 unique long-reviewer regressions prove each pair visits fixed-size keys.
+- Kept the 16-component ceiling and made the canonical verification template state the
+  exact maximum and that 17 components invalidate all claimant authority. A registered
+  input-owner test now binds the template wording to the enforced constant.
+- Added `block` to guarded ambiguous authority commands and the explicit task-record
+  authority vocabulary. Reviewer and finding components now expose addressed commands
+  under either structural verdict, while benign formal verdicts stay inert and the
+  declarative summary `Block size is 4096 bytes.` stays non-actionable.
+- The focused 10-test slice, 325 parser/projection/core tests, 458 task-origin/reconciler
+  tests, 67 staged-lane tests, and all 15 repository test files passed. The first broad
+  owning attempt was interrupted after the final grammar adjustment and is not counted.
+- The first committed exact-range reconciler then exposed 33 historical panel lines shaped
+  as `reviewer: block — finding` that the new general token had retroactively classified
+  as asks. The guarded ambiguous form now excludes only that completed-evidence
+  continuation; addressed commands and malformed ASCII-hyphen near-misses remain visible.
+- The compatibility-focused four tests and all six staged owners passed after that repair.
+  The full repository rerun passed all 15 files in 139.65s, and exact committed revision
+  `6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27` passed nine-path core scope, the reconciler
+  with zero findings, and the range diff check. A fresh independent review must bind the
+  later record checkpoint, not this pre-record revision.

@@ -10,12 +10,14 @@ worked, and the pair is what proves the rule no longer depends on indentation.
 import contextlib
 import datetime
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 AUTOMATION = Path(__file__).resolve().parents[1]
+REPO = AUTOMATION.parent
 
 
 def load(name, path):
@@ -45,6 +47,75 @@ MISSING_TARGET = "automation/does-not-exist.py"
 
 
 class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
+    def test_canonical_template_pins_claimant_and_key_bounds(self):
+        template = (REPO / "templates/task/verification.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            f"At most {SEMANTICS.MAX_CLAIMANT_IDENTITY_COMPONENTS} components "
+            "are accepted; 17 or more make the entire claimant invalid",
+            template,
+        )
+        self.assertIn("fixed 36-bin count vectors", template)
+        self.assertIn(
+            "without making comparison\ncost depend on claimant or reviewer length",
+            template,
+        )
+
+    def test_long_authority_keys_have_one_fixed_size_representation(self):
+        long_identity = "Reviewer " + "a" * 32768 + " 123"
+        key = SEMANTICS.identity_key(long_identity)
+        self.assertEqual(1, len(key))
+        self.assertEqual(
+            len(SEMANTICS.AUTHORITY_IDENTITY_ALPHABET), len(key[0])
+        )
+        self.assertEqual(
+            sum(character.isascii() and character.isalnum()
+                for character in long_identity),
+            sum(key[0]),
+        )
+
+    def test_fixed_histograms_match_legacy_sorted_multiset_decisions(self):
+        identities = (
+            "author",
+            "auth0r",
+            "O'Neil",
+            "Neil, O",
+            "codex planner",
+            "correctness reviewer 12",
+        )
+        for left in identities:
+            for right in identities:
+                with self.subTest(left=left, right=right):
+                    left_old = "".join(sorted("".join(
+                        re.findall(r"[a-z0-9]+", left.casefold())
+                    )))
+                    right_old = "".join(sorted("".join(
+                        re.findall(r"[a-z0-9]+", right.casefold())
+                    )))
+                    left_key = SEMANTICS.identity_key(left)
+                    right_key = SEMANTICS.identity_key(right)
+                    self.assertEqual(
+                        left_old == right_old, left_key == right_key
+                    )
+                    self.assertEqual(
+                        all(left_old.count(character) <= right_old.count(character)
+                            for character in set(left_old)),
+                        SEMANTICS._authority_key_multiset_subset(
+                            left_key, right_key
+                        ),
+                    )
+                    legacy_distance = sum(
+                        abs(left_old.count(character) - right_old.count(character))
+                        for character in set(left_old + right_old)
+                    )
+                    self.assertEqual(
+                        legacy_distance,
+                        SEMANTICS._authority_key_multiset_distance(
+                            left_key, right_key
+                        ),
+                    )
+
     def test_identity_and_finding_use_their_documented_plain_source_alphabets(self):
         allowed_identities = (
             "codex planner / sol-high implementer",
@@ -240,6 +311,40 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
         self.assertEqual(1, comparison_spy.call_count)
         self.assertEqual(0, neutralized.count("reviewer: approve"))
         self.assertEqual(verdict_count, neutralized.count(" — held"))
+
+    def test_unique_long_reviewers_use_only_fixed_size_comparisons(self):
+        reviewer_count = 64
+        claimant = "claimant " + "c" * 32768
+        source = (
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            + "".join(
+                "- core-fit / "
+                + "r" * 2048
+                + "a" * index
+                + " reviewer: approve — held\n"
+                for index in range(reviewer_count)
+            )
+        )
+        with mock.patch.object(
+            SEMANTICS,
+            "_authority_key_multiset_subset",
+            wraps=SEMANTICS._authority_key_multiset_subset,
+        ) as subset_spy, mock.patch.object(
+            SEMANTICS,
+            "_authority_key_multiset_distance",
+            wraps=SEMANTICS._authority_key_multiset_distance,
+        ) as distance_spy:
+            verdicts = SEMANTICS.independent_review_verdicts(
+                SEMANTICS.core_fit_review_evidence(source), claimant
+            )
+        self.assertEqual(reviewer_count, len(verdicts))
+        self.assertEqual(reviewer_count * 2, subset_spy.call_count)
+        self.assertEqual(reviewer_count, distance_spy.call_count)
+        for call in subset_spy.call_args_list + distance_spy.call_args_list:
+            left, right = call[0]
+            self.assertEqual(36, len(left[0]))
+            self.assertEqual(36, len(right[0]))
 
     def test_composite_claimant_component_count_is_bounded(self):
         accepted = " / ".join(f"role{index}" for index in range(16))

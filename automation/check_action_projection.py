@@ -163,7 +163,8 @@ WORK_DIRECTIVE_PATTERN = (
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
 AMBIGUOUS_CLEAR_COMMAND_PATTERN = (
-    rf"(?:(?:merge|release|review|vote){NONCOMMAND_SUMMARY_GUARD}"
+    rf"(?:(?:block(?![ \t]*—)|merge|release|review|vote)"
+    rf"{NONCOMMAND_SUMMARY_GUARD}"
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
 CLEAR_DIRECTIVE_ACTION_PATTERN = (
@@ -667,7 +668,7 @@ TASK_AUTHORITY_DIRECTIVE_RE = re.compile(
     rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}"
-    r"(?:accept|approve|authorize|"
+    r"(?:accept|approve|authorize|block(?![ \t]*—)|"
     r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|"
     r"let[ \t]+(?:me|us)[ \t]+know|"
     r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)|"

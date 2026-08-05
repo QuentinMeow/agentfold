@@ -16,6 +16,82 @@ Ran 7 tests in 0.256s
 OK
 ```
 
+## Final repair owning modules
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics automation.tests.test_check_action_projection automation.tests.test_check_core_scope
+----------------------------------------------------------------------
+Ran 325 tests in 49.411s
+
+OK (skipped=1)
+```
+
+```
+$ python3 -m unittest automation.tests.test_reconcile_queue
+----------------------------------------------------------------------
+Ran 458 tests in 189.007s
+
+OK
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ python3 -m unittest automation.tests.test_run_tests
+----------------------------------------------------------------------
+Ran 67 tests in 11.905s
+
+OK (skipped=1)
+```
+
+The first broad owning-module attempt was interrupted after the `block` command changed
+from the unambiguous to the guarded ambiguous vocabulary. It is not verification evidence;
+the three completed commands above are clean reruns of every affected owner.
+
+## Final repair full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 142.99s
+```
+
+## Final repair staged gates
+
+```
+$ git diff --cached --check
+```
+
+```
+$ python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (8 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
 ## Full action-projection and core-scope modules
 
 ```
@@ -1531,4 +1607,97 @@ PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 146.75s
+```
+
+## Final adversarial panel on a87701c
+
+**Reviewed revision:** a87701ccbb493c561eece7691997703f0ec394cb
+
+Panel result: 0 approve, 3 block.
+
+- contract reviewer finding — The canonical verification template omits the enforced maximum claimant-component count and its fail-closed consequence.
+- complexity reviewer finding — Unbounded claimant and reviewer key strings keep each independence comparison proportional to identity length, preserving quadratic total-input work for long identities and unique reviewers.
+- detection reviewer finding — Accepted reviewer and finding units miss an addressed `block` command such as `Owner, block this release.` even though the structural receipt verdict itself must remain inert.
+
+All three blockers were accepted and repaired after this exact revision. This panel supplies
+no acceptance evidence for the repair, and `--require-review` was not invoked against it.
+
+## Fixed-key, template-contract, and addressed-block focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_canonical_template_pins_claimant_and_key_bounds automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_long_authority_keys_have_one_fixed_size_representation automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_fixed_histograms_match_legacy_sorted_multiset_decisions automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_unique_long_reviewers_use_only_fixed_size_comparisons automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_provider_summary_allows_change_verbs_but_not_authority_asks automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_rejects_addressed_block_in_receipt_finding automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_bounds_unique_long_reviewer_comparisons automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_too_many_claimant_components
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 4.166s
+
+OK
+```
+
+## Historical-panel compatibility repair
+
+The first committed exact-range reconciler on `e0ea3c0602b031c3dd75fab87ea297726f5fd296`
+reported 33 `task-action-origin` findings. Every finding was a historical completed panel
+line shaped as `reviewer: block — finding`; the new general command token had
+retroactively treated those records as asks. This was a failed verification attempt, not
+a passing result. The guarded ambiguous form now excludes that completed-evidence
+continuation while retaining addressed commands and malformed ASCII-hyphen near-misses.
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_provider_summary_allows_change_verbs_but_not_authority_asks automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_rejects_addressed_block_in_receipt_finding
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.904s
+
+OK
+```
+
+The amended commit hook selected all six owners of the changed action grammar:
+
+```
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+tests: 6/6 files passed
+test elapsed: 70.38s
+pre-commit: OK
+```
+
+## Final compatibility full suite and exact committed range
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 139.65s
+```
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (9 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ git diff --check 4b467924b5832489829538164306439667e97aa0...6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27
 ```

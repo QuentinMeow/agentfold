@@ -148,6 +148,11 @@ CLAIMANT_IDENTITY_SEPARATOR_RE = re.compile(
 # when every verdict uses a distinct reviewer spelling. Sixteen is deliberately more
 # than ordinary task ownership needs while still providing a small, auditable ceiling.
 MAX_CLAIMANT_IDENTITY_COMPONENTS = 16
+AUTHORITY_IDENTITY_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+AUTHORITY_IDENTITY_INDEX = {
+    character: index
+    for index, character in enumerate(AUTHORITY_IDENTITY_ALPHABET)
+}
 
 
 def _is_default_ignorable_character(character):
@@ -380,9 +385,24 @@ def review_receipt_finding_source_text_allowed(text):
 
 
 def _authority_identity_multiset_key(text):
-    """Return the sorted multiset of case-folded ASCII alphanumerics."""
-    compact = "".join(re.findall(r"[a-z0-9]+", (text or "").casefold()))
-    return "".join(sorted(compact))
+    """Return a fixed-size histogram of case-folded ASCII alphanumerics.
+
+    The earlier sorted-character string represented the same multiset but made each
+    reviewer-to-claimant comparison proportional to both identities' lengths. A fixed
+    36-bin key preserves every equality, containment, anagram, and distance decision
+    while bounding each comparison independently of source length.
+    """
+    counts = [0] * len(AUTHORITY_IDENTITY_ALPHABET)
+    for character in (text or "").casefold():
+        index = AUTHORITY_IDENTITY_INDEX.get(character)
+        if index is not None:
+            counts[index] += 1
+    return tuple(counts)
+
+
+def _authority_key_has_characters(authority_key):
+    """Return whether one fixed-size authority histogram is nonempty."""
+    return bool(authority_key and any(authority_key))
 
 
 IDENTITY_PLACEHOLDER_KEYS = frozenset(
@@ -404,7 +424,8 @@ def identity_key(identity):
     if not review_receipt_identity_source_text_allowed(source):
         return ()
     authority_key = _authority_identity_multiset_key(source)
-    if not authority_key or authority_key in IDENTITY_PLACEHOLDER_KEYS:
+    if not _authority_key_has_characters(authority_key) \
+            or authority_key in IDENTITY_PLACEHOLDER_KEYS:
         return ()
     return (authority_key,)
 
@@ -473,10 +494,11 @@ def claimant_identity_keys(claimant):
             return ()
         component_keys.append(component_key)
 
-    whole_value = "".join(sorted(
-        "".join(component_key[0] for component_key in component_keys)
-    ))
-    if not whole_value or whole_value in IDENTITY_PLACEHOLDER_KEYS:
+    whole_value = tuple(sum(counts) for counts in zip(*(
+        component_key[0] for component_key in component_keys
+    )))
+    if not _authority_key_has_characters(whole_value) \
+            or whole_value in IDENTITY_PLACEHOLDER_KEYS:
         return ()
     whole_key = (whole_value,)
     keys = [whole_key]
@@ -495,41 +517,23 @@ def claimant_identity_key(claimant):
 
 
 def _authority_key_multiset_subset(candidate, reference):
-    """Return whether one sorted authority multiset is contained in another."""
+    """Return whether one fixed-size authority multiset is contained in another."""
     if not candidate or not reference:
         return False
-    smaller = candidate[0]
-    larger = reference[0]
-    if len(smaller) > len(larger):
-        return False
-    position = 0
-    for character in larger:
-        if position < len(smaller) and character == smaller[position]:
-            position += 1
-    return position == len(smaller)
+    return all(
+        candidate_count <= reference_count
+        for candidate_count, reference_count in zip(candidate[0], reference[0])
+    )
 
 
 def _authority_key_multiset_distance(left, right):
-    """Count unmatched characters across two sorted authority multisets."""
+    """Count unmatched characters across two fixed-size authority multisets."""
     if not left or not right:
         return None
-    left_value = left[0]
-    right_value = right[0]
-    left_index = 0
-    right_index = 0
-    unmatched = 0
-    while left_index < len(left_value) and right_index < len(right_value):
-        if left_value[left_index] == right_value[right_index]:
-            left_index += 1
-            right_index += 1
-        elif left_value[left_index] < right_value[right_index]:
-            unmatched += 1
-            left_index += 1
-        else:
-            unmatched += 1
-            right_index += 1
-    return unmatched + len(left_value) - left_index \
-        + len(right_value) - right_index
+    return sum(
+        abs(left_count - right_count)
+        for left_count, right_count in zip(left[0], right[0])
+    )
 
 
 def independent_reviewer_key(reviewer_key, claimant_keys):
@@ -554,8 +558,9 @@ def independent_review_verdicts(evidence, claimant):
 
     Reviewer source is normalized once per distinct spelling, and independence is
     evaluated once per distinct normalized key. Repeated votes therefore do not
-    repeat claimant-component comparisons; the finite claimant-component bound keeps
-    even all-unique reviewer receipts linear in their input size.
+    repeat claimant-component comparisons. Fixed-size 36-bin authority keys and the
+    finite claimant-component bound keep even all-unique reviewer receipts linear in
+    their total source size.
     """
     claimant_keys = claimant_identity_keys(claimant)
     reviewer_keys = {}

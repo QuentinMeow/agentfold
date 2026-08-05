@@ -1594,6 +1594,7 @@ class ActionProjectionTests(unittest.TestCase):
             "Fix the login race.",
             "Update dependency metadata.",
             "Implement retry backoff.",
+            "Block size is 4096 bytes.",
         )
         actions = (
             "Review this change.",
@@ -2295,7 +2296,7 @@ class ActionProjectionTests(unittest.TestCase):
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
             "- core-fit / first reviewer: approve — could not break it\n"
-            "- core-fit / second reviewer: block - found a boundary leak\n"
+            "- core-fit / second reviewer: block — found a boundary leak\n"
         )
         with self.repo() as root:
             self.receipt_task(root)
@@ -2307,6 +2308,19 @@ class ActionProjectionTests(unittest.TestCase):
                     repo=root,
                 ),
             )
+            near_miss = PROJECTION.task_action_unit_counts(
+                text
+                + "- core-fit / malformed reviewer: block - ordinary near miss\n",
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual(1, sum(near_miss.values()), near_miss)
+            historical_panel = PROJECTION.task_action_unit_counts(
+                "- adversarial panel / reviewer: block — completed finding\n",
+                "tasks/1_in-progress/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual({}, historical_panel)
 
     def test_task_action_units_scan_core_fit_reviewer_and_finding_text(self):
         receipts = (
@@ -2318,6 +2332,10 @@ class ActionProjectionTests(unittest.TestCase):
             "- core-fit / reviewer: approve — Do not merge this release.\n",
             "- core-fit / reviewer: approve — Owner, please ap\u0301prove the release\n",
             "- core-fit / reviewer: block — Owner, please blo\u0301ck the release\n",
+            "- core-fit / Owner, block this release.: approve — held\n",
+            "- core-fit / Owner, block this release.: block — held\n",
+            "- core-fit / reviewer: approve — Owner, block this release.\n",
+            "- core-fit / reviewer: block — Owner, block this release.\n",
             "- core-fit / reviewer: block — Is the boundary acceptable?\n",
             "- core-fit / reviewer: approve — TODO ask the owner\n",
         )

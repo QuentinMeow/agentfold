@@ -883,6 +883,40 @@ class CoreScopeTests(unittest.TestCase):
             "independent reviewer" in error for error in errors
         ), errors)
 
+    def test_review_parser_bounds_unique_long_reviewer_comparisons(self):
+        reviewer_count = 64
+        claimant = "claimant " + "c" * 32768
+        verification = "".join(
+            "- core-fit / "
+            + "r" * 2048
+            + "a" * index
+            + " reviewer: approve — held\n"
+            for index in range(reviewer_count)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant=claimant,
+                verification=verification,
+            )
+            helper_globals = SCOPE.independent_review_verdicts.__globals__
+            comparison_spy = mock.Mock(
+                wraps=helper_globals["independent_reviewer_key"]
+            )
+            with mock.patch.dict(helper_globals, {
+                "independent_reviewer_key": comparison_spy,
+            }):
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+        self.assertEqual([], errors)
+        self.assertEqual(reviewer_count, comparison_spy.call_count)
+        for call in comparison_spy.call_args_list:
+            reviewer_key, claimant_keys = call[0]
+            self.assertEqual(36, len(reviewer_key[0]))
+            self.assertTrue(all(len(key[0]) == 36 for key in claimant_keys))
+
     def test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes(self):
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(

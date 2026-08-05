@@ -47,6 +47,17 @@ detection units. A start-anchored command therefore cannot hide behind the recei
 while source bytes and the receipt exemption remain unchanged. The owner's authorization
 approves this parser/template boundary, not a review outcome.
 
+The shared command grammar treats `block` like the existing ambiguous authority commands
+`merge`, `release`, `review`, and `vote`: an addressed unit such as `Owner, block this
+release.` is actionable, while a declarative summary such as `Block size is 4096 bytes.`
+remains inert. The exact completed-evidence continuation `block —` is also excluded from
+the general ambiguous command token, so historical named panel results do not become new
+asks; the malformed near-miss `block -` receives no such exception. Task-record authority
+grammar still names the same guarded `block` form explicitly. Structural receipt verdict
+tokens are removed
+before component detection, so a benign formal `approve` or `block` remains completed
+evidence rather than a new action.
+
 The final compatibility boundary is an ASCII-only source whitelist rather than a partial
 renderer. Claimants and formal reviewers may contain ASCII letters, digits, space, and
 only `. , ; ? ! ' " ( ) / @ + -` as punctuation. Colon is excluded because it terminates
@@ -97,21 +108,27 @@ document length n and k verdicts, rather than rescanning the semantic prefix for
 verdict. The existing CommonMark LF/CRLF/CR normalization remains the classification-view
 boundary; this change does not rewrite repository source.
 
-Formal reviewer normalization uses the sorted multiset of case-folded ASCII alphanumeric
-characters. Duplicate-vote replacement still uses that one exact reviewer key, so distinct
-stable role labels are not merged merely because one contains another.
+Formal reviewer normalization uses a fixed 36-bin count vector ordered by ASCII `0-9` and
+`a-z`. This is the bounded representation of the same case-folded alphanumeric multiset:
+equality, containment, anagram, and character-distance decisions remain unchanged, while
+each comparison always visits 36 bins instead of both source identities. Duplicate-vote
+replacement still uses that one exact reviewer key, so distinct stable role labels are not
+merged merely because one contains another.
 
 Claimant authority additionally recognizes explicit co-claimant separators `/`, `+`, `;`,
 `,`, and the standalone case-insensitive ASCII word `and`. It validates the unchanged raw
 source first, strips ASCII spaces around components, and rejects the whole claimant if any
 component is empty, invalid, punctuation-only, or a placeholder. The whole key is the
-sorted multiset union of every component key, including repeated-component multiplicity;
+elementwise 36-bin multiset union of every component key, including repeated-component
+multiplicity;
 separator characters and the letters of structural `and` never enter it. The helper returns
 that whole key plus every distinct component key. Thus `/` and `and` produce identical
 authority, while `D/B/T`, `D and B and T`, `N/A`, adjacent separators, and `C++` all fail
-closed. A composite claimant may contain at most 16 components; a larger label fails
-closed. That finite ceiling bounds independence comparisons even when every verdict names
-a unique reviewer.
+closed. A composite claimant may contain at most 16 components; a larger label fails closed
+with no claimant authority, so no verdict can establish independent review. The canonical
+verification template states both the numeral and this consequence. That finite ceiling
+and the fixed-size component representation bound independence comparisons even when
+identities are long and every verdict names a unique reviewer.
 
 A reviewer must be distinct from the whole claimant and every component. Equality,
 punctuation or word-order aliases, either-direction character-multiset containment, and a
@@ -136,8 +153,11 @@ explanation remains ordinary prose outside it.
 The final independence pass derives claimant keys once, normalizes each distinct reviewer
 source once, and memoizes independence by reviewer key. Both the core-scope validator and
 the action classifier consume those shared accepted `(verdict, reviewer key)` pairs.
-Repeated votes therefore perform one claimant-component comparison, while the 16-component
-ceiling keeps an all-unique panel bounded and linear in receipt size.
+Repeated votes therefore perform one claimant-component comparison. For an all-unique
+panel, source scanning is linear in total identity bytes and each reviewer performs at most
+17 comparisons (the whole claimant plus at most 16 components) over a fixed 36-bin
+representation, so long identities cannot restore the
+old quadratic total-input work.
 
 ## Core fit
 

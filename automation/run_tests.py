@@ -123,6 +123,12 @@ MARKDOWN_SUFFIX = b".md"
 # automation/markdown_semantics.py) is deliberately left out so that it lands on the
 # coarse group fallback below.
 INPUT_TEST_OWNERS = (
+    # The review parser's enforced claimant ceiling and fixed-size key contract are
+    # documented in this canonical schema and pinned by the semantics tests.
+    (
+        b"templates/task/verification.md",
+        ("automation/tests/test_markdown_semantics.py",),
+    ),
     # Not a record either: the pull-request schema test reads both the schema and its
     # GitHub projection and asserts their shape, so editing one is a real input.
     (

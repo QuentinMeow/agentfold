@@ -56,15 +56,19 @@ line, even if a later line eventually supplies `>`.
 Composite claimants use literal `/`, `+`, `;`, `,`, and standalone case-insensitive ASCII
 `and` as co-claimant separators. ASCII spaces around each component are ignored. Every
 component must be nonempty, source-valid, and non-placeholder or the entire claimant has no
-authority. The whole key is the sorted multiset union of all component keys, excluding
-separators but preserving repeated-component multiplicity; the claimant exposes that key
-and every distinct component key. `D/B/T`, `D and B and T`, `N/A`, adjacent separators,
-punctuation-only components, and `C++` therefore fail closed.
+authority. At most 16 components are accepted; 17 or more make the entire claimant invalid,
+so no verdict can establish independent review authority. The whole key is the multiset
+union of all component keys, excluding separators but preserving repeated-component
+multiplicity; the claimant exposes that key and every distinct component key. `D/B/T`,
+`D and B and T`, `N/A`, adjacent separators, punctuation-only components, and `C++`
+therefore fail closed.
 
-Reviewer keys remain sorted multisets of case-folded ASCII alphanumerics. A reviewer is not
-independent when its key equals, contains, is contained by, or differs by at most one
-balanced character substitution from any whole or component claimant key. This catches
-punctuation, spacing, word-order, anagram, prefix, suffix, and nearby-spelling aliases.
+Reviewer keys are fixed 36-bin count vectors for case-folded ASCII `0-9` and `a-z`, the
+bounded representation of the same character multiset. A reviewer is not independent when
+its key equals, contains, is contained by, or differs by at most one balanced character
+substitution from any whole or component claimant key. This catches punctuation, spacing,
+word-order, anagram, prefix, suffix, and nearby-spelling aliases without making comparison
+cost depend on claimant or reviewer length.
 Duplicate reviewer votes still replace only the same exact key; different stable role
 labels are not merged by containment. These rules deliberately create false collisions,
 so formal receipts use stable role labels rather than personal or display names.
