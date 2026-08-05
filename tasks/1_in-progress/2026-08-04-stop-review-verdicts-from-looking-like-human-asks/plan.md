@@ -24,3 +24,4 @@
 - [x] 22. Freeze the repaired candidate inputs for an independent revision-bound review; the review receipt is a verification/worklog record only.
 - [x] 23. Separate post-review publication, integration, issue #80 projection closure, and stale-base resumption from this frozen review candidate.
 - [x] 24. Repair the final panel's missing template ceiling, unbounded identity-key comparisons, and addressed `block` command gap; repeat every verification lane.
+- [x] 25. Remove the global em-dash exemption after the panel on `c5d6769`; confine historical completed-panel compatibility to the task-root verification classification view and repeat every verification lane.

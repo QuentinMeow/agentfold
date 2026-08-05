@@ -444,3 +444,26 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27` passed nine-path core scope, the reconciler
   with zero findings, and the range diff check. A fresh independent review must bind the
   later record checkpoint, not this pre-record revision.
+
+## 2026-08-05 — scope completed-panel compatibility (codex sol-high implementer)
+
+- The final3 panel reviewed exact revision
+  `c5d676988eabb248f66000ecb2f3b72c47ef46b1` and returned 1 approve, 2 block. Both
+  blockers identified the global em-dash exception after `block`, which also hid ordinary
+  addressed commands such as `Owner, block — this release.` outside receipts.
+- Removing the exception reproduced exactly 33 task-action findings, all completed
+  adversarial-panel block records in this task verification file. The active path was
+  `task_action_unit_counts` to `action_like_task_record_prose` to
+  `TASK_AUTHORITY_DIRECTIVE_RE`, whose match was `: block`; the general verb regex also
+  saw the token but did not decide task-record actionability.
+- Both general grammars now recognize em-dash block commands. Task records retain the
+  declarative-summary guard, so `Block size is 4096 bytes.` remains inert.
+- Compatibility now exists only in the task-root verification classification view. It
+  removes an exact visible lowercase adversarial-panel evidence line, scans its stable
+  reviewer and nonempty same-line finding independently, and never changes formal
+  core-fit receipt authority. Wrong panels, reviewer shapes, punctuation, casing, and
+  out-of-region core-fit lines remain ordinary actions.
+- Focused coverage passed 6 tests in 1.210s, the two directly affected owning modules
+  passed 630 tests in 214.386s, and the full isolated suite passed all 15 files in
+  142.15s. The staged diff, two-path core-scope gate, and reconciler also passed before
+  the implementation checkpoint. Exact-range evidence follows on that committed tree.

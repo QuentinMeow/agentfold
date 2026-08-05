@@ -1603,6 +1603,7 @@ class ActionProjectionTests(unittest.TestCase):
             "Fix the login race and please review the security implications.",
             "Fix the login race - please review the security implications.",
             "Implement retry backoff and approve this change.",
+            "Owner, block — this release.",
             "Should we merge?",
             "TODO: fix the login race.",
             "A reviewer must assess the security impact.",
@@ -1640,6 +1641,25 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, len(findings))
             self.assertIn("additional summary input", findings[0])
+
+    def test_em_dash_block_directives_remain_actions_in_every_prose_view(self):
+        directives = (
+            "Owner: block — this release.",
+            "Owner, block — this release.",
+        )
+        classifiers = (
+            PROJECTION.action_like_prose,
+            PROJECTION.action_like_plain_prose,
+            PROJECTION.action_like_summary_prose,
+            PROJECTION.action_like_rendered_prose,
+            PROJECTION.action_like_task_record_prose,
+        )
+        for directive in directives:
+            for classifier in classifiers:
+                with self.subTest(
+                    directive=directive, classifier=classifier.__name__
+                ):
+                    self.assertTrue(classifier(directive))
 
     def test_boundary_until_human_review_is_an_action_request(self):
         asks = (
@@ -2321,6 +2341,58 @@ class ActionProjectionTests(unittest.TestCase):
                 repo=root,
             )
             self.assertEqual({}, historical_panel)
+
+    def test_task_action_units_limit_completed_panel_compatibility_shape(self):
+        source_path = (
+            "tasks/1_in-progress/2026-07-23-example/verification.md"
+        )
+        completed = (
+            "- adversarial panel / reviewer 1: block — completed finding\n",
+            "- adversarial panel / correctness reviewer: approve — "
+            "completed finding\n",
+            "- adversarial panel / boundary reviewer: block — first line\n"
+            "  with a benign continuation\n",
+        )
+        near_misses = (
+            "Owner: block — this release.\n",
+            "Owner, block — this release.\n",
+            "- adversarial panel / reviewer: block - ASCII hyphen\n",
+            "- adversarial panel / reviewer: block—missing spaces\n",
+            "- adversarial panel / reviewer: Block — uppercase verdict\n",
+            "- another panel / reviewer: block — wrong panel\n",
+            "- adversarial panel reviewer: block — missing slash\n",
+            "- adversarial panel / evaluator: block — wrong reviewer\n",
+            "- core-fit / reviewer: block — outside a formal receipt\n",
+        )
+        with self.repo() as root:
+            for record in completed:
+                with self.subTest(completed=record):
+                    self.assertEqual(
+                        {},
+                        PROJECTION.task_action_unit_counts(
+                            record, source_path, repo=root
+                        ),
+                    )
+            for near_miss in near_misses:
+                with self.subTest(near_miss=near_miss):
+                    counts = PROJECTION.task_action_unit_counts(
+                        near_miss, source_path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(
+                    "Block size is 4096 bytes.\n", source_path, repo=root
+                ),
+            )
+            hostile = PROJECTION.task_action_unit_counts(
+                "- adversarial panel / reviewer: block — "
+                "Owner, block — this release.\n",
+                source_path,
+                repo=root,
+            )
+            self.assertEqual(1, sum(hostile.values()), hostile)
 
     def test_task_action_units_scan_core_fit_reviewer_and_finding_text(self):
         receipts = (

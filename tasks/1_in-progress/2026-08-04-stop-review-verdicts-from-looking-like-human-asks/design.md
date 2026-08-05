@@ -50,11 +50,19 @@ approves this parser/template boundary, not a review outcome.
 The shared command grammar treats `block` like the existing ambiguous authority commands
 `merge`, `release`, `review`, and `vote`: an addressed unit such as `Owner, block this
 release.` is actionable, while a declarative summary such as `Block size is 4096 bytes.`
-remains inert. The exact completed-evidence continuation `block —` is also excluded from
-the general ambiguous command token, so historical named panel results do not become new
-asks; the malformed near-miss `block -` receives no such exception. Task-record authority
-grammar still names the same guarded `block` form explicitly. Structural receipt verdict
-tokens are removed
+remains inert. There is no punctuation-based exception after the general `block` token:
+`Owner, block — this release.` and the no-space or ASCII-hyphen variants stay ordinary
+actions. Task-record authority uses the same declarative-summary guard.
+
+Historical compatibility is confined to the task-root `verification.md` classification
+view and grants no receipt authority. Before rendering task-action units, that view removes
+only a literal visible list line shaped as lowercase `adversarial panel / <stable reviewer>:
+approve|block — <nonempty same-line finding>`. The stable reviewer is exactly `reviewer`,
+`reviewer N`, or an ASCII word/hyphen label ending in `reviewer`. Its reviewer and finding
+remain separate detection units, so hostile component prose stays actionable. Uppercase
+verdicts, missing whitespace, ASCII hyphens, wrong panel or reviewer labels, missing slash,
+and out-of-region `core-fit` lookalikes receive ordinary action classification. Structural
+receipt verdict tokens are removed
 before component detection, so a benign formal `approve` or `block` remains completed
 evidence rather than a new action.
 

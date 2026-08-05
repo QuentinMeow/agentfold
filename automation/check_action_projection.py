@@ -19,8 +19,10 @@ if str(AUTOMATION) not in sys.path:
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
     claimed_by_identity_source,
+    commonmark_lines,
     fold_unicode_marks,
     indentation_width,
+    markdown_line_body,
     markdown_links,
     neutralize_core_fit_review_verdict_tokens,
     partition_core_fit_review_verdict_units,
@@ -85,6 +87,15 @@ CORE_FIT_ACTION_VERDICT_RE = re.compile(
     r"(?m)^[ \t]*(?:-[ \t]+)?core-fit[ \t]*/[^\r\n:]+:[ \t]+"
     r"(?:approve|block)(?=[ \t]+—)",
     re.I,
+)
+COMPLETED_ADVERSARIAL_PANEL_LINE_RE = re.compile(
+    r"^[ ]{0,3}-[ \t]+adversarial[ \t]+panel[ \t]*/[ \t]*"
+    r"(?P<reviewer>"
+    r"(?:reviewer(?:[ \t]+[0-9]+)?|"
+    r"[A-Za-z0-9][A-Za-z0-9-]*"
+    r"(?:[ \t]+[A-Za-z0-9][A-Za-z0-9-]*)*[ \t]+reviewer)"
+    r"):[ \t]+(?P<verdict>approve|block)[ \t]+—[ \t]+"
+    r"(?P<finding>\S(?:[^\r\n]*\S)?)[ \t]*$"
 )
 HEADING_RE = re.compile(
     r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
@@ -163,7 +174,7 @@ WORK_DIRECTIVE_PATTERN = (
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
 AMBIGUOUS_CLEAR_COMMAND_PATTERN = (
-    rf"(?:(?:block(?![ \t]*—)|merge|release|review|vote)"
+    rf"(?:(?:block|merge|release|review|vote)"
     rf"{NONCOMMAND_SUMMARY_GUARD}"
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
@@ -668,7 +679,7 @@ TASK_AUTHORITY_DIRECTIVE_RE = re.compile(
     rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}"
-    r"(?:accept|approve|authorize|block(?![ \t]*—)|"
+    rf"(?:accept|approve|authorize|block{NONCOMMAND_SUMMARY_GUARD}|"
     r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|"
     r"let[ \t]+(?:me|us)[ \t]+know|"
     r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)|"
@@ -1430,6 +1441,47 @@ def _without_explicit_block_quotes(text):
     return text or ""
 
 
+def partition_completed_adversarial_panel_units(text):
+    """Remove exact completed panel lines from task-action detection.
+
+    This is a classification-only compatibility view for task-root verification
+    records. It grants no receipt authority. Only a literal, visible, lowercase
+    adversarial-panel list line with a stable reviewer label, an exact verdict
+    delimiter, and a nonempty same-line finding qualifies. The reviewer and
+    finding remain standalone detection units, so completed evidence cannot hide
+    an ask in either component.
+    """
+    source_lines = commonmark_lines(text or "")
+    semantic_lines = commonmark_lines(semantic_text(text or ""))
+    rendered_lines = commonmark_lines(rendered_human_text(text or ""))
+    if len(source_lines) != len(semantic_lines) \
+            or len(source_lines) != len(rendered_lines):
+        return text or "", ()
+
+    output = []
+    detection_units = []
+    for source_line, semantic_line, rendered_line in zip(
+        source_lines, semantic_lines, rendered_lines
+    ):
+        source_body = markdown_line_body(source_line)
+        matched = COMPLETED_ADVERSARIAL_PANEL_LINE_RE.fullmatch(source_body)
+        prefix_end = matched.start("finding") if matched else 0
+        structural_prefix = source_body[:prefix_end]
+        if not matched or not structural_prefix \
+                or markdown_line_body(semantic_line)[:prefix_end] \
+                != structural_prefix \
+                or markdown_line_body(rendered_line)[:prefix_end] \
+                != structural_prefix:
+            output.append(source_line)
+            continue
+        output.append(source_line[len(source_body):])
+        detection_units.extend((
+            matched.group("reviewer"),
+            matched.group("finding"),
+        ))
+    return "".join(output), tuple(detection_units)
+
+
 def task_queue_path_from_destination(destination, source_path):
     """Resolve one source-relative Markdown destination to a human queue path."""
     parsed = urlsplit((destination or "").strip())
@@ -1484,6 +1536,13 @@ def _task_projection_stripped_text(
         claimant = claimed_by_identity_source(task_text)
         source, receipt_detection_units = partition_core_fit_review_verdict_units(
             source, claimant=claimant
+        )
+        source, completed_panel_units = (
+            partition_completed_adversarial_panel_units(source)
+        )
+        receipt_detection_units = (
+            *receipt_detection_units,
+            *completed_panel_units,
         )
     _semantic_source, matches = visible_markdown_link_source(source)
     allowed = set(allowed_queue_paths or ())

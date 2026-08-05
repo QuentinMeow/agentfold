@@ -1701,3 +1701,127 @@ reconcile: 0 blocking finding(s)
 ```
 $ git diff --check 4b467924b5832489829538164306439667e97aa0...6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27
 ```
+
+## Final3 adversarial panel on c5d6769
+
+**Reviewed revision:** c5d676988eabb248f66000ecb2f3b72c47ef46b1
+
+Panel result: 1 approve, 2 block.
+
+- adversarial panel / correctness reviewer: block — An addressed block command using an em dash is silently missed outside receipts.
+- adversarial panel / boundary reviewer: block — A global block em dash exception hides real owner directives outside completed verdict records.
+- adversarial panel / core fit reviewer: approve — Core admission stays provider neutral, the canonical template pins the sixteen claimant limit, and accented action identities remain distinct.
+
+Both blockers were accepted and repaired after this exact revision. This panel supplies no
+acceptance evidence for the repair, and `--require-review` was not invoked against it.
+
+## Historical-panel failure reproduction and regex path
+
+After removing both generic `block(?![ \t]*—)` lookaheads and before adding the narrow
+classification view, the task-action detector reported exactly 33 historical records:
+
+```
+$ python3 -c 'from pathlib import Path; import automation.check_action_projection as p; f=Path("tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md"); c=p.task_action_unit_counts(f.read_text(), f.as_posix()); print(sum(c.values()), len(c)); [print(n, repr(k)) for k,n in c.items()]'
+33 33
+1 '- adversarial panel / reviewer 1: block — basename-only matching lets nested notes/verification.md and case-variant Verification.md files hide approval-like prose that the core gate never accepts as a receipt.'
+1 '- adversarial panel / reviewer 2: block — a matching line outside the one real Review verdicts section, or before its one valid full-commit field, receives an exception the formal gate never grants.'
+1 '- adversarial panel / reviewer 3: block — duplicate or missing sections and revision fields leave receipt lookalikes unbound, so neutralizing their verdict token can hide a real human ask.'
+1 '- adversarial panel / reviewer 3: block — the Review verdicts H2 ends only at another ATX H2, so ATX H1 and setext H1/H2 content can remain inside the receipt region and hide a later approval-like human action.'
+1 '- adversarial panel / security reviewer: block — semantic blanking lets a nonblank raw comment, HTML block, fence, or indented code bridge the receipt to a later verdict that is then wrongly counted and neutralized.'
+1 '- adversarial panel / correctness reviewer: block — punctuation-only and self reviewers can have their verdict token neutralized by action projection even though the core gate rejects those identities as independent evidence.'
+1 '- adversarial panel / grammar reviewer: block — Python `.strip()` treats NBSP, form-feed, vertical-tab, Unicode separators, controls, and default-ignorables as blank, so hostile raw content can bridge a later verdict.'
+1 '- adversarial panel / line-ending reviewer: block — removing only one trailing character does not define LF and CRLF bodies safely enough for the closed structural grammar.'
+1 '- adversarial panel / identity reviewer: block — source-shaped identity tokens make zero-width or inline-HTML self reviewers appear distinct, leave markup-only names nonempty, and treat repository placeholders as identities.'
+1 '- adversarial panel / identity-alias reviewer: block — Markdown link, reference, emphasis, and inline-code aliases can make a self reviewer appear distinct, while link destinations can mint apparent voters.'
+1 '- adversarial panel / placeholder reviewer: block — rendered placeholders such as linked or emphasized TBD can retain source-shaped tokens and enter the voter set.'
+1 '- adversarial panel / finding reviewer: block — decorated finding text can render as an approval request while source-shaped classification misses it after verdict neutralization.'
+1 '- adversarial panel / identity reviewer: block — Markdown image labels can display the claimant while their destinations alter identity tokens or create apparent voters.'
+1 '- adversarial panel / source-grammar reviewer: block — backslash escapes such as `cod\\_ex` remain source-decorated even when the partial renderer does not change them.'
+1 '- adversarial panel / raw-source reviewer: block — claimant identity was derived from a semantic view, so inline or trailing HTML comments could disappear before the source whitelist saw the claimant suffix.'
+1 '- adversarial panel / identity reviewer: block — NFKC preserved Unicode category-M marks, so visually equivalent reviewer spellings could become distinct voter keys and mark-decorated placeholders could remain identities.'
+1 '- adversarial panel / action reviewer: block — the human-action normalizer also preserved combining marks, so approval or blocking keywords could evade ordinary detection.'
+1 '- adversarial panel / input-grammar reviewer: block — punctuation-decorated placeholders could become voters, and a raw claimant line after prose or a blockquote could remain a CommonMark lazy continuation rather than top-level authority.'
+1 '- adversarial panel / identity reviewer: block — Cyrillic and mixed-script homoglyphs could make a claimant and reviewer appear equal to a human while comparing as independent.'
+1 '- adversarial panel / action reviewer: block — a Cyrillic first character in `approve` inside a formal finding could evade ordinary human-action detection.'
+1 '- adversarial panel / identity-key reviewer: block — placeholder rejection used compact alphanumeric order while authority used a sorted character multiset, so reordered or anagram spellings such as `yet none` and `D B T` could become voters.'
+1 '- adversarial panel / grammar reviewer: block — the shared source predicate allowed colon in claimant identity even though colon terminates reviewer identity in the receipt line.'
+1 '- adversarial panel / visibility reviewer: block — an open hidden HTML container could cross a blank line, leave a claimant structurally visible, and still hide it from a human.'
+1 '- adversarial panel / correctness reviewer: block — incomplete multiline raw HTML markers could leave the HTML parser stack empty while pending input still nested a later claimant or receipt, including a marker completed only after the authority line.'
+1 '- adversarial panel / visibility reviewer: block — receipt heading, revision, and verdict lines were compared with structural Markdown but not with the rendered-human view, so invisible evidence could retain formal meaning.'
+1 '- adversarial panel / complexity reviewer: block — each exact heading candidate reparsed its entire source prefix, making duplicate-heading rejection quadratic.'
+1 '- adversarial panel / correctness reviewer: block — an exact revision field after an already accepted verdict still reset the receipt, although any non-verdict at that point should terminate and preserve the evidence already collected.'
+1 '- adversarial panel / complexity reviewer: block — verdict neutralization called `semantic.count` and `semantic.rfind` on the growing prefix for every matched verdict, making a k-verdict document O(k*n).'
+1 '- adversarial panel / composite-identity reviewer: block — the actual claimant `codex planner / sol-high implementer` was represented only by its combined key, so either component could appear to be a different reviewer.'
+1 '- adversarial panel / alias reviewer: block — equality-only comparison admitted conservative prefix and suffix aliases such as a claimant component plus `reviewer`.'
+1 '- adversarial panel / performance reviewer: block — claimant-component independence remains quadratic for a composite claimant and many distinct reviewer keys because every verdict scans every claimant key with an unbounded component count.'
+1 '- adversarial panel / detection reviewer: block — a canonical receipt prefix can hide a start-anchored command in reviewer or finding text because the detector classifies the whole verdict line instead of each component.'
+1 '- adversarial panel / identity reviewer: block — global combining-mark folding collapses distinct accented and ASCII action identities in projection and origin Counter keys.'
+```
+
+A single-line trace identified the active classification path:
+
+```
+$ python3 -c 'import automation.check_action_projection as p; u="- adversarial panel / reviewer: block — finding"; c=p.fold_unicode_marks(p.strip_action_emphasis(p.rendered_human_text(u))); c=p.strip_action_list_markers(c); print(repr(c)); print("ACTION_VERB", [(m.group(),m.span()) for m in p.ACTION_VERB_RE.finditer(c)]); print("TASK_AUTHORITY", [(m.group(),m.span()) for m in p.TASK_AUTHORITY_DIRECTIVE_RE.finditer(c)]); print("ADDRESSED", [(m.group(),m.span()) for m in p.ADDRESSED_HUMAN_DIRECTIVE_RE.finditer(c)]); print("task_like", p.action_like_task_record_prose(u)); print("unit", p.task_action_unit_counts(u,"tasks/1_in-progress/2026-07-23-example/verification.md"))'
+'adversarial panel / reviewer: block — finding'
+ACTION_VERB [('block', (30, 35))]
+TASK_AUTHORITY [(': block', (28, 35))]
+ADDRESSED []
+task_like True
+unit Counter({'- adversarial panel / reviewer: block — finding': 1})
+```
+
+`TASK_AUTHORITY_DIRECTIVE_RE` was the predicate used by task-record prose; the general
+verb regex also recognized the word but was not the predicate that made this unit
+actionable.
+
+## Em-dash block and completed-panel focused regressions
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection.ActionProjectionTests.test_em_dash_block_directives_remain_actions_in_every_prose_view automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_limit_completed_panel_compatibility_shape automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_treat_core_fit_verdicts_as_receipts automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_provider_summary_allows_change_verbs_but_not_authority_asks automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_rejects_addressed_block_in_receipt_finding
+......
+----------------------------------------------------------------------
+Ran 6 tests in 1.210s
+
+OK
+```
+
+## Owning affected modules
+
+```
+$ python3 -m unittest automation.tests.test_check_action_projection automation.tests.test_reconcile_queue
+----------------------------------------------------------------------
+Ran 630 tests in 214.386s
+
+OK
+```
+
+## Full repository suite after the final3 repair
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 142.15s
+```
+
+## Staged core-scope, reconciler, and diff gates
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && python3 automation/reconcile/reconcile.py --check
+core-scope: pass (2 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+```
