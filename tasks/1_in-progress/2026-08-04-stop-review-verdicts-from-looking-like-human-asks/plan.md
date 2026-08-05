@@ -21,5 +21,5 @@
 - [x] 19. Derive claimant authority once per receipt after the performance finding on `ea4bb73`; add deterministic focused call-count coverage and commit through staged hooks.
 - [x] 20. Complete the deferred owning/full/exact-range verification and durable eleventh-panel record.
 - [x] 21. Bound composite-claimant comparisons, scan formal reviewer and finding components independently, and preserve Unicode marks in action identities after the panel on `1f79e480`.
-- [ ] 22. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 23. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 22. Freeze the repaired candidate inputs for an independent revision-bound review; the review receipt is a verification/worklog record only.
+- [x] 23. Separate post-review publication, integration, issue #80 projection closure, and stale-base resumption from this frozen review candidate.

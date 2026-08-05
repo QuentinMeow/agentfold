@@ -17,12 +17,12 @@ real human asks.
 
 ## Acceptance criteria
 
-- [ ] A newly introduced canonical `approve` or `block` review receipt is not reported as
+- [x] A newly introduced canonical `approve` or `block` review receipt is not reported as
       an unqueued human action.
-- [ ] A real human request embedded in the review finding is still reported.
-- [ ] Malformed near-misses receive no exemption from ordinary human-action detection.
-- [ ] The existing core-review parser continues accepting valid revision-bound receipts.
-- [ ] Focused tests, the full repository suite, core scope, and the reconciler pass with
+- [x] A real human request embedded in the review finding is still reported.
+- [x] Malformed near-misses receive no exemption from ordinary human-action detection.
+- [x] The existing core-review parser continues accepting valid revision-bound receipts.
+- [x] Focused tests, the full repository suite, core scope, and the reconciler pass with
       real output recorded in `verification.md`.
 
 ## Links
