@@ -402,3 +402,14 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The focused eight-test repair set passed in 2.708s, all four owning modules passed 777
   tests with one skip in 241.185s, and the full 15-file repository suite passed in
   141.90s. A new exact-revision approving panel, publication, and merge remain pending.
+
+## 2026-08-05 — independently rerun the repaired tree (codex sol-high verifier)
+
+- Took over the repair after the implementation session became unresponsive. The staged
+  diff matched the three accepted blockers and needed no further code change.
+- The focused eight-test slice passed in 4.928s, all four owning modules passed 777 tests
+  with one skip in 260.371s, and the isolated full suite passed all 15 files in 146.75s.
+- The interrupted implementation process completed commit `9fd8c258` while verification
+  was running. The same tree was tested throughout; the takeover session did not amend
+  that commit. This follow-up records independent evidence only. Final revision-bound
+  review, publication, and merge remain pending.

@@ -1486,3 +1486,49 @@ $ git diff --cached --check && python3 automation/check_core_scope.py --staged -
 core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
 reconcile: 0 blocking finding(s)
 ```
+
+## Independent takeover rerun on committed repair 9fd8c258
+
+The interrupted implementation session completed commit
+`9fd8c2581ac7aec5e89bb397917df73aae931705` while the takeover verification was
+running. The tested tree did not change during either test command; this entry records
+the takeover session's independently observed output rather than replacing the earlier
+implementation evidence.
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_neutralizer_derives_claimant_keys_once_for_many_verdicts automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimant_component_count_is_bounded automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_derives_claimant_keys_once_for_many_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_too_many_claimant_components automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_unit_keys_preserve_accented_identities automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_accepts_receipt_but_rejects_its_hostile_finding automation.tests.test_reconcile_queue.ReconcileQueueTests.test_handover_action_identity_preserves_accent_marks
+........
+----------------------------------------------------------------------
+Ran 8 tests in 4.928s
+
+OK
+```
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_reconcile_queue
+----------------------------------------------------------------------
+Ran 777 tests in 260.371s
+
+OK (skipped=1)
+```
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 146.75s
+```
