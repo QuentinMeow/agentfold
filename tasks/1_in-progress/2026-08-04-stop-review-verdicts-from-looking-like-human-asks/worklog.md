@@ -377,3 +377,28 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The exact-range diff check passed and the checkpoint branch was clean and tracking its
   remote. Plan step 20 is complete. Independent exact-revision review, publication,
   merge, issue closure, and the stale-base repair remain pending in steps 21 and 22.
+
+## 2026-08-05 — repair the twelfth-panel blockers (codex sol-high implementer)
+
+- The twelfth panel reviewed exact revision
+  `1f79e4802b5d492d7388022eab453795155e3651` and returned 0 approve, 3 block. The
+  accepted blockers were unbounded claimant-component comparisons, start-anchored
+  reviewer or finding commands hidden by a formal receipt prefix, and action identity
+  keys that collapsed accented names into ASCII spellings.
+- Composite claimants now fail closed above 16 components. One shared helper derives the
+  claimant once, normalizes each distinct reviewer source once, memoizes independence by
+  reviewer key, and supplies the same accepted matches to core admission and action
+  classification. Maximum-shape 16-component, 256-verdict tests record one independence
+  comparison in both consumers; a 17-component claimant is rejected.
+- Task-action classification blanks accepted receipt lines from its ordinary prose view
+  and scans exact reviewer and finding components as standalone units. The compatibility
+  neutralizer retains its equal-width verdict-token behavior. Regressions cover hostile
+  reviewer and finding commands, pending approval, a do-not-merge directive, benign
+  receipt text, task origin, and malformed/self receipts.
+- Detection normalization still folds marks so combining characters cannot split an
+  action keyword. Action identity and Counter normalization now use NFKC/casefold while
+  preserving marks, so composed/decomposed `José` compare equal and ASCII `Jose` remains
+  distinct. Projection, task-origin Counter, and handover bindings cover that boundary.
+- The focused eight-test repair set passed in 2.708s, all four owning modules passed 777
+  tests with one skip in 241.185s, and the full 15-file repository suite passed in
+  141.90s. A new exact-revision approving panel, publication, and merge remain pending.

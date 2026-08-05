@@ -1421,3 +1421,68 @@ $ git diff --check 4b467924b5832489829538164306439667e97aa0...d39aedcf3b5c84e3b4
 $ git status --short --branch
 ## task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks...origin/task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
 ```
+
+## Twelfth adversarial panel on 1f79e480
+
+**Reviewed revision:** 1f79e4802b5d492d7388022eab453795155e3651
+
+Panel result: 0 approve, 3 block.
+
+- adversarial panel / performance reviewer: block — claimant-component independence remains quadratic for a composite claimant and many distinct reviewer keys because every verdict scans every claimant key with an unbounded component count.
+- adversarial panel / detection reviewer: block — a canonical receipt prefix can hide a start-anchored command in reviewer or finding text because the detector classifies the whole verdict line instead of each component.
+- adversarial panel / identity reviewer: block — global combining-mark folding collapses distinct accented and ASCII action identities in projection and origin Counter keys.
+
+All three blockers were accepted and repaired. This panel supplies no acceptance evidence
+for the repair, and `--require-review` was not invoked against it.
+
+## Bounded independence, component detection, and Unicode identity regressions
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_neutralizer_derives_claimant_keys_once_for_many_verdicts automation.tests.test_markdown_semantics.ReviewReceiptSourceAllowlistTests.test_composite_claimant_component_count_is_bounded automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_derives_claimant_keys_once_for_many_verdicts automation.tests.test_check_core_scope.CoreScopeTests.test_review_parser_rejects_too_many_claimant_components automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_scan_core_fit_reviewer_and_finding_text automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_unit_keys_preserve_accented_identities automation.tests.test_reconcile_queue.ReconcileQueueTests.test_task_action_origin_accepts_receipt_but_rejects_its_hostile_finding automation.tests.test_reconcile_queue.ReconcileQueueTests.test_handover_action_identity_preserves_accent_marks
+........
+----------------------------------------------------------------------
+Ran 8 tests in 2.708s
+
+OK
+```
+
+## Repaired owning modules
+
+```
+$ python3 -m unittest automation.tests.test_markdown_semantics automation.tests.test_check_action_projection automation.tests.test_check_core_scope automation.tests.test_reconcile_queue
+----------------------------------------------------------------------
+Ran 777 tests in 241.185s
+
+OK (skipped=1)
+```
+
+## Repaired full repository suite
+
+```
+$ python3 automation/run_tests.py --jobs 4
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 141.90s
+```
+
+## Repaired staged core-scope gate, reconciler, and diff check
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && python3 automation/reconcile/reconcile.py --check
+core-scope: pass (7 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+```

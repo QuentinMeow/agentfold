@@ -19,9 +19,11 @@ if str(AUTOMATION) not in sys.path:
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
     claimed_by_identity_source,
+    fold_unicode_marks,
     indentation_width,
     markdown_links,
     neutralize_core_fit_review_verdict_tokens,
+    partition_core_fit_review_verdict_units,
     normalized_action_tokens,
     render_inline_code,
     rendered_human_text,
@@ -1266,7 +1268,7 @@ def action_like_clean_text(
     allow_self_answered_explanations=False,
 ):
     """Classify already-visible prose with the deterministic action grammar."""
-    clean = strip_default_ignorable_characters(clean)
+    clean = fold_unicode_marks(clean)
     if unchecked_task_list_item(clean):
         return True
     clean = strip_checked_task_list_items(clean)
@@ -1393,7 +1395,7 @@ def action_like_task_record_prose(text):
         matched = TASK_LIST_ITEM_RE.match(line)
         task_lines.append(line[matched.end():] if matched else line)
     clean = "\n".join(task_lines)
-    clean = strip_default_ignorable_characters(
+    clean = fold_unicode_marks(
         strip_action_emphasis(clean)
     )
     clean = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", clean)
@@ -1466,6 +1468,7 @@ def _task_projection_stripped_text(
     """Return rendered task prose with only exact task-owned actions removed."""
     source = _without_explicit_block_quotes(text)
     receipt_path = TASK_REVIEW_VERIFICATION_PATH_RE.fullmatch(str(source_path))
+    receipt_detection_units = []
     if receipt_path:
         task_path = (
             f"tasks/{receipt_path.group('status')}/"
@@ -1478,7 +1481,7 @@ def _task_projection_stripped_text(
         except (OSError, RuntimeError, UnicodeError):
             task_text = ""
         claimant = claimed_by_identity_source(task_text)
-        source = neutralize_core_fit_review_verdict_tokens(
+        source, receipt_detection_units = partition_core_fit_review_verdict_units(
             source, claimant=claimant
         )
     _semantic_source, matches = visible_markdown_link_source(source)
@@ -1544,7 +1547,7 @@ def _task_projection_stripped_text(
             + " " * len(projection_source)
             + rendered[offset + len(projection_source):]
         )
-    return rendered, invalid_human_projections
+    return rendered, invalid_human_projections, receipt_detection_units
 
 
 def task_action_prose_units(text):
@@ -1597,15 +1600,18 @@ def task_action_unit_counts(
     Counter keys are normalized visible excerpts, so an edge checker can subtract
     the parent multiset from the candidate multiset without losing duplicate asks.
     """
-    rendered, invalid_projections = _task_projection_stripped_text(
-        text,
-        source_path,
-        allowed_queue_paths,
-        repo=repo,
-        candidate_revision=candidate_revision,
+    rendered, invalid_projections, receipt_detection_units = (
+        _task_projection_stripped_text(
+            text,
+            source_path,
+            allowed_queue_paths,
+            repo=repo,
+            candidate_revision=candidate_revision,
+        )
     )
     units = list(task_action_prose_units(rendered))
     units.extend(invalid_projections)
+    units.extend(receipt_detection_units)
     actionable = []
     for unit in units:
         if not (

@@ -208,8 +208,9 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
 
     def test_neutralizer_derives_claimant_keys_once_for_many_verdicts(self):
         verdict_count = 256
-        claimant = "x" * verdict_count
+        claimant = " / ".join(f"role{index}" for index in range(16))
         claimant_keys = SEMANTICS.claimant_identity_keys(claimant)
+        self.assertEqual(17, len(claimant_keys))
         source = (
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
@@ -226,14 +227,25 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
             SEMANTICS,
             "identity_key",
             wraps=SEMANTICS.identity_key,
-        ) as reviewer_spy:
+        ) as reviewer_spy, mock.patch.object(
+            SEMANTICS,
+            "independent_reviewer_key",
+            wraps=SEMANTICS.independent_reviewer_key,
+        ) as comparison_spy:
             neutralized = SEMANTICS.neutralize_core_fit_review_verdict_tokens(
                 source, claimant=claimant
             )
         self.assertEqual(1, claimant_spy.call_count)
-        self.assertEqual(verdict_count, reviewer_spy.call_count)
+        self.assertEqual(1, reviewer_spy.call_count)
+        self.assertEqual(1, comparison_spy.call_count)
         self.assertEqual(0, neutralized.count("reviewer: approve"))
         self.assertEqual(verdict_count, neutralized.count(" — held"))
+
+    def test_composite_claimant_component_count_is_bounded(self):
+        accepted = " / ".join(f"role{index}" for index in range(16))
+        rejected = accepted + " / role16"
+        self.assertEqual(17, len(SEMANTICS.claimant_identity_keys(accepted)))
+        self.assertEqual((), SEMANTICS.claimant_identity_keys(rejected))
 
     def test_plain_and_formatted_placeholders_have_no_identity(self):
         placeholders = (
@@ -257,8 +269,16 @@ class ReviewReceiptSourceAllowlistTests(unittest.TestCase):
                 self.assertEqual((), SEMANTICS.identity_key(alias))
                 self.assertEqual("author", SEMANTICS.fold_unicode_marks(alias))
         self.assertEqual(
-            ("approve", "block"),
+            ("aṕprove", "blóck"),
             SEMANTICS.normalized_action_tokens("ap\u0301prove blo\u0301ck"),
+        )
+        self.assertEqual(
+            SEMANTICS.normalized_action_tokens("Ask José to review"),
+            SEMANTICS.normalized_action_tokens("Ask Jose\u0301 to review"),
+        )
+        self.assertNotEqual(
+            SEMANTICS.normalized_action_tokens("Ask José to review"),
+            SEMANTICS.normalized_action_tokens("Ask Jose to review"),
         )
 
     def test_claimant_identity_comes_from_one_unchanged_raw_field(self):

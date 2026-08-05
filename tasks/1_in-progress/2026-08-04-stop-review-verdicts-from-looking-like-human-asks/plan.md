@@ -20,5 +20,6 @@
 - [x] 18. Reject composite-claimant component, containment, and one-substitution self aliases after the panel on `7e3c8d2`, then repeat every verification lane.
 - [x] 19. Derive claimant authority once per receipt after the performance finding on `ea4bb73`; add deterministic focused call-count coverage and commit through staged hooks.
 - [x] 20. Complete the deferred owning/full/exact-range verification and durable eleventh-panel record.
-- [ ] 21. Obtain an approving independent revision-bound review of the repaired commit.
-- [ ] 22. Publish and merge; close issue #80; resume the stale-base repair.
+- [x] 21. Bound composite-claimant comparisons, scan formal reviewer and finding components independently, and preserve Unicode marks in action identities after the panel on `1f79e480`.
+- [ ] 22. Obtain an approving independent revision-bound review of the repaired commit.
+- [ ] 23. Publish and merge; close issue #80; resume the stale-base repair.

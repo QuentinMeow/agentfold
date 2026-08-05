@@ -2312,6 +2312,10 @@ class ActionProjectionTests(unittest.TestCase):
         receipts = (
             "- core-fit / Owner, please approve: block — could not break it\n",
             "- core-fit / reviewer: approve — Owner, please approve the release\n",
+            "- core-fit / Ask the owner to approve the release.: approve — held\n",
+            "- core-fit / reviewer: approve — Ask the owner to approve the release.\n",
+            "- core-fit / reviewer: approve — Pending owner approval.\n",
+            "- core-fit / reviewer: approve — Do not merge this release.\n",
             "- core-fit / reviewer: approve — Owner, please ap\u0301prove the release\n",
             "- core-fit / reviewer: block — Owner, please blo\u0301ck the release\n",
             "- core-fit / reviewer: block — Is the boundary acceptable?\n",
@@ -2329,6 +2333,38 @@ class ActionProjectionTests(unittest.TestCase):
                         repo=root,
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
+
+            benign = PROJECTION.task_action_unit_counts(
+                "## Review verdicts\n\n"
+                f"**Reviewed revision:** {'a' * 40}\n\n"
+                "- core-fit / correctness reviewer: approve — "
+                "Could not break it.\n",
+                "tasks/3_in-review/2026-07-23-example/verification.md",
+                repo=root,
+            )
+            self.assertEqual({}, benign)
+
+    def test_task_action_unit_keys_preserve_accented_identities(self):
+        source_path = "tasks/1_in-progress/2026-07-23-example/plan.md"
+        with self.repo() as root:
+            composed = PROJECTION.task_action_unit_counts(
+                "Owner, please ask José to approve the release.\n",
+                source_path,
+                repo=root,
+            )
+            decomposed = PROJECTION.task_action_unit_counts(
+                "Owner, please ask Jose\u0301 to approve the release.\n",
+                source_path,
+                repo=root,
+            )
+            ascii_only = PROJECTION.task_action_unit_counts(
+                "Owner, please ask Jose to approve the release.\n",
+                source_path,
+                repo=root,
+            )
+        self.assertEqual(composed, decomposed)
+        self.assertNotEqual(composed, ascii_only)
+        self.assertIn("José", next(iter(composed)))
 
     def test_task_action_units_do_not_normalize_receipt_near_misses(self):
         near_misses = (

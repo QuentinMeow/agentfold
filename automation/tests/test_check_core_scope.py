@@ -832,7 +832,7 @@ class CoreScopeTests(unittest.TestCase):
 
     def test_review_parser_derives_claimant_keys_once_for_many_verdicts(self):
         verdict_count = 256
-        claimant = "x" * verdict_count
+        claimant = " / ".join(f"role{index}" for index in range(16))
         with tempfile.TemporaryDirectory() as tmp:
             task = self.make_task(
                 tmp,
@@ -843,21 +843,45 @@ class CoreScopeTests(unittest.TestCase):
                     for _ in range(verdict_count)
                 ),
             )
-            with mock.patch.object(
-                SCOPE,
-                "claimant_identity_keys",
-                wraps=SCOPE.claimant_identity_keys,
-            ) as claimant_spy, mock.patch.object(
-                SCOPE,
-                "identity_key",
-                wraps=SCOPE.identity_key,
-            ) as reviewer_spy:
+            helper_globals = SCOPE.independent_review_verdicts.__globals__
+            claimant_spy = mock.Mock(
+                wraps=helper_globals["claimant_identity_keys"]
+            )
+            reviewer_spy = mock.Mock(wraps=helper_globals["identity_key"])
+            comparison_spy = mock.Mock(
+                wraps=helper_globals["independent_reviewer_key"]
+            )
+            with mock.patch.dict(helper_globals, {
+                "claimant_identity_keys": claimant_spy,
+                "identity_key": reviewer_spy,
+                "independent_reviewer_key": comparison_spy,
+            }):
                 errors = SCOPE.validate_task(
                     task, touched_core=True, require_review=True
                 )
             self.assertEqual([], errors)
             self.assertEqual(1, claimant_spy.call_count)
-            self.assertEqual(verdict_count, reviewer_spy.call_count)
+            # Sixteen claimant components and one reviewer are normalized once each.
+            self.assertEqual(17, reviewer_spy.call_count)
+            self.assertEqual(1, comparison_spy.call_count)
+
+    def test_review_parser_rejects_too_many_claimant_components(self):
+        claimant = " / ".join(f"role{index}" for index in range(17))
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp,
+                status="3_in-review",
+                claimant=claimant,
+                verification=(
+                    "- core-fit / correctness reviewer: approve — held\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+        self.assertTrue(any(
+            "independent reviewer" in error for error in errors
+        ), errors)
 
     def test_review_parser_deduplicates_ascii_boundary_and_order_alias_votes(self):
         with tempfile.TemporaryDirectory() as tmp:

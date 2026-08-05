@@ -8401,6 +8401,57 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = list(RECONCILE.check_handover_queue_projection())
             self.assertEqual([], findings, self.messages(findings))
 
+    def test_handover_action_identity_preserves_accent_marks(self):
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(
+                root,
+                "history/AGENTS.md",
+                "# History\n\n"
+                "**Queue projection schema:** v1\n"
+                "**Queue action-entry schema:** v2\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate strict handovers")
+            human_rel = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-accented-owner.md"
+            )
+            action = "Ask José to approve the release"
+            self.write(
+                root,
+                human_rel,
+                "# Review boundary\n\n"
+                f"**Action:** {action}\n"
+                "**Why-you-might-care:** The approval owns the release.\n"
+                "**If-you-do-nothing:** The release stays pending.\n",
+            )
+            handover = self.make_handover(
+                root,
+                "2026-07-23-1200PDT-accented-action",
+                "- [Ask Jose\u0301 to approve the release](../../../"
+                f"{human_rel}) — Why-you-might-care: The approval owns the "
+                "release. || If-you-do-nothing: The release stays pending.",
+            )
+            self.git(root, "add", ".")
+            self.assertEqual(
+                [],
+                list(RECONCILE.check_handover_queue_projection()),
+            )
+
+            handover.write_text(
+                handover.read_text(encoding="utf-8").replace(
+                    "Ask Jose\u0301 to approve", "Ask Jose to approve"
+                ),
+                encoding="utf-8",
+            )
+            self.git(root, "add", str(handover.relative_to(root)))
+            findings = list(RECONCILE.check_handover_queue_projection())
+            self.assertTrue(any(
+                "link label must exactly project" in finding.message
+                for finding in findings
+            ), self.messages(findings))
+
     def activate_schemas(self, root, entry="v2", liveness=None):
         """Commit one history contract activating the named handover schemas."""
         self.init_git(root)
@@ -13741,7 +13792,7 @@ class ReconcileQueueTests(unittest.TestCase):
             verification.write_text(
                 verification.read_text(encoding="utf-8")
                 + "- core-fit / second reviewer: block — "
-                "Owner, please approve the release\n",
+                "Ask the owner to approve the release.\n",
                 encoding="utf-8",
             )
             self.git(root, "add", str(verification.relative_to(root)))
@@ -13752,7 +13803,7 @@ class ReconcileQueueTests(unittest.TestCase):
             finally:
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual(1, len(findings), self.messages(findings))
-            self.assertIn("Owner, please approve", findings[0].message)
+            self.assertIn("Ask the owner to approve", findings[0].message)
 
     def test_task_action_origin_uses_all_staged_merge_parents(self):
         with self.repo() as root:

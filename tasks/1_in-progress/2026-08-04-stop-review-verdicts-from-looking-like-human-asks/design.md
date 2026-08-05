@@ -39,10 +39,13 @@ core-fit verdict lines. Blank lines may separate those elements; the first nonbl
 non-verdict ends the receipt. Duplicate exact headings or full-commit fields fail closed.
 
 Only an exact lowercase task-root `tasks/<status>/<id>/verification.md` may use the
-receipt. Equal-width token blanking remains narrow and reversible: it removes only the
-structural `approve` or `block`, while reviewer identity and finding text remain visible to
-the human-action detector. Removing one helper call restores the prior behavior; the
-owner's authorization approves this parser/template boundary, not a review outcome.
+receipt. The compatibility neutralizer keeps equal-width token blanking narrow and
+reversible: it removes only the structural `approve` or `block`. Task-action
+classification uses a stricter derived view: it blanks each accepted formal verdict line
+from ordinary prose and scans its exact reviewer and finding components as separate
+detection units. A start-anchored command therefore cannot hide behind the receipt prefix,
+while source bytes and the receipt exemption remain unchanged. The owner's authorization
+approves this parser/template boundary, not a review outcome.
 
 The final compatibility boundary is an ASCII-only source whitelist rather than a partial
 renderer. Claimants and formal reviewers may contain ASCII letters, digits, space, and
@@ -106,7 +109,9 @@ sorted multiset union of every component key, including repeated-component multi
 separator characters and the letters of structural `and` never enter it. The helper returns
 that whole key plus every distinct component key. Thus `/` and `and` produce identical
 authority, while `D/B/T`, `D and B and T`, `N/A`, adjacent separators, and `C++` all fail
-closed.
+closed. A composite claimant may contain at most 16 components; a larger label fails
+closed. That finite ceiling bounds independence comparisons even when every verdict names
+a unique reviewer.
 
 A reviewer must be distinct from the whole claimant and every component. Equality,
 punctuation or word-order aliases, either-direction character-multiset containment, and a
@@ -117,12 +122,22 @@ These conservative rules deliberately create false collisions: formal receipts u
 distinct stable role labels, not personal or display names, and identity text is not an
 authenticated principal. Commas in display-name order, plus or slash in labels, standalone
 `and`, and nearby spellings therefore sacrifice convenience to fail-closed authority.
-General human-action detection still applies NFKD and removes Unicode
-category-M marks so a malformed non-formal line cannot split an action keyword. Formal
-authority source rejects those marks and all other non-ASCII characters before identity or
-finding evidence exists. An invalid reviewer or finding ends the formal block, so the
-verdict receives no neutralization. The finite ASCII alphabet costs all non-ASCII names and
-findings inside the exempt receipt; Unicode explanation remains ordinary prose outside it.
+General human-action detection still applies compatibility decomposition and removes
+Unicode category-M marks so a malformed non-formal line cannot split an action keyword.
+Action identity normalization is separate: it applies NFKC/casefold, retains category-M
+marks inside word tokens, and removes only default-ignorables. Counter keys use the same
+mark-preserving view, so composed and decomposed spellings of `José` compare equal while
+`José` and `Jose` remain different actions. Formal authority source rejects marks and all
+other non-ASCII characters before identity or finding evidence exists. An invalid reviewer
+or finding ends the formal block, so the verdict receives no exemption. The finite ASCII
+alphabet costs all non-ASCII names and findings inside the exempt receipt; Unicode
+explanation remains ordinary prose outside it.
+
+The final independence pass derives claimant keys once, normalizes each distinct reviewer
+source once, and memoizes independence by reviewer key. Both the core-scope validator and
+the action classifier consume those shared accepted `(verdict, reviewer key)` pairs.
+Repeated votes therefore perform one claimant-component comparison, while the 16-component
+ceiling keeps an all-unique panel bounded and linear in receipt size.
 
 ## Core fit
 

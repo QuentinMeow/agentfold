@@ -143,6 +143,11 @@ CLAIMANT_IDENTITY_SEPARATOR_RE = re.compile(
     r"[/+;,]|(?<![A-Za-z0-9])and(?![A-Za-z0-9])",
     re.I,
 )
+# Composite claimants are convenience labels, not an authenticated principal list.
+# Keeping the list finite makes independence checking linear in the receipt size even
+# when every verdict uses a distinct reviewer spelling. Sixteen is deliberately more
+# than ordinary task ownership needs while still providing a small, auditable ceiling.
+MAX_CLAIMANT_IDENTITY_COMPONENTS = 16
 
 
 def _is_default_ignorable_character(character):
@@ -157,10 +162,10 @@ def _is_default_ignorable_character(character):
 def fold_unicode_marks(text):
     """Normalize compatibility forms and remove every Unicode mark.
 
-    Combining marks are presentation, not authority. Folding them before identity
-    comparison and action tokenization makes composed and decomposed text agree while
-    conservatively treating accent-only distinctions as the same identity or keyword.
-    Default-ignorable characters are removed in the same detection-only pass.
+    This is the detection-only command view: combining marks cannot split a visible
+    action keyword. Action identity and Counter keys use the mark-preserving
+    ``strip_default_ignorable_characters`` view instead. Default-ignorable characters
+    are removed here too.
     """
     output = []
     for character in unicodedata.normalize("NFKD", text or ""):
@@ -459,6 +464,8 @@ def claimant_identity_keys(claimant):
     if not review_receipt_identity_source_text_allowed(source):
         return ()
     components = CLAIMANT_IDENTITY_SEPARATOR_RE.split(source)
+    if len(components) > MAX_CLAIMANT_IDENTITY_COMPONENTS:
+        return ()
     component_keys = []
     for component in components:
         component_key = identity_key(component.strip(" "))
@@ -540,6 +547,32 @@ def independent_reviewer_identity(reviewer, claimant):
     return independent_reviewer_key(
         identity_key(reviewer), claimant_identity_keys(claimant)
     )
+
+
+def independent_review_verdicts(evidence, claimant):
+    """Return accepted ``(match, reviewer_key)`` pairs with bounded comparisons.
+
+    Reviewer source is normalized once per distinct spelling, and independence is
+    evaluated once per distinct normalized key. Repeated votes therefore do not
+    repeat claimant-component comparisons; the finite claimant-component bound keeps
+    even all-unique reviewer receipts linear in their input size.
+    """
+    claimant_keys = claimant_identity_keys(claimant)
+    reviewer_keys = {}
+    independence = {}
+    accepted = []
+    for matched in evidence.get("verdicts", ()):
+        reviewer = matched.group("reviewer")
+        if reviewer not in reviewer_keys:
+            reviewer_keys[reviewer] = identity_key(reviewer)
+        reviewer_key = reviewer_keys[reviewer]
+        if reviewer_key not in independence:
+            independence[reviewer_key] = independent_reviewer_key(
+                reviewer_key, claimant_keys
+            )
+        if independence[reviewer_key]:
+            accepted.append((matched, reviewer_key))
+    return tuple(accepted)
 
 
 def markdown_line_body(line):
@@ -664,28 +697,60 @@ def core_fit_review_evidence(text):
     return evidence
 
 
-def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
-    """Blank only structural core-fit verdict tokens in visible Markdown.
+def partition_core_fit_review_verdict_units(text, claimant=None):
+    """Blank accepted formal verdict lines and return their detection units.
 
     The shared receipt grammar remains structural evidence for the core-scope gate,
     but ``approve`` and ``block`` are completed verdicts rather than new commands.
-    Reviewer identities and finding tails stay byte-for-byte visible to the human-
-    action classifier. Fenced examples and raw-HTML lookalikes stay ordinary prose
-    because ``semantic_text`` does not expose them as structural receipts.
+    The ordinary prose view receives an equal-line-ending blank for each accepted
+    line, while the exact reviewer and finding components are returned as standalone
+    detection units. This keeps start-anchored commands visible without letting the
+    receipt prefix change their grammar. Fenced examples and raw-HTML lookalikes stay
+    ordinary prose because ``semantic_text`` does not expose them as receipts.
     """
     evidence = core_fit_review_evidence(text)
-    claimant_keys = claimant_identity_keys(claimant)
-    verdicts = tuple(
-        matched for matched in evidence["verdicts"]
-        if independent_reviewer_key(
-            identity_key(matched.group("reviewer")), claimant_keys
-        )
-    )
+    verdicts = independent_review_verdicts(evidence, claimant)
+    if not verdicts:
+        return text or "", ()
+    source_lines = commonmark_lines(text)
+    semantic_lines = commonmark_lines(evidence["semantic_text"])
+    if len(source_lines) != len(semantic_lines):
+        return text or "", ()
+    line_starts = []
+    cursor = 0
+    for semantic_line in semantic_lines:
+        line_starts.append(cursor)
+        cursor += len(semantic_line)
+
+    verdict_lines = {}
+    detection_units = []
+    line_index = 0
+    for matched, _reviewer_key in verdicts:
+        start = matched.start()
+        while line_index + 1 < len(line_starts) \
+                and line_starts[line_index + 1] <= start:
+            line_index += 1
+        verdict_lines[line_index] = True
+        detection_units.extend((
+            matched.group("reviewer"),
+            matched.group("finding"),
+        ))
+    output = [
+        _line_endings_only(source_line)
+        if line_index in verdict_lines else source_line
+        for line_index, source_line in enumerate(source_lines)
+    ]
+    return "".join(output), tuple(detection_units)
+
+
+def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
+    """Blank only accepted structural verdict tokens, preserving all other text."""
+    evidence = core_fit_review_evidence(text)
+    verdicts = independent_review_verdicts(evidence, claimant)
     if not verdicts:
         return text or ""
     source_lines = commonmark_lines(text)
-    semantic = evidence["semantic_text"]
-    semantic_lines = commonmark_lines(semantic)
+    semantic_lines = commonmark_lines(evidence["semantic_text"])
     if len(source_lines) != len(semantic_lines):
         return text or ""
     line_starts = []
@@ -696,7 +761,7 @@ def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
 
     verdict_tokens = {}
     line_index = 0
-    for matched in verdicts:
+    for matched, _reviewer_key in verdicts:
         start, end = matched.span("verdict")
         while line_index + 1 < len(line_starts) \
                 and line_starts[line_index + 1] <= start:
@@ -707,20 +772,21 @@ def neutralize_core_fit_review_verdict_tokens(text, claimant=None):
             end - line_start,
             matched.group("verdict"),
         )
+
     output = []
     for line_index, source_line in enumerate(source_lines):
         token = verdict_tokens.get(line_index)
         if token is None:
             output.append(source_line)
             continue
-        source_body = source_line[:-1] if source_line.endswith("\n") else source_line
+        source_body = markdown_line_body(source_line)
         start, end, verdict = token
         if source_body[start:end].casefold() != verdict.casefold():
             output.append(source_line)
             continue
         output.append(
             source_body[:start] + " " * (end - start) + source_body[end:]
-            + ("\n" if source_line.endswith("\n") else "")
+            + _line_endings_only(source_line)
         )
     return "".join(output)
 
@@ -932,14 +998,17 @@ def raw_html_container_open_at_end(text):
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_default_ignorable_characters(text):
-    """Fold Unicode marks and invisible controls in an isolated prose view.
+    """Apply compatibility normalization and remove only invisible controls.
 
-    Format controls, default-ignorable characters, and combining marks can split an
-    otherwise visible command word or make one identity appear to be several.
-    Callers must first remove Markdown destinations and code so this detection-only
-    normalization cannot change structural evidence or literal examples.
+    This identity-preserving view composes canonically equivalent text but retains
+    Unicode marks, so accented and ASCII action identities remain distinct. Callers
+    that classify command prose explicitly use ``fold_unicode_marks`` instead.
     """
-    return fold_unicode_marks(text)
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKC", text or "")
+        if not _is_default_ignorable_character(character)
+    )
 
 
 def inline_code_spans(text):
@@ -1218,12 +1287,12 @@ def normalized_action_tokens(text):
     """Normalize visible action words and symbols without dropping code contents."""
     clean = replace_markdown_links_with_labels(text or "")
     clean = render_inline_code(clean)
-    normalized = fold_unicode_marks(clean).casefold()
+    normalized = strip_default_ignorable_characters(clean).casefold()
     tokens = []
     word = []
     for character in normalized:
         category = unicodedata.category(character)
-        if character.isalnum():
+        if character.isalnum() or category.startswith("M"):
             word.append(character)
             continue
         if word:
