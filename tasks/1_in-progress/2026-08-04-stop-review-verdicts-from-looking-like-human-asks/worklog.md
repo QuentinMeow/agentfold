@@ -466,4 +466,9 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Focused coverage passed 6 tests in 1.210s, the two directly affected owning modules
   passed 630 tests in 214.386s, and the full isolated suite passed all 15 files in
   142.15s. The staged diff, two-path core-scope gate, and reconciler also passed before
-  the implementation checkpoint. Exact-range evidence follows on that committed tree.
+  the implementation checkpoint `50f2cf5da74524087dabc3dfefeeb627b045c767`.
+- The commit hook passed all six registered owner files in 72.65s. An initial exact-range
+  command used an abbreviated head that core scope accepted but the reconciler correctly
+  rejected; the immediate full-object-ID retry passed nine-path core scope, reconciliation
+  with zero findings, and the range diff check. The review candidate remains without an
+  approving receipt or status move.

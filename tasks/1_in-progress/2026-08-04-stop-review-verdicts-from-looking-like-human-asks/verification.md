@@ -1825,3 +1825,43 @@ $ git diff --cached --check && python3 automation/check_core_scope.py --staged -
 core-scope: pass (2 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
 reconcile: 0 blocking finding(s)
 ```
+
+## Commit hook and exact committed range
+
+The implementation and its records were committed as
+`50f2cf5da74524087dabc3dfefeeb627b045c767`. Its hook selected all six registered
+owners of the changed action grammar:
+
+```
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+tests: 6/6 files passed
+test elapsed: 72.65s
+pre-commit: OK
+```
+
+The first combined exact-range command used an abbreviated head. Core scope accepted Git's
+revision spelling, then the stricter reconciler rejected the non-full range before checking
+repository state:
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...50f2cf5 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...50f2cf5 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && git diff --check 4b467924b5832489829538164306439667e97aa0...50f2cf5
+core-scope: pass (9 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+usage: reconcile.py [-h] [--check] [--file-retries] [--fix-index]
+                    [--fix-open-actions] [--fail-on-advisory]
+                    [--at-transition NAME] [--task-id ID | --branch NAME]
+                    [--range BASE...HEAD|root:HEAD] [--displaced-tip FULL_OID]
+reconcile.py: error: --range must be full-base...full-head or root:full-head
+```
+
+The immediate retry used both full object IDs and passed all three gates:
+
+```
+$ python3 automation/check_core_scope.py --range 4b467924b5832489829538164306439667e97aa0...50f2cf5da74524087dabc3dfefeeb627b045c767 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && python3 automation/reconcile/reconcile.py --check --range 4b467924b5832489829538164306439667e97aa0...50f2cf5da74524087dabc3dfefeeb627b045c767 --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks && git diff --check 4b467924b5832489829538164306439667e97aa0...50f2cf5da74524087dabc3dfefeeb627b045c767
+core-scope: pass (9 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+reconcile: 0 blocking finding(s)
+```
