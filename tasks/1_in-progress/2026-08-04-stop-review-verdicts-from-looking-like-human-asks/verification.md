@@ -1938,3 +1938,61 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 145.19s
 ```
+
+## Sixteenth adversarial panel on ccbb9e4
+
+Three independent reviewers with distinct lenses examined the exact revision
+`ccbb9e4854faf42dc423638e6b6b39a284608f4b` in separate linked worktrees, with no view of
+each other or of the implementer's self-assessment. The vote was 0 approve, 3 block.
+Two findings were reproduced a fourth time by the orchestrating session before recording.
+
+Reproduced truncation of a mixed panel, run against this revision:
+
+```
+$ python3 -c "core_fit_review_evidence(one approve and two block, second finding backticked)"
+section_count: 1  revision_count: 1
+verdicts parsed: 1
+   -> - core-fit / lens one: approve — could not break it.
+TALLY: 1 approve, 0 block
+GATE RESULT: PASS (approve majority)
+```
+
+The first verdict whose finding leaves the closed source alphabet ends the receipt and
+discards its own vote together with every later vote. Position decides the loss: an
+invalid finding first discarded all three votes, in the middle discarded two, last
+discarded one. A control panel of the same three verdicts in plain text parsed all three.
+
+Recordability of ordinary finding text, run against this revision:
+
+```
+DROP markdown semantics dot py truncates verdicts.   (underscore)
+DROP issue number 80 is still open.                  (number sign)
+DROP coverage fell 5 percent overall.                (percent sign)
+OK   a block vote is dropped; the gate then passes.
+```
+
+A reviewer cannot name the defective module inside a finding. The second reviewer measured
+thirteen of fourteen realistic finding texts rejected, including backticked paths, curly
+apostrophes, a second em dash, and Markdown links.
+
+The third reviewer measured the action vocabulary widening over all 336 task Markdown
+files with the same data and only the code swapped: 23 actionable units at main became 48
+at this revision, five removals and thirty new detections across eleven existing files.
+
+Two reviewers independently reported that `neutralize_core_fit_review_verdict_tokens` is
+imported by the action gate and never called by any production path, so the test that pins
+the authorized token-only behavior asserts against an unreachable function. Two reviewers
+independently reported an undocumented `- adversarial panel /` grammar that grants receipt
+neutrality with no heading, no reviewed-revision binding, no claimant, and no independence
+check.
+
+## Review verdicts
+
+**Reviewed revision:** ccbb9e4854faf42dc423638e6b6b39a284608f4b
+
+- core-fit / fail-open lens: block — verdict lines are blanked whole, so an ask wrapped onto the next line escapes detection.
+- core-fit / authorized-scope lens: block — the closed finding alphabet silently drops a block verdict and every verdict after it.
+- core-fit / regression lens: block — adding block to the action vocabulary flags ordinary prose in eleven existing files.
+
+Every finding above is written inside the closed source alphabet because findings outside
+it are discarded without warning. That constraint is itself the first reviewer's finding.

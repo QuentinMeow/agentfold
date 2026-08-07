@@ -504,3 +504,22 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Remaining sequence: obtain a fresh three-way independent review of that exact revision,
   record only its receipt and worklog evidence, move the task to review, then push, open,
   merge, and close GitHub issue #80.
+
+## 2026-08-07 — sixteenth panel blocked the change (claude opus 5 orchestrator)
+
+- Recreated the task worktree after every prior worktree was lost: they had been created
+  under the system temporary directory, which the operating system cleared between sessions. No commit was
+  lost, but `task/2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` was still
+  unpushed and existed only in this clone. `handbook/git-workflow.md` already prescribes
+  `../<task-id>`; the worktrees now live there.
+- Ran a three-lens independent panel on `ccbb9e4854faf42dc423638e6b6b39a284608f4b`. The
+  vote was 0 approve, 3 block. Findings and reproductions are in
+  [verification.md](verification.md) under the sixteenth-panel section.
+- The decisive finding is a fail-open on the merge gate's own output: a finding leaving the
+  closed source alphabet ends the receipt and discards its verdict and every later verdict,
+  so a one-approve, two-block panel is reported as one approve, zero block and passes. The
+  orchestrating session reproduced this independently before recording it.
+- The task stays in `1_in-progress` with no pull request. Nothing was published, and the
+  dependent stale-base and bootstrap work is unchanged by this session's finding.
+- Filed the strategic question for the owner rather than starting a seventeenth repair
+  round, because the authorized decision described a smaller and fail-closed parser.
