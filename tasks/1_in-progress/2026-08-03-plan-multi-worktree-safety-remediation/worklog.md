@@ -11,3 +11,22 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Selected GitHub issues as non-canonical projections because the user explicitly requested
   them; every issue will be bound back to a repository queue item.
 - Audit evidence: `history/conversations/2026-08-03-0730PDT-audit-multi-worktree-safety/handover.md`.
+- Published draft planning pull request #73 and GitHub issue projections #74 through #78.
+- Bound every issue's exact provider node/version identity to a task-owned queue item; the
+  stable projection ledger is in the audit conversation's `artifacts/` folder.
+- Claimed issue #74's bootstrap task in a separate pushed coordination commit and delegated
+  its vertical implementation to a Sol high worker in a real linked worktree.
+- Published stacked draft implementation pull request #79 with the task, plan, design,
+  worklog, and real verification. Its exact implementation revision survived a Sol xhigh
+  block/fix/re-review cycle and an independent Terra test rerun.
+- Left the parent plan in progress: issue #75's displaced-tip repair is the next serial
+  implementation slice, followed by explicit expected-OID publication in issue #76.
+- Exact PR-candidate verification uncovered an unconditional-hook-`chmod` stat-cache
+  interaction after the first handover. The child task was honestly reopened, repaired,
+  given a red-on-parent/green-on-fix canary, independently re-reviewed, and returned to
+  review; final task head is `4dbb2d04eacaa482d3c806406458b99a0428fdba`.
+- PR #79's local exact merge candidate passes bootstrap, raw `git diff-files`, and the
+  merge-transition reconciler. GitHub's latest `reconcile-and-test` remains red because
+  its event carried stale base `4dbb22e...` while checkout used merge candidate `4bee4fc...`
+  whose first parent is `73492c5...`; this is the pre-existing defect tracked by issue #78,
+  not a bootstrap test failure. Planning PR #73 is green.
