@@ -16,9 +16,10 @@ mode permits. A task file may override the mode for that task only.
 
 ## Boot sequence
 
-1. Run `python3 automation/install.py` — idempotent, once per clone. Until it has run
-   there is no commit gate at all: `core.hooksPath` is unset in a fresh clone, and a
-   commit the reconciler would refuse lands silently.
+1. Run `python3 automation/install.py` once per linked worktree — idempotent. The first
+   run sets shared hooks; each verifies its effective setting, corrects a masking local
+   override, and creates local adapters without rewriting correct shared config. Until
+   then there is no commit gate, so a commit the reconciler would refuse can land.
 2. Read this file.
 3. Run the **message-queue ritual** (below). Top-level sessions only — subagents skip it.
 4. Read the `AGENTS.md` of every folder you are about to work in. The closest

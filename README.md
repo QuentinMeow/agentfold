@@ -69,7 +69,7 @@ agentfold/
 
 ```bash
 git clone <this-repo> && cd agentfold
-python3 automation/install.py        # git hooks + agent-adapter symlinks (idempotent)
+python3 automation/install.py        # shared hooks + this worktree's adapters (idempotent)
 python3 automation/reconcile/reconcile.py --check   # should pass on a fresh clone
 ```
 
