@@ -523,3 +523,39 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   dependent stale-base and bootstrap work is unchanged by this session's finding.
 - Filed the strategic question for the owner rather than starting a seventeenth repair
   round, because the authorized decision described a smaller and fail-closed parser.
+
+## 2026-08-07 — rebuilt the receipt parser to the authorized shape (claude opus 5)
+
+- Rebuilt from the withdrawal baseline `679a62a` rather than restoring any withdrawn code.
+  The whole grammar now lives in one new 141-line module, `automation/review_receipt.py`,
+  which both gates import: `check_core_scope.py` for the tally and
+  `check_action_projection.py` for neutralization. Net change against `main` over
+  `automation/` and `templates/` is 418 insertions and 32 deletions, against the withdrawn
+  implementation's 3746 and 81.
+- The finding is `.+` — any nonempty prose. Fourteen realistic findings covering an
+  underscore, a backticked path, a `#` reference, a percent, a colon, a comma, a second em
+  dash, a Markdown link, a curly apostrophe, and straight quotes all parse, which is what
+  removes the fail-open: the withdrawn parser accepted one of the fourteen and silently
+  dropped the rest of the panel.
+- Nothing inside the receipt is skipped. A line that reaches for the verdict shape and
+  misses, and a canonical verdict stranded after the block, both refuse the whole receipt
+  with a named error instead of ending it quietly. Any error yields zero verdicts, so the
+  core gate reports it and the action gate neutralizes nothing.
+- Neutralization replaces only the `approve`/`block` span with spaces of equal length. A
+  regression asserts byte equality at every other offset, so the reviewer identity, the
+  finding, and any line that wraps below it stay under ordinary human-action detection.
+- Excluded, per the 2026-08-07 withdrawal decision: the closed character alphabet,
+  reviewer-similarity independence, composite claimant rules, the second `adversarial
+  panel` grammar, raw-HTML container tracking, and widening the action vocabulary with
+  `block`. The claimant/reviewer identity check is `main`'s, unchanged. Also declined, as
+  unnamed by the authorization: restricting receipts to a `verification.md` path, whose
+  basename matching produced one of the sixteenth panel's findings.
+- `templates/task/verification.md` grew from 20 to 27 lines. The `core-fit` line moved
+  above the explanation so the revision field can be the receipt's first line, and the
+  explanation now doubles as the block terminator. A filled copy passes the action gate on
+  its `core-fit` line; its non-`core-fit` lens line still projects an action when filled
+  with `approve`, exactly as on `main`.
+- Eleven focused regressions, the full 15-file suite, the core-scope gate, and the
+  reconciler all pass with real output in [verification.md](verification.md). No review was
+  run against this work and no receipt was written for it; the task stays in
+  `1_in-progress` with nothing pushed.

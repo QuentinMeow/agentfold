@@ -16,5 +16,12 @@ $ <exact command>
 
 **Reviewed revision:** <full immutable commit ID reviewed by every verdict below>
 
-- <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">
 - core-fit / <reviewer other than Claimed-by>: <approve | block> — <substitution or boundary challenged; required only when `--require-review` is explicitly selected>
+
+Those three elements are the closed receipt both gates read, and only blank lines may
+separate them: this heading once, the revision field, then consecutive `core-fit` lines.
+The receipt ends here, at the first other nonblank line. A finding is ordinary one-line
+prose; a `core-fit` line that misses the shape refuses the whole receipt instead of being
+skipped. Every other lens records its verdict below, under ordinary prose rules:
+
+- <reviewer / lens>: <approve | block> — <one-line finding or "could not break it">

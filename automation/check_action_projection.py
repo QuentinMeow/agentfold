@@ -29,6 +29,7 @@ from markdown_semantics import (
     strip_inline_code,
     visible_markdown_link_source,
 )
+from review_receipt import accepted_verdict_token_spans, blank_spans
 
 REPO = Path(__file__).resolve().parents[1]
 # Every Git read in this gate goes through this prefix, so a `refs/replace/*` entry
@@ -1501,6 +1502,10 @@ def _task_projection_stripped_text(
             )
 
     rendered = rendered_human_text(source)
+    # Read the receipt from the pristine view so the spans do not depend on the order
+    # these two blankings run in; both replace their span with spaces of equal length,
+    # so every other offset in the document survives untouched.
+    verdict_spans = accepted_verdict_token_spans(rendered)
     for projection_source in valid_sources:
         offset = rendered.find(projection_source)
         if offset < 0:
@@ -1510,7 +1515,7 @@ def _task_projection_stripped_text(
             + " " * len(projection_source)
             + rendered[offset + len(projection_source):]
         )
-    return rendered, invalid_human_projections
+    return blank_spans(rendered, verdict_spans), invalid_human_projections
 
 
 def task_action_prose_units(text):

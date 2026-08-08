@@ -1996,3 +1996,188 @@ check.
 
 Every finding above is written inside the closed source alphabet because findings outside
 it are discarded without warning. That constraint is itself the first reviewer's finding.
+
+## Rebuilt narrow receipt parser — focused regressions
+
+Eleven tests, one per invariant the sixteenth panel named.
+
+```
+$ python3 -m unittest \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_review_receipt_accepts_findings_written_in_ordinary_prose \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_mixed_panel_tally_never_loses_a_verdict \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_verdict_the_receipt_cannot_accept_fails_it_loudly \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_verdict_outside_the_contiguous_block_fails_the_receipt \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_review_receipt_needs_exactly_one_real_heading_and_revision \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_accept_a_canonical_review_receipt \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_receipt_neutralization_blanks_the_token_and_nothing_else \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_report_an_ask_in_a_reviewer_or_a_finding \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_report_an_ask_on_a_wrapped_finding_line \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_task_action_units_give_receipt_near_misses_no_exemption \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_a_malformed_verdict_refuses_the_whole_receipt
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 0.141s
+
+OK
+```
+
+## Rebuilt parser — the sixteenth panel's fail-open, replayed
+
+The same one-approve, two-block panel the withdrawn parser reported as `1 approve, 0
+block`. Its three findings carry a backticked path, a percent sign, a number sign, a
+curly apostrophe, and two extra em dashes — every class the closed alphabet rejected.
+The script is `tmp/probe.py`, reproduced inline below the output.
+
+```
+$ python3 tmp/probe.py
+verdicts parsed: 3
+tally: 1 approve, 2 block
+errors: ()
+spans: ((110, 117), (178, 183), (241, 246))
+same length: True
+changed offsets outside the token spans: []
+'- core-fit / first:         — the `automation/x.py` boundary holds'
+'- core-fit / second:       — 50% of the adapters break, see #81'
+'- core-fit / third:       — the reviewer’s case — nested — still parses'
+```
+
+```python
+import sys
+sys.path.insert(0, "automation")
+import check_action_projection as CAP
+import review_receipt as RR
+from markdown_semantics import semantic_text
+
+REVISION = "a" * 40
+PANEL = (
+    "- core-fit / first: approve — the `automation/x.py` boundary holds\n"
+    "- core-fit / second: block — 50% of the adapters break, see #81\n"
+    "- core-fit / third: block — the reviewer’s case — nested — still parses\n"
+)
+DOCUMENT = f"# V\n\n## Review verdicts\n\n**Reviewed revision:** {REVISION}\n\n{PANEL}"
+
+receipt = RR.parse_review_receipt(semantic_text(DOCUMENT))
+tally = [entry.verdict for entry in receipt.verdicts]
+print("verdicts parsed:", len(receipt.verdicts))
+print("tally:", tally.count("approve"), "approve,", tally.count("block"), "block")
+print("errors:", receipt.errors)
+
+rendered = CAP.rendered_human_text(DOCUMENT)
+spans = CAP.accepted_verdict_token_spans(rendered)
+blanked = CAP.blank_spans(rendered, spans)
+print("spans:", spans)
+print("same length:", len(rendered) == len(blanked))
+changed = {index for index, (a, b) in enumerate(zip(rendered, blanked)) if a != b}
+print("changed offsets outside the token spans:",
+      sorted(i for i in changed if not any(s <= i < e for s, e in spans)))
+for line in blanked.splitlines()[-3:]:
+    print(repr(line))
+```
+
+## Rebuilt parser — staged diff and core-scope gate
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (6 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```
+
+## Rebuilt parser — change size against the withdrawn implementation
+
+```
+$ git diff --cached --stat main -- automation templates
+ automation/check_action_projection.py            |   7 +-
+ automation/check_core_scope.py                   |  39 ++-----
+ automation/review_receipt.py                     | 141 +++++++++++++++++++++++
+ automation/tests/test_check_action_projection.py | 118 +++++++++++++++++++
+ automation/tests/test_check_core_scope.py        | 136 ++++++++++++++++++++++
+ templates/task/verification.md                   |   9 +-
+ 6 files changed, 418 insertions(+), 32 deletions(-)
+```
+
+The withdrawn implementation was 3746 insertions and 81 deletions over the same two
+folders, across four source files and four test files.
+
+## Rebuilt parser — the filled template through the action gate
+
+`templates/README.md` requires that copying a template and replacing its placeholders
+produces a valid item. The filled copy was passed to `task_action_unit_counts` once per
+verdict token.
+
+```
+$ python3 tmp/filled_template.py
+--- verdict token 'approve': 1 unprojected action(s) ---
+    1 '- adversarial panel / reviewer-b: approve — could not break it'
+--- verdict token 'block': 0 unprojected action(s) ---
+```
+
+The `core-fit` receipt line is neutral in both fills. The remaining unit is the
+non-`core-fit` lens line, which the 2026-08-04 grammar deliberately leaves outside the
+receipt and which behaves exactly as it does on `main`; closing it needs the second panel
+grammar the 2026-08-07 withdrawal decision forbids.
+
+```python
+import sys
+sys.path.insert(0, "automation")
+from pathlib import Path
+import check_action_projection as CAP
+
+raw = Path("templates/task/verification.md").read_text(encoding="utf-8")
+filled = (
+    raw
+    .replace("<task title>", "Stop review verdicts from looking like human asks")
+    .replace("<YYYY-MM-DD> by <who>", "2026-08-07 by sol-high")
+    .replace('<check name, e.g. "unit tests">', "unit tests")
+    .replace("<exact command>", "python3 automation/run_tests.py")
+    .replace("<real output, trimmed to the meaningful part>", "tests: 15/15 files passed")
+    .replace("<full immutable commit ID reviewed by every verdict below>", "b" * 40)
+    .replace("<reviewer other than Claimed-by>", "reviewer-a")
+    .replace(
+        "<substitution or boundary challenged; required only when "
+        "`--require-review` is explicitly selected>",
+        "another agent runtime reads the same files, so the boundary holds",
+    )
+    .replace("<reviewer / lens>", "adversarial panel / reviewer-b")
+    .replace('<one-line finding or "could not break it">', "could not break it")
+)
+for token in ("approve", "block"):
+    text = filled.replace("<approve | block>", token)
+    counts = CAP.task_action_unit_counts(
+        text, "tasks/1_in-progress/2026-08-04-example/verification.md", ()
+    )
+    print(f"--- verdict token {token!r}: {sum(counts.values())} unprojected action(s) ---")
+    for excerpt, count in counts.items():
+        print("   ", count, repr(excerpt))
+```
+
+## Rebuilt parser — full repository suite
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 44.19s
+```
+
+## Rebuilt parser — reconciler
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+No independent review has been run against the rebuilt parser. `--require-review` was not
+invoked, and this session wrote no receipt for its own work.

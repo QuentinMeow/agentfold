@@ -2393,6 +2393,124 @@ class ActionProjectionTests(unittest.TestCase):
             self.assertEqual(1, len(counts))
             self.assertEqual(2, sum(counts.values()))
 
+    def receipt(self, body, heading="## Review verdicts", revision="a" * 40):
+        """Build a verification record whose only content is one review receipt."""
+        return (
+            f"# Verification\n\n{heading}\n\n"
+            f"**Reviewed revision:** {revision}\n\n{body}"
+        )
+
+    def receipt_units(self, root, document):
+        return PROJECTION.task_action_unit_counts(
+            document,
+            "tasks/1_in-progress/2026-08-04-example/verification.md",
+            repo=root,
+        )
+
+    def test_task_action_units_accept_a_canonical_review_receipt(self):
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                self.receipt_units(root, self.receipt(
+                    "- core-fit / first: approve — the `automation/x.py` boundary holds\n"
+                    "- core-fit / second: block — 50% of the adapters break, see #81\n"
+                    "\n"
+                    "- core-fit / third: approve — the reviewer’s case — nested — parses\n"
+                )),
+            )
+
+    def test_receipt_neutralization_blanks_the_token_and_nothing_else(self):
+        """Only the structural token may lose its offsets; never the whole line."""
+        rendered = PROJECTION.rendered_human_text(self.receipt(
+            "- core-fit / first: approve — the boundary holds\n"
+        ))
+        spans = PROJECTION.accepted_verdict_token_spans(rendered)
+        blanked = PROJECTION.blank_spans(rendered, spans)
+
+        self.assertEqual(1, len(spans))
+        self.assertEqual(len("approve"), spans[0][1] - spans[0][0])
+        self.assertEqual(len(rendered), len(blanked))
+        self.assertIn(
+            "- core-fit / first:         — the boundary holds", blanked
+        )
+        for index, (before, after) in enumerate(zip(rendered, blanked)):
+            if spans[0][0] <= index < spans[0][1]:
+                self.assertEqual(" ", after)
+            else:
+                self.assertEqual(before, after, index)
+
+    def test_task_action_units_report_an_ask_in_a_reviewer_or_a_finding(self):
+        cases = {
+            "reviewer": self.receipt(
+                "- core-fit / Quentin must approve the rollout: approve — "
+                "the boundary holds\n"
+            ),
+            "finding": self.receipt(
+                "- core-fit / first: approve — Quentin must approve the rollout\n"
+            ),
+        }
+        with self.repo() as root:
+            for position, document in cases.items():
+                with self.subTest(position=position):
+                    counts = self.receipt_units(root, document)
+                    self.assertEqual(1, sum(counts.values()), counts)
+                    self.assertIn(
+                        "Quentin must approve the rollout",
+                        next(iter(counts)),
+                    )
+
+    def test_task_action_units_report_an_ask_on_a_wrapped_finding_line(self):
+        with self.repo() as root:
+            counts = self.receipt_units(root, self.receipt(
+                "- core-fit / first: approve — the boundary holds but\n"
+                "  Quentin must decide the flag default\n"
+            ))
+            self.assertEqual(1, sum(counts.values()), counts)
+            self.assertIn("Quentin must decide the flag default", next(iter(counts)))
+
+    def test_task_action_units_give_receipt_near_misses_no_exemption(self):
+        cases = {
+            "hyphen delimiter": self.receipt(
+                "- core-fit / first: approve - the boundary holds\n"
+            ),
+            "decorated heading": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n",
+                heading="### Review verdicts",
+            ),
+            "abbreviated revision": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n",
+                revision="abc1234",
+            ),
+            "indented verdict": self.receipt(
+                "  - core-fit / first: approve — the boundary holds\n"
+            ),
+            "prose before the revision field": (
+                "# Verification\n\n## Review verdicts\n\nThe panel met on Tuesday.\n\n"
+                "**Reviewed revision:** " + "a" * 40 + "\n\n"
+                "- core-fit / first: approve — the boundary holds\n"
+            ),
+            "verdict stranded after the block": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n\n"
+                "The panel adjourned.\n\n"
+                "- core-fit / second: approve — the boundary still holds\n"
+            ),
+        }
+        with self.repo() as root:
+            for name, document in cases.items():
+                with self.subTest(case=name):
+                    counts = self.receipt_units(root, document)
+                    self.assertGreaterEqual(sum(counts.values()), 1, counts)
+
+    def test_a_malformed_verdict_refuses_the_whole_receipt(self):
+        """A near-miss beside real verdicts neutralizes none of them."""
+        with self.repo() as root:
+            counts = self.receipt_units(root, self.receipt(
+                "- core-fit / first: approve — the boundary holds\n"
+                "- core-fit / second: blocks — not a canonical verdict token\n"
+                "- core-fit / third: approve — the boundary still holds\n"
+            ))
+            self.assertEqual(2, sum(counts.values()), counts)
+
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:
             item = self.queue_item(root)
