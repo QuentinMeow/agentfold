@@ -771,3 +771,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   An inlined script that cannot run is the same defect as a docstring that cannot be
   checked, which is what this task keeps relearning.
 - The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — gate panel approved and the task moved to review (claude)
+
+- Three independent reviewers approved `4cec5be`, then each re-bound its verdict to
+  `66c6e57` after a records-only pass. Executable code is byte-equivalent across that
+  pass, verified by syntax-tree comparison with docstrings removed and reproduced by two
+  reviewers, one of them also by bytecode.
+- `check_core_scope.py --require-review` now reports `independent review verified` on this
+  task's own receipt, which is the behaviour the task exists to provide.
+- The residue the panel named is recorded beside the receipt in
+  [verification.md](verification.md), including two items an earlier record wrongly
+  claimed were repaired.
