@@ -626,6 +626,162 @@ class CoreScopeTests(unittest.TestCase):
                     any("independent reviewer" in error for error in errors), errors
                 )
 
+    def test_a_marker_or_dash_variant_never_leaves_the_tally_silently(self):
+        """The gate must not pass a panel that rejected the change.
+
+        Each of these is a verdict reaching for the shape and missing on the list
+        marker or the delimiter alone. Read as ordinary prose, each ends the receipt and
+        takes both block verdicts with it, so a one-approve two-block panel is tallied
+        `1 approve, 0 block` and the gate reports success.
+        """
+        variants = {
+            "ordered 1. marker": "1. core-fit / {0}: block — {1}\n",
+            "ordered 1) marker": "1) core-fit / {0}: block — {1}\n",
+            "no marker at all": "core-fit / {0}: block — {1}\n",
+            "bullet glyph marker": "• core-fit / {0}: block — {1}\n",
+            "ascii hyphen dash": "- core-fit / {0}: block - {1}\n",
+            "en dash": "- core-fit / {0}: block – {1}\n",
+        }
+        for name, shape in variants.items():
+            for placement in ("inside the block", "stranded after it"):
+                with self.subTest(case=name, placement=placement), \
+                        tempfile.TemporaryDirectory() as tmp:
+                    blocks = (
+                        shape.format("second", "a concrete bypass")
+                        + shape.format("third", "the same bypass")
+                    )
+                    if placement == "stranded after it":
+                        blocks = "\nThe panel adjourned.\n\n" + blocks
+                    task = self.make_task(
+                        tmp, status="3_in-review", claimant="author",
+                        verification=(
+                            "- core-fit / first: approve — could not break it\n"
+                            + blocks
+                        ),
+                    )
+                    errors = SCOPE.validate_task(
+                        task, touched_core=True, require_review=True
+                    )
+                    self.assertTrue(
+                        any("core-fit line" in error for error in errors), errors
+                    )
+                    self.assertTrue(
+                        any("independent reviewer" in error for error in errors), errors
+                    )
+
+    def test_a_reviewer_without_an_identity_is_refused_not_dropped(self):
+        """`identity_key` returns nothing for these, so the gate would drop the vote."""
+        for reviewer in ("  ", "🛑", "_", "...", "-", "( )"):
+            with self.subTest(reviewer=reviewer), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"- core-fit / {reviewer}: block — a concrete bypass\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("no identity" in error for error in errors), errors
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_only_the_exact_review_verdicts_heading_opens_a_receipt(self):
+        for heading in (
+            "## Review verdicts (when a review was explicitly run)",
+            "## Review verdicts today",
+            "### Review verdicts",
+            "## review verdicts",
+        ):
+            with self.subTest(heading=heading), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review", verification="")
+                (task / "verification.md").write_text(
+                    f"# Verification\n\n{heading}\n\n"
+                    f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                    "- core-fit / reviewer: approve — inexact heading\n",
+                    encoding="utf-8",
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_verdict_line_details_the_grammar_actually_depends_on(self):
+        """Each case is one mutation the suite would otherwise not have caught."""
+        accepted = {
+            "uppercase verdict token": "- core-fit / reviewer: APPROVE — case folds",
+            "uppercase core-fit label": "- Core-Fit / reviewer: approve — case folds",
+            "no space after the colon": "- core-fit / reviewer:approve — tight colon",
+            "two spaces after the colon": "- core-fit / reviewer:  approve — loose colon",
+            "tab after the colon": "- core-fit / reviewer:\tapprove — tab colon",
+        }
+        for name, line in accepted.items():
+            with self.subTest(accepted=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=line + "\n",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ), name)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / reviewer: BLOCK — case folds\n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("(0 approve, 1 block)" in error for error in errors), errors
+            )
+
+        with self.subTest(refused="empty finding"), tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / reviewer: approve — \n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("core-fit line" in error for error in errors), errors
+            )
+
+    def test_a_second_revision_field_anywhere_in_the_section_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / reviewer: approve — a bound review\n\n"
+                "The panel adjourned.\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("Reviewed revision" in error for error in errors), errors
+            )
+
+    def test_a_later_h2_ends_the_receipt_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / reviewer: approve — a bound review\n\n"
+                "## Later notes\n\n"
+                "- core-fit / other: block — outside the section entirely\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
     def test_home_access_in_core_executable_fails(self):
         content = "target = Path.home() / '.agent'\n"
         findings = SCOPE.global_state_findings(

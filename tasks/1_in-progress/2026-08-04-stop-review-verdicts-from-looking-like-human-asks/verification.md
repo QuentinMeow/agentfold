@@ -1708,9 +1708,11 @@ $ git diff --check 4b467924b5832489829538164306439667e97aa0...6c9568b6833a2f3b77
 
 Panel result: 1 approve, 2 block.
 
+```
 - adversarial panel / correctness reviewer: block — An addressed block command using an em dash is silently missed outside receipts.
 - adversarial panel / boundary reviewer: block — A global block em dash exception hides real owner directives outside completed verdict records.
 - adversarial panel / core fit reviewer: approve — Core admission stays provider neutral, the canonical template pins the sixteen claimant limit, and accented action identities remain distinct.
+```
 
 Both blockers were accepted and repaired after this exact revision. This panel supplies no
 acceptance evidence for the repair, and `--require-review` was not invoked against it.
@@ -1872,9 +1874,11 @@ reconcile: 0 blocking finding(s)
 
 Panel result: 1 approve, 2 block.
 
+```
 - adversarial panel / correctness reviewer: block — Conjoined commands inside accepted findings are missed after the receipt line is blanked.
 - adversarial panel / boundary reviewer: block — Completed panel compatibility can hide decorated human action findings in task verification records.
 - adversarial panel / core fit reviewer: approve — Provider-neutral receipt authority stays confined to task-root verification, review freshness remains bound to core and task inputs, and historical panel compatibility grants no review authority.
+```
 
 Both blockers were accepted and repaired after this exact revision. This panel supplies no
 acceptance evidence for the repair, and `--require-review` was not invoked against it.
@@ -2181,3 +2185,209 @@ reconcile: 0 blocking finding(s)
 
 No independent review has been run against the rebuilt parser. `--require-review` was not
 invoked, and this session wrote no receipt for its own work.
+
+## Seventeenth panel repair — every hole replayed against the repaired parser
+
+One script per finding class. Item 1 is the decisive one: each variant previously parsed
+as `1 approve, 0 block` with no error, so the gate passed a panel that rejected the
+change. The script is `tmp/repairs.py`, reproduced below its output.
+
+```
+$ python3 tmp/repairs.py
+1. marker and delimiter variants on the two block verdicts
+   1. ordered  in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+   1) ordered  in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+   no marker   in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+   bullet      in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+   hyphen      in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+   en dash     in block: 0 approve, 0 block, 2 error(s)   stranded: 0 approve, 0 block, 1 error(s)
+2. reviewer with no identity
+   reviewer='  ': 0 approve, 0 block, 1 error(s)
+   reviewer='🛑': 0 approve, 0 block, 1 error(s)
+   reviewer='_': 0 approve, 0 block, 1 error(s)
+   reviewer='...': 0 approve, 0 block, 1 error(s)
+   reviewer='-': 0 approve, 0 block, 1 error(s)
+3. heading exactness
+   exact           : 1 approve, 0 block, 0 error(s)
+   parenthetical   : 0 approve, 0 block, 1 error(s)
+4. which artifact may claim the exemption
+   tasks/1_in-progress/2026-08-04-example/verification.md     0 action(s)
+   tasks/1_in-progress/2026-08-04-example/worklog.md          1 action(s)
+   tasks/1_in-progress/2026-08-04-example/design.md           1 action(s)
+   tasks/1_in-progress/2026-08-04-example/notes/verification.md 1 action(s)
+5. raw HTML that only renders as a receipt
+   rendered view contains the heading: True
+   parse errors: ('verification.md needs exactly one exact `## Review verdicts` heading',)
+   actions reported: 1
+```
+
+```python
+import sys
+sys.path.insert(0, "automation")
+import check_action_projection as CAP
+import review_receipt as RR
+
+REVISION = "a" * 40
+PATH = "tasks/1_in-progress/2026-08-04-example/verification.md"
+APPROVE = "- core-fit / first: approve — could not break it\n"
+
+
+def receipt(body, heading="## Review verdicts"):
+    return f"# V\n\n{heading}\n\n**Reviewed revision:** {REVISION}\n\n{body}"
+
+
+def tally(body, heading="## Review verdicts"):
+    parsed = RR.parse_review_receipt(receipt(body, heading))
+    votes = [entry.verdict for entry in parsed.verdicts]
+    return (f"{votes.count('approve')} approve, {votes.count('block')} block, "
+            f"{len(parsed.errors)} error(s)")
+
+
+print("1. marker and delimiter variants on the two block verdicts")
+for name, shape in (
+    ("1. ordered", "1. core-fit / {0}: block — {1}\n"),
+    ("1) ordered", "1) core-fit / {0}: block — {1}\n"),
+    ("no marker ", "core-fit / {0}: block — {1}\n"),
+    ("bullet    ", "• core-fit / {0}: block — {1}\n"),
+    ("hyphen    ", "- core-fit / {0}: block - {1}\n"),
+    ("en dash   ", "- core-fit / {0}: block – {1}\n"),
+):
+    inside = APPROVE + shape.format("b", "a bypass") + shape.format("c", "same bypass")
+    after = APPROVE + "\nThe panel adjourned.\n\n" + shape.format("b", "a bypass")
+    print(f"   {name}  in block: {tally(inside)}   stranded: {tally(after)}")
+
+print("2. reviewer with no identity")
+for reviewer in ("  ", "\N{OCTAGONAL SIGN}", "_", "...", "-"):
+    body = APPROVE + f"- core-fit / {reviewer}: block — a bypass\n"
+    print(f"   reviewer={reviewer!r}: {tally(body)}")
+
+print("3. heading exactness")
+print("   exact           :", tally(APPROVE))
+print("   parenthetical   :",
+      tally(APPROVE, "## Review verdicts (when a review was explicitly run)"))
+
+print("4. which artifact may claim the exemption")
+document = receipt(APPROVE)
+for path in (
+    "tasks/1_in-progress/2026-08-04-example/verification.md",
+    "tasks/1_in-progress/2026-08-04-example/worklog.md",
+    "tasks/1_in-progress/2026-08-04-example/design.md",
+    "tasks/1_in-progress/2026-08-04-example/notes/verification.md",
+):
+    counts = CAP.task_action_unit_counts(document, path, ())
+    print(f"   {path:58s} {sum(counts.values())} action(s)")
+
+print("5. raw HTML that only renders as a receipt")
+html = (
+    "<p>## Review verdicts</p>\n"
+    f"<p>**Reviewed revision:** {REVISION}</p>\n"
+    "<p>- core-fit / first: approve — could not break it</p>\n"
+)
+print("   rendered view contains the heading:",
+      "## Review verdicts" in CAP.rendered_human_text(html))
+print("   parse errors:", RR.parse_review_receipt(html).errors)
+print("   actions reported:",
+      sum(CAP.task_action_unit_counts(html, PATH, ()).values()))
+```
+
+## Seventeenth panel repair — the new regressions fail on the blocked revision
+
+The six new core-scope tests were run against `1d536d0`'s parser and gates, with the
+tests themselves left at the repaired revision. Eighteen subtests fail there and all pass
+after the repair, so each one bites. The two dash variants pass inside the block at
+`1d536d0` because its narrower recognizer already required a bullet, and fail only in the
+stranded position — which is the asymmetry the repair removes.
+
+```
+$ git checkout 1d536d0 -- automation/review_receipt.py automation/check_core_scope.py automation/check_action_projection.py
+$ python3 -m unittest automation.tests.test_check_core_scope
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='ordered 1. marker', placement='inside the block')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='ordered 1. marker', placement='stranded after it')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='ordered 1) marker', placement='inside the block')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='ordered 1) marker', placement='stranded after it')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='no marker at all', placement='inside the block')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='no marker at all', placement='stranded after it')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='bullet glyph marker', placement='inside the block')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='bullet glyph marker', placement='stranded after it')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='ascii hyphen dash', placement='stranded after it')
+FAIL: test_a_marker_or_dash_variant_never_leaves_the_tally_silently (case='en dash', placement='stranded after it')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='  ')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='🛑')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='_')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='...')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='-')
+FAIL: test_a_reviewer_without_an_identity_is_refused_not_dropped (reviewer='( )')
+FAIL: test_only_the_exact_review_verdicts_heading_opens_a_receipt (heading='## Review verdicts (when a review was explicitly run)')
+FAIL: test_only_the_exact_review_verdicts_heading_opens_a_receipt (heading='## Review verdicts today')
+Ran 68 tests in 1.618s
+
+FAILED (failures=18, skipped=1)
+```
+
+## Seventeenth panel repair — focused regressions
+
+```
+$ python3 -m unittest \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_marker_or_dash_variant_never_leaves_the_tally_silently \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_reviewer_without_an_identity_is_refused_not_dropped \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_only_the_exact_review_verdicts_heading_opens_a_receipt \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_verdict_line_details_the_grammar_actually_depends_on \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_second_revision_field_anywhere_in_the_section_fails_closed \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_later_h2_ends_the_receipt_section \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_no_list_marker_or_dash_can_slip_a_verdict_past_the_receipt \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_only_a_task_verification_record_may_claim_a_receipt \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_raw_html_cannot_render_a_receipt_no_gate_validated \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_receipt_neutralization_blanks_the_token_and_nothing_else
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.154s
+
+OK
+```
+
+## Seventeenth panel repair — the filled template through the action gate
+
+Unchanged by this pass: the `core-fit` receipt line is neutral, and the non-`core-fit`
+lens line still projects an action when filled with `approve`, exactly as on `main`.
+
+```
+$ python3 tmp/filled_template.py
+--- verdict token 'approve': 1 unprojected action(s) ---
+    1 '- adversarial panel / reviewer-b: approve — could not break it'
+--- verdict token 'block': 0 unprojected action(s) ---
+```
+
+## Seventeenth panel repair — full repository suite
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 44.57s
+```
+
+## Seventeenth panel repair — reconciler and core-scope gate
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+```
+$ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
+core-scope: pass (6 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
+```

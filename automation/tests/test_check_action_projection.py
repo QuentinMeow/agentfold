@@ -2421,23 +2421,23 @@ class ActionProjectionTests(unittest.TestCase):
 
     def test_receipt_neutralization_blanks_the_token_and_nothing_else(self):
         """Only the structural token may lose its offsets; never the whole line."""
-        rendered = PROJECTION.rendered_human_text(self.receipt(
-            "- core-fit / first: approve — the boundary holds\n"
-        ))
-        spans = PROJECTION.accepted_verdict_token_spans(rendered)
-        blanked = PROJECTION.blank_spans(rendered, spans)
+        source = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(source)
+        blanked = PROJECTION.blank_receipt_verdict_tokens(source, path, rendered)
+        changed = [
+            index for index, (before, after) in enumerate(zip(rendered, blanked))
+            if before != after
+        ]
 
-        self.assertEqual(1, len(spans))
-        self.assertEqual(len("approve"), spans[0][1] - spans[0][0])
         self.assertEqual(len(rendered), len(blanked))
+        self.assertEqual(len("approve"), len(changed))
+        self.assertEqual(list(range(changed[0], changed[0] + len(changed))), changed)
+        self.assertEqual("approve", rendered[changed[0]:changed[-1] + 1])
+        self.assertEqual(" " * len("approve"), blanked[changed[0]:changed[-1] + 1])
         self.assertIn(
             "- core-fit / first:         — the boundary holds", blanked
         )
-        for index, (before, after) in enumerate(zip(rendered, blanked)):
-            if spans[0][0] <= index < spans[0][1]:
-                self.assertEqual(" ", after)
-            else:
-                self.assertEqual(before, after, index)
 
     def test_task_action_units_report_an_ask_in_a_reviewer_or_a_finding(self):
         cases = {
@@ -2510,6 +2510,81 @@ class ActionProjectionTests(unittest.TestCase):
                 "- core-fit / third: approve — the boundary still holds\n"
             ))
             self.assertEqual(2, sum(counts.values()), counts)
+
+    def test_no_list_marker_or_dash_can_slip_a_verdict_past_the_receipt(self):
+        """The loose recognizer is the same one on both sides of the block end.
+
+        A near-miss refuses the receipt, so neither token is blanked. The unit count
+        varies — an unmarked line continues the list item above it — so what is pinned
+        is that both `approve` tokens survive into the scanned text.
+        """
+        cases = {
+            "ordered 1. marker": "1. core-fit / second: approve — sneaks in\n",
+            "ordered 1) marker": "1) core-fit / second: approve — sneaks in\n",
+            "no marker at all": "core-fit / second: approve — sneaks in\n",
+            "bullet glyph marker": "• core-fit / second: approve — sneaks in\n",
+            "ascii hyphen dash": "- core-fit / second: approve - sneaks in\n",
+            "en dash": "- core-fit / second: approve – sneaks in\n",
+        }
+        with self.repo() as root:
+            for name, line in cases.items():
+                for placement in ("inside the block", "stranded after it"):
+                    with self.subTest(case=name, placement=placement):
+                        tail = (
+                            line if placement == "inside the block"
+                            else "\nThe panel adjourned.\n\n" + line
+                        )
+                        counts = self.receipt_units(root, self.receipt(
+                            "- core-fit / first: approve — the boundary holds\n" + tail
+                        ))
+                        surviving = sum(
+                            excerpt.count("approve") * count
+                            for excerpt, count in counts.items()
+                        )
+                        self.assertEqual(2, surviving, counts)
+
+    def test_only_a_task_verification_record_may_claim_a_receipt(self):
+        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        exempt = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        refused = (
+            "tasks/1_in-progress/2026-08-04-example/worklog.md",
+            "tasks/1_in-progress/2026-08-04-example/design.md",
+            "tasks/1_in-progress/2026-08-04-example/task.md",
+            "tasks/1_in-progress/2026-08-04-example/plan.md",
+            "tasks/1_in-progress/2026-08-04-example/notes/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/Verification.md",
+            "docs/designs/verification.md",
+            "verification.md",
+        )
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(document, exempt, repo=root),
+            )
+            for path in refused:
+                with self.subTest(path=path):
+                    counts = PROJECTION.task_action_unit_counts(
+                        document, path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_raw_html_cannot_render_a_receipt_no_gate_validated(self):
+        """`rendered_human_text` is never structural evidence for a receipt.
+
+        Raw HTML renders these three lines as a heading, a field and a verdict, while
+        `semantic_text` blanks them, so the core-scope gate would never see a receipt
+        here. The exemption follows the structural view, so it is not granted.
+        """
+        revision = "a" * 40
+        html = (
+            "<p>## Review verdicts</p>\n"
+            f"<p>**Reviewed revision:** {revision}</p>\n"
+            "<p>- core-fit / first: approve — the boundary holds</p>\n"
+        )
+        self.assertIn("## Review verdicts", PROJECTION.rendered_human_text(html))
+        with self.repo() as root:
+            counts = self.receipt_units(root, html)
+            self.assertEqual(1, sum(counts.values()), counts)
 
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:

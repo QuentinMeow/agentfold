@@ -1,6 +1,6 @@
 # Stop completed review verdicts from looking like human asks
 
-**Claimed-by:** codex planner / sol-high implementer
+**Claimed-by:** claude
 **Filed:** 2026-08-04, by codex, from task `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check`
 **Parent:** 2026-08-03-plan-multi-worktree-safety-remediation
 **Repository scope:** core

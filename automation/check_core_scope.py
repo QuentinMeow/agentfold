@@ -310,7 +310,7 @@ def validate_task(
     elif require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
-        receipt = parse_review_receipt(semantic_text(verification_text))
+        receipt = parse_review_receipt(verification_text)
         errors.extend(receipt.errors)
         if receipt.revision is not None and review_revision_check:
             errors.extend(review_revision_check(receipt.revision))

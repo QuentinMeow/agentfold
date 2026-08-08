@@ -559,3 +559,46 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   reconciler all pass with real output in [verification.md](verification.md). No review was
   run against this work and no receipt was written for it; the task stays in
   `1_in-progress` with nothing pushed.
+
+## 2026-08-07 — seventeenth panel blocked the rebuild; one consolidated repair (claude)
+
+- A three-lens panel on `1d536d0` returned 0 approve, 3 block. Reviewers confirmed the
+  evidence reproduces byte-for-byte with nothing fabricated; the block was a set of small
+  holes plus records work. All of it is repaired in one pass, not one finding at a time.
+- **Correction to the previous entry and to `1d536d0`'s commit message.** Both claimed
+  "nothing inside the receipt is skipped" and that a verdict "can never leave the tally
+  silently". That was false. A `core-fit` verdict that missed only on its list marker
+  (`1.`, `1)`, `•`, none) or, when stranded after the block, only on its dash, was neither
+  tallied nor reported — so a one-approve two-block panel was reported as `1 approve, 0
+  block` and the gate passed a panel that had rejected the change. A reviewer with no word
+  character parsed as a verdict and then vanished at the gate's identity filter. The module
+  docstring now states only what is demonstrated and names the residue.
+- One loose recognizer, blind to the list marker and stopping before the dash, is now
+  applied by a single loop on both sides of the block end, so the two scans cannot drift
+  apart again. A reviewer with no word token is refused with a reported error.
+- `## Review verdicts` must now match exactly, per the 2026-08-04 ADR. That also unblocks
+  this task: its own `verification.md` carried both spellings and so could host no receipt.
+  `templates/task/verification.md` moved its parenthetical into the prose to match.
+- Both gates now parse `semantic_text` of the same bytes. The action gate locates each
+  accepted verdict's line in the rendered view by literal search — the technique it already
+  uses for a projected queue link — and blanks the token there. That closes the raw-HTML
+  receipt (`<p>## Review verdicts</p>` …) without raw-HTML container tracking or
+  structural-versus-rendered agreement, both of which the 2026-08-07 ADR forbids.
+- The exemption is now restricted to a full `tasks/<status>/<id>/verification.md` path
+  shape. A receipt in the task's worklog or design record, or in a verification record
+  nested one directory deeper, gets ordinary classification. This reverses the previous
+  session's deliberate omission: it is
+  a narrowing, it fails closed, and the old basename bug came from matching loosely.
+- Removed as proved dead: the `if receipt.errors` guard in the span helper and the unread
+  `Verdict.finding` field.
+- `design.md` was `**Status:** decided` while specifying every mechanism the 2026-08-07 ADR
+  forbids. Rewritten to the shipped design, with a Known residue section.
+- Two unfenced panel transcripts in `verification.md` read as new human asks, so the
+  pull-request reconciler command exited 1. Both are fenced; no historical text was
+  deleted or reworded.
+- `Claimed-by` was `codex planner / sol-high implementer`, a composite that would let one
+  half review the other's work. It is now `claude`.
+- Ten focused regressions plus eighteen subtests proved to fail on `1d536d0`, the full
+  15-file suite, the core-scope gate, and both reconciler invocations pass with real output
+  in [verification.md](verification.md). No review was run against this pass and no receipt
+  was written for it; the task stays in `1_in-progress` with nothing pushed.
