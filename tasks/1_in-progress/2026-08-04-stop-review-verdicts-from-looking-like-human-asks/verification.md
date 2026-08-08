@@ -2403,7 +2403,7 @@ head. The same command from the withdrawal baseline forward is clean.
 The range head must be the current HEAD, so both commands below derive it. A reader can
 re-run them exactly as written at any later commit on this branch and get this output,
 because what they report depends on the intermediate commits, not on the head. The runs
-recorded here were made at `<final SHA below>`.
+recorded here were made at `4b66357fd501b4cee6700d6b6ccad6b694197262`.
 
 ```
 $ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range "$(git rev-parse main)...$(git rev-parse HEAD)"
