@@ -79,7 +79,7 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-08-07, by claude opus 5, from task `2026-08-04-stop-review-verdicts-from-looking-like-human-asks`
 **Full context:** `history/conversations/2026-08-07-1030PDT-resume-multi-worktree-improvements/handover.md`
 **Resolution evidence:** `memory/decisions/2026-08-04-review-receipt-parser-authorization.md`
