@@ -4,7 +4,8 @@
 **Date:** 2026-08-04
 **Decided-by:** human (Option A, recorded in the canonical decision item before folding)
 **Description:** Formal core-review receipts use one closed contiguous block so verdict tokens can be distinguished from human requests without interpreting general Markdown structure.
-**Review-by:** 2027-01-31
+**Amended-by:** `memory/decisions/2026-08-07-withdraw-the-first-review-receipt-implementation.md` — the Consequences clause stating that the parser becomes deliberately smaller and fail-closed
+**Review-by:** 2027-02-07
 
 ## Context
 
