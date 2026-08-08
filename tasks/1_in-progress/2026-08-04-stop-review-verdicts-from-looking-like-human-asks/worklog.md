@@ -706,13 +706,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - **The regression: widening the rejector also narrowed it.** Capping the run before the
   slash at sixteen characters let seventeen or more non-letters through, dropping a block
   verdict with no error. Worse than the count suggests — the zero-width variant renders
-  byte-identically to a canonical verdict, so a reader of the diff sees a rejection while
+  the same tuple from `normalized_action_tokens`, so a reader of the diff sees a rejection while
   the gate reports an approve majority. Nothing in the rejector is bounded now: it locates
   `core…fit` with a pattern and finds the slash by plain string search over the rest of
-  the line. That is also *faster* than the bound it replaces, 4.4 ms against 6 ms on a
-  200,000-character line, because a string search cannot backtrack. Recorded as a rule:
-  bounding a rejector is a coverage decision, and any future bound goes in the record with
-  what it costs.
+  the line. **Correction, recorded at the twentieth panel:** the first version of this
+  entry, of `design.md` and of the commit message said that was *faster* than the bound it
+  replaces. It is not. Head to head on identical inputs the unbounded rejector is slower
+  on five of fourteen shapes, by up to 2.6x, and its peak is comparable rather than lower;
+  the 4.4 ms figure came from a probe set that omitted the dominating family. Coverage,
+  not cost, is why the bound is gone. The rule stands: bounding a rejector is a coverage
+  decision, and any future bound goes in the record with what it costs.
 - **The tests that claimed to pin the previous regression did not.** All four fixtures used
   a decoy shifted by a character, so the token-boundary clause refused them on its own and
   the two clauses under test never ran; the whole pre-`eeca7db` placement shape could be
@@ -736,4 +739,35 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and three false glosses in the records are corrected — one of the three blast-radius
   refusals is not a placeholder case, the pinned script's wording is the nineteenth
   panel's not the eighteenth's, and the superseded benchmark says so.
+- The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — twenty-first pass: records and tests only (claude)
+
+- The gate approved 3-0 at `4cec5be`. This pass changed no behaviour: `tmp/prove_comments_only.py`
+  compares each gate module's AST with docstrings stripped and reports all three identical.
+- **Four sentences were false and are corrected.** The benchmark claim was the worst: three
+  records and a commit message said the unbounded rejector is *faster* than the bound it
+  replaced. Measured head to head on identical inputs it is slower on five of fourteen
+  shapes, by up to 2.6x, with a comparable peak — the 4.4 ms figure came from a probe set
+  that omitted the dominating family, `("core" + "."*k)` repeated. Coverage, not cost, is
+  why the bound is gone, and the record now says that with the numbers beside it. The
+  commit message cannot be edited, so the correction is stated here and in `design.md`.
+- The other three: `reaches_for_verdict`'s docstring claimed nothing backtracks, which is
+  true of the slash search and false of the pattern that finds `core…fit` — now scoped,
+  with the linearity claim kept and measured at ~32 ns/char. "Renders byte-identically"
+  was a false technical claim in a repo where *rendered* names a view; the raw, rendered
+  and structural forms all differ, and only `normalized_action_tokens` agrees. And the
+  module docstring named `LOOSE_VERDICT_RE`, a symbol that no longer exists.
+- `_placement_index` justified itself with a claim about the two views numbering lines
+  alike, which fuzzing falsified on unterminated HTML comments. The code never relied on
+  it — the exact step requires character equality and the fallback is bounded — so the
+  docstring now says what the code does.
+- **Four coverage gaps closed, each an invisible edit that passed 235 tests.** Re-bounding
+  the run *inside* `core…fit` resurrected the fail-open one character position over; the
+  fallback's bound to the receipt range was masked by the line-number step; dropping the
+  slash requirement entirely flipped zero files; and the refused-receipt message branch had
+  no test. Eleven mutations now run, eleven die, no survivors — and the mutation table is
+  inlined in full, because the one inlined last pass was a placeholder that could not run.
+  An inlined script that cannot run is the same defect as a docstring that cannot be
+  checked, which is what this task keeps relearning.
 - The merge-edge known issue is unchanged and still needs the owner.

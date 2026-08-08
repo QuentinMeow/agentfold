@@ -69,10 +69,13 @@ either is free — but that argument covers what they do, not what they fail to 
 Declining to refuse is permission. A pass that returns early, a bound that clips a run,
 or a view that dropped a line before the pass ran are all fail-open, whichever direction
 the pass itself points. A sixteen-character cap on the run before the slash was exactly
-that: seventeen zero-width spaces produced a line rendering byte-identically to a
-canonical verdict, invisible in a diff, that neither half looked at. Nothing in the
-rejector is bounded now, and bounding it again would be a coverage decision to record,
-not an optimization to take.
+that: seventeen zero-width spaces produced a line visually identical to a canonical
+verdict — the raw, rendered and structural forms all differ, but a reader sees no
+difference and `normalized_action_tokens` returns the same tuple — that neither half
+looked at. Nothing in the rejector is bounded now. Removing the bounds cost speed rather
+than saving it, on some shapes by more than double, so coverage rather than cost is the
+reason; the measurement is in `verification.md`. Bounding it again would be a coverage
+decision to record, not an optimization to take.
 
 **The rule, not an inventory.** Inside the receipt section, a line whose structural or
 raw form the rejector matches and the acceptor does not refuses the whole receipt. A line

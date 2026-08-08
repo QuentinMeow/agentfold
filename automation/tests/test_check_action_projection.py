@@ -2718,6 +2718,34 @@ class ActionProjectionTests(unittest.TestCase):
         )
         self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
 
+    def test_the_fallback_search_never_leaves_the_receipt(self):
+        """The fallback's bound is load-bearing on its own, not only beside line numbers.
+
+        An HTML entity in the finding makes the rendered line differ from the parsed one,
+        so the line-number step declines and the fallback is what runs. Unbounded, it
+        would find the decoy above the receipt first and blank that instead.
+        """
+        document = (
+            "# Verification\n\n"
+            "## Panel round one\n\n"
+            "- core-fit / dana: approve — round one, superseded\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / dana: approve — the &amp; in the finding\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        self.assertNotEqual(
+            verdict.line,
+            rendered.split("\n")[verdict.number - 1],
+            "the line-number step must decline, or the fallback is not under test",
+        )
+
+        blanked = PROJECTION.blank_receipt_verdict_tokens(document, path, rendered)
+        self.assertIn("- core-fit / dana: approve — round one, superseded", blanked)
+        self.assertIn("- core-fit / dana:         — the & in the finding", blanked)
+
     def test_a_bare_carriage_return_cannot_hide_a_verdict(self):
         """The raw scan shares line numbering with the structural view by construction.
 

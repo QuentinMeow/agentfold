@@ -2917,9 +2917,10 @@ reconcile: 0 blocking finding(s)
 
 Widening the rejector at the nineteenth panel also capped the run before the slash at
 sixteen characters, so seventeen or more non-letters escaped both halves and dropped a
-block verdict with no error. The zero-width variant renders byte-identically to a
-canonical verdict, so a reader of the diff sees a rejection while the gate reports
-an approve majority. Nothing in the rejector is bounded now: it locates `core…fit` with a
+block verdict with no error. The zero-width variant is visually identical to a canonical
+verdict — its raw, rendered and structural forms all differ, but a reader sees no
+difference and `normalized_action_tokens` returns the same tuple for both — so a reader
+of the diff sees a rejection while the gate reports an approve majority. Nothing in the rejector is bounded now: it locates `core…fit` with a
 pattern, then looks for a slash-like character in the rest of the line by plain string
 search. The script is `tmp/unbounded.py`, inline below its output.
 
@@ -2944,10 +2945,15 @@ $ python3 tmp/unbounded.py
   core fit repeated      0.0000 s
 ```
 
-At `eeca7db` every row but the first read `1a/0b err=0`. The unbounded rejector is also
-cheaper than the bounded one it replaces — 4.4 ms against the 6 ms recorded for
-`6d84769` — because the tail is now a string search rather than a backtracking run. Each
-figure is the mean of five calls.
+At `eeca7db` every row but the first read `1a/0b err=0`.
+
+**The cost claim first recorded here was wrong.** It said the unbounded rejector was
+cheaper than the bound it replaced, at 4.4 ms against 6 ms. That came from a probe set
+that omitted the family which dominates — `("core" + "."*k)` repeated — and from means
+that hid the peak. The head-to-head measurement is in the twentieth-panel section below:
+the unbounded rejector is *slower* on several shapes and its peak is comparable, so
+coverage, not cost, is why the bound is gone. Each figure below is the mean of five
+calls, and `slash far away` is one of the shapes where the two disagree.
 
 ```python
 import sys
@@ -3043,39 +3049,10 @@ newline split were found to be untested.
 The script writes to `automation/review_receipt.py` and restores it in a `finally`; it is
 git-ignored scratch, and the tree is clean after it runs.
 
-```python
-import subprocess
-import sys
-from pathlib import Path
-
-MODULE = Path("automation/review_receipt.py")
-ORIGINAL = MODULE.read_text(encoding="utf-8")
-
-MUTATIONS = {"<name>": ("<exact source to replace>", "<replacement>")}
-
-for name, (old, new) in MUTATIONS.items():
-    if ORIGINAL.count(old) != 1:
-        print("SKIP (anchor not unique):", name, ORIGINAL.count(old))
-        continue
-    MODULE.write_text(ORIGINAL.replace(old, new), encoding="utf-8")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "unittest",
-             "automation.tests.test_check_core_scope",
-             "automation.tests.test_check_action_projection"],
-            capture_output=True, text=True,
-        )
-    finally:
-        MODULE.write_text(ORIGINAL, encoding="utf-8")
-    killers = sorted({
-        line.split("(")[0].replace("FAIL: ", "").replace("ERROR: ", "").strip()
-        for line in result.stderr.splitlines()
-        if line.startswith(("FAIL:", "ERROR:"))
-    })
-    print(("DIED" if result.returncode else "SURVIVED") + ":", name)
-    for killer in killers:
-        print("    killed by", killer)
-```
+The script as first inlined here carried a placeholder mutation table, so running it
+printed `SKIP (anchor not unique)` and did nothing: the recorded result could not be
+reproduced from the record. The real table is inlined in the twentieth-panel section
+below, which supersedes this run.
 
 ## Twentieth panel repair — blast radius, re-measured
 
@@ -3149,6 +3126,358 @@ PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 44.36s
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+## Twenty-first pass — the benchmark, measured head to head
+
+The nineteenth-panel record claimed the unbounded rejector was faster than the bound it
+replaced. It is not. The probe behind that claim omitted the family that dominates —
+`("core" + "."*k)` repeated, where each `core` start forces a run to be consumed and
+retried — and reported means that hid the peak. Both rejectors are run here in one
+process on identical inputs, each figure the best of three rounds of N calls.
+
+```
+$ python3 tmp/benchmark.py
+shape                    bounded      unbounded    ratio   verdicts agree
+punctuation run            1.9909 ms   3.2894 ms    1.7x  True
+no slash after fit         1.7786 ms   0.0122 ms    0.0x  True
+many core prefixes         4.2637 ms   4.2334 ms    1.0x  True
+core fit no slash          5.3879 ms   0.0126 ms    0.0x  True
+slash far away             1.8433 ms   0.0122 ms    0.0x  False
+no slash, long tail        1.8438 ms   0.0134 ms    0.0x  True
+core fit repeated          5.9289 ms   0.0124 ms    0.0x  True
+core dots repeated 4       6.5259 ms   6.3328 ms    1.0x  True
+core dots repeated 8       6.6507 ms   6.5410 ms    1.0x  True
+core dots repeated 16      7.0648 ms   6.7805 ms    1.0x  True
+core dots repeated 20      6.1501 ms   6.7163 ms    1.1x  True
+core dots repeated 40      3.8965 ms   6.7158 ms    1.7x  True
+core dots repeated 100     2.6931 ms   6.7527 ms    2.5x  True
+corefit dots repeated      5.8634 ms   0.0115 ms    0.0x  True
+
+peak bounded   7.0648 ms
+peak unbounded 6.7805 ms
+slower on 5 of 14 shapes
+
+linearity of the unbounded rejector, nanoseconds per character:
+       9988 chars     31.8 ns/char
+      99968 chars     32.6 ns/char
+     999988 chars     33.9 ns/char
+```
+
+**Coverage, not cost, is why the bound is gone.** The unbounded rejector is slower on
+five of fourteen shapes, by up to 2.6x, and its peak is comparable rather than lower —
+6.8 ms against 7.1 ms here, both far above the 4.4 ms first recorded. A reviewer
+measuring on other hardware saw six of nine and a 10.5 ms peak; the direction is the same
+and the exact figures are machine-dependent, so what matters is the sign, not the number.
+
+The `slash far away` row is the coverage difference itself: `verdicts agree` is `False`
+there, because the bounded rejector stops looking after sixteen characters and the
+unbounded one does not. That row is the defect, priced.
+
+Cost stays linear in the line — about 32 ns per character across two orders of magnitude
+— because neither run can cross a letter, so no run can span the whole line.
+
+```python
+import re
+import sys
+import time
+sys.path.insert(0, "automation")
+import review_receipt as rr
+
+SLASH = rr.SLASH_CHARACTERS
+BOUNDED = re.compile(
+    rf"core[^A-Za-z\n]{{0,16}}fit[^A-Za-z\n]{{0,16}}[{SLASH}]", re.I
+)
+
+
+def bounded(line):
+    return BOUNDED.search(line) is not None
+
+
+def unbounded(line):
+    return rr.reaches_for_verdict(line)
+
+
+def measure(function, line, calls):
+    best = None
+    for _ in range(3):
+        start = time.perf_counter()
+        for _ in range(calls):
+            function(line)
+        elapsed = (time.perf_counter() - start) / calls
+        best = elapsed if best is None else min(best, elapsed)
+    return best
+
+
+CASES = [
+    ("punctuation run", "core" + "-" * 200000 + "fit", 20),
+    ("no slash after fit", "core-fit" + " " * 200000, 200),
+    ("many core prefixes", "core" * 50000, 200),
+    ("core fit no slash", "core-fit " * 20000, 200),
+    ("slash far away", "core-fit" + "." * 200000 + "/", 200),
+    ("no slash, long tail", "core-fit" + "." * 200000 + "x", 200),
+    ("core fit repeated", "core-fit" * 25000, 200),
+    ("core dots repeated 4", ("core" + "." * 4) * 25000, 20),
+    ("core dots repeated 8", ("core" + "." * 8) * 16666, 20),
+    ("core dots repeated 16", ("core" + "." * 16) * 10000, 20),
+    ("core dots repeated 20", ("core" + "." * 20) * 8333, 20),
+    ("core dots repeated 40", ("core" + "." * 40) * 4545, 20),
+    ("core dots repeated 100", ("core" + "." * 100) * 1923, 20),
+    ("corefit dots repeated", ("corefit" + "." * 20) * 7407, 20),
+]
+
+print("shape                    bounded      unbounded    ratio   verdicts agree")
+peak_bounded = 0.0
+peak_unbounded = 0.0
+for name, line, calls in CASES:
+    one = measure(bounded, line, calls)
+    two = measure(unbounded, line, calls)
+    peak_bounded = max(peak_bounded, one)
+    peak_unbounded = max(peak_unbounded, two)
+    print("{0:24s} {1:8.4f} ms {2:8.4f} ms  {3:5.1f}x  {4}".format(
+        name, one * 1000, two * 1000, two / one if one else float("nan"),
+        bounded(line) == unbounded(line),
+    ))
+print()
+print("peak bounded   {0:.4f} ms".format(peak_bounded * 1000))
+print("peak unbounded {0:.4f} ms".format(peak_unbounded * 1000))
+print("slower on {0} of {1} shapes".format(
+    sum(1 for name, line, calls in CASES
+        if measure(unbounded, line, calls) > measure(bounded, line, calls)),
+    len(CASES),
+))
+
+print()
+print("linearity of the unbounded rejector, nanoseconds per character:")
+for width in (10000, 100000, 1000000):
+    line = ("core" + "." * 40) * (width // 44)
+    elapsed = measure(unbounded, line, 5)
+    print("  {0:9d} chars  {1:7.1f} ns/char".format(len(line), elapsed * 1e9 / len(line)))
+```
+
+## Twenty-first pass — eleven mutations, eleven deaths, and a runnable table
+
+Four coverage gaps were open at `4cec5be`, each an invisible edit that resurrected a
+fixed defect with the suite green. The mutation table is inlined in full below, so this
+run reproduces from the record alone; the version inlined at the twentieth panel carried
+a placeholder table and did nothing.
+
+```
+$ python3 tmp/mutants.py
+DIED: M-a prefix truncated to token_start
+    killed by test_placement_needs_the_whole_prefix_through_the_token
+DIED: M-b startswith -> in
+    killed by test_placement_needs_the_prefix_at_the_start_of_the_line
+DIED: M-c line-number step removed and fallback unbounded
+    killed by test_a_lookalike_above_the_receipt_cannot_steal_the_blanking
+    killed by test_the_fallback_search_never_leaves_the_receipt
+DIED: M-d fallback unbounded, line-number step kept
+    killed by test_the_fallback_search_never_leaves_the_receipt
+DIED: M-e run before the slash bounded again
+    killed by test_no_run_length_before_the_slash_escapes_the_rejector
+DIED: M-f run inside core...fit bounded again
+    killed by test_no_run_length_inside_the_token_escapes_the_rejector
+DIED: M-g slash requirement dropped
+    killed by test_a_core_fit_mention_without_a_slash_does_not_refuse
+DIED: M-h raw scan uses a plain newline split
+    killed by test_a_bare_carriage_return_cannot_hide_a_verdict
+DIED: M-i hidden-verdict scan disabled
+    killed by test_a_bare_carriage_return_cannot_hide_a_verdict
+    killed by test_a_verdict_the_structural_view_drops_is_refused_not_skipped
+    killed by test_the_problem_cap_keeps_the_earliest_problems
+DIED: M-j problem cap keeps the latest instead of the earliest
+    killed by test_the_problem_cap_keeps_the_earliest_problems
+DIED: M-k refused and absent receipt messages swapped
+    killed by test_a_refused_receipt_does_not_ask_for_one_that_was_written
+
+survivors: []
+```
+
+M-d, M-f, M-g and M-k all survived at `4cec5be`. M-f is the one that mattered most: the
+rejector has two unbounded runs and only the one after `fit` was pinned, so re-bounding
+the run *inside* `core…fit` dropped a dissent again with every test passing. M-g is the
+opposite edge — dropping the slash requirement so any `core-fit` mention refuses also
+passed everything, which is why over-rejection now has a test of its own.
+
+```python
+"""Apply each named mutation, run the owning tests, and report which test kills it.
+
+Every mutation names its file, its exact source, and its replacement. The file is
+restored in a `finally`, and an anchor that is not unique aborts that mutation rather
+than editing the wrong place.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+RECEIPT = "automation/review_receipt.py"
+SCOPE = "automation/check_core_scope.py"
+
+MUTATIONS = {
+    "M-a prefix truncated to token_start": (
+        RECEIPT,
+        "    prefix = entry.line[:entry.token_end]\n",
+        "    prefix = entry.line[:entry.token_start]\n",
+    ),
+    "M-b startswith -> in": (
+        RECEIPT,
+        "        line.startswith(prefix)\n",
+        "        prefix in line\n",
+    ),
+    "M-c line-number step removed and fallback unbounded": (
+        RECEIPT,
+        '    exact = entry.number - 1\n'
+        '    if 0 <= exact < len(lines) and lines[exact].rstrip("\\r") == entry.line:\n'
+        "        return exact\n"
+        "    for index in range(max(first - 1, 0), min(last, len(lines))):\n",
+        "    for index in range(0, len(lines)):\n",
+    ),
+    "M-d fallback unbounded, line-number step kept": (
+        RECEIPT,
+        "    for index in range(max(first - 1, 0), min(last, len(lines))):\n",
+        "    for index in range(0, len(lines)):\n",
+    ),
+    "M-e run before the slash bounded again": (
+        RECEIPT,
+        "    remainder = line[matched.end():]\n",
+        "    remainder = line[matched.end():][:16]\n",
+    ),
+    "M-f run inside core...fit bounded again": (
+        RECEIPT,
+        'LOOSE_TOKEN_RE = re.compile(r"core[^A-Za-z\\n]*fit", re.I)\n',
+        'LOOSE_TOKEN_RE = re.compile(r"core[^A-Za-z\\n]{0,16}fit", re.I)\n',
+    ),
+    "M-g slash requirement dropped": (
+        RECEIPT,
+        "    remainder = line[matched.end():]\n"
+        "    return any(character in remainder for character in SLASH_CHARACTERS)\n",
+        "    return True\n",
+    ),
+    "M-h raw scan uses a plain newline split": (
+        RECEIPT,
+        '    raw_lines = [line.rstrip("\\n") for line in commonmark_lines(source)]\n',
+        '    raw_lines = source.split("\\n")\n',
+    ),
+    "M-i hidden-verdict scan disabled": (
+        RECEIPT,
+        "        if raw.strip() and reaches_for_verdict(raw):\n",
+        "        if False and raw.strip() and reaches_for_verdict(raw):\n",
+    ),
+    "M-j problem cap keeps the latest instead of the earliest": (
+        RECEIPT,
+        "            self.found.pop()\n",
+        "            self.found.pop(0)\n",
+    ),
+    "M-k refused and absent receipt messages swapped": (
+        SCOPE,
+        "        if not latest and receipt.errors:\n",
+        "        if not latest and not receipt.errors:\n",
+    ),
+}
+
+survivors = []
+for name, (path, old, new) in MUTATIONS.items():
+    target = Path(path)
+    original = target.read_text(encoding="utf-8")
+    if original.count(old) != 1:
+        print("ABORT (anchor not unique):", name, original.count(old))
+        survivors.append(name)
+        continue
+    target.write_text(original.replace(old, new), encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest",
+             "automation.tests.test_check_core_scope",
+             "automation.tests.test_check_action_projection"],
+            capture_output=True, text=True,
+        )
+    finally:
+        target.write_text(original, encoding="utf-8")
+    killers = sorted({
+        line.split("(")[0].replace("FAIL: ", "").replace("ERROR: ", "").strip()
+        for line in result.stderr.splitlines()
+        if line.startswith(("FAIL:", "ERROR:"))
+    })
+    print(("DIED" if result.returncode else "SURVIVED") + ":", name)
+    for killer in killers:
+        print("    killed by", killer)
+    if not result.returncode:
+        survivors.append(name)
+
+print()
+print("survivors:", survivors)
+```
+
+
+## Twenty-first pass — proof that only comments and docstrings changed
+
+This pass was records and tests only. The proof is mechanical rather than a reading of
+the diff: each gate module's AST is compared with every docstring removed, so a changed
+comment or docstring cannot show and a changed statement cannot hide.
+
+```
+$ python3 tmp/prove_comments_only.py 4cec5be
+identical: automation/review_receipt.py (executable AST, docstrings stripped)
+identical: automation/check_core_scope.py (executable AST, docstrings stripped)
+identical: automation/check_action_projection.py (executable AST, docstrings stripped)
+```
+
+```python
+import ast
+import subprocess
+import sys
+
+BASE = sys.argv[1]
+FILES = [
+    "automation/review_receipt.py",
+    "automation/check_core_scope.py",
+    "automation/check_action_projection.py",
+]
+
+
+def _is_string(node):
+    """True for a string literal on either the Constant or the legacy Str node."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str)
+    return node.__class__.__name__ == "Str"
+
+
+def stripped(source):
+    """Return the AST with every docstring removed; comments never reach the AST."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            continue
+        body = node.body
+        if body and isinstance(body[0], ast.Expr) and _is_string(body[0].value):
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(ast.fix_missing_locations(tree))
+
+
+for path in FILES:
+    before = subprocess.run(
+        ["git", "show", f"{BASE}:{path}"], capture_output=True, text=True, check=True
+    ).stdout
+    after = open(path, encoding="utf-8").read()
+    verdict = "identical" if stripped(before) == stripped(after) else "CHANGED"
+    print(f"{verdict}: {path} (executable AST, docstrings stripped)")
+```
+
+## Twenty-first pass — full suite and reconciler
+
+```
+$ python3 automation/run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 44.67s
 ```
 
 ```

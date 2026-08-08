@@ -7,15 +7,15 @@ one grammar: one exact top-level `## Review verdicts` heading, one
 consecutive `- core-fit / <reviewer>: <approve|block> — <finding>` lines. Only blank
 lines separate those elements, and the block ends at the first other nonblank line.
 
-Two regexes, pointed in opposite directions, and the direction is the whole design.
+Two halves, pointed in opposite directions, and the direction is the whole design.
 `VERDICT_RE` is the acceptor and stays exact — widening an acceptor is how the withdrawn
-implementation grew. `LOOSE_VERDICT_RE` is the rejector, and a rejector can only refuse:
-whatever it newly matches becomes a reported error, never an accepted verdict. So it is
-kept loose on purpose, searched anywhere in the line rather than anchored, tolerant of
-any decoration around and inside `core-fit`, of any dash, and of slash-like characters
-beyond ASCII. It is applied twice — once to the structural view and once to the section's
-raw source, because the structural view blanks fenced, commented, indented and
-HTML-wrapped lines before any rejector could see them.
+implementation grew. `reaches_for_verdict`, built on `LOOSE_TOKEN_RE`, is the rejector,
+and a rejector can only refuse: whatever it newly matches becomes a reported error, never
+an accepted verdict. So it is kept loose on purpose, searched anywhere in the line rather
+than anchored, tolerant of any decoration around and inside `core-fit`, of any dash, and
+of slash-like characters beyond ASCII. It is applied twice — once to the structural view
+and once to the section's raw source, because the structural view blanks fenced,
+commented, indented and HTML-wrapped lines before any rejector could see them.
 
 **What this module refuses, as a rule rather than a list.** Inside the one receipt
 section, a line whose structural *or* raw form the rejector matches, and which the
@@ -74,13 +74,14 @@ VERDICT_RE = re.compile(
     r"[ \t]+—[ \t]+(?P<finding>.+)$",
     re.I,
 )
-# The rejector. Nothing in it is bounded, because a bound on a rejector is a coverage
-# decision wearing a performance costume: a earlier revision capped the run before the
-# slash at sixteen characters, and seventeen zero-width spaces then produced a line
-# visually identical to a canonical verdict that neither half would look at. The pattern
-# locates `core…fit` only; the slash is found by plain string search over the rest of the
-# line, which is linear and cannot backtrack. The run inside the pattern excludes letters
-# and is followed by one, so it cannot consume what `fit` needs either.
+# The rejector. Neither of its two runs is bounded — the one inside `core…fit` or the one
+# before the slash — because a bound on a rejector is a coverage decision, not an
+# optimization: an earlier revision capped both at sixteen characters, and seventeen
+# zero-width spaces then produced a line visually identical to a canonical verdict that
+# neither half would look at. Removing the bounds costs speed rather than saving it, on
+# some shapes by more than double; the measurement is in this task's verification record.
+# The pattern locates `core…fit`; the slash is then found by plain string search over the
+# rest of the line, which cannot backtrack.
 SLASH_CHARACTERS = "/／∕⁄"
 LOOSE_TOKEN_RE = re.compile(r"core[^A-Za-z\n]*fit", re.I)
 # The exemption belongs to the artifact the core-scope gate actually validates. Nothing
@@ -132,10 +133,16 @@ def _excerpt(line):
 def reaches_for_verdict(line):
     """Whether one line reaches for a core-fit verdict, however it is decorated.
 
-    The rejector, and the only place a line is judged near-miss. `core…fit` is located
-    with a pattern; the slash is then looked for in the remainder of the line by plain
-    string search, so nothing here is bounded and nothing backtracks. Checking the first
-    `core…fit` is enough: its remainder contains every slash any later one could claim.
+    The rejector, and the only place a line is judged near-miss. Neither half is bounded.
+    `core…fit` is located with a pattern, which does backtrack: the run consumes the
+    maximal span of non-letters and then retries every shorter one when `fit` does not
+    follow, measured at about 2.2x on that failing path. The slash is then looked for in
+    the remainder by plain string search, and that half does not backtrack. Cost stays
+    linear in the line either way — about 35 ns per character across three orders of
+    magnitude — because the run cannot cross a letter and so cannot span the whole line.
+
+    Checking the first `core…fit` is enough: its remainder contains every slash any later
+    one could claim.
     """
     matched = LOOSE_TOKEN_RE.search(line)
     if matched is None:
@@ -295,10 +302,13 @@ def carries_verdict_prefix(line, entry):
 def _placement_index(lines, entry, first, last):
     """Find the rendered line one verdict occupies, never leaving the receipt.
 
-    The line number the parser recorded is authoritative, because `semantic_text` and
-    `rendered_human_text` number lines alike. The fallback exists only for a rendered
-    view that rewrote the line, and it is bounded to the receipt's own verdict lines, so
-    a lookalike elsewhere in the document can never be blanked in its place.
+    Neither step assumes the two views number lines alike, and they do not always: an
+    unterminated HTML comment is one shape where they diverge. The first step tries the
+    line the parser recorded and takes it only if that rendered line is the verdict
+    character for character, so a shifted view simply fails the test. The second exists
+    for a rendered view that rewrote the line, and it is bounded to the receipt's own
+    verdict lines, so a lookalike elsewhere in the document can never be blanked in its
+    place — which is the bug that bound is there to prevent, not a bound for speed.
     """
     exact = entry.number - 1
     if 0 <= exact < len(lines) and lines[exact].rstrip("\r") == entry.line:
