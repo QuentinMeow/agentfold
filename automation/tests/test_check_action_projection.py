@@ -2586,6 +2586,56 @@ class ActionProjectionTests(unittest.TestCase):
             counts = self.receipt_units(root, html)
             self.assertEqual(1, sum(counts.values()), counts)
 
+    def test_a_finding_carrying_markup_is_still_neutralized(self):
+        """Acceptance criterion 1: the core gate counts these, so this gate must not
+        report them. The token is placed by the verdict's own prefix, so an entity,
+        autolink or inline tag later in the finding cannot move it.
+        """
+        findings = (
+            "see <https://example.com/adr> for the rule",
+            "the &amp; in the finding survives",
+            "boundary holds for <div> containers",
+        )
+        with self.repo() as root:
+            for finding in findings:
+                with self.subTest(finding=finding):
+                    counts = self.receipt_units(root, self.receipt(
+                        f"- core-fit / first: approve — {finding}\n"
+                    ))
+                    self.assertEqual({}, counts)
+
+    def test_a_verdict_prefix_the_rendered_view_lost_blanks_nothing(self):
+        """The one guard between a mismatched view and a blanking placed on a guess."""
+        document = self.receipt(
+            "- core-fit / first <span>a</span>: approve — the boundary holds\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        self.assertNotIn("<span>", rendered)
+        self.assertEqual(
+            rendered,
+            PROJECTION.blank_receipt_verdict_tokens(document, path, rendered),
+        )
+        with self.repo() as root:
+            counts = self.receipt_units(root, document)
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_the_receipt_path_is_matched_whole_and_never_by_suffix(self):
+        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        refused = (
+            "services/x/tasks/1_in-progress/2026-08-04-example/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/verification.mdx",
+            "atasks/1_in-progress/2026-08-04-example/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/verification.md.bak",
+        )
+        with self.repo() as root:
+            for path in refused:
+                with self.subTest(path=path):
+                    counts = PROJECTION.task_action_unit_counts(
+                        document, path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:
             item = self.queue_item(root)

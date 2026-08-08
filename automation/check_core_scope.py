@@ -19,7 +19,7 @@ if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
 from markdown_semantics import semantic_text
-from review_receipt import parse_review_receipt
+from review_receipt import formatted_errors, parse_review_receipt
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
@@ -311,7 +311,7 @@ def validate_task(
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
         receipt = parse_review_receipt(verification_text)
-        errors.extend(receipt.errors)
+        errors.extend(formatted_errors(receipt, display(verification)))
         if receipt.revision is not None and review_revision_check:
             errors.extend(review_revision_check(receipt.revision))
         claimant = task_fields.get("Claimed-by", "")

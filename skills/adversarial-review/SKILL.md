@@ -27,8 +27,11 @@ trusts the majority (`handbook/principles/majority-over-single-agent.md`).
      live agent item that names the blocked merge or transition.
    - split → file a human review item with all verdicts and evidence linked.
 5. **Record**: one line per verdict in the task's `verification.md` (who, lens,
-   verdict) — the merge gate's audit trail. Records and external review surfaces are
-   projections; every still-pending action links its live queue item.
+   verdict) — the merge gate's audit trail, whose shape `templates/task/verification.md`
+   owns. Outside the `core-fit` receipt, write the verdict as a code span —
+   `` `approve` `` — because a bare one reads as a new human ask and refuses the commit.
+   Records and external review surfaces are projections; every still-pending action links
+   its live queue item.
 
 ## Queue discipline
 

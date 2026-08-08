@@ -51,19 +51,25 @@ A finding is `.+` — any nonempty prose. Constraining it was the fail-open the 
 decision names: a rejected finding ended the receipt and dropped its verdict together
 with every verdict after it.
 
-Nothing inside the receipt section is skipped in silence. One loose recognizer — a
-`core-fit /` line under an optional list marker of any kind — is applied both inside the
-block and after it, so a verdict that misses only on its marker (`1.`, `1)`, `•`, none)
-or only on its dash (hyphen, en dash) is reported instead of being read as the ordinary
-prose that closes the block. Any error yields zero verdicts, so the core-scope gate
-reports it and the action gate grants no exemption at all.
+Two regexes point in opposite directions, and the direction is the design. The acceptor
+stays exact; widening it is how the withdrawn implementation grew. The rejector's only
+power is to refuse — widening it can never accept anything new, only report more — so it
+is made as permissive as it can be: any decoration before `core-fit`, any short run of
+non-letters inside it or before the slash, any dash. One rejector is applied by one loop
+on both sides of the block end, so the two cannot drift apart. Any error yields zero
+verdicts, so the core-scope gate reports it and the action gate grants no exemption.
 
-Both gates parse `semantic_text` of the same bytes, so neither can accept a receipt the
-other refuses. The action gate then finds each accepted verdict's own line in
-`rendered_human_text` by literal search — the way it already finds a projected queue
-link — and blanks the token at that offset. That is why raw HTML rendering as a heading
-cannot claim a receipt: `rendered_human_text` is never the parse view, which its own
-docstring requires.
+The claim that holds exactly: inside the receipt section, any line the rejector matches
+and the acceptor does not is reported with its line number. Not more than that — see
+Known residue.
+
+Both gates parse `semantic_text` of the same bytes, so the action gate never neutralizes
+a receipt the core-scope gate would refuse. The converse does not hold, on purpose: the
+action gate additionally requires the artifact path and a rendered line still opening
+with the verdict's own prefix, and when either fails it blanks nothing. That prefix
+search — the technique the gate already uses for a projected queue link — is also why
+raw HTML that merely renders as a heading cannot claim a receipt: `rendered_human_text`
+is never the parse view, which its own docstring requires.
 
 The exemption belongs only to a path matching `tasks/<status>/<task-id>/verification.md`
 in full, because that is the artifact `--require-review` validates. A receipt in the
@@ -77,14 +83,31 @@ then vanish from the tally.
 
 ## Known residue
 
-Three things still leave the tally without an error, all by prior design and none of
-them this parser's to change: a verdict inside a code fence or an HTML comment, which
-`test_fenced_review_example_is_not_a_verdict` requires to be inert; a second verdict from
-an identity already recorded, which the core-scope gate replaces under its "latest
-verdict per reviewer" rule; and a verdict outside the one `## Review verdicts` section,
-which is not in the receipt at all. A non-`core-fit` lens verdict written with `approve`
-is still an unqueued action, unchanged from the default branch, because the authorized
-grammar covers `core-fit` lines only.
+Three shapes reach for a verdict and fall outside even the widened rejector, so they end
+the block in silence: no slash at all (`- core-fit reviewer: approve — …`), a letter
+fused to the token (`- core-fitt / …`), and a homoglyph inside the word itself. Catching
+those needs character-similarity judgement, which
+`memory/decisions/2026-08-07-withdraw-the-first-review-receipt-implementation.md`
+forbids.
+
+Five further routes out of the tally are prior design, not this grammar's:
+
+- a verdict inside a code fence or an HTML comment is blanked before any gate sees it,
+  which `test_fenced_review_example_is_not_a_verdict` requires;
+- a second verdict from an identity already recorded replaces the first, under the
+  core-scope gate's latest-verdict-per-reviewer rule;
+- a verdict whose reviewer matches the claimant is dropped by
+  `check_core_scope.same_reviewer_as_claimant`;
+- two different reviewer names whose word tokens form the same set collapse to one
+  entry, because `check_core_scope.identity_key` is order-insensitive;
+- a verdict outside the one `## Review verdicts` section is not in the receipt at all.
+
+One asymmetry remains between the gates and it fails closed: a verdict whose reviewer
+carries raw HTML is counted by the core-scope gate but not neutralized by the action
+gate, because the rendered line no longer opens with the verdict's prefix. The completed
+verdict is then reported as an ordinary action, which refuses the commit rather than
+hiding anything. Markup in the *finding* is fine — the prefix stops at the token — and
+`templates/task/verification.md` asks writers to keep raw tags out of a finding anyway.
 
 ## Core fit
 

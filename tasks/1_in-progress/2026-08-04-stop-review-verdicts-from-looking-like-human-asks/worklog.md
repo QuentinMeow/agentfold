@@ -611,3 +611,49 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   [a known issue](../../../memory/known-issues/2026-08-07-withdrawn-panel-grammar-reopens-two-branch-edges.md);
   the three ways out all need the owner, because the only one that clears the edges
   rewrites unpushed history and would strand the revisions sixteen panels are bound to.
+
+## 2026-08-07 — eighteenth panel: prose narrowed, rejector widened (claude)
+
+- Panel 3 on `4a83f18` returned 0 approve, 3 block, all three on the same root cause: the
+  prose promised more than the code delivered. The code was confirmed sound — 35 of 48
+  mutants killed, every round-2 repair pinned, no regressions across 267 whole-repo
+  results.
+- **The rejector is now as loose as it can be made, and the acceptor is untouched.** It
+  allowed exactly one decoration character, so any two escaped it: `**- core-fit / …`,
+  `- [ ] core-fit / …`, `> - core-fit / …`, a backticked or emphasised token, a non-ASCII
+  hyphen. Sixteen forms parsed as `1 approve, 0 block` with no error. All sixteen are now
+  reported. The direction matters and is written down: a rejector can only refuse, so
+  widening it is free; widening the acceptor is what grew the withdrawn implementation.
+- Acceptance criterion 1 was checked but not met. A finding containing an HTML entity, an
+  autolink, or an inline tag was counted by the core gate and reported by the action gate,
+  which refuses the commit. The token is now placed by the verdict's own prefix — marker,
+  reviewer, token — so markup after it cannot move it. One shape still fails, closed: raw
+  HTML in the *reviewer identity*. Stated in the criterion itself and in Known residue
+  rather than left as a tick.
+- **Every claim narrowed to what is demonstrated.** "A line that reaches for the verdict
+  shape and misses is reported" was false and is now stated as exactly what the rejector
+  matches, with the three shapes that escape it named: no slash at all, a letter fused to
+  the token, a homoglyph inside the word. "Neither gate can accept a receipt the other
+  refuses" was false and is now the one-way statement that holds. The residue list grew
+  from three to five: a claimant-matching reviewer and an `identity_key` collision also
+  leave the tally in silence. Corrected in the module, `design.md`,
+  `templates/task/verification.md`, a test docstring, and the "each one bites"
+  overstatement in this file — only three of the six round-2 tests fail at `1d536d0`.
+- Receipt problems now carry the file and line, name the line that actually ended the
+  block instead of the flawless verdict after it, quote the heading spelling they found,
+  and cap at five with a count of the rest.
+- The template and `skills/adversarial-review/SKILL.md` told writers to record other-lens
+  verdicts in a shape that blocks the commit when the verdict is `approve`. It never fired
+  only because every panel line recorded here so far happened to be `block`. Both now ask
+  for the verdict word in a code span, and the filled template projects nothing in either
+  fill — the last residue from the first pass.
+- Six mutation-surviving behaviors now have tests: the revision field's first-line rule,
+  receipt path anchoring, the unmatched-prefix guard, the tie boundary, latest-wins in
+  both directions, and a colon in the reviewer.
+- Filed `2026-08-07-migrate-the-review-verdicts-heading` with its pickup request: nineteen
+  records still carry the older parenthesized heading, four of them live core tasks. The
+  task names the trap — a repo-wide rename would give this task's own record two exact
+  headings and collapse the receipt it already holds.
+- The pull-request reconciler command is re-recorded with a derived range so it reproduces
+  as written at any head. Its two findings are unchanged and still come from `50f2cf5` and
+  `df0a5de`; the known issue is unchanged.

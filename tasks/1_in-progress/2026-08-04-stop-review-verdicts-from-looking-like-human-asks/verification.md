@@ -2293,10 +2293,11 @@ print("   actions reported:",
 ## Seventeenth panel repair — the new regressions fail on the blocked revision
 
 The six new core-scope tests were run against `1d536d0`'s parser and gates, with the
-tests themselves left at the repaired revision. Eighteen subtests fail there and all pass
-after the repair, so each one bites. The two dash variants pass inside the block at
-`1d536d0` because its narrower recognizer already required a bullet, and fail only in the
-stranded position — which is the asymmetry the repair removes.
+tests themselves left at the repaired revision. Eighteen subtests across three of the six
+tests fail there and all pass after the repair. The other three cover behavior `1d536d0`
+already had; they are mutation coverage, not repair evidence. The two dash variants pass
+inside the block at `1d536d0` because its narrower recognizer already required a bullet,
+and fail only in the stranded position — which is the asymmetry the repair removes.
 
 ```
 $ git checkout 1d536d0 -- automation/review_receipt.py automation/check_core_scope.py automation/check_action_projection.py
@@ -2399,8 +2400,13 @@ from `pull_request.base.sha...pull_request.head.sha`). It still exits 1, and the
 not the repaired parser: both findings come from intermediate commits, not from the branch
 head. The same command from the withdrawal baseline forward is clean.
 
+The range head must be the current HEAD, so both commands below derive it. A reader can
+re-run them exactly as written at any later commit on this branch and get this output,
+because what they report depends on the intermediate commits, not on the head. The runs
+recorded here were made at `<final SHA below>`.
+
 ```
-$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range da1c4bc586d4c03909c727b68d3dba0498a6a6e8...f824780504015e628696d6947af357975ec21a52
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range "$(git rev-parse main)...$(git rev-parse HEAD)"
 [task-action-origin] tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md: task artifact introduced an unqueued human action: - adversarial panel / core fit reviewer: approve — Core admission stays provider neutral, the canonical template pins the sixteen claimant limit, and accented action identities remain distinct.
     fix: create one needs-human queue item, list it in task.md Queue actions, and replace the ask with its exact action link
 [task-action-origin] tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md: task artifact introduced an unqueued human action: - adversarial panel / core fit reviewer: approve — Provider-neutral receipt authority stays confined to task-root verification, review freshness remains bound to core and task inputs, and historical panel compatibility grants no review authority.
@@ -2409,7 +2415,7 @@ reconcile: 2 blocking finding(s)
 ```
 
 ```
-$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range 679a62a8d00435a8169746b72285d967bd26945c...f824780504015e628696d6947af357975ec21a52
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range "679a62a8d00435a8169746b72285d967bd26945c...$(git rev-parse HEAD)"
 reconcile: 0 blocking finding(s)
 ```
 
@@ -2428,3 +2434,199 @@ committed cleanly at the time because the implementation they carried exempted
 decision withdrew. Recorded as
 [a known issue](../../../memory/known-issues/2026-08-07-withdrawn-panel-grammar-reopens-two-branch-edges.md)
 with the three options and why none of them is an agent's to choose alone.
+
+## Eighteenth panel repair — every decorated near-miss is now reported
+
+Sixteen forms a writer could plausibly type. Before this pass, fifteen of them parsed as
+`1 approve, 0 block` with no error at all: the rejector allowed exactly one decoration
+character, so two escaped it. The rejector's only power is to refuse, so widening it can
+report more and accept nothing new; the acceptor is untouched. The script is
+`tmp/decorations.py`, reproduced below the output.
+
+```
+$ python3 tmp/decorations.py
+=== item 1: decorated near-misses (want err>=1 and 0a/0b) ===
+  0a/0b err=1    **- core-fit / d: block — dissent
+  0a/0b err=1    - [ ] core-fit / d: block — dissent
+  0a/0b err=1    > - core-fit / d: block — dissent
+  0a/0b err=1    - `core-fit` / d: block — dissent
+  0a/0b err=1    - **core-fit** / d: block — dissent
+  0a/0b err=1    - core‑fit / d: block — dissent
+  0a/0b err=1    -- core-fit / d: block — dissent
+  0a/0b err=1    * * core-fit / d: block — dissent
+  0a/0b err=1    + > core-fit / d: block — dissent
+  0a/0b err=1    1.. core-fit / d: block — dissent
+  0a/0b err=1    (1) core-fit / d: block — dissent
+  0a/0b err=1      * core-fit / d: block — dissent
+  0a/0b err=1    • - core-fit / d: block — dissent
+  0a/0b err=1    - _core-fit_ / d: block — dissent
+  0a/0b err=1    - ~~core-fit~~ / d: block — dissent
+  0a/0b err=1    - core - fit / d: block — dissent
+=== item 3: entity / autolink / inline tag in the finding ===
+  core gate: 1 verdict(s) 0 err | action gate: 0 action(s) | see <https://example.com/adr> for the rule
+  core gate: 1 verdict(s) 0 err | action gate: 0 action(s) | the &amp; in the finding survives
+  core gate: 1 verdict(s) 0 err | action gate: 0 action(s) | boundary holds for <div> containers
+```
+
+The second block is acceptance criterion 1: before this pass each of those three was
+counted by the core gate and reported as an unqueued human action by the action gate,
+which refuses the commit. The token is now placed by the verdict's own prefix — marker,
+reviewer, token — so markup later in the finding cannot move it.
+
+```python
+import sys
+sys.path.insert(0, "automation")
+import review_receipt as rr
+import check_action_projection as cap
+
+REV = "a" * 40
+PATH = "tasks/1_in-progress/2026-08-04-x/verification.md"
+APPROVE = "- core-fit / a: approve — ok\n"
+
+
+def doc(body):
+    return "# V\n\n## Review verdicts\n\n**Reviewed revision:** " + REV + "\n\n" + body
+
+
+def tally(body):
+    parsed = rr.parse_review_receipt(doc(body))
+    votes = [entry.verdict for entry in parsed.verdicts]
+    return "{0}a/{1}b err={2}".format(
+        votes.count("approve"), votes.count("block"), len(parsed.errors)
+    )
+
+
+DECOR = [
+    "**- core-fit / d: block — dissent",
+    "- [ ] core-fit / d: block — dissent",
+    "> - core-fit / d: block — dissent",
+    "- `core-fit` / d: block — dissent",
+    "- **core-fit** / d: block — dissent",
+    "- core‑fit / d: block — dissent",
+    "-- core-fit / d: block — dissent",
+    "* * core-fit / d: block — dissent",
+    "+ > core-fit / d: block — dissent",
+    "1.. core-fit / d: block — dissent",
+    "(1) core-fit / d: block — dissent",
+    "  * core-fit / d: block — dissent",
+    "• - core-fit / d: block — dissent",
+    "- _core-fit_ / d: block — dissent",
+    "- ~~core-fit~~ / d: block — dissent",
+    "- core - fit / d: block — dissent",
+]
+
+print("=== item 1: decorated near-misses (want err>=1 and 0a/0b) ===")
+for line in DECOR:
+    print("  {0:14s} {1}".format(tally(APPROVE + line + "\n"), line))
+
+print("=== item 3: entity / autolink / inline tag in the finding ===")
+for finding in (
+    "see <https://example.com/adr> for the rule",
+    "the &amp; in the finding survives",
+    "boundary holds for <div> containers",
+):
+    body = "- core-fit / a: approve — " + finding + "\n"
+    parsed = rr.parse_review_receipt(doc(body))
+    units = cap.task_action_unit_counts(doc(body), PATH, ())
+    print("  core gate: {0} verdict(s) {1} err | action gate: {2} action(s) | {3}".format(
+        len(parsed.verdicts), len(parsed.errors), sum(units.values()), finding
+    ))
+```
+
+## Eighteenth panel repair — what a receipt problem now says
+
+Every problem carries the file and the line. A stranded verdict names the line that
+actually ended the block rather than itself. A refused heading quotes the spelling it
+found. Twelve near-misses report five problems and a count of the rest.
+
+```
+$ python3 tmp/messages.py
+-- stranded after a wrapped finding
+    tasks/1_in-progress/x/verification.md:11: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: the wrap continues here
+-- stranded after prose
+    tasks/1_in-progress/x/verification.md:13: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 11: The panel adjourned.
+-- uncanonical inside the block
+    tasks/1_in-progress/x/verification.md:10: Review verdicts rejects a core-fit line that is not `- core-fit / <reviewer>: <approve|block> — <finding>`: **- core-fit / b: block — decorated
+-- no identity
+    tasks/1_in-progress/x/verification.md:9: Review verdicts rejects a core-fit line whose reviewer has no identity: - core-fit /  : approve — ok
+-- revision not first
+-- inexact heading
+    tasks/1_in-progress/x/verification.md:5: verification.md needs exactly one exact `## Review verdicts` heading; found `## Review verdicts (when a review was explicitly run)`
+-- two exact headings
+    tasks/1_in-progress/x/verification.md:11: verification.md needs exactly one exact `## Review verdicts` heading; found 2 of them
+-- twelve near-misses -> 6 reported
+    v.md:10: Review verdicts rejects a core-fit line that is not `- core-fit / <reviewer>: <approve|block> — <find
+    v.md:11: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: **-
+    v.md:12: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: **-
+    v.md:13: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: **-
+    v.md:14: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: **-
+    v.md: Review verdicts has 7 further problem(s) not listed
+```
+
+The `revision not first` probe prints nothing because its own fixture is malformed — it
+puts the revision field first regardless. That path is covered by
+`test_the_revision_field_must_be_the_first_line_of_the_receipt`, which asserts the message
+and its line number.
+
+## Eighteenth panel repair — the filled template no longer projects an action
+
+The other-lens verdict is now written with its verdict word in a code span, in both
+`templates/task/verification.md` and `skills/adversarial-review/SKILL.md`. Filled either
+way, the template projects nothing. Every earlier run of this script reported one action
+for the `approve` fill.
+
+```
+$ python3 tmp/filled_template.py
+--- verdict token 'approve': 0 unprojected action(s) ---
+--- verdict token 'block': 0 unprojected action(s) ---
+```
+
+## Eighteenth panel repair — focused regressions
+
+```
+$ python3 -m unittest \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_decoration_around_a_verdict_never_leaves_the_tally_silently \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_finding_carrying_markup_is_still_a_counted_verdict \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_receipt_problems_name_the_file_the_line_and_the_block_end \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_receipt_problems_are_capped_and_counted \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_the_revision_field_must_be_the_first_line_of_the_receipt \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_an_equal_split_is_not_an_approve_majority \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_one_reviewer_voting_twice_keeps_only_the_later_verdict \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_reviewer_may_not_contain_a_colon \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_a_finding_carrying_markup_is_still_neutralized \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_a_verdict_prefix_the_rendered_view_lost_blanks_nothing \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_the_receipt_path_is_matched_whole_and_never_by_suffix
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 0.131s
+
+OK
+```
+
+## Eighteenth panel repair — full repository suite and reconciler
+
+```
+$ python3 automation/run_tests.py
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 44.82s
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
