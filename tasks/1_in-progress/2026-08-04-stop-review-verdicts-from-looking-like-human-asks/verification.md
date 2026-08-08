@@ -1990,9 +1990,9 @@ independently reported an undocumented `- adversarial panel /` grammar that gran
 neutrality with no heading, no reviewed-revision binding, no claimant, and no independence
 check.
 
-## Review verdicts
+## Sixteenth panel receipt on ccbb9e4 (superseded)
 
-**Reviewed revision:** ccbb9e4854faf42dc423638e6b6b39a284608f4b
+**Historical reviewed revision:** ccbb9e4854faf42dc423638e6b6b39a284608f4b
 
 - core-fit / fail-open lens: block — verdict lines are blanked whole, so an ask wrapped onto the next line escapes detection.
 - core-fit / authorized-scope lens: block — the closed finding alphabet silently drops a block verdict and every verdict after it.
@@ -3484,3 +3484,45 @@ test elapsed: 44.67s
 $ python3 automation/reconcile/reconcile.py --check
 reconcile: 0 blocking finding(s)
 ```
+
+## Gate panel on 66c6e57 and the residue it named
+
+Three independent reviewers, each in its own worktree with no view of the others, examined
+`4cec5be` and returned three approvals. The records-only pass that followed left executable
+code untouched, which the orchestrating session verified by comparing every gate module's
+syntax tree with docstrings removed, and which two reviewers reproduced independently, one
+of them also by bytecode. Each reviewer then re-bound its verdict to this exact revision.
+
+Findings the panel named and this task does not close. None changes what either gate
+enforces, and each is recorded here rather than carried silently.
+
+- The fallback search's upper bound is unpinned. Its test places the decoy above the
+  receipt, so only the lower bound is exercised; a decoy below the receipt reproduces the
+  original lookalike defect under mutation. Behaviour at this revision is correct.
+- Whether the recorded line number takes precedence over the fallback is unpinned. The new
+  test pins the fallback's bound instead. The direction is fail-closed: a collision leaves
+  a token unblanked and the action gate then reports it.
+- Searching the whole line for the slash rather than the remainder survives mutation. It
+  can only refuse more, never admit a verdict.
+- The raw scan reaches the heading that terminates the section, so a valid receipt followed
+  by a heading naming core fit and a slash is refused. It reaches exactly one line, only
+  ever adds an error, and predates this revision.
+- One message still says a receipt above was refused when no receipt was written. An
+  earlier record claimed this was repaired; it was not, and the file carrying it is
+  unchanged.
+- The two reviewers disagree on whether an unterminated HTML comment makes the structural
+  and rendered views disagree on line count. One measured divergence in about seven percent
+  of two hundred thousand fuzzed documents; the other measured agreement across fourteen
+  shapes. Neither outcome changes behaviour, and forty thousand fuzzed receipts with
+  diverging views produced no byte-discipline violation.
+- The recorded benchmark counts five of fourteen shapes slower. Reviewers measured six and
+  seven of fourteen on other hardware, and worst ratios above the recorded figure. The
+  record is conservative rather than overstated, and the sign is what it relies on.
+
+## Review verdicts
+
+**Reviewed revision:** 66c6e57b56c9995362fc6b01f7e6130d21866ecd
+
+- core-fit / fail-open lens: approve — No verdict left the tally unreported, and every blanked byte stayed a verdict token
+- core-fit / regression lens: approve — Both fail-opens closed and zero flips across 645 files, 90 task dirs and every action record
+- core-fit / honesty lens: approve — Both placement mutations die with their own tests; 120,000 fuzzed receipts lost no verdict.
