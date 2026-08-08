@@ -1501,8 +1501,9 @@ def _task_projection_stripped_text(
                 "Invalid human-action projection: " + label.strip()
             )
 
-    # The receipt is parsed from the structural view of the source and applied here by
-    # literal search, so raw HTML that only renders as a heading cannot claim one.
+    # The receipt is parsed from the structural view of the source, so raw HTML that only
+    # renders as a heading cannot claim one, and each token is placed by the line number
+    # the parser recorded — literal search only as a fallback, bounded to the receipt.
     rendered = blank_receipt_verdict_tokens(
         source, source_path, rendered_human_text(source)
     )

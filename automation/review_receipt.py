@@ -35,17 +35,27 @@ rule — leaves the tally by that gate's rules, not this parser's. Problems past
 `ERROR_LIMIT` are counted rather than listed, so a receipt with many of them reports how
 many it did not name.
 
-**What the two gates share, and what they do not.** They parse `semantic_text` of the
-same bytes, so this parser reaches the same verdict for both; everything after that is
-each gate's own. The core-scope gate then applies claimant, identity and majority rules
-this module never sees, and the action gate additionally requires the artifact path and a
-rendered line still carrying the verdict, and blanks nothing when either fails.
+**Refusal-only is not the same as safe.** Both rejector passes can only add an error,
+never accept a verdict, so widening either is free. That argument covers what they do —
+it does not cover what they fail to do. Declining to refuse is permission: every line
+neither pass matches ends the block in silence, so a pass that returns early, a bound
+that clips a run, or a view that dropped the line before the pass ran are all fail-open,
+whatever the direction of the pass itself.
+
+**What the two gates share, and what they do not.** Both call this parser, so it reaches
+the same verdict for whatever text each hands it; everything after that is each gate's
+own. They do not necessarily hand it the same bytes — the core-scope gate reads the file
+through Git with universal newlines, the action gate decodes it without — which is why
+line correspondence here is derived from `commonmark_lines` rather than from a raw split.
+The core-scope gate then applies claimant, identity and majority rules this module never
+sees, and the action gate additionally requires the artifact path and a rendered line
+still carrying the verdict, and blanks nothing when either fails.
 """
 import re
 import unicodedata
 from collections import namedtuple
 
-from markdown_semantics import semantic_text
+from markdown_semantics import commonmark_lines, semantic_text
 
 SECTION_RE = re.compile(
     r"^## Review verdicts[ \t]*\r?\n(.*?)(?=^##(?:[ \t]|\r?$)|\Z)",
@@ -64,15 +74,15 @@ VERDICT_RE = re.compile(
     r"[ \t]+—[ \t]+(?P<finding>.+)$",
     re.I,
 )
-# The rejector, used with `search`, so decoration before `core` cannot carry a line past
-# it. Both runs inside the pattern are bounded to 16 characters, which is what keeps the
-# scan cheap: the second run is followed by a slash, which is itself a character that run
-# accepts, so it does backtrack — but over at most 16 positions per start. Measured in
-# this task's verification record at a few milliseconds for 200,000-character lines.
+# The rejector. Nothing in it is bounded, because a bound on a rejector is a coverage
+# decision wearing a performance costume: a earlier revision capped the run before the
+# slash at sixteen characters, and seventeen zero-width spaces then produced a line
+# visually identical to a canonical verdict that neither half would look at. The pattern
+# locates `core…fit` only; the slash is found by plain string search over the rest of the
+# line, which is linear and cannot backtrack. The run inside the pattern excludes letters
+# and is followed by one, so it cannot consume what `fit` needs either.
 SLASH_CHARACTERS = "/／∕⁄"
-LOOSE_VERDICT_RE = re.compile(
-    rf"core[^A-Za-z\n]{{0,16}}fit[^A-Za-z\n]{{0,16}}[{SLASH_CHARACTERS}]", re.I
-)
+LOOSE_TOKEN_RE = re.compile(r"core[^A-Za-z\n]*fit", re.I)
 # The exemption belongs to the artifact the core-scope gate actually validates. Nothing
 # validates a receipt in a worklog, so nothing there may claim one. Matched whole.
 RECEIPT_PATH_RE = re.compile(
@@ -119,8 +129,29 @@ def _excerpt(line):
     return trimmed if len(trimmed) <= 80 else trimmed[:77] + "..."
 
 
+def reaches_for_verdict(line):
+    """Whether one line reaches for a core-fit verdict, however it is decorated.
+
+    The rejector, and the only place a line is judged near-miss. `core…fit` is located
+    with a pattern; the slash is then looked for in the remainder of the line by plain
+    string search, so nothing here is bounded and nothing backtracks. Checking the first
+    `core…fit` is enough: its remainder contains every slash any later one could claim.
+    """
+    matched = LOOSE_TOKEN_RE.search(line)
+    if matched is None:
+        return False
+    remainder = line[matched.end():]
+    return any(character in remainder for character in SLASH_CHARACTERS)
+
+
 class _Problems:
-    """Collect receipt problems, capped, counting whatever the cap leaves out."""
+    """Collect receipt problems, keeping the earliest, counting what the cap leaves out.
+
+    Problems arrive in two passes over the section — the structural lines first, then the
+    raw lines the structural view dropped — so visit order is not line order. Keeping
+    whatever arrived first would report the later half of a broken receipt and hide its
+    beginning, which is where a reader starts.
+    """
 
     def __init__(self):
         self.found = []
@@ -129,16 +160,16 @@ class _Problems:
 
     def add(self, line, message):
         self.lines.add(line)
-        if len(self.found) < ERROR_LIMIT:
-            self.found.append(ReceiptError(line, message))
-        else:
+        self.found.append(ReceiptError(line, message))
+        self.found.sort(key=lambda problem: problem.line)
+        if len(self.found) > ERROR_LIMIT:
+            self.found.pop()
             self.suppressed += 1
 
     def result(self):
-        ordered = sorted(self.found, key=lambda problem: problem.line)
         if not self.suppressed:
-            return tuple(ordered)
-        return tuple(ordered) + (
+            return tuple(self.found)
+        return tuple(self.found) + (
             ReceiptError(None, MORE_PROBLEMS.format(self.suppressed)),
         )
 
@@ -200,7 +231,7 @@ def parse_review_receipt(text):
                 matched.end("verdict"),
             ))
             continue
-        if LOOSE_VERDICT_RE.search(line) is not None:
+        if reaches_for_verdict(line):
             problems.add(number, (
                 UNCANONICAL_VERDICT.format(_excerpt(line)) if ended_at is None
                 else STRANDED_VERDICT.format(ended_at, _excerpt(line))
@@ -208,33 +239,33 @@ def parse_review_receipt(text):
         if ended_at is None:
             ended_at = number
 
-    _refuse_hidden_verdicts(
-        source, structural, first_number, len(lines), accepted, problems
-    )
+    _refuse_hidden_verdicts(source, first_number, len(lines), accepted, problems)
     errors = problems.result()
     if errors:
         return Receipt(revision_match.group(1), (), errors)
     return Receipt(revision_match.group(1), tuple(verdicts), ())
 
 
-def _refuse_hidden_verdicts(source, structural, first, count, accepted, problems):
+def _refuse_hidden_verdicts(source, first, count, accepted, problems):
     """Refuse a verdict the structural view dropped before any rejector saw it.
 
     `semantic_text` blanks fenced, commented, indented and HTML-wrapped lines, so a
     verdict written that way reaches neither the acceptor nor the rejector and would end
     the block in silence. Reading the section's own raw lines is refusal-only: it can add
-    an error, never a verdict. Line numbering is shared because `semantic_text` replaces
-    content without adding or removing lines; the guard below declines rather than
-    guesses if that ever stops holding.
+    an error, never a verdict.
+
+    The raw lines come from `commonmark_lines`, which is what `semantic_text` itself
+    splits on, so the two agree line for line by construction rather than by coincidence.
+    Splitting the source on `\\n` instead did not: one bare CR anywhere in the document
+    shifted every later line, and an earlier revision responded by declining the whole
+    scan, which turned one stray byte into permission to hide a verdict.
     """
-    raw_lines = source.split("\n")
-    if len(raw_lines) != len(structural.split("\n")):
-        return
-    for number in range(first, first + count):
+    raw_lines = [line.rstrip("\n") for line in commonmark_lines(source)]
+    for number in range(first, min(first + count, len(raw_lines) + 1)):
         if number in accepted or number in problems.lines:
             continue
-        raw = raw_lines[number - 1].rstrip("\r") if number <= len(raw_lines) else ""
-        if raw.strip() and LOOSE_VERDICT_RE.search(raw) is not None:
+        raw = raw_lines[number - 1]
+        if raw.strip() and reaches_for_verdict(raw):
             problems.add(number, HIDDEN_VERDICT.format(_excerpt(raw)))
 
 

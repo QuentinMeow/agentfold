@@ -54,12 +54,25 @@ with every verdict after it.
 Two regexes point in opposite directions, and the direction is the design. The acceptor
 stays exact; widening it is how the withdrawn implementation grew. The rejector can only
 refuse — whatever it newly matches becomes a reported error, never an accepted verdict —
-so it is kept loose: searched anywhere in the line rather than anchored, tolerant of
-decoration around and inside `core-fit`, of any dash, and of slash-like characters beyond
-ASCII. It runs twice, over the structural view and over the section's own raw lines,
-because the structural view blanks fenced, commented, indented and HTML-wrapped lines
-before any rejector could see them. Any error yields zero verdicts, so the core-scope
-gate reports it and the action gate grants no exemption.
+so it is kept loose and, since the nineteenth panel, unbounded: searched anywhere in the
+line rather than anchored, tolerant of any run of decoration around and inside
+`core-fit`, of any dash, and of slash-like characters beyond ASCII. It locates `core…fit`
+with a pattern and then looks for the slash by plain string search over the rest of the
+line, which is linear and cannot backtrack, so no length limit is needed. It runs twice,
+over the structural view and over the section's own raw lines, because the structural
+view blanks fenced, commented, indented and HTML-wrapped lines before any rejector could
+see them. Any error yields zero verdicts, so the core-scope gate reports it and the
+action gate grants no exemption.
+
+**Refusal-only is not the same as safe.** Both passes can only add an error, so widening
+either is free — but that argument covers what they do, not what they fail to do.
+Declining to refuse is permission. A pass that returns early, a bound that clips a run,
+or a view that dropped a line before the pass ran are all fail-open, whichever direction
+the pass itself points. A sixteen-character cap on the run before the slash was exactly
+that: seventeen zero-width spaces produced a line rendering byte-identically to a
+canonical verdict, invisible in a diff, that neither half looked at. Nothing in the
+rejector is bounded now, and bounding it again would be a coverage decision to record,
+not an optimization to take.
 
 **The rule, not an inventory.** Inside the receipt section, a line whose structural or
 raw form the rejector matches and the acceptor does not refuses the whole receipt. A line
@@ -67,8 +80,11 @@ the rejector does not match still ends the block silently: the rejector is a pat
 `core`, `fit` and a slash, not a judgement about what a writer meant, and no pattern of
 that kind sees a shape that keeps none of those three.
 
-Both gates parse `semantic_text` of the same bytes, so this parser reaches the same
-verdict for both. Everything after that is each gate's own, and the two do diverge:
+Both gates call this parser, so it reaches the same verdict for whatever text each hands
+it — though they need not hand it the same bytes, since the core-scope gate reads the
+file through Git with universal newlines and the action gate decodes it without. That is
+why the raw scan derives its line numbering from `commonmark_lines` rather than from a
+newline split. Everything after that is each gate's own, and the two do diverge:
 the core-scope gate applies claimant, identity, majority and revision-freshness rules the
 action gate never sees, so a receipt this parser accepts can still be refused there and
 neutralized here. The action gate for its part requires the artifact path and a rendered
@@ -95,9 +111,9 @@ Stated as rules, because every earlier attempt to state it as a numbered list wa
 falsified by the next reviewer, and a closed list invites exactly that.
 
 **A verdict the rejector cannot match ends the block in silence.** The rejector needs
-`core`, then `fit` within a short run of non-letters, then a slash-like character. A line
-keeping none of those — no slash, a letter fused to the token, a homoglyph inside the
-word — passes it. Some of that could be chased with more pattern; the rest needs
+`core`, then `fit` after any run of non-letters, then a slash-like character anywhere
+after it. A line keeping none of those — no slash, a letter fused to the token, a
+homoglyph inside the word — passes it. Some of that could be chased with more pattern; the rest needs
 character-similarity reasoning, which
 `memory/decisions/2026-08-07-withdraw-the-first-review-receipt-implementation.md`
 forbids. Neither is claimed as covered.

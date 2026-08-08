@@ -2620,7 +2620,7 @@ for line in rr.formatted_errors(parsed, "v.md"):
 ```
 
 That run is pinned to `4b66357fd501b4cee6700d6b6ccad6b694197262`. At HEAD the same script
-prints the same problems with the wording the eighteenth-panel repair gave them.
+prints the same problems with the wording the nineteenth-panel repair gave them.
 
 The `revision not first` probe prints nothing because its own fixture is malformed — it
 puts the revision field first regardless. That path is covered by
@@ -2829,8 +2829,12 @@ backtracking probe (seconds per call, 200k-character lines):
   slash far away       0.0019
 ```
 
-Zero blast radius. All three refusals are the unfilled-placeholder case — a section whose
-revision field is still `<full immutable commit ID …>` — which behaved the same before.
+Zero blast radius, but the three refusals are not one case. Two are the unfilled-template
+placeholder — a section whose revision field is still `<full immutable commit ID …>` —
+and the third,
+`tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md`,
+has no placeholder at all: its section is prose beginning "None run." with no revision
+field. All three behaved the same before this pass.
 Both real receipts still parse, including the 2026-07-22 historical one. The action-gate
 total is 18, identical to `6d84769`:
 
@@ -2839,8 +2843,8 @@ $ git checkout 6d84769 -- automation/review_receipt.py && python3 -c 'import sub
 6d84769 unprojected actions over every tracked task record: 18
 ```
 
-Nothing exceeds six milliseconds on a 200,000-character line, because both runs inside the
-rejector are bounded to sixteen characters.
+The benchmark figures above are from `6d84769`'s bounded rejector and are superseded; the
+nineteenth-panel section below re-measures the unbounded one, which is cheaper.
 
 ## Nineteenth panel repair — the new regressions fail at 6d84769
 
@@ -2902,6 +2906,249 @@ PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 45.86s
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+## Twentieth panel repair — the bound that narrowed the rejector
+
+Widening the rejector at the nineteenth panel also capped the run before the slash at
+sixteen characters, so seventeen or more non-letters escaped both halves and dropped a
+block verdict with no error. The zero-width variant renders byte-identically to a
+canonical verdict, so a reader of the diff sees a rejection while the gate reports
+an approve majority. Nothing in the rejector is bounded now: it locates `core…fit` with a
+pattern, then looks for a slash-like character in the rest of the line by plain string
+search. The script is `tmp/unbounded.py`, inline below its output.
+
+```
+$ python3 tmp/unbounded.py
+=== 17 or more non-letters between fit and the slash ===
+  16 zero-width spaces   0a/0b err=1
+  17 zero-width spaces   0a/0b err=1
+  40 zero-width spaces   0a/0b err=1
+  17 spaces              0a/0b err=1
+  17 dots                0a/0b err=1
+  200 combining marks    0a/0b err=1
+  visually identical to a canonical verdict: True
+
+=== rejector cost, unbounded, 200k-character lines ===
+  punctuation run        0.0034 s
+  no slash after fit     0.0000 s
+  many core prefixes     0.0044 s
+  core fit no slash      0.0000 s
+  slash far away         0.0000 s
+  no slash, long tail    0.0000 s
+  core fit repeated      0.0000 s
+```
+
+At `eeca7db` every row but the first read `1a/0b err=0`. The unbounded rejector is also
+cheaper than the bounded one it replaces — 4.4 ms against the 6 ms recorded for
+`6d84769` — because the tail is now a string search rather than a backtracking run. Each
+figure is the mean of five calls.
+
+```python
+import sys
+import time
+sys.path.insert(0, "automation")
+import review_receipt as rr
+
+REV = "a" * 40
+APPROVE = "- core-fit / a: approve — could not break it\n"
+
+
+def doc(body):
+    return "# V\n\n## Review verdicts\n\n**Reviewed revision:** " + REV + "\n\n" + body
+
+
+def tally(body):
+    parsed = rr.parse_review_receipt(doc(body))
+    votes = [entry.verdict for entry in parsed.verdicts]
+    return "{0}a/{1}b err={2}".format(
+        votes.count("approve"), votes.count("block"), len(parsed.errors)
+    )
+
+
+print("=== 17 or more non-letters between fit and the slash ===")
+CASES = {
+    "16 zero-width spaces": "​" * 16,
+    "17 zero-width spaces": "​" * 17,
+    "40 zero-width spaces": "​" * 40,
+    "17 spaces": " " * 17,
+    "17 dots": "." * 17,
+    "200 combining marks": "́" * 200,
+}
+for name, filler in CASES.items():
+    line = "- core-fit" + filler + " / dissenter: block — a concrete bypass"
+    print("  {0:22s} {1}".format(name, tally(APPROVE + line + "\n")))
+
+zero_width = "- core-fit" + "​" * 17 + " / dissenter: block — a concrete bypass"
+canonical = "- core-fit / dissenter: block — a concrete bypass"
+import check_action_projection as cap
+print("  visually identical to a canonical verdict:",
+      cap.normalized_action_tokens(zero_width) == cap.normalized_action_tokens(canonical))
+
+print()
+print("=== rejector cost, unbounded, 200k-character lines ===")
+for name, line in (
+    ("punctuation run", "core" + "-" * 200000 + "fit"),
+    ("no slash after fit", "core-fit" + " " * 200000),
+    ("many core prefixes", "core" * 50000),
+    ("core fit no slash", "core-fit " * 20000),
+    ("slash far away", "core-fit" + "." * 200000 + "/"),
+    ("no slash, long tail", "core-fit" + "." * 200000 + "x"),
+    ("core fit repeated", "core-fit" * 25000),
+):
+    start = time.perf_counter()
+    for _ in range(5):
+        rr.reaches_for_verdict(line)
+    print("  {0:22s} {1:.4f} s".format(name, (time.perf_counter() - start) / 5))
+```
+
+## Twentieth panel repair — every placement mutation now dies
+
+The previous pass named two mutations in a test docstring and killed neither: all four
+fixtures used a decoy shifted by a character, so the token-boundary clause refused them
+on its own and the clauses under test never ran. Each clause now has its own test with a
+decoy built so that only that clause can refuse it, and each is asserted to be reachable
+before the clause is exercised. `tmp/mutants.py` applies each mutation to the module,
+runs both owning test files, restores the module, and names the killer.
+
+```
+$ python3 tmp/mutants.py
+DIED: M-a prefix truncated to token_start
+    killed by test_placement_needs_the_whole_prefix_through_the_token
+DIED: M-b startswith -> in
+    killed by test_placement_needs_the_prefix_at_the_start_of_the_line
+DIED: M-c line-number path removed and fallback unbounded
+    killed by test_a_lookalike_above_the_receipt_cannot_steal_the_blanking
+DIED: M-d rejector tail bounded again
+    killed by test_no_run_length_before_the_slash_escapes_the_rejector
+DIED: M-f raw scan uses a plain newline split
+    killed by test_a_bare_carriage_return_cannot_hide_a_verdict
+DIED: M-e hidden-verdict scan disabled
+    killed by test_a_bare_carriage_return_cannot_hide_a_verdict
+    killed by test_a_verdict_the_structural_view_drops_is_refused_not_skipped
+
+survivors: []
+```
+
+M-c is the exact pre-`eeca7db` shape, and its test now uses a decoy repeating the receipt
+verdict word for word, so only the recorded line number distinguishes the two. M-d and
+M-f were both survivors when this run was first made, which is how the bound and the
+newline split were found to be untested.
+
+The script writes to `automation/review_receipt.py` and restores it in a `finally`; it is
+git-ignored scratch, and the tree is clean after it runs.
+
+```python
+import subprocess
+import sys
+from pathlib import Path
+
+MODULE = Path("automation/review_receipt.py")
+ORIGINAL = MODULE.read_text(encoding="utf-8")
+
+MUTATIONS = {"<name>": ("<exact source to replace>", "<replacement>")}
+
+for name, (old, new) in MUTATIONS.items():
+    if ORIGINAL.count(old) != 1:
+        print("SKIP (anchor not unique):", name, ORIGINAL.count(old))
+        continue
+    MODULE.write_text(ORIGINAL.replace(old, new), encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest",
+             "automation.tests.test_check_core_scope",
+             "automation.tests.test_check_action_projection"],
+            capture_output=True, text=True,
+        )
+    finally:
+        MODULE.write_text(ORIGINAL, encoding="utf-8")
+    killers = sorted({
+        line.split("(")[0].replace("FAIL: ", "").replace("ERROR: ", "").strip()
+        for line in result.stderr.splitlines()
+        if line.startswith(("FAIL:", "ERROR:"))
+    })
+    print(("DIED" if result.returncode else "SURVIVED") + ":", name)
+    for killer in killers:
+        print("    killed by", killer)
+```
+
+## Twentieth panel repair — blast radius, re-measured
+
+```
+$ python3 tmp/blast_radius.py
+  refused: tasks/0_backlog/2026-08-07-migrate-the-review-verdicts-heading/verification.md
+      tasks/0_backlog/2026-08-07-migrate-the-review-verdicts-heading/verification.md:17: Review verdicts needs exactly one real `**Reviewed revision:** <com
+  refused: tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md
+      tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md:288: Review verdicts needs exactly one real `**Reviewed revision:
+  receipt accepted: tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md 3 verdict(s)
+  receipt accepted: tasks/4_done/2026-07-22-protect-core-portability/verification.md 3 verdict(s)
+  refused: templates/task/verification.md
+      templates/task/verification.md:17: Review verdicts needs exactly one real `**Reviewed revision:** <commit>` field, as the first line of the receipt
+tracked markdown files: 645 | receipts accepted: 2 | refused past the heading: 3
+unprojected actions over every tracked task record: 18
+
+the rejector's own cost is measured in tmp/unbounded.py, which pins its shape
+```
+
+Unchanged from `eeca7db` on every count. Two of the three refusals are the unfilled
+template placeholder; the third is a section that is prose with no revision field at all.
+
+```python
+import subprocess
+import sys
+sys.path.insert(0, "automation")
+from pathlib import Path
+import review_receipt as rr
+import check_action_projection as cap
+
+tracked = subprocess.run(
+    ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True
+).stdout.split()
+
+changed = 0
+receipts = 0
+for path in tracked:
+    text = Path(path).read_text(encoding="utf-8")
+    parsed = rr.parse_review_receipt(text)
+    if parsed.verdicts:
+        receipts += 1
+        print("  receipt accepted:", path, len(parsed.verdicts), "verdict(s)")
+    if parsed.errors and "needs exactly one exact" not in parsed.errors[0].message:
+        changed += 1
+        print("  refused:", path)
+        for line in rr.formatted_errors(parsed, path)[:3]:
+            print("     ", line[:150])
+print("tracked markdown files:", len(tracked),
+      "| receipts accepted:", receipts, "| refused past the heading:", changed)
+
+actions = 0
+for path in tracked:
+    if not path.startswith("tasks/"):
+        continue
+    text = Path(path).read_text(encoding="utf-8")
+    actions += sum(cap.task_action_unit_counts(text, path, ()).values())
+print("unprojected actions over every tracked task record:", actions)
+```
+
+## Twentieth panel repair — filled template, full suite, reconciler
+
+```
+$ python3 tmp/filled_template.py
+--- verdict token 'approve': 0 unprojected action(s) ---
+--- verdict token 'block': 0 unprojected action(s) ---
+```
+
+```
+$ python3 automation/run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 44.36s
 ```
 
 ```

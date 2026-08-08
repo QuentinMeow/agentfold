@@ -2644,14 +2644,15 @@ class ActionProjectionTests(unittest.TestCase):
     def test_a_lookalike_above_the_receipt_cannot_steal_the_blanking(self):
         """Placement follows the parser's line number, never a scan from line 0.
 
-        A superseded verdict above the receipt used to absorb the blanking: the real
-        verdict was then reported as a human ask, and seven characters of the decoy's
-        unrelated word were erased.
+        The decoy repeats the receipt verdict word for word, so nothing about the line
+        itself distinguishes the two: only the recorded line number does. A decoy that
+        differed by even one character would be refused by the token-boundary rule
+        instead, and this test would pass with the placement rule deleted.
         """
         document = (
             "# Verification\n\n"
             "## Panel round one\n\n"
-            "- core-fit / dana: approved — round one, superseded\n\n"
+            "- core-fit / dana: approve — round one, superseded\n\n"
             "## Review verdicts\n\n"
             f"**Reviewed revision:** {'a' * 40}\n\n"
             "- core-fit / dana: approve — the boundary holds\n"
@@ -2660,31 +2661,103 @@ class ActionProjectionTests(unittest.TestCase):
         rendered = PROJECTION.rendered_human_text(document)
         blanked = PROJECTION.blank_receipt_verdict_tokens(document, path, rendered)
 
-        self.assertIn("- core-fit / dana: approved — round one, superseded", blanked)
+        self.assertIn("- core-fit / dana: approve — round one, superseded", blanked)
         self.assertIn("- core-fit / dana:         — the boundary holds", blanked)
+        self.assertEqual(len(rendered), len(blanked))
         with self.repo() as root:
-            self.assertEqual({}, self.receipt_units(root, document))
+            counts = self.receipt_units(root, document)
+            # The decoy is outside the receipt, so it stays an ordinary action. What
+            # must never happen is the reverse: the receipt's own verdict reported while
+            # the decoy is quietly blanked in its place.
+            self.assertEqual(
+                ["- core-fit / dana: approve — round one, superseded"],
+                sorted(counts),
+                counts,
+            )
 
-    def test_placement_needs_the_whole_prefix_and_a_token_boundary(self):
-        """Two mutations the placement rule must not survive.
+    def test_placement_needs_the_whole_prefix_through_the_token(self):
+        """Truncating the anchor to the reviewer must not survive.
 
-        Truncating the anchor to the reviewer would let any later verdict by the same
-        reviewer take this one's blanking; matching the prefix anywhere in the line
-        rather than at its start would let an indented or quoted copy take it.
+        The decoy keeps every character before the token and differs only in the token,
+        so the anchor is the only thing that can refuse it: the token-boundary rule
+        passes here, because the character at the token's end offset is a space in both
+        lines.
         """
-        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
         verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        decoy = "- core-fit / dana: block — a different verdict"
 
         self.assertTrue(RECEIPT.carries_verdict_prefix(verdict.line, verdict))
-        self.assertFalse(RECEIPT.carries_verdict_prefix(
-            "- core-fit / first: approved — a different verdict", verdict
-        ))
-        self.assertFalse(RECEIPT.carries_verdict_prefix(
-            "  - core-fit / first: approve — an indented copy", verdict
-        ))
-        self.assertFalse(RECEIPT.carries_verdict_prefix(
-            "> - core-fit / first: approve — a quoted copy", verdict
-        ))
+        self.assertTrue(
+            decoy.startswith(verdict.line[:verdict.token_start]),
+            "the decoy must share everything before the token",
+        )
+        self.assertFalse(
+            decoy[verdict.token_end:verdict.token_end + 1].isalnum(),
+            "the boundary rule must not be what refuses this decoy",
+        )
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
+
+    def test_placement_needs_the_prefix_at_the_start_of_the_line(self):
+        """Matching the prefix anywhere in the line must not survive.
+
+        The decoy carries the prefix verbatim but not at column zero, and its padding is
+        chosen so the character at the token's end offset is a space — otherwise the
+        token-boundary rule refuses it first and the start-of-line rule is never reached.
+        """
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        prefix = verdict.line[:verdict.token_end]
+        decoy = "> note: " + prefix + " — a quoted copy"
+
+        self.assertIn(prefix, decoy)
+        self.assertFalse(decoy.startswith(prefix))
+        self.assertFalse(
+            decoy[verdict.token_end:verdict.token_end + 1].isalnum(),
+            "the boundary rule must not be what refuses this decoy",
+        )
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
+
+    def test_a_bare_carriage_return_cannot_hide_a_verdict(self):
+        """The raw scan shares line numbering with the structural view by construction.
+
+        Splitting the source on newlines alone let one bare CR shift every later line,
+        and the guard that noticed the shift declined the whole scan, turning a stray
+        byte into permission to hide a verdict in a fence. This gate is where that is
+        reachable: it decodes the artifact without newline translation, while the
+        core-scope gate reads it through Git with universal newlines.
+        """
+        document = (
+            "# Verification\n\nA note with a bare \r carriage return.\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / first: approve — could not break it\n"
+            "```\n- core-fit / dissenter: block — a concrete bypass\n```\n"
+        )
+        problems = RECEIPT.formatted_errors(
+            RECEIPT.parse_review_receipt(document), "verification.md"
+        )
+        hidden = [
+            problem for problem in problems
+            if "structural view does not carry" in problem
+        ]
+
+        self.assertEqual(1, len(hidden), problems)
+        # The CR ends a CommonMark line, so the fenced verdict sits on line 12. A raw
+        # split on newlines alone puts it on 11 and names the wrong place.
+        self.assertIn("verification.md:12:", hidden[0])
+        with self.repo() as root:
+            counts = self.receipt_units(root, document)
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_placement_refuses_a_token_that_only_starts_the_same(self):
+        """The token-boundary rule, isolated from the other two."""
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        decoy = "- core-fit / dana: approved — a longer word"
+
+        self.assertTrue(decoy.startswith(verdict.line[:verdict.token_end]))
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
 
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:

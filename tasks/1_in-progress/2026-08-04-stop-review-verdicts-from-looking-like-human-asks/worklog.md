@@ -691,10 +691,49 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   the stranded message's line prefix and excerpt now name the same line; the migration task
   no longer says all nineteen records can host no receipt.
 - Blast radius measured, not assumed: 645 tracked Markdown files, both real receipts still
-  parse, three refusals all the unfilled-placeholder case, and the action-gate total over
+  parse, three refusals (two the unfilled-template placeholder, one a section that is prose
+  with no revision field at all), and the action-gate total over
   every task record is 18 at HEAD and 18 at `6d84769`. The backtracking probe stays under
   six milliseconds on 200,000-character lines.
 - Three older evidence sections cited scripts that no longer run as written; each now pins
   the revision it was taken at and says what changed, and the messages section carries its
   source inline.
+- The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — twentieth panel: the bound, and tests that did not test (claude)
+
+- Panel 5: 2 block, 1 approve. The gate held every attack; both blocks were mine.
+- **The regression: widening the rejector also narrowed it.** Capping the run before the
+  slash at sixteen characters let seventeen or more non-letters through, dropping a block
+  verdict with no error. Worse than the count suggests — the zero-width variant renders
+  byte-identically to a canonical verdict, so a reader of the diff sees a rejection while
+  the gate reports an approve majority. Nothing in the rejector is bounded now: it locates
+  `core…fit` with a pattern and finds the slash by plain string search over the rest of
+  the line. That is also *faster* than the bound it replaces, 4.4 ms against 6 ms on a
+  200,000-character line, because a string search cannot backtrack. Recorded as a rule:
+  bounding a rejector is a coverage decision, and any future bound goes in the record with
+  what it costs.
+- **The tests that claimed to pin the previous regression did not.** All four fixtures used
+  a decoy shifted by a character, so the token-boundary clause refused them on its own and
+  the two clauses under test never ran; the whole pre-`eeca7db` placement shape could be
+  restored with the suite green and my earlier regression back in full. Each clause now has
+  its own test with a decoy built so only that clause can refuse it, and each test asserts
+  the other clauses are reachable before exercising its own. Proved by `tmp/mutants.py`,
+  which applies each mutation, runs both owning files, and names the killer: six
+  mutations, six deaths, no survivors. Two of the six — the rejector bound and the raw
+  newline split — were survivors on the first run, which is how they were found.
+- **The line-count guard was itself a fail-open.** One bare CR desynchronised the raw scan,
+  the guard declined the whole scan, and a fenced verdict was dropped silently. The raw
+  lines now come from `commonmark_lines`, which is what `semantic_text` splits on, so the
+  two agree by construction and no guard is needed. Reachable only through the action
+  gate, which decodes without newline translation — so its test lives there.
+- Stated the rule the approving reviewer asked for: refusal-only is not the same as safe.
+  Declining to refuse is permission, so an early return, a clipped run, or a view that
+  dropped the line are all fail-open whichever way the pass points.
+- Also: the gate no longer says a receipt "is needed" when one was written and refused;
+  the problem list keeps the earliest five rather than whichever pass ran first; the
+  review skill no longer places a superseded transcript inside the section it would refuse;
+  and three false glosses in the records are corrected — one of the three blast-radius
+  refusals is not a placeholder case, the pinned script's wording is the nineteenth
+  panel's not the eighteenth's, and the superseded benchmark says so.
 - The merge-edge known issue is unchanged and still needs the owner.

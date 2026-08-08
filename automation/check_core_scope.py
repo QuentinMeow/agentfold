@@ -322,7 +322,12 @@ def validate_task(
                 latest[reviewer_key] = entry.verdict
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())
-        if not latest:
+        if not latest and receipt.errors:
+            errors.append(
+                "the review receipt above was refused, so no "
+                "`- core-fit / <independent reviewer>: approve — <finding>` was counted"
+            )
+        elif not latest:
             errors.append(
                 "verification.md needs `- core-fit / <independent reviewer>: approve — <finding>`"
             )

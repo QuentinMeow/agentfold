@@ -1002,6 +1002,38 @@ class CoreScopeTests(unittest.TestCase):
                     any("independent reviewer" in error for error in errors), errors
                 )
 
+    def test_no_run_length_before_the_slash_escapes_the_rejector(self):
+        """Nothing in the rejector is bounded, because a bound is a coverage decision.
+
+        A sixteen-character cap on the run before the slash let seventeen zero-width
+        spaces through, and such a line renders byte-identically to a canonical verdict:
+        the diff reads as a rejection while the gate reports an approve majority.
+        """
+        fillers = {
+            "16 zero-width spaces": "​" * 16,
+            "17 zero-width spaces": "​" * 17,
+            "40 zero-width spaces": "​" * 40,
+            "17 spaces": " " * 17,
+            "17 dots": "." * 17,
+            "200 combining marks": "́" * 200,
+        }
+        for name, filler in fillers.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"- core-fit{filler} / dissenter: block — a concrete bypass\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(self.refusal(error) for error in errors), errors)
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
     def test_a_verdict_the_structural_view_drops_is_refused_not_skipped(self):
         """`semantic_text` blanks these before any rejector could see them.
 
