@@ -2391,3 +2391,40 @@ reconcile: 0 blocking finding(s)
 $ git diff --cached --check && python3 automation/check_core_scope.py --staged --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks
 core-scope: pass (6 core path(s), task 2026-08-04-stop-review-verdicts-from-looking-like-human-asks; independent review manual; not invoked)
 ```
+
+## Seventeenth panel repair — the pull-request reconciler command
+
+The command CI runs on a pull request (`.github/workflows/harness.yml` builds its range
+from `pull_request.base.sha...pull_request.head.sha`). It still exits 1, and the reason is
+not the repaired parser: both findings come from intermediate commits, not from the branch
+head. The same command from the withdrawal baseline forward is clean.
+
+```
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range da1c4bc586d4c03909c727b68d3dba0498a6a6e8...f824780504015e628696d6947af357975ec21a52
+[task-action-origin] tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md: task artifact introduced an unqueued human action: - adversarial panel / core fit reviewer: approve — Core admission stays provider neutral, the canonical template pins the sixteen claimant limit, and accented action identities remain distinct.
+    fix: create one needs-human queue item, list it in task.md Queue actions, and replace the ask with its exact action link
+[task-action-origin] tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md: task artifact introduced an unqueued human action: - adversarial panel / core fit reviewer: approve — Provider-neutral receipt authority stays confined to task-root verification, review freshness remains bound to core and task inputs, and historical panel compatibility grants no review authority.
+    fix: create one needs-human queue item, list it in task.md Queue actions, and replace the ask with its exact action link
+reconcile: 2 blocking finding(s)
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-04-stop-review-verdicts-from-looking-like-human-asks --range 679a62a8d00435a8169746b72285d967bd26945c...f824780504015e628696d6947af357975ec21a52
+reconcile: 0 blocking finding(s)
+```
+
+Both lines are fenced at the head, so `task_action_unit_counts` over the current file
+reports nothing:
+
+```
+$ python3 -c 'import sys; sys.path.insert(0, "automation"); from pathlib import Path; import check_action_projection as p; f = "tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md"; print(sum(p.task_action_unit_counts(Path(f).read_text(), f, ()).values()))'
+0
+```
+
+A task edge is evaluated against the bytes of its own commit, so a fence added later
+cannot repair `50f2cf5` and `df0a5de`, the two commits that wrote those transcripts. They
+committed cleanly at the time because the implementation they carried exempted
+`- adversarial panel / …` lines under the second receipt grammar that the 2026-08-07
+decision withdrew. Recorded as
+[a known issue](../../../memory/known-issues/2026-08-07-withdrawn-panel-grammar-reopens-two-branch-edges.md)
+with the three options and why none of them is an agent's to choose alone.

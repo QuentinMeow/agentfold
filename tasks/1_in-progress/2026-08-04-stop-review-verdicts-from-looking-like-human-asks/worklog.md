@@ -599,6 +599,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - `Claimed-by` was `codex planner / sol-high implementer`, a composite that would let one
   half review the other's work. It is now `claude`.
 - Ten focused regressions plus eighteen subtests proved to fail on `1d536d0`, the full
-  15-file suite, the core-scope gate, and both reconciler invocations pass with real output
-  in [verification.md](verification.md). No review was run against this pass and no receipt
+  15-file suite, the core-scope gate, and `reconcile.py --check` pass with real output in
+  [verification.md](verification.md). No review was run against this pass and no receipt
   was written for it; the task stays in `1_in-progress` with nothing pushed.
+- The pull-request reconciler command still exits 1, and fencing cannot fix it. Both
+  findings come from `50f2cf5` and `df0a5de`, not from the branch head: a task edge is
+  judged on its own commit's bytes, and those commits committed cleanly only because the
+  implementation they carried exempted `- adversarial panel / …` lines under the second
+  grammar the 2026-08-07 decision withdrew. The same command from the withdrawal baseline
+  forward reports 0 findings. Filed as
+  [a known issue](../../../memory/known-issues/2026-08-07-withdrawn-panel-grammar-reopens-two-branch-edges.md);
+  the three ways out all need the owner, because the only one that clears the edges
+  rewrites unpushed history and would strand the revisions sixteen panels are bound to.
