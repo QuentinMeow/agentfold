@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Require external action sections to project live queue items."""
 import argparse
-from collections import Counter, defaultdict, deque
+from collections import Counter
 import contextlib
 import functools
 import json
@@ -18,14 +18,8 @@ if str(AUTOMATION) not in sys.path:
 
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
-    claimed_by_identity_source,
-    commonmark_lines,
-    fold_unicode_marks,
     indentation_width,
-    markdown_line_body,
     markdown_links,
-    neutralize_core_fit_review_verdict_tokens,
-    partition_core_fit_review_verdict_units,
     normalized_action_tokens,
     render_inline_code,
     rendered_human_text,
@@ -74,39 +68,10 @@ TASK_QUEUE_ACTION_FIELD_RE = re.compile(
     re.M,
 )
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
-TASK_REVIEW_VERIFICATION_PATH_RE = re.compile(
-    r"^tasks/(?P<status>0_backlog|1_in-progress|2_blocked|3_in-review|4_done)/"
-    r"(?P<task_id>\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)/verification\.md$"
-)
 TASK_COMMIT_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9_-])task:\s*"
     r"(?P<task>\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)"
     r"(?![A-Za-z0-9-])",
-)
-CORE_FIT_ACTION_VERDICT_RE = re.compile(
-    r"(?m)^[ \t]*(?:-[ \t]+)?core-fit[ \t]*/[^\r\n:]+:[ \t]+"
-    r"(?:approve|block)(?=[ \t]+—)",
-    re.I,
-)
-COMPLETED_ADVERSARIAL_PANEL_LINE_RE = re.compile(
-    r"^[ ]{0,3}-[ \t]+adversarial[ \t]+panel[ \t]*/[ \t]*"
-    r"(?P<reviewer>"
-    r"(?:reviewer(?:[ \t]+[0-9]+)?|"
-    r"[A-Za-z0-9][A-Za-z0-9-]*"
-    r"(?:[ \t]+[A-Za-z0-9][A-Za-z0-9-]*)*[ \t]+reviewer)"
-    r"):[ \t]+(?P<verdict>approve|block)[ \t]+—[ \t]+"
-    r"(?P<finding>\S(?:[^\r\n]*\S)?)[ \t]*$"
-)
-COMPLETED_PANEL_INLINE_IMAGE_RE = re.compile(
-    r"(?<!\\)!\[(?P<label>(?:\\.|[^\]\\])*)\]"
-    r"\([^\r\n)]*\)"
-)
-COMPLETED_PANEL_REFERENCE_LINK_RE = re.compile(
-    r"(?<!!)\[(?P<label>(?:\\.|[^\]\\])*)\]"
-    r"\[(?P<reference>(?:\\.|[^\]\\])*)\]"
-)
-COMPLETED_PANEL_REFERENCE_DEFINITION_RE = re.compile(
-    r"^[ ]{0,3}\[(?P<reference>[^\]\r\n]+)\]:[ \t]+\S"
 )
 HEADING_RE = re.compile(
     r"^(?P<quote>(?:>[ \t]?)*)(?P<level>#{1,6})[ \t]+"
@@ -127,7 +92,7 @@ NO_ACTION_TEXT_BY_ACTOR = {
 }
 NO_ACTION_TEXT = NO_ACTION_TEXT_BY_ACTOR["needs-human"]
 CLEAR_ACTION_VERB_PATTERN = (
-    r"(?:accept|approve|authorize|block|choose|confirm|consider|"
+    r"(?:accept|approve|authorize|choose|confirm|consider|"
     r"(?:chime|weigh)[ \t]+in|"
     r"(?:have|take)[ \t]+"
     r"(?:(?:a|an|another|one|your)[ \t]+)?"
@@ -185,8 +150,7 @@ WORK_DIRECTIVE_PATTERN = (
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
 AMBIGUOUS_CLEAR_COMMAND_PATTERN = (
-    rf"(?:(?:block|merge|release|review|vote)"
-    rf"{NONCOMMAND_SUMMARY_GUARD}"
+    rf"(?:(?:merge|release|review|vote){NONCOMMAND_SUMMARY_GUARD}"
     r"(?=[.!?;,:)]|$|[ \t]+\S))"
 )
 CLEAR_DIRECTIVE_ACTION_PATTERN = (
@@ -258,11 +222,6 @@ KINDLY_COMMAND_PATTERN = (
 )
 COURTESY_COMMAND_PATTERN = (
     rf"(?:{PLEASE_COMMAND_PATTERN}|{KINDLY_COMMAND_PATTERN})"
-)
-CONJOINED_COURTESY_COMMAND_RE = re.compile(
-    rf"(?:^|[.!?;:—][ \t]+|\band[ \t]+)"
-    rf"{COURTESY_COMMAND_PATTERN}\b",
-    re.I | re.M,
 )
 HUMAN_ACTION_NOUN_PATTERN = (
     r"(?:advice|approval|authorization|choice|clarification|comments?|"
@@ -695,7 +654,7 @@ TASK_AUTHORITY_DIRECTIVE_RE = re.compile(
     rf"{COURTESY_COMMAND_PATTERN}"
     r"|"
     rf"{DIRECTIVE_PREFIX_PATTERN}"
-    rf"(?:accept|approve|authorize|block{NONCOMMAND_SUMMARY_GUARD}|"
+    r"(?:accept|approve|authorize|"
     r"(?:give|provide)(?:[ \t]+(?:me|our|us|your))?[ \t]+feedback|"
     r"let[ \t]+(?:me|us)[ \t]+know|"
     r"keep[ \t]+(?:me|us)[ \t]+(?:informed|posted|updated)|"
@@ -1296,16 +1255,11 @@ def action_like_clean_text(
     allow_self_answered_explanations=False,
 ):
     """Classify already-visible prose with the deterministic action grammar."""
-    clean = fold_unicode_marks(clean)
+    clean = strip_default_ignorable_characters(clean)
     if unchecked_task_list_item(clean):
         return True
     clean = strip_checked_task_list_items(clean)
     clean = strip_action_list_markers(clean)
-    if CORE_FIT_ACTION_VERDICT_RE.search(clean):
-        # A valid formal receipt already has its exact structural token blanked.
-        # Any approve/block token still in that position is a non-formal near miss
-        # and remains an action, including a source word split by combining marks.
-        return True
     if strip_leading_symbols:
         clean = "\n".join(
             re.sub(r"^[^\w]+", "", line)
@@ -1423,7 +1377,7 @@ def action_like_task_record_prose(text):
         matched = TASK_LIST_ITEM_RE.match(line)
         task_lines.append(line[matched.end():] if matched else line)
     clean = "\n".join(task_lines)
-    clean = fold_unicode_marks(
+    clean = strip_default_ignorable_characters(
         strip_action_emphasis(clean)
     )
     clean = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", clean)
@@ -1435,8 +1389,6 @@ def action_like_task_record_prose(text):
         lambda matched: matched.group(0)[:-1] + ".",
         clean,
     )
-    if CORE_FIT_ACTION_VERDICT_RE.search(clean):
-        return True
     if question_mark_count(clean) or TODO_RE.search(clean):
         return True
     return any(
@@ -1452,119 +1404,9 @@ def action_like_task_record_prose(text):
     )
 
 
-def action_like_completed_review_unit_prose(text):
-    """Classify one reviewer/finding unit without receipt-prefix interference.
-
-    Completed review prose has one extra guarded shape: a courtesy command can
-    follow a benign finding clause after ASCII ``and``. The general task grammar
-    intentionally does not gain that rule, and bare conjunctions such as
-    ``Agents review and approve`` remain summaries rather than commands.
-    """
-    if action_like_task_record_prose(text):
-        return True
-    clean = rendered_human_text(text or "")
-    clean = strip_indented_code(render_inline_code(clean))
-    clean = MARKDOWN_LINK_RE.sub(
-        lambda matched: matched.group("label"),
-        clean,
-    )
-    clean = fold_unicode_marks(strip_action_emphasis(clean))
-    clean = strip_action_list_markers(clean)
-    return any(
-        CONJOINED_COURTESY_COMMAND_RE.search(variant)
-        for variant in action_prose_variants(clean)
-    )
-
-
 def _without_explicit_block_quotes(text):
     """Keep visible blockquotes actionable; fenced/inline code remains data."""
     return text or ""
-
-
-def partition_completed_adversarial_panel_units(text):
-    """Neutralize exact completed-panel verdict tokens for task detection.
-
-    This is a classification-only compatibility view for task-root verification
-    records. It grants no receipt authority. Only a literal, visible, lowercase
-    adversarial-panel list line with a stable reviewer label, an exact verdict
-    delimiter, and a nonempty same-line finding qualifies. The whole line remains
-    in the ordinary rendered-prose pipeline; only its exact structural verdict
-    token is blanked. Markdown that a human sees inside the finding is rendered in
-    this compatibility view, so decoration cannot split an action word. The
-    reviewer remains a standalone detection unit because its structural prefix
-    would otherwise keep a start-anchored command from being seen.
-    """
-    source_lines = commonmark_lines(text or "")
-    semantic = semantic_text(text or "")
-    semantic_lines = commonmark_lines(semantic)
-    rendered_lines = commonmark_lines(rendered_human_text(text or ""))
-    if len(source_lines) != len(semantic_lines) \
-            or len(source_lines) != len(rendered_lines):
-        return text or "", ()
-
-    reference_definitions = {
-        " ".join(matched.group("reference").casefold().split())
-        for line in semantic_lines
-        for matched in (
-            COMPLETED_PANEL_REFERENCE_DEFINITION_RE.match(
-                markdown_line_body(line)
-            ),
-        )
-        if matched
-    }
-
-    def render_finding(finding):
-        visible = render_inline_code(finding)
-        visible = COMPLETED_PANEL_INLINE_IMAGE_RE.sub(
-            lambda matched: matched.group("label"), visible
-        )
-
-        def render_reference(matched):
-            reference = " ".join(
-                matched.group("reference").casefold().split()
-            )
-            return (
-                matched.group("label")
-                if reference in reference_definitions
-                else matched.group(0)
-            )
-
-        return COMPLETED_PANEL_REFERENCE_LINK_RE.sub(
-            render_reference, visible
-        )
-
-    output = []
-    panel_units = []
-    for source_line, semantic_line, rendered_line in zip(
-        source_lines, semantic_lines, rendered_lines
-    ):
-        source_body = markdown_line_body(source_line)
-        matched = COMPLETED_ADVERSARIAL_PANEL_LINE_RE.fullmatch(source_body)
-        prefix_end = matched.start("finding") if matched else 0
-        structural_prefix = source_body[:prefix_end]
-        if not matched or not structural_prefix \
-                or markdown_line_body(semantic_line)[:prefix_end] \
-                != structural_prefix \
-                or markdown_line_body(rendered_line)[:prefix_end] \
-                != structural_prefix:
-            output.append(source_line)
-            continue
-        verdict_start, verdict_end = matched.span("verdict")
-        finding_start, finding_end = matched.span("finding")
-        transformed_body = (
-            source_body[:verdict_start]
-            + " " * (verdict_end - verdict_start)
-            + source_body[verdict_end:finding_start]
-            + render_finding(matched.group("finding"))
-            + source_body[finding_end:]
-        )
-        output.append(transformed_body + source_line[len(source_body):])
-        panel_units.append((
-            transformed_body,
-            matched.group("reviewer"),
-            render_finding(matched.group("finding")),
-        ))
-    return "".join(output), tuple(panel_units)
 
 
 def task_queue_path_from_destination(destination, source_path):
@@ -1605,27 +1447,6 @@ def _task_projection_stripped_text(
 ):
     """Return rendered task prose with only exact task-owned actions removed."""
     source = _without_explicit_block_quotes(text)
-    receipt_path = TASK_REVIEW_VERIFICATION_PATH_RE.fullmatch(str(source_path))
-    receipt_detection_units = []
-    completed_panel_units = ()
-    if receipt_path:
-        task_path = (
-            f"tasks/{receipt_path.group('status')}/"
-            f"{receipt_path.group('task_id')}/task.md"
-        )
-        try:
-            task_text = candidate_text(
-                task_path, repo=repo, candidate_revision=candidate_revision
-            )
-        except (OSError, RuntimeError, UnicodeError):
-            task_text = ""
-        claimant = claimed_by_identity_source(task_text)
-        source, receipt_detection_units = partition_core_fit_review_verdict_units(
-            source, claimant=claimant
-        )
-        source, completed_panel_units = (
-            partition_completed_adversarial_panel_units(source)
-        )
     _semantic_source, matches = visible_markdown_link_source(source)
     allowed = set(allowed_queue_paths or ())
     valid_sources = []
@@ -1689,12 +1510,7 @@ def _task_projection_stripped_text(
             + " " * len(projection_source)
             + rendered[offset + len(projection_source):]
         )
-    return (
-        rendered,
-        invalid_human_projections,
-        receipt_detection_units,
-        completed_panel_units,
-    )
+    return rendered, invalid_human_projections
 
 
 def task_action_prose_units(text):
@@ -1747,60 +1563,26 @@ def task_action_unit_counts(
     Counter keys are normalized visible excerpts, so an edge checker can subtract
     the parent multiset from the candidate multiset without losing duplicate asks.
     """
-    (
-        rendered,
-        invalid_projections,
-        receipt_detection_units,
-        completed_panel_units,
-    ) = (
-        _task_projection_stripped_text(
-            text,
-            source_path,
-            allowed_queue_paths,
-            repo=repo,
-            candidate_revision=candidate_revision,
-        )
+    rendered, invalid_projections = _task_projection_stripped_text(
+        text,
+        source_path,
+        allowed_queue_paths,
+        repo=repo,
+        candidate_revision=candidate_revision,
     )
     units = list(task_action_prose_units(rendered))
-    panel_by_line = defaultdict(deque)
-    for panel_unit in completed_panel_units:
-        panel_by_line[panel_unit[0]].append(panel_unit)
+    units.extend(invalid_projections)
     actionable = []
     for unit in units:
-        first_line = unit.split("\n", 1)[0]
-        panel_queue = panel_by_line.get(first_line)
-        panel_unit = panel_queue.popleft() if panel_queue else None
-        if panel_unit is not None:
-            _line, reviewer, finding = panel_unit
-            is_actionable = (
-                action_like_task_record_prose(unit)
-                or action_like_completed_review_unit_prose(reviewer)
-                or action_like_completed_review_unit_prose(finding)
-            )
-        else:
-            is_actionable = action_like_task_record_prose(unit)
-        if not is_actionable:
+        if not (
+            unit.startswith("Invalid human-action projection:")
+            or action_like_task_record_prose(unit)
+        ):
             continue
         normalized = re.sub(
             r"\s+",
             " ",
             strip_default_ignorable_characters(unit),
-        ).strip()
-        if normalized:
-            actionable.append(normalized)
-
-    for unit in invalid_projections:
-        normalized = re.sub(
-            r"\s+", " ", strip_default_ignorable_characters(unit)
-        ).strip()
-        if normalized:
-            actionable.append(normalized)
-
-    for unit in receipt_detection_units:
-        if not action_like_completed_review_unit_prose(unit):
-            continue
-        normalized = re.sub(
-            r"\s+", " ", strip_default_ignorable_characters(unit)
         ).strip()
         if normalized:
             actionable.append(normalized)

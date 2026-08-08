@@ -11,21 +11,22 @@ import fnmatch
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 AUTOMATION = Path(__file__).resolve().parent
 if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
-from markdown_semantics import (
-    claimed_by_identity_source,
-    core_fit_review_evidence,
-    independent_review_verdicts,
-    semantic_text,
-)
+from markdown_semantics import semantic_text
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
+REVIEW_RE = re.compile(
+    r"^- core-fit / ([^:\r\n]+):[ \t]*(approve|block)[ \t]+[—-][ \t]+(.+)$",
+    re.I | re.M,
+)
+FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 CORE_PREFIXES = (
     "skills/",
     "automation/",
@@ -242,6 +243,17 @@ def valid_adapter(value):
     )
 
 
+def identity_key(identity):
+    normalized = unicodedata.normalize("NFKC", identity or "").casefold()
+    return tuple(sorted(re.findall(r"[^\W_]+", normalized, re.UNICODE)))
+
+
+def same_reviewer_as_claimant(reviewer, claimant):
+    claimant_key = identity_key(claimant)
+    reviewer_key = identity_key(reviewer)
+    return bool(claimant_key and reviewer_key == claimant_key)
+
+
 def validate_task(
     task, touched_core, require_review=False, load_text=None,
     review_revision_check=None,
@@ -302,25 +314,33 @@ def validate_task(
     elif require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
-        review_evidence = core_fit_review_evidence(verification_text)
-        if review_evidence["section_count"] != 1:
+        review_sections = named_sections(verification_text, "Review verdicts")
+        if len(review_sections) != 1:
             errors.append("verification.md needs exactly one real `## Review verdicts` section")
-        if review_evidence["revision_count"] != 1:
+        review_section = review_sections[0] if len(review_sections) == 1 else ""
+        revision_matches = list(re.finditer(
+            rf"^\*\*Reviewed revision:\*\*[ \t]*({FULL_COMMIT_PATTERN})[ \t]*$",
+            review_section,
+            re.M,
+        ))
+        if len(revision_matches) != 1:
             errors.append(
                 "Review verdicts needs exactly one real "
                 "`**Reviewed revision:** <commit>` field"
             )
+            verdict_source = ""
         else:
-            reviewed_revision = review_evidence["reviewed_revision"]
+            reviewed_revision = revision_matches[0].group(1)
+            verdict_source = review_section[revision_matches[0].end():]
             if review_revision_check:
                 errors.extend(review_revision_check(reviewed_revision))
-        claimant = claimed_by_identity_source(task_text)
+        verdicts = REVIEW_RE.findall(verdict_source)
+        claimant = task_fields.get("Claimed-by", "")
         latest = {}
-        for matched, reviewer_key in independent_review_verdicts(
-            review_evidence, claimant
-        ):
-            verdict = matched.group("verdict")
-            latest[reviewer_key] = verdict.lower()
+        for reviewer, verdict, _ in verdicts:
+            reviewer_key = identity_key(reviewer)
+            if reviewer_key and not same_reviewer_as_claimant(reviewer, claimant):
+                latest[reviewer_key] = verdict.lower()
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())
         if not latest:
