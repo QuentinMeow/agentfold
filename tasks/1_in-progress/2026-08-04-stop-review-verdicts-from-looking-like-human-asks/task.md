@@ -18,11 +18,12 @@ real human asks.
 ## Acceptance criteria
 
 - [x] A newly introduced canonical `approve` or `block` review receipt is not reported as
-      an unqueued human action. One shape is still reported, named in `design.md` under
-      Known residue: a receipt whose *reviewer identity* carries raw HTML, which the
-      rendered view strips, so the gate cannot place the token and blanks nothing. It
-      fails closed — the commit is refused, nothing hidden — and markup in a finding, the
-      case that actually came up, is now neutralized correctly.
+      an unqueued human action, with one limit stated as a rule in `design.md` under Known
+      residue: if the rendered view rewrites anything inside the verdict's prefix — its
+      marker, its reviewer, or the token itself — the gate cannot place the token and
+      blanks nothing, so that verdict is still reported. It fails closed, the commit is
+      refused and nothing is hidden, and the template asks writers to keep that prefix
+      plain. Markup in a *finding*, the case that actually came up, is neutralized.
 - [x] A real human request embedded in the review finding is still reported.
 - [x] Malformed near-misses receive no exemption from ordinary human-action detection.
 - [x] The existing core-review parser continues accepting valid revision-bound receipts.

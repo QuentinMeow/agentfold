@@ -11,9 +11,11 @@
 The review-receipt parser now requires the heading to be exactly `## Review verdicts`,
 which `memory/decisions/2026-08-04-review-receipt-parser-authorization.md` authorized and
 `automation/review_receipt.py` enforces. Nineteen tracked verification records still carry
-the older `## Review verdicts (when a review was explicitly run)` spelling, so none of them
-can host a receipt. Four are live tasks with `**Repository scope:** core`, which are the
-first records `--require-review` will be run against, so they hit this first.
+the older `## Review verdicts (when a review was explicitly run)` spelling. In eighteen of
+them that is the only such heading, so those records can host no receipt at all; the
+nineteenth also carries an exact heading, which is the one that counts there. Four of the
+nineteen are live tasks with `**Repository scope:** core`, the first records
+`--require-review` will be run against, so they hit this first.
 
 Nothing is broken today: every one of those sections says no review was run, and
 `--require-review` is invoked by hand. This is a migration, not a repair.

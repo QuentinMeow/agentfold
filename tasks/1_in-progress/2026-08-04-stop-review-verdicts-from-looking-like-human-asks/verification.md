@@ -2030,7 +2030,10 @@ OK
 The same one-approve, two-block panel the withdrawn parser reported as `1 approve, 0
 block`. Its three findings carry a backticked path, a percent sign, a number sign, a
 curly apostrophe, and two extra em dashes — every class the closed alphabet rejected.
-The script is `tmp/probe.py`, reproduced inline below the output.
+The script is `tmp/probe.py`, reproduced inline below the output. It was run at
+`1d536d0ba12268c75cf642817acc208ca97935c0` and does not run at any later revision: it
+calls `accepted_verdict_token_spans`, which existed only in that revision's module. The
+equivalent behavior at HEAD is recorded under the eighteenth-panel sections below.
 
 ```
 $ python3 tmp/probe.py
@@ -2190,7 +2193,10 @@ invoked, and this session wrote no receipt for its own work.
 
 One script per finding class. Item 1 is the decisive one: each variant previously parsed
 as `1 approve, 0 block` with no error, so the gate passed a panel that rejected the
-change. The script is `tmp/repairs.py`, reproduced below its output.
+change. The script is `tmp/repairs.py`, reproduced below its output. It was run at
+`f824780504015e628696d6947af357975ec21a52`. Re-running it at HEAD prints the same lines
+except item 5's `parse errors:`, which now shows a `ReceiptError(...)` repr rather than a
+bare string, because problems carry their line number since then.
 
 ```
 $ python3 tmp/repairs.py
@@ -2539,6 +2545,8 @@ Every problem carries the file and the line. A stranded verdict names the line t
 actually ended the block rather than itself. A refused heading quotes the spelling it
 found. Twelve near-misses report five problems and a count of the rest.
 
+The script is `tmp/messages.py`, reproduced below its output.
+
 ```
 $ python3 tmp/messages.py
 -- stranded after a wrapped finding
@@ -2562,6 +2570,57 @@ $ python3 tmp/messages.py
     v.md:14: Review verdicts has a core-fit line outside the contiguous receipt block, which ended at line 10: **-
     v.md: Review verdicts has 7 further problem(s) not listed
 ```
+
+```python
+import sys
+sys.path.insert(0, "automation")
+import review_receipt as rr
+
+REV = "a" * 40
+
+
+def doc(body, heading="## Review verdicts"):
+    return "# V\n\nintro\n\n" + heading + "\n\n**Reviewed revision:** " + REV + "\n\n" + body
+
+
+def show(name, body, **kw):
+    parsed = rr.parse_review_receipt(doc(body, **kw))
+    print("--", name)
+    for line in rr.formatted_errors(parsed, "tasks/1_in-progress/x/verification.md"):
+        print("   ", line)
+
+
+show("stranded after a wrapped finding", (
+    "- core-fit / a: approve — the boundary holds but\n"
+    "  the wrap continues here\n"
+    "- core-fit / b: block — flawless line\n"
+))
+show("stranded after prose", (
+    "- core-fit / a: approve — ok\n\nThe panel adjourned.\n\n"
+    "- core-fit / b: block — flawless line\n"
+))
+show("uncanonical inside the block", (
+    "- core-fit / a: approve — ok\n**- core-fit / b: block — decorated\n"
+))
+show("no identity", "- core-fit /  : approve — ok\n")
+show("revision not first", "x\n", heading="## Review verdicts")
+show("inexact heading", "- core-fit / a: approve — ok\n",
+     heading="## Review verdicts (when a review was explicitly run)")
+show("two exact headings",
+     "- core-fit / a: approve — ok\n\n## Review verdicts\n\n"
+     "**Reviewed revision:** " + REV + "\n\n- core-fit / b: approve — ok\n")
+
+many = "- core-fit / a: approve — ok\n" + "".join(
+    "**- core-fit / r{0}: block — decorated\n".format(n) for n in range(12)
+)
+parsed = rr.parse_review_receipt(doc(many))
+print("-- twelve near-misses ->", len(parsed.errors), "reported")
+for line in rr.formatted_errors(parsed, "v.md"):
+    print("   ", line[:110])
+```
+
+That run is pinned to `4b66357fd501b4cee6700d6b6ccad6b694197262`. At HEAD the same script
+prints the same problems with the wording the eighteenth-panel repair gave them.
 
 The `revision not first` probe prints nothing because its own fixture is malformed — it
 puts the revision field first regardless. That path is covered by
@@ -2624,6 +2683,225 @@ PASS services/quote-api/tests/test_quote_api.py
 PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 44.82s
+```
+
+```
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s)
+```
+
+## Nineteenth panel repair — the three defects, replayed
+
+One script, `tmp/regressions.py`, reproduced below its output. Item 1 is the regression
+the previous pass introduced: placement scanned the rendered view from line 0, so a
+superseded lookalike above the receipt absorbed the blanking. The real verdict was then
+reported as an unqueued ask, and seven characters of the decoy's own word — `approved`
+became `       d` — were erased on a line that is not in any receipt.
+
+```
+$ python3 tmp/regressions.py
+=== item 1: decoy above the receipt ===
+  actions reported: 0
+   line: '- core-fit / dana: approved — round one, superseded'
+   line: '- core-fit / dana:         — the boundary holds'
+
+=== item 2: eight escapes ===
+  0a/0b err=1    - **core**-**fit** / d: block — dissent
+  0a/0b err=1    - `core` - `fit` / d: block — dissent
+  0a/0b err=1    - core -- fit / d: block — dissent
+  0a/0b err=1    - core...-...fit / d: block — dissent
+  0a/0b err=1    - core-fit ／ d: block — dissent
+  0a/0b err=1    - lens core-fit / d: block — dissent
+  0a/0b err=1    Note: core-fit / d: block — dissent
+  0a/0b err=1    - xcore-fit / d: block — dissent
+
+=== item 3: verdicts the structural view blanks ===
+  0a/0b err=1    indented 4
+  0a/0b err=1    indented 8
+  0a/0b err=1    div block
+  0a/0b err=1    inline span
+  0a/0b err=1    fenced
+  0a/0b err=1    comment
+```
+
+At `6d84769` the first block reported one action and mutated the decoy, and every line in
+the second block, plus `div block`, `inline span`, `fenced` and `comment` in the third,
+read `1a/0b err=0` — the panel's verdict silently dropped and the gate passing.
+
+```python
+import sys
+sys.path.insert(0, "automation")
+import review_receipt as rr
+import check_action_projection as cap
+from markdown_semantics import rendered_human_text
+
+REV = "a" * 40
+PATH = "tasks/1_in-progress/2026-08-04-x/verification.md"
+
+DECOY = (
+    "# V\n\n"
+    "## Panel round one\n\n"
+    "- core-fit / dana: approved — round one, superseded\n\n"
+    "## Review verdicts\n\n"
+    "**Reviewed revision:** " + REV + "\n\n"
+    "- core-fit / dana: approve — the boundary holds\n"
+)
+
+print("=== item 1: decoy above the receipt ===")
+counts = cap.task_action_unit_counts(DECOY, PATH, ())
+print("  actions reported:", sum(counts.values()))
+for excerpt in counts:
+    print("   ", repr(excerpt))
+blanked = rr.blank_receipt_verdict_tokens(DECOY, PATH, rendered_human_text(DECOY))
+for line in blanked.splitlines():
+    if "dana" in line:
+        print("   line:", repr(line))
+
+print()
+print("=== item 2: eight escapes ===")
+
+
+def doc(body, heading="## Review verdicts"):
+    return "# V\n\n" + heading + "\n\n**Reviewed revision:** " + REV + "\n\n" + body
+
+
+def tally(body):
+    parsed = rr.parse_review_receipt(doc(body))
+    votes = [entry.verdict for entry in parsed.verdicts]
+    return "{0}a/{1}b err={2}".format(
+        votes.count("approve"), votes.count("block"), len(parsed.errors)
+    )
+
+
+APPROVE = "- core-fit / a: approve — ok\n"
+ESCAPES = [
+    "- **core**-**fit** / d: block — dissent",
+    "- `core` - `fit` / d: block — dissent",
+    "- core -- fit / d: block — dissent",
+    "- core...-...fit / d: block — dissent",
+    "- core-fit ／ d: block — dissent",
+    "- lens core-fit / d: block — dissent",
+    "Note: core-fit / d: block — dissent",
+    "- xcore-fit / d: block — dissent",
+]
+for line in ESCAPES:
+    print("  {0:14s} {1}".format(tally(APPROVE + line + "\n"), line))
+
+print()
+print("=== item 3: verdicts the structural view blanks ===")
+HIDDEN = {
+    "indented 4": "    - core-fit / d: block — dissent",
+    "indented 8": "        - core-fit / d: block — dissent",
+    "div block": "<div>\n- core-fit / d: block — dissent\n</div>",
+    "inline span": "<span>- core-fit / d: block — dissent</span>",
+    "fenced": "```\n- core-fit / d: block — dissent\n```",
+    "comment": "<!-- - core-fit / d: block — dissent -->",
+}
+for name, block in HIDDEN.items():
+    print("  {0:14s} {1}".format(tally(APPROVE + block + "\n"), name))
+```
+
+## Nineteenth panel repair — blast radius and the backtracking probe
+
+The rejector is now searched rather than anchored, so its false-positive surface had to be
+measured against real content, and `.search` changes the scan shape so the cost had to be
+measured too. Every tracked Markdown file is parsed, and every tracked task record is run
+through the action gate. The script is `tmp/blast_radius.py`.
+
+```
+$ python3 tmp/blast_radius.py
+  refused: tasks/0_backlog/2026-08-07-migrate-the-review-verdicts-heading/verification.md
+      tasks/0_backlog/2026-08-07-migrate-the-review-verdicts-heading/verification.md:17: Review verdicts needs exactly one real `**Reviewed revision:** <com
+  refused: tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md
+      tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md:288: Review verdicts needs exactly one real `**Reviewed revision:
+  receipt accepted: tasks/1_in-progress/2026-08-04-stop-review-verdicts-from-looking-like-human-asks/verification.md 3 verdict(s)
+  receipt accepted: tasks/4_done/2026-07-22-protect-core-portability/verification.md 3 verdict(s)
+  refused: templates/task/verification.md
+      templates/task/verification.md:17: Review verdicts needs exactly one real `**Reviewed revision:** <commit>` field, as the first line of the receipt
+tracked markdown files: 645 | receipts accepted: 2 | refused past the heading: 3
+unprojected actions over every tracked task record: 18
+
+backtracking probe (seconds per call, 200k-character lines):
+  punctuation run      0.0021
+  no slash after fit   0.0020
+  many core prefixes   0.0046
+  core fit no slash    0.0055
+  slash far away       0.0019
+```
+
+Zero blast radius. All three refusals are the unfilled-placeholder case — a section whose
+revision field is still `<full immutable commit ID …>` — which behaved the same before.
+Both real receipts still parse, including the 2026-07-22 historical one. The action-gate
+total is 18, identical to `6d84769`:
+
+```
+$ git checkout 6d84769 -- automation/review_receipt.py && python3 -c 'import subprocess, sys; sys.path.insert(0, "automation"); from pathlib import Path; import check_action_projection as cap; tracked = subprocess.run(["git","ls-files","tasks/*.md"], capture_output=True, text=True, check=True).stdout.split(); print("6d84769 unprojected actions over every tracked task record:", sum(sum(cap.task_action_unit_counts(Path(p).read_text(encoding="utf-8"), p, ()).values()) for p in tracked))'
+6d84769 unprojected actions over every tracked task record: 18
+```
+
+Nothing exceeds six milliseconds on a 200,000-character line, because both runs inside the
+rejector are bounded to sixteen characters.
+
+## Nineteenth panel repair — the new regressions fail at 6d84769
+
+```
+$ git checkout 6d84769 -- automation/review_receipt.py
+$ python3 -m unittest <the five tests below>
+ERROR: test_placement_needs_the_whole_prefix_and_a_token_boundary (automation.tests.test_check_action_projection.ActionProjectionTests)
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- **core**-**fit** / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- `core` - `fit` / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- core -- fit / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- core...-...fit / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- core-fit ／ dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- lens core-fit / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='Note: core-fit / dissenter: block — a concrete bypass')
+FAIL: test_decoration_anywhere_in_the_line_is_still_refused (case='- xcore-fit / dissenter: block — a concrete bypass')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='indented four spaces')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='indented eight spaces')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='div block')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='inline span')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='fenced')
+FAIL: test_a_verdict_the_structural_view_drops_is_refused_not_skipped (case='html comment')
+FAIL: test_a_lookalike_above_the_receipt_cannot_steal_the_blanking (automation.tests.test_check_action_projection.ActionProjectionTests)
+Ran 5 tests in 0.057s
+
+FAILED (failures=15, errors=1)
+```
+
+The subtest labels are shortened here to fit; the runner prints each with its full class
+path. `test_a_refused_heading_quotes_the_spelling_it_found` passes at `6d84769` and is not
+listed: it is mutation coverage for a branch that already existed, not repair evidence.
+
+## Nineteenth panel repair — focused regressions at HEAD
+
+```
+$ python3 -m unittest \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_decoration_anywhere_in_the_line_is_still_refused \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_verdict_the_structural_view_drops_is_refused_not_skipped \
+    automation.tests.test_check_core_scope.CoreScopeTests.test_a_refused_heading_quotes_the_spelling_it_found \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_a_lookalike_above_the_receipt_cannot_steal_the_blanking \
+    automation.tests.test_check_action_projection.ActionProjectionTests.test_placement_needs_the_whole_prefix_and_a_token_boundary
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.081s
+
+OK
+```
+
+## Nineteenth panel repair — filled template, full suite, reconciler
+
+```
+$ python3 tmp/filled_template.py
+--- verdict token 'approve': 0 unprojected action(s) ---
+--- verdict token 'block': 0 unprojected action(s) ---
+```
+
+```
+$ python3 automation/run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 15/15 files passed
+test elapsed: 45.86s
 ```
 
 ```

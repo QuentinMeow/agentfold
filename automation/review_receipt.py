@@ -7,41 +7,39 @@ one grammar: one exact top-level `## Review verdicts` heading, one
 consecutive `- core-fit / <reviewer>: <approve|block> — <finding>` lines. Only blank
 lines separate those elements, and the block ends at the first other nonblank line.
 
-Two regexes, pointed in opposite directions. `VERDICT_RE` is the acceptor and stays
-exact: widening it is how the withdrawn implementation grew. `LOOSE_VERDICT_RE` is the
-rejector, and its only power is to refuse — widening it can never accept anything new,
-only report more — so it is as permissive as it can be made. It ignores list markers,
-quote markers, checkboxes, emphasis and code decoration, and any short run of non-letters
-inside `core-fit` or before the slash. A verdict that misses only on its decoration or
-its dash is reported rather than read as the ordinary prose that ends the receipt, which
-is the fail-open the 2026-08-07 withdrawal decision named.
+Two regexes, pointed in opposite directions, and the direction is the whole design.
+`VERDICT_RE` is the acceptor and stays exact — widening an acceptor is how the withdrawn
+implementation grew. `LOOSE_VERDICT_RE` is the rejector, and a rejector can only refuse:
+whatever it newly matches becomes a reported error, never an accepted verdict. So it is
+kept loose on purpose, searched anywhere in the line rather than anchored, tolerant of
+any decoration around and inside `core-fit`, of any dash, and of slash-like characters
+beyond ASCII. It is applied twice — once to the structural view and once to the section's
+raw source, because the structural view blanks fenced, commented, indented and
+HTML-wrapped lines before any rejector could see them.
 
-The claim this module can make, stated exactly: inside the one receipt section, any line
-`LOOSE_VERDICT_RE` matches and `VERDICT_RE` does not is reported with its line number. It
-cannot claim more. A line that reaches for the verdict shape but falls outside the
-rejector still ends the block in silence — no slash at all (`- core-fit reviewer:
-approve — …`), a letter fused to the token (`- core-fitt / …`), or a homoglyph inside the
-word itself. Catching those needs character-similarity judgement, which that decision
-forbids.
+**What this module refuses, as a rule rather than a list.** Inside the one receipt
+section, a line whose structural *or* raw form the rejector matches, and which the
+acceptor does not accept, refuses the whole receipt. A line the rejector does not match
+still ends the block silently; the rejector is loose but it is a pattern, not a judgement
+about what a writer meant, and the shapes past it are those needing character-similarity
+reasoning that
+`memory/decisions/2026-08-07-withdraw-the-first-review-receipt-implementation.md`
+forbids, plus anything else a pattern over `core`/`fit`/slash cannot see.
 
-Five further routes out of the tally have nothing to do with this grammar, and all five
-are prior design:
+**What leaves the tally without an error, as rules.** A verdict the receipt never
+contained — outside the one section, or on a line the rejector cannot match — is not in
+the receipt. A verdict the core-scope gate declines to count — one whose reviewer it
+cannot tell apart from the claimant or from another reviewer under
+`check_core_scope.identity_key`, or one it replaces under its latest-verdict-per-reviewer
+rule — leaves the tally by that gate's rules, not this parser's. Problems past
+`ERROR_LIMIT` are counted rather than listed, so a receipt with many of them reports how
+many it did not name.
 
-- a verdict inside a code fence or an HTML comment is blanked before any gate sees it,
-  which `test_fenced_review_example_is_not_a_verdict` requires;
-- a second verdict from an identity already recorded replaces the first, under the
-  core-scope gate's latest-verdict-per-reviewer rule;
-- a verdict whose reviewer matches the task's claimant is dropped by
-  `check_core_scope.same_reviewer_as_claimant`;
-- two different reviewer names whose word tokens are the same set collapse to one entry,
-  because `check_core_scope.identity_key` is order-insensitive;
-- a verdict outside the one `## Review verdicts` section is not in the receipt at all.
-
-Both gates parse `semantic_text` of the same bytes, so the action gate never neutralizes
-a receipt the core-scope gate would refuse. The converse does not hold, on purpose: the
-action gate additionally requires the artifact path and a rendered line that still opens
-with the verdict's own prefix, and when either fails it blanks nothing, leaving the
-completed verdict visible as an ordinary action.
+**What the two gates share, and what they do not.** They parse `semantic_text` of the
+same bytes, so this parser reaches the same verdict for both; everything after that is
+each gate's own. The core-scope gate then applies claimant, identity and majority rules
+this module never sees, and the action gate additionally requires the artifact path and a
+rendered line still carrying the verdict, and blanks nothing when either fails.
 """
 import re
 import unicodedata
@@ -66,10 +64,14 @@ VERDICT_RE = re.compile(
     r"[ \t]+—[ \t]+(?P<finding>.+)$",
     re.I,
 )
-# The rejector. Every run below stops at an ASCII letter, and the literals that follow
-# them begin with one, so no run can backtrack into another: the match stays linear.
+# The rejector, used with `search`, so decoration before `core` cannot carry a line past
+# it. Both runs inside the pattern are bounded to 16 characters, which is what keeps the
+# scan cheap: the second run is followed by a slash, which is itself a character that run
+# accepts, so it does backtrack — but over at most 16 positions per start. Measured in
+# this task's verification record at a few milliseconds for 200,000-character lines.
+SLASH_CHARACTERS = "/／∕⁄"
 LOOSE_VERDICT_RE = re.compile(
-    r"[^A-Za-z\n]*core[^A-Za-z\n]{0,3}fit[^A-Za-z\n]*/", re.I
+    rf"core[^A-Za-z\n]{{0,16}}fit[^A-Za-z\n]{{0,16}}[{SLASH_CHARACTERS}]", re.I
 )
 # The exemption belongs to the artifact the core-scope gate actually validates. Nothing
 # validates a receipt in a worklog, so nothing there may claim one. Matched whole.
@@ -79,11 +81,11 @@ RECEIPT_PATH_RE = re.compile(
 # The same word tokens `check_core_scope.identity_key` counts. A reviewer with none of
 # them parses as a verdict and then vanishes from the tally, so it is refused here.
 REVIEWER_WORD_RE = re.compile(r"[^\W_]", re.UNICODE)
-# One malformed receipt should read like a repair list, not a wall. The count of what is
-# not shown is still reported, so nothing is hidden.
+# One malformed receipt should read like a repair list, not a wall. What is not shown is
+# still counted, so the reader knows the list is partial.
 ERROR_LIMIT = 5
 
-Verdict = namedtuple("Verdict", "reviewer verdict line token_start token_end")
+Verdict = namedtuple("Verdict", "reviewer verdict line number token_start token_end")
 ReceiptError = namedtuple("ReceiptError", "line message")
 Receipt = namedtuple("Receipt", "revision verdicts errors")
 
@@ -94,12 +96,17 @@ MISSING_REVISION = (
     "as the first line of the receipt"
 )
 UNCANONICAL_VERDICT = (
-    "Review verdicts rejects a core-fit line that is not "
-    "`- core-fit / <reviewer>: <approve|block> — <finding>`: {0}"
+    "Review verdicts refuses a line inside the receipt that reads as a core-fit "
+    "verdict but is not one; write it as `- core-fit / <reviewer>: <approve|block> "
+    "— <finding>` or move it out of the receipt: {0}"
 )
 STRANDED_VERDICT = (
     "Review verdicts has a core-fit line outside the contiguous receipt block, "
     "which ended at line {0}: {1}"
+)
+HIDDEN_VERDICT = (
+    "Review verdicts has a core-fit line the structural view does not carry — "
+    "indented, fenced, commented, or wrapped in HTML: {0}"
 )
 EMPTY_REVIEWER = (
     "Review verdicts rejects a core-fit line whose reviewer has no identity: {0}"
@@ -113,27 +120,25 @@ def _excerpt(line):
 
 
 class _Problems:
-    """Collect receipt problems, deduplicated and capped, counting the rest."""
+    """Collect receipt problems, capped, counting whatever the cap leaves out."""
 
     def __init__(self):
         self.found = []
         self.suppressed = 0
+        self.lines = set()
 
     def add(self, line, message):
-        if any(
-            problem.line == line and problem.message == message
-            for problem in self.found
-        ):
-            return
+        self.lines.add(line)
         if len(self.found) < ERROR_LIMIT:
             self.found.append(ReceiptError(line, message))
         else:
             self.suppressed += 1
 
     def result(self):
+        ordered = sorted(self.found, key=lambda problem: problem.line)
         if not self.suppressed:
-            return tuple(self.found)
-        return tuple(self.found) + (
+            return tuple(ordered)
+        return tuple(ordered) + (
             ReceiptError(None, MORE_PROBLEMS.format(self.suppressed)),
         )
 
@@ -146,7 +151,8 @@ def _numbered_lines(text, first_number):
 
 def parse_review_receipt(text):
     """Return the single receipt in one artifact, or the problems that refuse it."""
-    structural = semantic_text(text or "")
+    source = text or ""
+    structural = semantic_text(source)
     sections = list(SECTION_RE.finditer(structural))
     if len(sections) != 1:
         near = NEAR_SECTION_RE.search(structural)
@@ -160,9 +166,8 @@ def parse_review_receipt(text):
             message, line = MISSING_SECTION, None
         return Receipt(None, (), (ReceiptError(line, "verification.md " + message),))
 
-    body_start = sections[0].start(1)
     body = sections[0].group(1)
-    first_number = 1 + structural.count("\n", 0, body_start)
+    first_number = 1 + structural.count("\n", 0, sections[0].start(1))
     lines = list(_numbered_lines(body, first_number))
     index = 0
     while index < len(lines) and not lines[index][1].strip():
@@ -174,6 +179,7 @@ def parse_review_receipt(text):
 
     problems = _Problems()
     verdicts = []
+    accepted = set()
     ended_at = None
     for number, line in lines[index + 1:]:
         if not line.strip():
@@ -184,25 +190,52 @@ def parse_review_receipt(text):
             if REVIEWER_WORD_RE.search(unicodedata.normalize("NFKC", reviewer)) is None:
                 problems.add(number, EMPTY_REVIEWER.format(_excerpt(line)))
                 continue
+            accepted.add(number)
             verdicts.append(Verdict(
                 reviewer,
                 matched.group("verdict").lower(),
                 line,
+                number,
                 matched.start("verdict"),
                 matched.end("verdict"),
             ))
             continue
-        if LOOSE_VERDICT_RE.match(line) is not None:
+        if LOOSE_VERDICT_RE.search(line) is not None:
             problems.add(number, (
                 UNCANONICAL_VERDICT.format(_excerpt(line)) if ended_at is None
-                else STRANDED_VERDICT.format(ended_at[0], _excerpt(ended_at[1]))
+                else STRANDED_VERDICT.format(ended_at, _excerpt(line))
             ))
         if ended_at is None:
-            ended_at = (number, line)
+            ended_at = number
+
+    _refuse_hidden_verdicts(
+        source, structural, first_number, len(lines), accepted, problems
+    )
     errors = problems.result()
     if errors:
         return Receipt(revision_match.group(1), (), errors)
     return Receipt(revision_match.group(1), tuple(verdicts), ())
+
+
+def _refuse_hidden_verdicts(source, structural, first, count, accepted, problems):
+    """Refuse a verdict the structural view dropped before any rejector saw it.
+
+    `semantic_text` blanks fenced, commented, indented and HTML-wrapped lines, so a
+    verdict written that way reaches neither the acceptor nor the rejector and would end
+    the block in silence. Reading the section's own raw lines is refusal-only: it can add
+    an error, never a verdict. Line numbering is shared because `semantic_text` replaces
+    content without adding or removing lines; the guard below declines rather than
+    guesses if that ever stops holding.
+    """
+    raw_lines = source.split("\n")
+    if len(raw_lines) != len(structural.split("\n")):
+        return
+    for number in range(first, first + count):
+        if number in accepted or number in problems.lines:
+            continue
+        raw = raw_lines[number - 1].rstrip("\r") if number <= len(raw_lines) else ""
+        if raw.strip() and LOOSE_VERDICT_RE.search(raw) is not None:
+            problems.add(number, HIDDEN_VERDICT.format(_excerpt(raw)))
 
 
 def formatted_errors(receipt, display_path):
@@ -214,36 +247,62 @@ def formatted_errors(receipt, display_path):
     ]
 
 
+def carries_verdict_prefix(line, entry):
+    """Report whether one rendered line opens with exactly this verdict's prefix.
+
+    The boundary test is what stops `approve` from matching a line whose reviewer voted
+    `approved`: without it the blanking would erase seven characters of an unrelated
+    word on an unrelated line.
+    """
+    prefix = entry.line[:entry.token_end]
+    return (
+        line.startswith(prefix)
+        and not line[entry.token_end:entry.token_end + 1].isalnum()
+    )
+
+
+def _placement_index(lines, entry, first, last):
+    """Find the rendered line one verdict occupies, never leaving the receipt.
+
+    The line number the parser recorded is authoritative, because `semantic_text` and
+    `rendered_human_text` number lines alike. The fallback exists only for a rendered
+    view that rewrote the line, and it is bounded to the receipt's own verdict lines, so
+    a lookalike elsewhere in the document can never be blanked in its place.
+    """
+    exact = entry.number - 1
+    if 0 <= exact < len(lines) and lines[exact].rstrip("\r") == entry.line:
+        return exact
+    for index in range(max(first - 1, 0), min(last, len(lines))):
+        if carries_verdict_prefix(lines[index], entry):
+            return index
+    return None
+
+
 def blank_receipt_verdict_tokens(text, source_path, rendered):
     """Blank each accepted verdict's `approve`/`block` token inside a rendered view.
 
     The receipt is read from the structural view, because `rendered_human_text` is
-    explicitly not evidence for headings or fields. Each token is then placed by finding
-    the next rendered line that opens with that verdict's own prefix — the marker, the
-    reviewer and the token itself — so an entity, autolink or inline tag later in the
-    finding cannot move it. Only the token is replaced, always with spaces of equal
-    length, so every other offset survives and the reviewer, the finding and any line
-    wrapped beneath stay under ordinary human-action detection. A verdict whose prefix no
-    rendered line carries is left alone rather than blanked on a guess.
+    explicitly not evidence for headings or fields. Only the token is replaced, always
+    with spaces of equal length, so every other offset survives and the reviewer, the
+    finding and any line wrapped beneath stay under ordinary human-action detection. A
+    verdict whose line the rendered view no longer carries is left alone rather than
+    blanked on a guess.
     """
     if RECEIPT_PATH_RE.fullmatch(source_path or "") is None:
         return rendered
-    receipt = parse_review_receipt(text)
-    if not receipt.verdicts:
+    verdicts = parse_review_receipt(text).verdicts
+    if not verdicts:
         return rendered
     lines = rendered.split("\n")
-    index = 0
-    for entry in receipt.verdicts:
-        prefix = entry.line[:entry.token_end]
-        while index < len(lines) and not lines[index].startswith(prefix):
-            index += 1
-        if index >= len(lines):
-            break
+    first, last = verdicts[0].number, verdicts[-1].number
+    for entry in verdicts:
+        index = _placement_index(lines, entry, first, last)
+        if index is None:
+            continue
         line = lines[index]
         lines[index] = (
             line[:entry.token_start]
             + " " * (entry.token_end - entry.token_start)
             + line[entry.token_end:]
         )
-        index += 1
     return "\n".join(lines)

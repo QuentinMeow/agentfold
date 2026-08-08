@@ -657,3 +657,44 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The pull-request reconciler command is re-recorded with a derived range so it reproduces
   as written at any head. Its two findings are unchanged and still come from `50f2cf5` and
   `df0a5de`; the known issue is unchanged.
+
+## 2026-08-07 — nineteenth panel: one regression, two wider refusals, no more counting (claude)
+
+- Panel 4: 1 approve, 2 block. The approving reviewer verified zero real flips across 360
+  whole-repo runs. One block was a regression the previous pass introduced; the rest was
+  the same prose failure for the fourth round.
+- **Regression, introduced by chasing acceptance criterion 1.** Placement scanned the
+  rendered view from line 0 for the first line opening with the verdict's prefix, and
+  nothing bound that scan to the receipt. A superseded `- core-fit / dana: approved — …`
+  above the receipt absorbed the blanking: the real verdict was reported as an unqueued
+  ask, and `approved` became `       d` — seven characters of an unrelated word erased on
+  a line in no receipt at all. `Verdict` now carries the document line number the parser
+  already computed; placement uses it, and the prefix fallback is bounded to the receipt's
+  own verdict lines and requires a non-alphanumeric boundary after the token.
+- **The rejector is far looser, in both directions I had missed.** It was applied with
+  `match`, so any letter before `core` carried a line past it, and its internal gap was
+  capped at three characters. It is now searched, both runs are bounded at sixteen, and
+  slash-like characters beyond ASCII count. Eight demonstrated escapes are closed.
+- **A silent-drop family I did not know about.** `semantic_text` blanks fenced, commented,
+  indented and HTML-wrapped lines before any rejector sees them, so a verdict written that
+  way vanished with no error and the gate passed — the withdrawal ADR's decisive outcome
+  through another door. The parser now also reads the receipt section's own raw lines.
+  That is refusal-only: it can add an error, never a verdict.
+- **Stopped counting.** Four rounds were blocked on prose, and the cause was structural: a
+  closed enumeration invites falsification, and each round a reviewer found one more item.
+  The module, `design.md`, the template and `task.md` now state rules — what the rejector
+  needs, what each gate owns, when placement declines — and no inventory of shapes. The
+  false completeness claims are gone: the two gates share the parser and nothing else, and
+  problems past `ERROR_LIMIT` are counted rather than listed.
+- Also: the refusal message no longer invites reshaping a link into a verdict; the skill's
+  code-span rule is scoped to non-`core-fit` lenses; the unreachable dedup branch is gone;
+  the stranded message's line prefix and excerpt now name the same line; the migration task
+  no longer says all nineteen records can host no receipt.
+- Blast radius measured, not assumed: 645 tracked Markdown files, both real receipts still
+  parse, three refusals all the unfilled-placeholder case, and the action-gate total over
+  every task record is 18 at HEAD and 18 at `6d84769`. The backtracking probe stays under
+  six milliseconds on 200,000-character lines.
+- Three older evidence sections cited scripts that no longer run as written; each now pins
+  the revision it was taken at and says what changed, and the messages section carries its
+  source inline.
+- The merge-edge known issue is unchanged and still needs the owner.

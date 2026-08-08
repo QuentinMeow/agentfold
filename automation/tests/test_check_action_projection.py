@@ -19,6 +19,11 @@ SPEC = importlib.util.spec_from_file_location("check_action_projection", MODULE_
 PROJECTION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROJECTION)
 
+RECEIPT_PATH = Path(__file__).resolve().parents[1] / "review_receipt.py"
+RECEIPT_SPEC = importlib.util.spec_from_file_location("review_receipt", RECEIPT_PATH)
+RECEIPT = importlib.util.module_from_spec(RECEIPT_SPEC)
+RECEIPT_SPEC.loader.exec_module(RECEIPT)
+
 GIT_FIXTURE_IDENTITY = (
     ("user.name", "Test"),
     ("user.email", "test@example.invalid"),
@@ -2635,6 +2640,51 @@ class ActionProjectionTests(unittest.TestCase):
                         document, path, repo=root
                     )
                     self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_a_lookalike_above_the_receipt_cannot_steal_the_blanking(self):
+        """Placement follows the parser's line number, never a scan from line 0.
+
+        A superseded verdict above the receipt used to absorb the blanking: the real
+        verdict was then reported as a human ask, and seven characters of the decoy's
+        unrelated word were erased.
+        """
+        document = (
+            "# Verification\n\n"
+            "## Panel round one\n\n"
+            "- core-fit / dana: approved — round one, superseded\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / dana: approve — the boundary holds\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        blanked = PROJECTION.blank_receipt_verdict_tokens(document, path, rendered)
+
+        self.assertIn("- core-fit / dana: approved — round one, superseded", blanked)
+        self.assertIn("- core-fit / dana:         — the boundary holds", blanked)
+        with self.repo() as root:
+            self.assertEqual({}, self.receipt_units(root, document))
+
+    def test_placement_needs_the_whole_prefix_and_a_token_boundary(self):
+        """Two mutations the placement rule must not survive.
+
+        Truncating the anchor to the reviewer would let any later verdict by the same
+        reviewer take this one's blanking; matching the prefix anywhere in the line
+        rather than at its start would let an indented or quoted copy take it.
+        """
+        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+
+        self.assertTrue(RECEIPT.carries_verdict_prefix(verdict.line, verdict))
+        self.assertFalse(RECEIPT.carries_verdict_prefix(
+            "- core-fit / first: approved — a different verdict", verdict
+        ))
+        self.assertFalse(RECEIPT.carries_verdict_prefix(
+            "  - core-fit / first: approve — an indented copy", verdict
+        ))
+        self.assertFalse(RECEIPT.carries_verdict_prefix(
+            "> - core-fit / first: approve — a quoted copy", verdict
+        ))
 
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:

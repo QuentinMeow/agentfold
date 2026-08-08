@@ -28,8 +28,10 @@ trusts the majority (`handbook/principles/majority-over-single-agent.md`).
    - split → file a human review item with all verdicts and evidence linked.
 5. **Record**: one line per verdict in the task's `verification.md` (who, lens,
    verdict) — the merge gate's audit trail, whose shape `templates/task/verification.md`
-   owns. Outside the `core-fit` receipt, write the verdict as a code span —
+   owns. Every lens other than `core-fit` writes its verdict as a code span —
    `` `approve` `` — because a bare one reads as a new human ask and refuses the commit.
+   A `core-fit` line is never decorated: inside the receipt that refuses it, and outside
+   it belongs in the fenced transcript of the panel it came from.
    Records and external review surfaces are projections; every still-pending action links
    its live queue item.
 
