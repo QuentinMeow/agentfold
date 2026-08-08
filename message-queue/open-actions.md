@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 51 actions waiting on an agent. 3 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 51 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -322,13 +322,5 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.
 
   **If you do nothing:** The repaired format becomes and stays the repository standard without your judgment on record.
-
-  </details>
-- [Choose whether the review-receipt work is repaired in place, withdrawn and rebuilt to the smaller shape you authorized, or left exactly as it is.](needs-human/decisions/non-blocking-repair-or-withdraw-the-review-receipt-parser.md) — already answered — an agent owes the fold
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** The check that decides whether independent reviewers approved a change can count a panel that rejected it as a panel that approved it.
-
-  **If you do nothing:** Nothing stops. The current branch stays unpublished and unmerged, the default branch stays green and unchanged, and three finished repairs stay unreleased.
 
   </details>
