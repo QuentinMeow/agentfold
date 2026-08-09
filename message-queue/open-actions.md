@@ -5,14 +5,14 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 52 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 14 questions waiting on you, 53 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
 To answer one, open it and write a sentence in its blank `**Your answer:**` or `**Your review:**`
 line. That is the whole protocol — one edit, and nothing else to fill in.
 
-### Stops work at a named boundary — 3
+### Stops work at a named boundary — 4
 
 - [Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.](needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md) — blocks transition:start task:2026-07-22-universal-guard-mode-configuration · answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -36,6 +36,14 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** The implementation must configure real guards and report only observed protection, rather than letting an agent select or claim an assurance label.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the approved conceptual direction remains recorded but the revised design is not accepted.
+
+  </details>
+- [Choose contract-aware defaults, the screenshot's strict defaults, or a mixed set for the three conflicting areas.](needs-human/decisions/future-blocking-choose-agent-instruction-defaults.md) — blocks transition:start task:2026-08-09-refactor-agent-instructions · answer by 2026-11-07
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** These defaults will shape changes across every repository, while a strict reading would also overturn explicit compatibility and dependency promises in AgentFold.
+
+  **If you do nothing:** The global file stays unchanged and the repository-instruction refactor remains in backlog; existing projects continue under their current local rules.
 
   </details>
 
@@ -175,7 +183,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 44
+### Never stops work — 45
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -273,7 +281,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.
 
   </details>
-- **28 backlog tasks are waiting for an agent to pick one up.**
+- **29 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -304,6 +312,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [make-linked-worktree-bootstrap-concurrency-safe](needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md)
   - [one-line-human-responses-refresh-open-actions-safely](needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md)
   - [stop-a-withdrawn-exemption-from-dirtying-past-edges](needs-agent/requests/non-blocking-pick-up-stop-a-withdrawn-exemption-from-dirtying-past-edges.md)
+  - [refactor-agent-instructions](needs-agent/requests/non-blocking-pick-up-refactor-agent-instructions.md)
 
   </details>
 
