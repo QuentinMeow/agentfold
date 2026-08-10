@@ -74,7 +74,7 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** folding
 **Filed:** 2026-08-09, by codex, from task `2026-08-09-refactor-agent-instructions`
 **Full context:** `AGENTS.md`
 **Resolution evidence:** `memory/decisions/2026-08-09-agent-instruction-defaults.md`
