@@ -5,14 +5,14 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 14 questions waiting on you, 53 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 53 actions waiting on an agent. 3 others not yours right now.
 
 ## Waiting on you
 
 To answer one, open it and write a sentence in its blank `**Your answer:**` or `**Your review:**`
 line. That is the whole protocol — one edit, and nothing else to fill in.
 
-### Stops work at a named boundary — 4
+### Stops work at a named boundary — 3
 
 - [Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.](needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md) — blocks transition:start task:2026-07-22-universal-guard-mode-configuration · answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -36,14 +36,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** The implementation must configure real guards and report only observed protection, rather than letting an agent select or claim an assurance label.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the approved conceptual direction remains recorded but the revised design is not accepted.
-
-  </details>
-- [Choose contract-aware defaults, the screenshot's strict defaults, or a mixed set for the three conflicting areas.](needs-human/decisions/future-blocking-choose-agent-instruction-defaults.md) — blocks transition:start task:2026-08-09-refactor-agent-instructions · answer by 2026-11-07
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** These defaults will shape changes across every repository, while a strict reading would also overturn explicit compatibility and dependency promises in AgentFold.
-
-  **If you do nothing:** The global file stays unchanged and the repository-instruction refactor remains in backlog; existing projects continue under their current local rules.
 
   </details>
 
@@ -324,6 +316,14 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** A crashed or incomplete scanner must not accidentally become evidence that content is safe.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the separate failure state remains a proposal.
+
+  </details>
+- [Choose contract-aware defaults, the screenshot's strict defaults, or a mixed set for the three conflicting areas.](needs-human/decisions/future-blocking-choose-agent-instruction-defaults.md) — already answered — an agent owes the fold
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** These defaults will shape changes across every repository, while a strict reading would also overturn explicit compatibility and dependency promises in AgentFold.
+
+  **If you do nothing:** The global file stays unchanged and the repository-instruction refactor remains in backlog; existing projects continue under their current local rules.
 
   </details>
 - [After the repair is published as one exact revision, judge whether every human-attention file is understandable and answerable on its own, and approve it, name the remaining ambiguity, or reject the format.](needs-human/reviews/non-blocking-rereview-human-action-files.md) — status awaiting-artifact

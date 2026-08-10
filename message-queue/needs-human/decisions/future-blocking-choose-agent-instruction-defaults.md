@@ -68,7 +68,7 @@ Answer in plain words — one sentence is enough. You do not need to copy anythi
 particular vocabulary; the agent that folds your answer does the bookkeeping and will
 show you how it read your words before acting.
 
-**Your answer:** ______
+**Your answer:** Do what you recommend, then create PRs for all local changes.
 
 ## For the record
 
