@@ -10,5 +10,5 @@ this file is the task's progress bar.
       scope maps while preserving their local behavior.
 - [x] 4. Verify links, core admission, the reconciler, and the full test suite; record the
       exact results.
-- [ ] 5. Complete the task records and handover, push the task branch, and open its draft
+- [x] 5. Complete the task records and handover, push the task branch, and open its draft
       pull request against GitHub's actual default branch.

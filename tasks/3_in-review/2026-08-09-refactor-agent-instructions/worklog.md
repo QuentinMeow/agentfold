@@ -43,3 +43,14 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The final history contract is 44 lines: two lines were added after the first count to
   preserve the exact `awaiting-artifact` projection exclusion and distinguish the one
   handover marker from the three repository schema markers.
+
+## 2026-08-09 — publish-for-review (codex)
+
+- Committed the refactor after the staged core-scope gate, reconciler, and both selected
+  quote-service test files passed in the pre-commit hook. Pushed the task branch and
+  opened draft pull request #83 against GitHub's actual default branch, `main`.
+- GitHub's connected app returned `403 Resource not accessible by integration` when
+  creating the pull request. The authenticated GitHub CLI fallback opened the same draft
+  successfully; no repository or credential change was needed.
+- Moved the task to `3_in-review`. It has no queued review action, so the pull request
+  presents the verified change without inventing a second action ledger.
