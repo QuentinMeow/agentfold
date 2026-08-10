@@ -16,17 +16,17 @@ canonical documents, skills, templates, hooks, or tests.
 
 ## Acceptance criteria
 
-- [ ] The root `AGENTS.md` is materially shorter and routes agents to canonical depth
+- [x] The root `AGENTS.md` is materially shorter and routes agents to canonical depth
       without dropping the boot, coordination, safety, or publication obligations needed
       before those deeper files are opened.
-- [ ] Every tracked `AGENTS.md` is audited; ancestor restatements and stale routing are
+- [x] Every tracked `AGENTS.md` is audited; ancestor restatements and stale routing are
       removed while genuinely local boundaries, commands, and interfaces remain.
-- [ ] The chosen compatibility, dependency, and temporary-implementation defaults are
+- [x] The chosen compatibility, dependency, and temporary-implementation defaults are
       stated at the narrowest scope that owns them and do not silently overturn an
       existing public interface, immutable record, portability constraint, or decision.
-- [ ] Objective rules are linked to their existing mechanical enforcement instead of
+- [x] Objective rules are linked to their existing mechanical enforcement instead of
       being expanded into duplicate prose.
-- [ ] All instruction links resolve, the reconciler passes, and the full test suite passes
+- [x] All instruction links resolve, the reconciler passes, and the full test suite passes
       with real output recorded.
 
 ## Links

@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-02
+**Last-updated:** 2026-08-09
 
 What is true today, mapped to the desired-state lines.
 
@@ -99,6 +99,13 @@ What is true today, mapped to the desired-state lines.
   waiting on a human decision, because principles are near-immutable. ADRs gained
   `**Amends:**`/`**Amended-by:**` for a partial reversal, and `memory/index.md` marks an
   amended decision `[amended]` so an overturned clause is no longer advertised as live.
+- **Instruction hierarchy (2026-08-09)**: the root contract is a 79-line startup,
+  routing, lifecycle, and invariant map instead of a second copy of subtree procedures.
+  Automation and history contracts retain their actionable editing/current-schema rules
+  while routing enforced implementation detail to code, tests, and templates. Every
+  tracked contract was audited; quote-service leaves no longer repeat the parent-owned
+  standard-library constraint, and explicit public or persisted contracts remain
+  protected from speculative compatibility cleanup.
 - **Example code**: `services/quote-api` + `services/quote-cli`, stdlib-only, tested,
   cross-linked contracts.
 - **Design review (2026-07-22)**: a full grill of the harness — report in
