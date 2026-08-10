@@ -1,10 +1,10 @@
 # Refactor repository agent instructions
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Filed:** 2026-08-09, by codex, from chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/decisions/future-blocking-choose-agent-instruction-defaults.md`; `message-queue/needs-agent/requests/non-blocking-pick-up-refactor-agent-instructions.md`
+**Queue actions:** none
 
 ## Goal
 
