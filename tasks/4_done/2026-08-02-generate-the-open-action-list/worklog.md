@@ -34,3 +34,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   an exit code over a fixture that now owes both generated projections.
 - All three contract files sat exactly at their line budgets (root 139/140, both leaves
   60/60), so every documentation change folded into an existing line rather than adding one.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #72 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved from `3_in-review` to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output,
+  `message-queue/open-actions.md` and its `--fix-open-actions` generator are present on
+  `main`, and no live blocking agent action names this task.

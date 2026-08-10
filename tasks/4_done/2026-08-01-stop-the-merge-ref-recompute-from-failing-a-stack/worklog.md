@@ -94,3 +94,11 @@ design and verification records it needed and did not have.
   not this branch's: both are the stale-base race recorded above, now filed as its own task
   (`2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check`). No check was weakened
   and no `--no-verify` bypass was used.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #65 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output, the merge-ref
+  re-resolve lives in `.github/workflows/harness.yml` on `main`, and no live blocking agent
+  action names this task.

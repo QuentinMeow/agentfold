@@ -32,3 +32,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The task's `11/11` acceptance number is stale: the tree held twelve discovered test files
   before this branch and thirteen after. Noted in `verification.md` rather than quietly
   restated.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #68 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output, `automation/integrate.py`
+  and its tests are present on `main`, and no live blocking agent action names this task.
