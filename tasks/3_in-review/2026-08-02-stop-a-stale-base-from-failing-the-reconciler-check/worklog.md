@@ -49,3 +49,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Re-ran the five focused fixtures, all 25 workflow-adapter tests, all 15 repository test
   files, core scope, the reconciler, and diff whitespace checks after the review repair;
   every command passed.
+
+## 2026-08-16 — publish the finished repair (claude)
+
+- Found the branch pushed, complete, and verified, but never published: no pull request
+  existed for it, and the task folder still read `1_in-progress` while the work was done.
+- Merged current `main` into the branch. The merge was clean; no conflict and no
+  behavioural change to the workflow repair.
+- Re-ran the full repository suite on the merged tree: 15/15 files passed. One earlier run
+  reported `test_inspect_workspace_boundaries.py` failing under parallel sharding while the
+  same module passed standalone and on `main`; the re-run passed. Filed as a separate
+  flakiness finding rather than treated as a defect in this task.
+- Moved the task to `3_in-review` and opened its pull request. Review and merge remain.
