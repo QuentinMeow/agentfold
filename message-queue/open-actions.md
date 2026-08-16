@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 51 actions waiting on an agent. 2 others not yours right now.
+**Nothing is stopping work.** 13 questions waiting on you, 52 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -175,7 +175,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 43
+### Never stops work — 44
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -273,7 +273,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.
 
   </details>
-- **27 backlog tasks are waiting for an agent to pick one up.**
+- **28 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -303,6 +303,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [bind-task-branch-pushes-to-observed-tips](needs-agent/requests/non-blocking-pick-up-bind-task-branch-pushes-to-observed-tips.md)
   - [one-line-human-responses-refresh-open-actions-safely](needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md)
   - [stop-a-withdrawn-exemption-from-dirtying-past-edges](needs-agent/requests/non-blocking-pick-up-stop-a-withdrawn-exemption-from-dirtying-past-edges.md)
+  - [stop-workspace-boundary-tests-from-flaking-under-sharding](needs-agent/requests/non-blocking-pick-up-stop-workspace-boundary-tests-from-flaking-under-sharding.md)
 
   </details>
 
