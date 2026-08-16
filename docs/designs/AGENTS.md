@@ -9,6 +9,5 @@ and trust assumptions; test failure and bypass paths; and say how reality will b
 verified. Specify outcomes and boundaries more tightly than procedures so future agents
 can find better implementation paths without weakening the invariant.
 
-A proposal is not an accepted decision. One-way doors still follow
-`handbook/collaboration-modes.md`; accepted durable decisions live in
-`memory/decisions/`, and implementation progress lives in `tasks/`.
+Do not record acceptance or implementation status here; `docs/AGENTS.md` routes those
+artifacts to their owners.

@@ -8,44 +8,28 @@ One folder per conversation/session that did work:
 `conversations/YYYY-MM-DD-HHMM<TZ>-<kebab-slug>/` — session start as **local time
 plus timezone abbreviation** (e.g. `2026-07-22-0014PDT-fix-cli-crash`; use `UTC` if
 your zone has no letter abbreviation). Every folder **must** contain a `handover.md`
-— missing one is a blocking reconciler finding; only `--file-retries` would queue it.
+— the reconciler enforces this.
 
 ## handover.md (schema: `templates/handover.md`)
 
-The handover is for a human who was away: what happened, how it works now, what needs
-their attention — one screen maximum, plain language, no invented shorthand. Depth
-never goes in the handover; it goes in the task folder (worklog, design, verification)
-and the handover links there. End-of-session ritual: root `AGENTS.md`;
-`skills/session-handover/` walks through it.
+The handover is a one-screen, plain-language orientation for a human who was away. Copy
+`templates/handover.md`; put depth in task worklogs, designs, and verification, then link
+it. Follow `skills/session-handover/` and `skills/explain-to-human/`.
 
-The repository-local schema field above activates checking without imposing an
-AgentFold date or retained legacy folder on forks. Existing unmarked records remain
-records; every newly added handover must declare `**Queue projection:** v1` and exactly
-project the `message-queue/needs-human/` actions its liveness version selects, in
-filename-timing order. It never originates an ask. Resolved targets may later disappear
-because git history archives past delivery. Range-based checks evaluate the handover and
-queue together at its creation commit, so later additions or resolutions never rewrite it.
-`Next steps` is `None.` or links assigned work to live `needs-agent/` items; it never
-originates a cross-session action.
+Under the three repository schema markers above, every new handover declares
+`**Queue projection:** v1` and exactly projects the live unanswered
+`message-queue/needs-human/` items in filename-timing order. It never originates an ask.
+Each entry is one top-level bullet beginning with the exact Action as a link to one
+actor-matching queue path, followed by the exact suffix labels `Why this matters:` and
+`If you do nothing:`, copying those queue fields. `Next steps` is `None.` or links assigned
+work to live `needs-agent/` items.
 
-The action-entry marker versions projection *syntax*: version 1 freezes the entry contract
-existing records passed when created; version 2 adds raw-HTML and origin checks; version 3
-keeps both and renames only the two suffix labels it renders. The liveness marker
-separately versions *which* human actions a projection contains: version 1 selects only
-**unresolved** ones — awaiting their owner until a concrete `**Your answer:**` or
-`**Your review:**` is committed, since `folding` only moves an answered item on and
-`awaiting-artifact` binds nothing to judge; every other state stays projected.
-Each post-activation entry is one top-level bullet whose first content is
-`[<exact queue Action>](<one actor-matching live queue path>)`. Human entries append
-` — Why this matters: <field> — If you do nothing: <field>` under v3 and
-` — Why-you-might-care: <field> || If-you-do-nothing: <field>` under v1/v2, copying both
-from that snapshot whichever spelling the item uses, in timing-then-path order; agent
-entries hold only the link and may project just work assigned here. A record owes the suffix
-its creation snapshot declared — never a later, parallel, or reused withdrawn version — while
-its *rejections* ratchet at the admission edge, joined parallel history included. All three
-markers are sticky while `history/` remains; adoption freezes every existing handover path,
-legacy records included — committed bytes are immutable, so delete when retention permits,
-never edit or rename, and correct in a new conversation path.
+A concrete `Your answer` or `Your review` resolves an item for projection; `folding`
+therefore stays out, and `awaiting-artifact` also stays out because no artifact is ready
+for the human to judge. The reconciler evaluates queue and handover together at creation,
+so later queue changes never rewrite a record. Committed handovers are immutable: never
+edit or rename one; correct it in a new conversation folder. Older records keep the syntax
+and liveness contract active at their creation revision.
 
 ## Other files in a conversation folder (optional)
 
