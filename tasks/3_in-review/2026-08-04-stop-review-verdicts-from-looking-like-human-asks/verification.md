@@ -2831,8 +2831,8 @@ backtracking probe (seconds per call, 200k-character lines):
 
 Zero blast radius, but the three refusals are not one case. Two are the unfilled-template
 placeholder — a section whose revision field is still `<full immutable commit ID …>` —
-and the third,
-`tasks/1_in-progress/2026-08-02-reconcile-the-contracts-with-the-code/verification.md`,
+and the third, the verification record of task
+`2026-08-02-reconcile-the-contracts-with-the-code`,
 has no placeholder at all: its section is prose beginning "None run." with no revision
 field. All three behaved the same before this pass.
 Both real receipts still parse, including the 2026-07-22 historical one. The action-gate
