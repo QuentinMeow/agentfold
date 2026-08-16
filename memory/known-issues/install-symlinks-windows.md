@@ -2,13 +2,13 @@
 
 **Status:** open
 **Severity:** low — affects setup on one platform, workaround exists
-**Description:** Agent-adapter symlinks need Windows developer mode or admin; otherwise install.py falls back with a warning
+**Description:** Agent-adapter symlinks need Windows developer mode or admin; otherwise install.py preserves existing paths, exits nonzero, and points to the workaround
 **Review-by:** 2027-01-22
 
 ## Symptom
 
-On Windows, `python3 automation/install.py` may raise `OSError: symbolic link
-privilege not held` when creating `.claude/skills/` links.
+On Windows, `python3 automation/install.py` may report `symbolic link privilege not
+held` and exit nonzero when creating `.claude/skills/` links.
 
 ## Impact
 
