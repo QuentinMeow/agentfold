@@ -290,19 +290,26 @@ HUMAN_MACHINE_FIELDS = frozenset({
 # Dead fields that may not drift back. `Look-at` had six live uses, no template,
 # no contract sentence, and no reader; the source is named once in the prose.
 BANNED_QUEUE_FIELDS = ("Look-at",)
-# Raised to 800 once, on the argument that three of eight authored items failed at
-# 701–723 and the shape the checklist demands measures 699 words on its own. Measured
-# afterwards, that raise did what a raised ceiling does: authors expanded into it.
-# Freshly authored items went from a mean of 673.4 words to 736.2 (+9.3 %) and 43.5
-# rendered lines to 55.1 (+27 %), and the count over 700 went from three of eight to
-# six of eight, while the paired authoring-quality difference stayed inside noise
-# (McNemar p = 0.50). The owner's complaint is visual volume, so a ceiling that buys
-# no measured quality and costs a tenth more words is the wrong trade, and it is
-# reverted. What the failed attempts actually needed was the *number*, which the
-# finding now carries: how many words are written, how many are allowed, and exactly
-# how many to cut. A budget an author can only satisfy by guessing is passed by luck;
-# one that is counted for them is not.
-HUMAN_ATTENTION_WORD_BUDGET = 700
+# 800, and neither the number nor the way it moved is free. Two measurements say
+# opposite-sounding things and both are recorded, because acting on one alone is what
+# produced the wrong value twice.
+#
+#   Training scenarios, 700 -> 800: freshly authored items grew from a mean of 673.4
+#   words to 736.2 (+9.3 %) and from 43.5 rendered lines to 55.1 (+27 %), while the
+#   paired quality difference stayed inside noise (McNemar p = 0.50). Authors expand
+#   into a ceiling. That is real, and it is why the raise is not free.
+#
+#   Held-out scenarios, the same prose under both gates: pass^2 0.750 at 800 against
+#   0.375 at 700, with 7 of 10 items over 700 and 0 of 10 over 800, worst overrun 92
+#   words. Mean length on unseen briefs is 724.7 words — so ~725 words is what a
+#   complete, competent ask costs here, and 700 refuses well-written items.
+#
+# The ratchet measures how long authors write; the held-out gate measures whether the
+# threshold refuses good work. Only the second is what a budget is for, so 800 stands.
+# The real repair is not the number: it is that an author could not see the count until
+# the gate refused them. `--word-count` prints it on demand and the finding carries it,
+# so the threshold is now something a person can check rather than guess at.
+HUMAN_ATTENTION_WORD_BUDGET = 800
 HUMAN_CHOICES_HEADINGS = ("## Your choices", "## Differences", "## Options")
 CHOICE_HEADING_RE = re.compile(r"^###[ \t]+(\S.*?)[ \t]*$", re.M)
 # A bare adjective is not a calibration signal: say what was checked and what
@@ -1715,6 +1722,57 @@ def queue_fold_targets(explicit=()):
         if DETAILS_OPEN_TOKEN_RE.search(visible_html_text(repo_text(item))):
             targets.append(item)
     return targets
+
+
+def word_count_targets(explicit=()):
+    """Return the files `--word-count` measures.
+
+    With no path given: the three human templates, so an author can see what the
+    empty shape already costs, and every live human item the current template
+    governs, which is exactly the set `human-attention` counts. A path given
+    explicitly is measured whether or not it is committed, tracked, or governed —
+    the whole point is to answer "how am I doing" *before* the commit that would
+    otherwise be the first place the number appears.
+    """
+    if explicit:
+        return [REPO / Path(path) for path in explicit]
+    targets = [
+        REPO / QUEUE_TEMPLATES / name
+        for name in ("decision.md", "clarification.md", "review.md")
+    ]
+    for item in live_queue_items() or ():
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] != "needs-human":
+            continue
+        text = repo_text(item)
+        if human_attention_format_applies(parts[0], text):
+            targets.append(item)
+    return targets
+
+
+def word_count_report(explicit=()):
+    """Return one `(name, words, over)` row per target, in the order measured.
+
+    The budget is the format's only threshold an author cannot see by reading their
+    own file, and a held-out authoring run named that as one of two ambiguities that
+    mattered: seven of ten items breached a ceiling nothing had shown them. A number
+    a person can only discover by being refused is a wish, not a harness. This is the
+    counter — it writes nothing, and it is deliberately not a check, because a count
+    is information and only the ceiling is a rule.
+    """
+    rows = []
+    for path in word_count_targets(explicit):
+        if not path.is_file():
+            continue
+        try:
+            name = path.relative_to(REPO).as_posix()
+        except ValueError:
+            name = path.as_posix()
+        words = len(human_attention_above_fold(
+            path.read_text(encoding="utf-8")
+        ).split())
+        rows.append((name, words, max(0, words - HUMAN_ATTENTION_WORD_BUDGET)))
+    return rows
 
 
 def fix_queue_fold(explicit=()):
@@ -6665,6 +6723,29 @@ def check_explanation_shape():
             )
         if not current_queue_template_governs(actor, text):
             continue
+        if actor == "needs-human" \
+                and rel.as_posix() not in git_head_paths("message-queue") \
+                and not markdown_link_destinations(
+                    human_attention_above_fold(text)
+                ):
+            # Birth-time only, and deliberately so. `handbook/human-action-guide.md`
+            # asks for the source once, as one clickable link in the prose, with the
+            # machine copy in `Full context` below the answer line — and nothing
+            # checked it, so a held-out authoring run produced items with a path a
+            # reader could not follow. Reporting it on an item already committed
+            # would be a nag nobody may act on: adding the link changes the prose,
+            # which changes action identity, which `queue-resolution` refuses. So it
+            # is raised to the one author who can still fix it, in the one commit
+            # where fixing it is legal.
+            yield Finding(
+                "explanation-shape",
+                rel,
+                "no source link in the prose above the answer line",
+                "link the durable source once, in the prose, as "
+                "[<label>](<path from this file>); `Full context` below the "
+                "answer line keeps the machine copy, and a reader cannot click "
+                "that one",
+            )
         if leaf not in sections_by_leaf:
             sections_by_leaf[leaf] = queue_leaf_template_sections(leaf)
         required = sections_by_leaf[leaf]
@@ -10867,6 +10948,14 @@ def reconcile(argv=None):
              "human queue templates and every live human item already folded",
     )
     parser.add_argument(
+        "--word-count",
+        nargs="*",
+        metavar="PATH",
+        help="print words before the answer line against the budget; default "
+             "targets are the three human queue templates and every live human "
+             "item the current template governs",
+    )
+    parser.add_argument(
         "--fail-on-advisory",
         action="store_true",
         help="also exit 1 on advisory findings; for maintenance runs, never the gate",
@@ -10961,6 +11050,21 @@ def reconcile(argv=None):
         print(f"queue fold: {len(changed)} file(s) rewritten"
               + (f", {len(refused)} refused" if refused else ""))
         if refused:
+            return 1
+        if not (args.check or args.file_retries or args.fix_open_actions):
+            return 0
+
+    if args.word_count is not None:
+        rows = word_count_report(args.word_count)
+        for name, words, over in rows:
+            spare = HUMAN_ATTENTION_WORD_BUDGET - words
+            print(
+                f"{name}: {words} of {HUMAN_ATTENTION_WORD_BUDGET} words "
+                + (f"— cut {over}" if over else f"— {spare} to spare")
+            )
+        breached = [name for name, _words, over in rows if over]
+        print(f"word count: {len(rows)} file(s), {len(breached)} over budget")
+        if breached:
             return 1
         if not (args.check or args.file_retries or args.fix_open_actions):
             return 0

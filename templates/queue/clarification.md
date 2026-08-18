@@ -14,8 +14,10 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
    counter-case sits beside it. The check compares text, so paraphrasing fails.
 7. No machine field, hash, or token appears above the answer line.
 8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 700 words before the answer. Four choices cost about 700 on their own,
-   so cut background, never a choice or its example consequence.
+9. Under 800 words before the answer, and you never have to guess where you are:
+   `python3 automation/reconcile/reconcile.py --word-count <this file>` prints
+   your count against the budget. Four choices cost about 700 on their own, so
+   cut background, never a choice or its example consequence.
 
 Three shapes a checker enforces that nothing else shows you:
 - Every **Key:** value and every *Example consequence:* is read one physical line at

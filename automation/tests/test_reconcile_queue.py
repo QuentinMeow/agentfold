@@ -15887,6 +15887,7 @@ class ReconcileQueueTests(unittest.TestCase):
         "**What this does not decide:** Which detector does the refusing.\n"
         "\n"
         "The boundary decides who can skip it, which is the whole question.\n"
+        "The source is [the design](../../../docs/design.md).\n"
         "\n"
         "## Your choices\n"
         "\n"
@@ -17222,9 +17223,10 @@ class ReconcileQueueTests(unittest.TestCase):
             ]
             self.assertTrue(over, self.messages(findings))
             # Every number an author needs, in the line they are shown: what they
-            # wrote, what is allowed, and exactly how many words to cut. Raising
-            # the ceiling instead was measured to make items 9.3 % longer without
-            # improving them, so the number is the repair and the ceiling stands.
+            # wrote, what is allowed, and exactly how many words to cut. The
+            # ceiling itself was measured twice and both readings are recorded on
+            # the constant; what neither reading excuses is a threshold nobody can
+            # see before being refused, which is why `--word-count` exists.
             self.assertRegex(
                 over[0].fix,
                 r"^cut \d+ of the \d+ words of background written above the "
@@ -17246,6 +17248,95 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertNotRegex(
                     text, r"Under (?!%d\b)\d+ words before the answer" % budget
                 )
+
+    def test_word_count_measures_any_file_against_the_budget(self):
+        """The budget stops being guesswork: the count is printable on demand."""
+        budget = RECONCILE.HUMAN_ATTENTION_WORD_BUDGET
+        with self.repo() as root:
+            self.human_attention_repo(root)
+            rows = RECONCILE.word_count_report([self.HUMAN_ATTENTION_PATH])
+            self.assertEqual(1, len(rows), rows)
+            name, words, over = rows[0]
+            self.assertEqual(self.HUMAN_ATTENTION_PATH, name)
+            self.assertGreater(words, 0)
+            self.assertEqual(0, over)
+            # An explicit path is measured whether or not anything governs it,
+            # because the author needs the number while the file is still a draft.
+            self.write(root, "draft.md", "one two three\n\n**Your answer:** ______\n")
+            self.assertEqual(
+                [("draft.md", 3, 0)], RECONCILE.word_count_report(["draft.md"])
+            )
+            self.human_attention_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
+                "The boundary decides who can skip it, which is the whole question.\n",
+                "The boundary decides who can skip it. "
+                + "Background sentence. " * budget + "\n",
+            ))
+            _name, words, over = RECONCILE.word_count_report(
+                [self.HUMAN_ATTENTION_PATH]
+            )[0]
+            self.assertEqual(words - budget, over)
+
+    def test_word_count_command_exits_one_only_when_something_is_over(self):
+        budget = RECONCILE.HUMAN_ATTENTION_WORD_BUDGET
+        with self.repo() as root:
+            self.human_attention_repo(root)
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                status = RECONCILE.reconcile(
+                    ["--word-count", self.HUMAN_ATTENTION_PATH]
+                )
+            self.assertEqual(0, status, printed.getvalue())
+            self.assertIn(f"of {budget} words", printed.getvalue())
+            self.assertIn("to spare", printed.getvalue())
+            self.assertIn("1 file(s), 0 over budget", printed.getvalue())
+
+            self.human_attention_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
+                "The boundary decides who can skip it, which is the whole question.\n",
+                "The boundary decides who can skip it. "
+                + "Background sentence. " * budget + "\n",
+            ))
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                status = RECONCILE.reconcile(
+                    ["--word-count", self.HUMAN_ATTENTION_PATH]
+                )
+            self.assertEqual(1, status, printed.getvalue())
+            self.assertRegex(printed.getvalue(), r"— cut \d+")
+            self.assertIn("1 file(s), 1 over budget", printed.getvalue())
+
+    NO_PROSE_LINK = "no source link in the prose above the answer line"
+
+    def test_explanation_shape_reports_a_new_item_with_no_prose_source_link(self):
+        """`handbook/human-action-guide.md` asks for it; nothing used to check it."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root)
+            self.assertNotIn(
+                self.NO_PROSE_LINK,
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+            self.explanation_shape_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
+                "The source is [the design](../../../docs/design.md).\n",
+                "The source is `docs/design.md`, which nobody can click.\n",
+            ))
+            self.assertIn(
+                self.NO_PROSE_LINK,
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
+
+    def test_explanation_shape_never_nags_a_committed_item_about_its_link(self):
+        """Adding the link would change action identity, which is refused."""
+        with self.repo() as root:
+            self.explanation_shape_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
+                "The source is [the design](../../../docs/design.md).\n",
+                "The source is `docs/design.md`, which nobody can click.\n",
+            ))
+            self.init_git(root)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "file the ask")
+            self.assertNotIn(
+                self.NO_PROSE_LINK,
+                self.messages(RECONCILE.check_explanation_shape()),
+            )
 
     def test_human_attention_requires_two_choices_with_examples(self):
         with self.repo() as root:
