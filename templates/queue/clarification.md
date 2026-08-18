@@ -13,7 +13,8 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 6. My working assumption names one reading shown; its counter-case sits beside it.
 7. No machine field, hash, or token appears above the answer line.
 8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 700 words before the answer. Cut background, not choices.
+9. Under 800 words before the answer. Four choices cost about 700 on their own,
+   so cut background, never a choice or its example consequence.
 
 An agent recommending an answer to "what did you mean?" puts words in the owner's
 mouth. State what you will assume and do instead.

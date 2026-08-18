@@ -13,7 +13,8 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 6. Recommendation names one choice shown; its counter-case sits beside it.
 7. No machine field, hash, or token appears above the answer line.
 8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 700 words before the answer. Cut background, not choices.
+9. Under 800 words before the answer. Four choices cost about 700 on their own,
+   so cut background, never a choice or its example consequence.
 -->
 
 # <The question the owner can answer, in plain English>

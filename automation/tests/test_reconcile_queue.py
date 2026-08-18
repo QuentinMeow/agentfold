@@ -1761,6 +1761,85 @@ class ReconcileQueueTests(unittest.TestCase):
                 for message in messages
             ), messages)
 
+    def test_a_human_future_boundary_may_only_be_transition_start(self):
+        """A calendar date in `Blocks at` used to be accepted on a human item.
+
+        The contract admits exactly one future boundary here, and a date is not
+        it: the queue already carries the deadline as `Answer by`, which
+        re-surfaces the question without holding anything.
+        """
+        for boundary, refused in (
+            ("2026-09-01", True),
+            ("event:release", True),
+            ("transition:start task:2026-07-23-example", False),
+        ):
+            with self.subTest(boundary=boundary), self.repo() as root:
+                self.make_task(root, "0_backlog", "none")
+                messages = self.human_gating_item(
+                    root,
+                    "future-blocking-choose.md",
+                    f"**Blocks at:** {boundary}\n"
+                    "**Until then:** implementation may continue\n",
+                )
+                self.assertEqual(refused, any(
+                    "a calendar deadline is **Answer by:**" in message
+                    for message in messages
+                ), messages)
+
+    def test_answer_by_may_not_lapse_on_the_day_it_is_filed(self):
+        """Compared against `Filed`, never against today, so no clean tree rots."""
+        for answer_by, refused in (
+            ("2026-07-23", True), ("2026-07-22", True), ("2026-10-21", False),
+        ):
+            with self.subTest(answer_by=answer_by), self.repo() as root:
+                messages = self.human_gating_item(
+                    root,
+                    "non-blocking-choose.md",
+                    "",
+                    extra="",
+                )
+                item = (
+                    root / "message-queue/needs-human/decisions"
+                    / "non-blocking-choose.md"
+                )
+                item.write_text(
+                    item.read_text(encoding="utf-8").replace(
+                        "**Answer by:** 2026-12-31\n",
+                        f"**Answer by:** {answer_by}\n",
+                    ),
+                    encoding="utf-8",
+                )
+                messages = self.messages(RECONCILE.check_queue_schema())
+                self.assertEqual(refused, any(
+                    "is lapsed the moment it is asked" in message
+                    for message in messages
+                ), messages)
+
+    def test_an_operation_boundary_accepts_a_version_number(self):
+        """Release names carry dots; the token grammar has to survive one."""
+        for name, accepted in (
+            ("release-ios-8.7.0-rc3", True),
+            ("publish-the-artifact", True),
+            ("release.", False),
+            (".release", False),
+        ):
+            with self.subTest(operation=name):
+                self.assertEqual(
+                    accepted,
+                    bool(RECONCILE.OPERATION_BOUNDARY_RE.fullmatch(
+                        f"operation:{name}"
+                    )),
+                )
+        with self.repo() as root:
+            messages = self.human_gating_item(
+                root,
+                "blocking-choose.md",
+                "**Blocks now:** operation:release-ios-8.7.0-rc3\n",
+            )
+            self.assertFalse(any(
+                "Blocks now" in message for message in messages
+            ), messages)
+
     def test_start_gate_must_name_an_unstarted_backlog_task(self):
         for status, refused in (
             ("0_backlog", False), ("1_in-progress", True), ("4_done", True),
@@ -15797,15 +15876,18 @@ class ReconcileQueueTests(unittest.TestCase):
             self.HUMAN_ATTENTION_REVIEW if text is None else text,
         )
 
-    def human_attention_messages(self, root, replacements=()):
+    def human_attention_findings(self, root, replacements=()):
         text = self.HUMAN_ATTENTION_REVIEW
         for old, new in replacements:
             self.assertIn(old, text)
             text = text.replace(old, new)
         self.human_attention_repo(root, text)
-        return self.messages(RECONCILE.check_human_attention()) + self.messages(
+        return list(RECONCILE.check_human_attention()) + list(
             RECONCILE.check_queue_schema()
         )
+
+    def human_attention_messages(self, root, replacements=()):
+        return self.messages(self.human_attention_findings(root, replacements))
 
     def test_human_attention_accepts_the_decided_shape(self):
         with self.repo() as root:
@@ -16584,16 +16666,32 @@ class ReconcileQueueTests(unittest.TestCase):
             ), messages)
 
     def test_human_attention_rejects_exceeding_the_word_budget(self):
+        budget = RECONCILE.HUMAN_ATTENTION_WORD_BUDGET
         with self.repo() as root:
-            messages = self.human_attention_messages(root, [(
+            findings = list(self.human_attention_findings(root, [(
                 "The boundary decides who can skip it, which is the whole question.\n",
                 "The boundary decides who can skip it. "
-                + "Background sentence. " * 400 + "\n",
-            )])
-            self.assertTrue(any(
-                "exceeds the 700-word budget" in message
-                for message in messages
-            ), messages)
+                + "Background sentence. " * budget + "\n",
+            )]))
+            over = [
+                finding for finding in findings
+                if f"exceeds the {budget}-word budget" in finding.message
+            ]
+            self.assertTrue(over, self.messages(findings))
+            # The number to cut, not just the number written: a budget an author
+            # can only satisfy by guessing is passed by luck.
+            self.assertRegex(over[0].fix, r"^cut \d+ words of background")
+
+    def test_the_templates_name_the_word_budget_the_check_enforces(self):
+        """Two numbers that must agree, held together by a test rather than care."""
+        budget = RECONCILE.HUMAN_ATTENTION_WORD_BUDGET
+        for name in ("decision.md", "clarification.md", "review.md"):
+            with self.subTest(template=name):
+                text = (QUEUE_TEMPLATES / name).read_text(encoding="utf-8")
+                self.assertIn(f"Under {budget} words before the answer", text)
+                self.assertNotRegex(
+                    text, r"Under (?!%d\b)\d+ words before the answer" % budget
+                )
 
     def test_human_attention_requires_two_choices_with_examples(self):
         with self.repo() as root:

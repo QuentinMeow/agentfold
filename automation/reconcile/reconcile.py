@@ -188,7 +188,12 @@ RESOLVING_TASK_STATUSES = frozenset(
 )
 TRANSITION_BOUNDARY_RE = re.compile(r"^transition:([a-z0-9][a-z0-9-]*)$")
 EVENT_BOUNDARY_RE = re.compile(r"^event:([a-z0-9][a-z0-9-]*)$")
-OPERATION_BOUNDARY_RE = re.compile(r"^operation:([a-z0-9][a-z0-9-]*)$")
+# An operation is a real act with a real name, and release names carry version dots:
+# `operation:release-ios-8.7.0-rc3` is the ordinary case, not an exotic one. Dots are
+# admitted inside the name only, so a name still starts and ends on an alphanumeric.
+OPERATION_BOUNDARY_RE = re.compile(
+    r"^operation:([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$"
+)
 REVIEW_REVISION_RE = re.compile(
     r"^(?:sha256:[0-9a-f]{64}|git:(?:[0-9a-f]{40}|[0-9a-f]{64})"
     r"(?:\.\.\.(?:[0-9a-f]{40}|[0-9a-f]{64}))?)$"
@@ -284,7 +289,17 @@ HUMAN_MACHINE_FIELDS = frozenset({
 # Dead fields that may not drift back. `Look-at` had six live uses, no template,
 # no contract sentence, and no reader; the source is named once in the prose.
 BANNED_QUEUE_FIELDS = ("Look-at",)
-HUMAN_ATTENTION_WORD_BUDGET = 700
+# Raised from 700 once a real corpus existed to calibrate it against, which is the
+# follow-up `tasks/4_done/2026-07-31-redesign-human-action-files/verification.md`
+# recorded as owed: "whether 700 is the right number will first be tested by a real
+# item written in the format." Twelve items authored from scenario briefs measured a
+# mean of 673.4 words with a maximum of 723, and three of eight failed at 701–723;
+# the five live items written under the format sit at 675–700, one of them exactly on
+# the ceiling. A budget carrying ~12 words of headroom is passed by luck, and the
+# same checklist demands up to four choices, each with a cost and a concrete example
+# consequence — a shape that measures 699 words on its own. 800 clears every observed
+# attempt with margin while still refusing a genuinely long question.
+HUMAN_ATTENTION_WORD_BUDGET = 800
 HUMAN_CHOICES_HEADINGS = ("## Your choices", "## Differences", "## Options")
 CHOICE_HEADING_RE = re.compile(r"^###[ \t]+(\S.*?)[ \t]*$", re.M)
 # A bare adjective is not a calibration signal: say what was checked and what
@@ -5421,6 +5436,18 @@ def human_gating_problems(timing, got, records):
             "file it non-blocking-* with its unattended outcome, or name the "
             "one act with no undo as operation:<name>",
         )
+    if timing == "future-blocking" and tokens and "start" not in transitions:
+        # The contract admits exactly one future boundary on a human item, and it
+        # is not a date: `**Blocks at:** 2026-09-01` used to be accepted, so an
+        # item could sit in the blocking class on a deadline the queue already
+        # carries elsewhere. A calendar date is `Answer by`, which re-surfaces the
+        # question without holding anything.
+        yield (
+            "**Blocks at:** on a human action must be transition:start "
+            "task:<id>; a calendar deadline is **Answer by:**, not a boundary",
+            "file it non-blocking-* and set Answer by to that date, or bind "
+            "transition:start on the 0_backlog task this gate withholds",
+        )
     if "start" in transitions:
         if not task_ids:
             yield (
@@ -5440,12 +5467,27 @@ def human_gating_problems(timing, got, records):
                     "return that task to 0_backlog and unclaim it, or drop the "
                     "boundary and file this non-blocking-*",
                 )
-    if parse_date(got.get("Answer by", "").strip()) is None:
+    answer_by = parse_date(got.get("Answer by", "").strip())
+    if answer_by is None:
         yield (
             "**Answer by:** must be one UTC YYYY-MM-DD date",
             "set the date this question is worth re-surfacing on — 90 days "
             "from Filed unless something real dates it",
         )
+    else:
+        # Both dates are in the file, so this compares the item against itself
+        # and never against today: a clean tree cannot start failing on a
+        # calendar date. One generated item shipped already lapsed, with the
+        # deadline equal to the day it was filed.
+        filed = parse_leading_date(got.get("Filed", ""))
+        if filed is not None and answer_by <= filed:
+            yield (
+                f"**Answer by:** {answer_by} is not after **Filed:** {filed}, "
+                "so this question is lapsed the moment it is asked",
+                "set it 90 days from Filed unless something real dates it "
+                "sooner; a deadline already behind the filing date gives the "
+                "reader no time at all",
+            )
 
 
 def check_queue_schema():
@@ -5826,7 +5868,11 @@ def check_queue_schema():
                         "queue-schema",
                         item.relative_to(REPO),
                         "**Review revision:** is not an immutable sha256 or Git revision",
-                        "use sha256:<64 hex>, git:<full id>, or git:<base>...<head>",
+                        "use sha256:<64 hex digits>, git:<full 40- or 64-hex "
+                        "commit id>, or git:<full id>...<full id>; a branch "
+                        "name or an abbreviated id names something that can "
+                        "move, so run `git rev-parse <ref>` and paste the "
+                        "whole id on both sides of the range",
                     )
                 elif revision.startswith("git:"):
                     problems = git_review_revision_problems(revision)
@@ -6197,7 +6243,8 @@ def check_human_attention():
                 rel,
                 f"{words} words before the answer line exceeds the "
                 f"{HUMAN_ATTENTION_WORD_BUDGET}-word budget",
-                "cut background, not choices",
+                f"cut {words - HUMAN_ATTENTION_WORD_BUDGET} words of background, "
+                "never a choice or its example consequence",
             )
 
         status = got.get("Status", "").strip()
