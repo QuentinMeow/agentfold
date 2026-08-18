@@ -1,10 +1,10 @@
 # Fold the machine record on new human queue items, and gate the shape that carries it
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-08-18, by claude, from chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-fold-the-queue-machine-record.md`
+**Queue actions:** none
 
 ## Goal
 
