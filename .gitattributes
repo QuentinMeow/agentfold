@@ -1,0 +1,7 @@
+# Two trailing spaces are a Markdown hard break, and inside a collapsed <details>
+# they cost no rendered height. Git's default core.whitespace is
+# blank-at-eol,space-before-tab,blank-at-eof, so it would flag every one of them and
+# `git apply --whitespace=fix` would strip them silently. The queue paths opt out of
+# blank-at-eol only; everywhere else in the repository it still applies.
+message-queue/needs-*/**/*.md   whitespace=-blank-at-eol
+templates/queue/*.md            whitespace=-blank-at-eol

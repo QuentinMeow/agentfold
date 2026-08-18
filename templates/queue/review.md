@@ -64,17 +64,21 @@ show you how it read your words before acting.
 
 ## For the record
 
-Bookkeeping the reconciler reads. Nothing here needs you.
+<details>
+<summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting
-**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<root-relative path to the durable source>`
-**Resolution evidence:** `<non-queue path distinct from Review target>`
-**Review target:** `<root-relative path to the exact file being judged>`
-**Review revision:** sha256:<64 hex digits of that file's bytes>
-**Reviewed revision:** ______
-**Review outcome:** pending
+**Status:** waiting  
+**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]  
+**Full context:** `<root-relative path to the durable source>`  
+**Resolution evidence:** `<non-queue path distinct from Review target>`  
+**Review target:** `<root-relative path to the exact file being judged>`  
+**Review revision:** sha256:<64 hex digits of that file's bytes>  
+**Reviewed revision:** ______  
+**Review outcome:** pending  
 **Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
+
+</details>
+
 <!-- Status ships as `waiting` with a local file bound. Before the artifact exists,
 file it with **Status:** awaiting-artifact and both target and revision literally
 `pending`, then publish the binding in one later commit that moves the status to

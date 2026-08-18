@@ -22,20 +22,20 @@ identity and `message-queue/AGENTS.md` forbids rewriting a live ask.
 
 ## Acceptance criteria
 
-- [ ] `templates/queue/{decision,clarification,review}.md` carry the sanctioned fold,
+- [x] `templates/queue/{decision,clarification,review}.md` carry the sanctioned fold,
       with two trailing spaces on every field line but the last inside it.
-- [ ] `record-swallow` blocks a field line the record region shows and `semantic_text()`
+- [x] `record-swallow` blocks a field line the record region shows and `semantic_text()`
       cannot read, scoped by line position rather than by key name.
-- [ ] `fold-shape` blocks every deviation from the nine fold rules.
-- [ ] `queue-frozen-skeleton` blocks an edit that leaves `queue_action_identity()`
+- [x] `fold-shape` blocks every deviation from the nine fold rules.
+- [x] `queue-frozen-skeleton` blocks an edit that leaves `queue_action_identity()`
       unchanged while changing the raw bytes of a live item.
-- [ ] `check_human_attention`'s raw-HTML rule admits exactly the three anchored fold line
+- [x] `check_human_attention`'s raw-HTML rule admits exactly the three anchored fold line
       shapes and nothing else, and adds `parsed ⊆ rendered` visibility findings.
-- [ ] `--fix-queue-fold` re-emits the canonical block idempotently, losing no field.
-- [ ] `.gitattributes` opts the queue paths out of `blank-at-eol`.
-- [ ] `python3 automation/run_tests.py` stays at 15/15 files, and
+- [x] `--fix-queue-fold` re-emits the canonical block idempotently, losing no field.
+- [x] `.gitattributes` opts the queue paths out of `blank-at-eol`.
+- [x] `python3 automation/run_tests.py` stays at 15/15 files, and
       `python3 automation/reconcile/reconcile.py --check` stays at 0 blocking findings.
-- [ ] The new predicates report zero findings when run unscoped over every tracked
+- [x] The new predicates report zero findings when run unscoped over every tracked
       Markdown file in the repository.
 
 ## Links

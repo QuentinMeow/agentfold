@@ -67,6 +67,38 @@ Every `**Your answer:**`/`**Your review:**` blank is the only line a human fills
 review ships `Reviewed revision` and `Review outcome` as slots the folding agent
 completes (`handbook/human-action-guide.md`).
 
+## The record region, and the one fold that may carry it
+
+A queue item's **record region** is every line above the first `## ` heading, plus every
+line at or below the answer line. That is where machine bookkeeping lives and the only
+place any visibility check looks; prose sits strictly between the two, so a bold label
+used as a pro/con inside a choice, a table cell or a blockquote is out of scope because
+of *where* it is, never because of what it is called. Inside the region a field must be a
+plain `**Key:** value` line at column 0 — indent it by one space, or write it as a list
+item, and it still renders bold while `record-swallow` blocks the commit that hid it.
+
+The three `needs-human/` templates carry that block inside one collapsed `<details>`, so
+a reader sees one tappable line instead of a dozen. It is the only raw HTML a live human
+item may contain, and its nine rules are enforced by `fold-shape`, not by memory:
+
+1. `<details>` alone on its line, column 0, no attributes.
+2. `<summary>…</summary>` on the very next line, column 0, no nested tags.
+3. Exactly one blank line after `</summary>` — omitting it erases every field below.
+4. Every field at column 0: no indentation, no list markers.
+5. Exactly one blank line before `</details>`.
+6. `</details>` alone on its line, column 0.
+7. A blank line after `</details>` if anything follows — it is itself an HTML block
+   start, so a field on the next line is swallowed too.
+8. One fold per item, never nested.
+9. The fold sits below the answer line and never contains it.
+
+Nothing inside those three lines is a placeholder, so copy-and-fill cannot break the
+shape. Every field line but the last ends in two spaces, a Markdown hard break that costs
+no height while the fold is closed; `.gitattributes` stops Git stripping them, and
+`automation/reconcile/reconcile.py --fix-queue-fold` re-emits the whole block from
+whatever shape it is in. A live item is never retro-folded: folding changes its action
+identity, which the queue's own resolution gate refuses.
+
 ## Fields with no template of their own
 
 These are single-instance markers on files that already exist, so nothing copies them

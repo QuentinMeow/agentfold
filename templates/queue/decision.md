@@ -58,13 +58,17 @@ show you how it read your words before acting.
 
 ## For the record
 
-Bookkeeping the reconciler reads. Nothing here needs you.
+<details>
+<summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting
-**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<root-relative path to the durable source>`
-**Resolution evidence:** `<durable non-queue file that folding this answer will change>`
+**Status:** waiting  
+**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]  
+**Full context:** `<root-relative path to the durable source>`  
+**Resolution evidence:** `<durable non-queue file that folding this answer will change>`  
 **Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
+
+</details>
+
 <!-- Status ships as `waiting`, the only status a newly filed item may hold; the
 folding agent moves it to `folding` on its claim edge.
 Then exactly one timing field matching the filename:

@@ -41,6 +41,7 @@ from check_action_projection import (
 )
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
+    RAW_HTML_TOKEN_RE,
     contains_raw_html,
     markdown_link_destinations,
     markdown_links,
@@ -48,6 +49,8 @@ from markdown_semantics import (
     render_inline_code,
     rendered_human_text,
     semantic_text,
+    strip_inline_code,
+    visible_html_text,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -156,7 +159,14 @@ STALE_TASK_DAYS = 14
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
 REPOSITORY_SCOPE_RE = re.compile(r"^(core|records-only|service:[a-z0-9][a-z0-9-]*)$")
 CONVERSATION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}[A-Z]{2,5}-[a-z0-9][a-z0-9-]*$")
-FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*[ \t]*(.*)$", re.M)
+# Trailing whitespace is presentation, never value: two spaces at end of line are a
+# Markdown hard break, which the sanctioned record fold puts on every field line but
+# its last. Capturing them would push `"pending  "` and `"______  "` into the parsed
+# value, where each reader would have to remember to strip them and `PLACEHOLDER_RE`
+# stops matching an unfilled slot. Deciding it once here is inert on the corpus:
+# `templates/queue/{decision,clarification,review}.md` are the only tracked files
+# whose parsed values change, and they change to what they already meant.
+FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*[ \t]*(.*?)[ \t]*$", re.M)
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 LEADING_DATE_RE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})(?:,|\s|$)")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -283,6 +293,33 @@ CONFIDENCE_RE = re.compile(r"^(?:high|medium|low)\s+—\s+\S", re.I)
 HUMAN_RESPONSE_LINE_RE = re.compile(
     r"^\*\*(?:Your answer|Your review):\*\*", re.M
 )
+# The sanctioned fold. These three exact line shapes are the entire raw-HTML
+# language a live human item may contain; `templates/README.md` states the nine
+# rules once and the emitter below writes them, so nothing asks an author to
+# reproduce them by hand.
+FOLD_OPEN_RE = re.compile(r"^<details>$")
+FOLD_SUMMARY_RE = re.compile(r"^<summary>[^<>]+</summary>$")
+FOLD_CLOSE_RE = re.compile(r"^</details>$")
+FOLD_SUMMARY_TEXT = (
+    "For the record — bookkeeping the reconciler reads. Nothing here needs you."
+)
+RECORD_HEADING = "## For the record"
+DETAILS_OPEN_TOKEN_RE = re.compile(r"<details(?=[\s/>])", re.I)
+DETAILS_CLOSE_TOKEN_RE = re.compile(r"</details(?=[\s>])", re.I)
+SUMMARY_TOKEN_RE = re.compile(r"</?summary(?=[\s/>])", re.I)
+# A line whose *rendered* shape is a bold key, however it is indented, quoted,
+# listed or tabled. `FIELD_RE` is anchored at column zero, so every shape this
+# accepts and `FIELD_RE` rejects is a field a reader sees and no check can read.
+RECORD_FIELD_SHAPE_RE = re.compile(
+    r"^[ \t]*(?:[>|]|[-*+][ \t]|\d+\.[ \t])?[ \t]*"
+    r"(?P<field>\*\*(?P<key>[A-Za-z][A-Za-z -]*):\*\*)"
+)
+# The sentence the fold's summary replaces, so re-emitting a legacy block does
+# not leave it stranded above a summary that now says the same thing.
+RECORD_LEGACY_SUMMARY_PROSE = (
+    "Bookkeeping the reconciler reads. Nothing here needs you."
+)
+HTML_COMMENT_SPAN_RE = re.compile(r"<!--.*?-->", re.S)
 QUEUE_STATUS_TOKEN_RE = re.compile(
     r"`(awaiting-artifact|waiting|folding|open|in-repair)`"
 )
@@ -391,6 +428,12 @@ LINK_PATH_EXTENSIONS = {
 ADVISORY_CHECKS = {
     "explanation-shape",
     "memory-expiry",
+    # A Markdown hard break is unenforceable by any blocking check: an editor that
+    # trims trailing whitespace on save strips it, and refusing that commit would
+    # refuse the one edit in which a human answers, for which no repair exists.
+    # `.gitattributes` removes Git itself as a stripper and `--fix-queue-fold`
+    # repairs the rest, so the loss is transient rather than permanent.
+    "queue-render",
     "roadmap-fresh",
     "stale-queue",
     "stale-task",
@@ -1139,6 +1182,425 @@ def human_attention_above_fold(text):
     clean = semantic_text(text)
     offset = human_response_line_offset(clean)
     return clean if offset is None else clean[:offset]
+
+
+# ------------------------------------------- the record region and its fold
+
+def blank_html_comments(view):
+    """Blank HTML comments in a visible-HTML view, preserving line positions.
+
+    `visible_html_text` deliberately keeps a line-initial `<!-- … -->` block
+    standing, because `contains_raw_html` has to see one. Everything reading the
+    *record* wants the opposite: `templates/README.md` makes an HTML comment the
+    declared home of optional-field documentation, so a `**Key:**` written inside
+    one is documentation and is not a field anybody lost. Mid-line comments are
+    already blanked upstream, so the only spans left here start a line.
+    """
+    def spaces(value):
+        return "".join(
+            character if character == "\n" else " " for character in value
+        )
+
+    blanked = HTML_COMMENT_SPAN_RE.sub(lambda m: spaces(m.group()), view)
+    unclosed = blanked.find("<!--")
+    if unclosed < 0:
+        return blanked
+    # An unterminated comment runs to end of file, exactly as `_semantic_text`
+    # treats one.
+    return blanked[:unclosed] + spaces(blanked[unclosed:])
+
+
+def record_visible_lines(text):
+    """Return the lines a reader sees, minus code and HTML comments.
+
+    Positional: index *i* here is line *i* of the source, of `semantic_text`, and
+    of the raw file. That is what lets a check ask "this line renders as a field —
+    does any check read it as one?" without parsing the document twice.
+    """
+    return blank_html_comments(visible_html_text(text)).splitlines()
+
+
+def record_region_lines(text):
+    """Return the line indices where a queue item's machine record may live.
+
+    The region is every line above the first `## ` heading, plus every line at or
+    below the answer line. Nothing else: prose lives strictly between them, and no
+    check in this file looks there.
+
+    This is the whole reason the visibility rule can block. Scoping it by key name
+    is impossible — `Status`, `Action`, `Check`, `Subject` and `Today` are declared
+    field names *and* ordinary English words, with dozens of legitimate in-tree
+    uses as bold labels inside a choice, a table cell or a blockquote. Position is
+    decidable where the name is not.
+
+    An item with no answer line — every `needs-agent` item, by design — has only
+    the first half. The narrative fields that fall outside the region are not
+    unprotected: `check_human_attention` and `check_queue_schema` require each of
+    them to be *present and concrete*, which fails from the other direction the
+    moment one is indented into invisibility.
+    """
+    clean = semantic_text(text)
+    lines = clean.splitlines()
+    region = set()
+    heading = next(
+        (
+            index for index, line in enumerate(lines)
+            if re.match(r"^##[ \t]", line)
+        ),
+        None,
+    )
+    region.update(range(len(lines) if heading is None else heading))
+    offset = human_response_line_offset(clean)
+    if offset is not None:
+        region.update(range(clean.count("\n", 0, offset), len(lines)))
+    return region
+
+
+def record_swallow_losses(text):
+    """Return `(line number, key)` for every record field no check can read."""
+    visible = record_visible_lines(text)
+    parsed = semantic_text(text).splitlines()
+    losses = []
+    for index in sorted(record_region_lines(text)):
+        if index >= len(visible) or index >= len(parsed):
+            continue
+        shown = RECORD_FIELD_SHAPE_RE.match(visible[index])
+        if shown is None:
+            continue
+        read = FIELD_RE.match(parsed[index])
+        if read is not None and read.group(1) == shown.group("key"):
+            continue
+        losses.append((index + 1, shown.group("key")))
+    return losses
+
+
+def fold_bounds(lines):
+    """Return the `(open, close)` line indices of the one fold, or None."""
+    opens = [
+        index for index, line in enumerate(lines)
+        if DETAILS_OPEN_TOKEN_RE.search(line)
+    ]
+    closes = [
+        index for index, line in enumerate(lines)
+        if DETAILS_CLOSE_TOKEN_RE.search(line)
+    ]
+    if len(opens) != 1 or len(closes) != 1 or closes[0] < opens[0]:
+        return None
+    return opens[0], closes[0]
+
+
+def fold_shape_problems(text):
+    """Return every way one item's fold departs from the canonical block.
+
+    Two of these are the swallow points. A missing blank line after `</summary>`
+    keeps the HTML block open, so `semantic_text` blanks every field below it and
+    the record silently becomes empty; `</details>` is itself a CommonMark type-6
+    start tag, so a field on the line straight after it is swallowed the same way.
+    Neither is a style rule, and both are why this check blocks.
+    """
+    lines = record_visible_lines(text)
+    opens = [
+        index for index, line in enumerate(lines)
+        if DETAILS_OPEN_TOKEN_RE.search(line)
+    ]
+    closes = [
+        index for index, line in enumerate(lines)
+        if DETAILS_CLOSE_TOKEN_RE.search(line)
+    ]
+    if not opens and not closes:
+        return []
+    problems = []
+    if len(opens) != len(closes):
+        problems.append("every `<details>` needs exactly one `</details>`")
+    if len(opens) > 1 or len(closes) > 1:
+        problems.append(
+            "an item carries at most one fold, and it holds `## For the record`"
+        )
+    bounds = fold_bounds(lines)
+    if bounds is None:
+        return problems
+    opening, closing = bounds
+    if lines[opening] != "<details>":
+        problems.append(
+            "the fold must open with `<details>` alone on its own line at "
+            "column 0, with no attributes"
+        )
+    summary = lines[opening + 1] if opening + 1 < len(lines) else ""
+    if not FOLD_SUMMARY_RE.match(summary):
+        problems.append(
+            "`<summary>…</summary>` must be the very next line, at column 0, "
+            "with no nested tags"
+        )
+    elif opening + 2 >= closing:
+        problems.append("the fold holds no field")
+    else:
+        if lines[opening + 2].strip():
+            problems.append(
+                "a blank line must follow `</summary>`, or every field below "
+                "it is erased from the record"
+            )
+        elif opening + 3 < closing and not lines[opening + 3].strip():
+            problems.append("exactly one blank line follows `</summary>`")
+    if SUMMARY_TOKEN_RE.search(
+        "\n".join(lines[:opening + 1] + lines[opening + 2:])
+    ):
+        problems.append("`<summary>` may appear only on the fold's second line")
+    if lines[closing] != "</details>":
+        problems.append(
+            "the fold must close with `</details>` alone on its own line at "
+            "column 0"
+        )
+    if closing - 1 > opening and lines[closing - 1].strip():
+        problems.append("exactly one blank line must precede `</details>`")
+    elif closing - 2 > opening + 1 and not lines[closing - 2].strip():
+        problems.append("exactly one blank line precedes `</details>`")
+    if any(line.strip() for line in lines[closing + 1:]) \
+            and lines[closing + 1].strip():
+        problems.append(
+            "a blank line must follow `</details>`; `</details>` opens an HTML "
+            "block of its own, so the line after it is erased too"
+        )
+    answer = next(
+        (
+            index for index, line in enumerate(lines)
+            if HUMAN_RESPONSE_LINE_RE.match(line)
+        ),
+        None,
+    )
+    if answer is not None and opening <= answer <= closing:
+        problems.append(
+            "the answer line is inside the fold — the one line the reader must "
+            "fill in may never be folded away"
+        )
+    elif answer is not None and opening < answer:
+        problems.append(
+            "the fold sits above the answer line; machine bookkeeping belongs "
+            "under `## For the record`, below the line you answer on"
+        )
+    return problems
+
+
+def unsanctioned_raw_html(text):
+    """Whether raw HTML other than the sanctioned fold is present.
+
+    This is `contains_raw_html` with exactly three anchored line shapes
+    subtracted, computed over the same view, so it rejects everything the blanket
+    ban rejected except a well-formed fold. Subtracting lines can only remove
+    matches, which is what makes the narrowing a strict restriction rather than a
+    weakening. Indentation is fatal to admission: ` <details>` is not the
+    sanctioned form and falls straight through to rejection.
+    """
+    residual = []
+    for line in visible_html_text(text).splitlines():
+        stripped = line.strip()
+        sanctioned = line == stripped and (
+            FOLD_OPEN_RE.match(stripped)
+            or FOLD_CLOSE_RE.match(stripped)
+            or FOLD_SUMMARY_RE.match(stripped)
+        )
+        residual.append("" if sanctioned else line)
+    return bool(RAW_HTML_TOKEN_RE.search("\n".join(residual)))
+
+
+def hidden_from_the_reader(text):
+    """Return the parsed fields, headings and choices a reader never sees.
+
+    `<details>` folds; `display:none`, `hidden` and `aria-hidden` hide. The
+    difference is the whole safety argument for admitting the first, so it is
+    verified rather than assumed: everything a check obeys must also appear in the
+    view that models what a browser paints.
+
+    Two rendered views are consulted and something counts as hidden only when it
+    is missing from both. `rendered_human_text` reads its input as HTML without
+    removing code spans first, so a repository path written as `` `<head>` `` is
+    parsed as a real `<head>` tag and blanks the rest of the document — 5 tracked
+    files do exactly that today. Blanking code spans removes that misreading and
+    introduces the opposite one, on a heading whose whole label is backticked.
+    Requiring both views to agree keeps every real hide, because a `display:none`
+    wrapper hides its content in both, while neither misreading can survive the
+    other view.
+    """
+    painted = rendered_human_text(text)
+    uncoded = rendered_human_text(strip_inline_code(text))
+    clean = semantic_text(text)
+
+    def hidden(needle):
+        return needle not in painted and strip_inline_code(needle) not in uncoded
+
+    fields_hidden = sorted({
+        key for key, _value in FIELD_RE.findall(clean)
+        if hidden(f"**{key}:**")
+    })
+    headings_hidden = [
+        heading for heading in SECTION_HEADING_RE.findall(clean)
+        if hidden(heading)
+    ]
+    choices_hidden = [
+        " ".join(choice.split())
+        for choice in CHOICE_HEADING_RE.findall(clean)
+        if hidden(" ".join(choice.split()))
+    ]
+    return fields_hidden, headings_hidden, choices_hidden
+
+
+def folded_record_block(field_lines):
+    """Return the canonical fold, byte-exactly, around one run of fields.
+
+    Every field line but the last ends in two spaces. That is a Markdown hard
+    break, and inside a *collapsed* fold it costs no rendered height at all: a
+    closed `<details>` paints only its summary. Applied to a visible block it does
+    the opposite — N hard-broken lines wrap to the sum of their own wraps, which
+    is never less than one run-on paragraph's — which is why nothing outside a
+    fold ever gets them.
+    """
+    body = [
+        line + ("  " if index + 1 < len(field_lines) else "")
+        for index, line in enumerate(field_lines)
+    ]
+    return [
+        "<details>",
+        f"<summary>{FOLD_SUMMARY_TEXT}</summary>",
+        "",
+        *body,
+        "",
+        "</details>",
+    ]
+
+
+def refolded_record_text(text):
+    """Return one queue document with its record block re-emitted canonically.
+
+    Fence- and comment-aware by construction: it reads the record section through
+    `record_visible_lines`, so a template quoted inside a fenced example and the
+    optional-field documentation inside an HTML comment are carried through
+    untouched rather than harvested as fields. Every malformed shape an agent can
+    plausibly produce — no blank line after `</summary>`, no `<summary>` at all,
+    `<details open>`, the one-line form, fields indented or written as list items,
+    no fold whatsoever — converges here to the same bytes, so running it twice is
+    a no-op and running it once loses nothing.
+    """
+    lines = text.splitlines()
+    visible = record_visible_lines(text)
+    # Both boundaries are read from the fence- and comment-blanked view, so a
+    # `## For the record` quoted inside a fenced example is neither mistaken for
+    # the real section nor allowed to end it early.
+    heading = next(
+        (
+            index for index, line in enumerate(visible)
+            if line.rstrip() == RECORD_HEADING
+        ),
+        None,
+    )
+    if heading is None:
+        return text
+    end = next(
+        (
+            index for index in range(heading + 1, len(visible))
+            if re.match(r"^##[ \t]", visible[index])
+        ),
+        len(lines),
+    )
+    fields = []
+    carried = []
+    for index in range(heading + 1, end):
+        line = lines[index]
+        if not line.strip():
+            continue
+        inert = index >= len(visible) or not visible[index].strip()
+        if not inert:
+            matched = RECORD_FIELD_SHAPE_RE.match(line)
+            if matched is not None:
+                fields.append(line[matched.start("field"):].rstrip())
+                continue
+            if DETAILS_OPEN_TOKEN_RE.search(line) \
+                    or DETAILS_CLOSE_TOKEN_RE.search(line) \
+                    or SUMMARY_TOKEN_RE.search(line) \
+                    or line.strip() == RECORD_LEGACY_SUMMARY_PROSE \
+                    or line.strip() == f"<summary>{FOLD_SUMMARY_TEXT}</summary>":
+                continue
+        carried.append(index)
+    if not fields:
+        return text
+    block = [RECORD_HEADING, "", *folded_record_block(fields)]
+    if carried:
+        consumed = set(range(heading + 1, end)) - set(carried)
+        block.append("")
+        block.extend(
+            lines[index]
+            for index in range(min(carried), max(carried) + 1)
+            if index not in consumed or not lines[index].strip()
+        )
+    if end < len(lines):
+        block.append("")
+    rebuilt = lines[:heading] + block + lines[end:]
+    return "\n".join(rebuilt) + ("\n" if text.endswith("\n") else "")
+
+
+def queue_fold_targets(explicit=()):
+    """Return the files `--fix-queue-fold` rewrites.
+
+    With no path given it rewrites the three human templates and every live human
+    item that *already* carries a fold. It never introduces one into a live item
+    that has none, because folding a live item changes `queue_action_identity`
+    and `queue_mutation_problem` refuses that; re-emitting an existing fold is
+    `rstrip`-invariant and therefore always legal, which is what makes the
+    self-healing loop for a stripped hard break safe to run at any time.
+    """
+    if explicit:
+        return [REPO / Path(path) for path in explicit]
+    targets = [
+        REPO / QUEUE_TEMPLATES / name
+        for name in ("decision.md", "clarification.md", "review.md")
+    ]
+    for item in live_queue_items() or ():
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] != "needs-human":
+            continue
+        if DETAILS_OPEN_TOKEN_RE.search(visible_html_text(repo_text(item))):
+            targets.append(item)
+    return targets
+
+
+def fix_queue_fold(explicit=()):
+    """Re-emit the canonical record fold; return the paths actually changed."""
+    changed = []
+    for path in queue_fold_targets(explicit):
+        if not path.is_file():
+            continue
+        before = path.read_text(encoding="utf-8")
+        after = refolded_record_text(before)
+        if after != before:
+            path.write_text(after, encoding="utf-8")
+            changed.append(path.relative_to(REPO).as_posix())
+    return changed
+
+
+def unbroken_fold_field_lines(text):
+    """Return the line numbers inside a fold that lost their Markdown hard break.
+
+    Advisory forever, and this says why rather than pretending otherwise: an
+    editor that trims trailing whitespace on save strips these, and blocking that
+    would refuse the one-edit commit in which the owner answers. `.gitattributes`
+    removes the most common stripper — Git's own `core.whitespace` — and
+    `--fix-queue-fold` repairs the rest in one command, so a strip is a transient
+    regression rather than permanent damage.
+    """
+    lines = text.splitlines()
+    bounds = fold_bounds(record_visible_lines(text))
+    if bounds is None:
+        return []
+    opening, closing = bounds
+    unbroken = []
+    for index in range(opening + 1, closing - 1):
+        if index + 1 >= len(lines):
+            break
+        if not FIELD_RE.match(lines[index].rstrip()) \
+                or not FIELD_RE.match(lines[index + 1].rstrip()):
+            continue
+        trailing = lines[index][len(lines[index].rstrip()):]
+        if trailing != "  ":
+            unbroken.append(index + 1)
+    return unbroken
 
 
 def human_choices_body(clean):
@@ -2738,8 +3200,8 @@ AGENT_NOTES_SECTION_RE = re.compile(
 )
 
 
-def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
-    """Return action-defining visible text with lifecycle state removed."""
+def lifecycle_mutable_fields(actor, leaf, extra_mutable_fields=()):
+    """Return the fields one live item may change without changing its action."""
     mutable_fields = set(LIFECYCLE_MUTABLE_FIELDS)
     mutable_fields.update(extra_mutable_fields)
     if actor == "needs-agent":
@@ -2761,6 +3223,14 @@ def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
         })
     elif actor == "needs-human":
         mutable_fields.update({"Your answer", "Your review"})
+    return mutable_fields
+
+
+def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
+    """Return action-defining visible text with lifecycle state removed."""
+    mutable_fields = lifecycle_mutable_fields(
+        actor, leaf, extra_mutable_fields=extra_mutable_fields
+    )
     clean = semantic_text(text)
     if actor == "needs-agent" and leaf == "retries":
         clean = AGENT_NOTES_SECTION_RE.sub("", clean)
@@ -2770,6 +3240,37 @@ def immutable_action_text(text, actor, leaf, extra_mutable_fields=()):
         if matched and matched.group(1) in mutable_fields:
             continue
         lines.append(line.rstrip())
+    return "\n".join(lines).strip()
+
+
+def queue_frozen_skeleton(path, text):
+    """Return the raw bytes a live item may not change, as `rstrip`ed lines.
+
+    `immutable_action_text` computes identity over `semantic_text`, which is a
+    *subtractive* view: it blanks fenced code, indented code and HTML comments so
+    they cannot supply structural evidence, and the blanked lines then vanish from
+    the joined identity string. That is right for admitting evidence and wrong for
+    integrity — the very constructs the repository distrusts are the constructs
+    its tamper check cannot see. Content can be appended to a frozen record
+    carrying the owner's committed answer, in a shape no reader is shown and no
+    check reads, without changing the item's action identity.
+
+    This is total over the file's own lines instead. Only `rstrip` and the same
+    lifecycle-mutable field lines are discarded, so re-applying or stripping the
+    fold's hard breaks stays legal at any time, and everything else — a comment, a
+    fence, an indented block, a hidden `<div>` — moves the skeleton.
+    """
+    parts = Path(path).parts
+    actor = parts[1] if len(parts) > 1 else ""
+    leaf = parts[2] if len(parts) > 2 else ""
+    mutable_fields = lifecycle_mutable_fields(actor, leaf)
+    lines = []
+    for line in (text or "").splitlines():
+        stripped = line.rstrip()
+        matched = FIELD_RE.fullmatch(stripped)
+        if matched and matched.group(1) in mutable_fields:
+            continue
+        lines.append(stripped)
     return "\n".join(lines).strip()
 
 
@@ -4806,6 +5307,54 @@ def check_queue_resolution():
                 )
 
 
+def check_queue_frozen_skeleton():
+    """Refuse an edit identity calls a no-op while the bytes say otherwise.
+
+    `queue-resolution` asks whether the *action* changed, and computes that over
+    `semantic_text`. Everything that view blanks — an HTML comment, a fenced
+    block, an indented block — can therefore be appended to a live item, or to a
+    frozen record already carrying the owner's committed answer, and the gate
+    that exists to notice exactly that reports nothing. The payload is invisible
+    to the reader and legible to the next agent, which is the ordinary shape of
+    an instruction-injection.
+
+    So this runs only where the identity gate said "unchanged", and asks the
+    complementary question over raw lines: did anything change at all? Sanctioned
+    migrations change identity, so they are `queue-resolution`'s business and are
+    never double-reported here. The one edit that must stay legal — re-applying
+    or stripping the fold's hard breaks — is `rstrip`-invariant and passes.
+    """
+    if not (REPO / ".git").exists():
+        return
+    activations = queue_resolution_activation_commits(_GIT_HEAD_OID)
+    if not activations and queue_resolution_enabled() and _GIT_HEAD_OID:
+        activations = (_GIT_HEAD_OID,)
+    if not activations:
+        return
+    reported = set()
+    for source, destination, before, after, _prior, _revision in \
+            queue_mutation_events(activations):
+        if queue_action_identity(source, before) \
+                != queue_action_identity(destination, after):
+            continue  # queue-resolution owns a changed action and its carve-outs
+        if queue_frozen_skeleton(source, before) \
+                == queue_frozen_skeleton(destination, after):
+            continue
+        if destination in reported:
+            continue
+        reported.add(destination)
+        yield Finding(
+            "queue-frozen-skeleton",
+            Path(destination),
+            "live queue item changed bytes that its action identity cannot "
+            "see; a comment, a fenced or indented block, or hidden markup was "
+            "added to or removed from a frozen record",
+            "revert the invisible edit; only lifecycle fields and trailing "
+            "whitespace may change while an item is live, and anything else "
+            "belongs in a distinct successor action",
+        )
+
+
 # ---------------------------------------------------------------- checks
 
 def check_queue_name():
@@ -5513,14 +6062,32 @@ def check_human_attention():
         clean = semantic_text(text)
         got = text_fields(text)
 
-        if contains_raw_html(text):
+        if unsanctioned_raw_html(text):
             yield Finding(
                 "human-attention",
                 rel,
-                "live human item contains raw HTML",
-                "write it in Markdown only: an HTML block silently swallows "
-                "every field below it while still rendering identically",
+                "live human item contains raw HTML outside the sanctioned fold",
+                "write it in Markdown only; the sole admitted HTML is the three "
+                "exact lines of the `## For the record` fold in "
+                "`templates/queue/`, which `--fix-queue-fold` writes for you",
             )
+        fields_hidden, headings_hidden, choices_hidden = \
+            hidden_from_the_reader(text)
+        for label, lost in (
+            ("field(s)", [f"**{key}:**" for key in fields_hidden]),
+            ("section heading(s)", [f"## {name}" for name in headings_hidden]),
+            ("choice(s)", [f"### {name}" for name in choices_hidden]),
+        ):
+            if lost:
+                yield Finding(
+                    "human-attention",
+                    rel,
+                    f"{label} the checks obey but the reader never sees: "
+                    + ", ".join(lost),
+                    "delete the `display:none`, `hidden` or `aria-hidden` that "
+                    "hides it; a fold is legal because a reader can open it, "
+                    "and hiding is not folding",
+                )
         for key in BANNED_QUEUE_FIELDS:
             if key in got:
                 yield Finding(
@@ -5644,6 +6211,104 @@ def check_human_attention():
                     "delete the state-dependent sentence; the item's own "
                     "Status is the single source of when it can be answered",
                 )
+
+
+def check_record_swallow():
+    """Refuse a record field a reader is shown and no check can read.
+
+    This is the silent half of the failure class, and it is live in production
+    today with nothing catching it. Indent a field by one space, or write it as a
+    list item, and GitHub still renders a bold label while `FIELD_RE`'s column-0
+    anchor stops seeing it: the field exists to the human and not to the gate that
+    is supposed to enforce it. Every HTML-boundary swallow is loud by comparison —
+    the lost labels render as literal asterisks — so what blocks here is not the
+    presence of a construct but the disagreement between the two views.
+
+    Scoped by *position*, never by key name: only the record region is read, so a
+    bold label used as prose inside a choice, a table cell or a blockquote is out
+    of scope because of where it sits and not because of what it is called.
+    """
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue  # queue-location owns unsafe or broken filesystem entries
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] not in ("needs-human", "needs-agent"):
+            continue
+        for line, key in record_swallow_losses(repo_text(item)):
+            yield Finding(
+                "record-swallow",
+                item.relative_to(REPO),
+                f"line {line} renders as **{key}:** but no check reads it as a "
+                "field",
+                "put it at column 0 with no indent and no list marker, and keep "
+                "a blank line after `</summary>` and before `</details>`; "
+                "`automation/reconcile/reconcile.py --fix-queue-fold` does all "
+                "of that",
+            )
+
+
+def check_fold_shape():
+    """Hold the one admitted `<details>` shape to the nine rules it must obey.
+
+    Conditional on a fold being present, so every item written before the fold
+    existed passes untouched and no live item is ever asked to be rewritten. An
+    answered item is skipped for the same reason `check_human_attention` skips
+    one: it is a record rather than an ask, and what protects a record is
+    `queue-frozen-skeleton`.
+    """
+    if not human_attention_format_enabled():
+        return
+    for item in live_queue_items() or ():
+        if not readable_queue_item(item):
+            continue  # queue-location owns unsafe or broken filesystem entries
+        parts = item.parent.relative_to(QUEUE).parts
+        if len(parts) != 2 or parts[0] != "needs-human":
+            continue
+        text = repo_text(item)
+        if not human_attention_format_applies(parts[0], text):
+            continue  # an earlier-spelled live item keeps its own schema
+        if first_concrete_response(human_response_fields(text)) is not None:
+            continue
+        for problem in fold_shape_problems(text):
+            yield Finding(
+                "fold-shape",
+                item.relative_to(REPO),
+                f"malformed fold: {problem}",
+                "copy the block from `templates/queue/` unchanged, or run "
+                "`automation/reconcile/reconcile.py --fix-queue-fold`",
+            )
+
+
+def check_queue_render():
+    """Report a fold whose field lines lost their Markdown hard break.
+
+    Advisory, permanently and by design. The repair is one command and the
+    damage is cosmetic and transient, while blocking it would refuse the commit
+    in which a human answers from an editor that trims trailing whitespace — and
+    for that there is no repair at all, because their first response is
+    immutable and no agent may edit it.
+    """
+    targets = [
+        REPO / QUEUE_TEMPLATES / name
+        for name in ("decision.md", "clarification.md", "review.md")
+    ]
+    targets.extend(live_queue_items() or ())
+    for path in targets:
+        if not candidate_has_file(path):
+            continue
+        rel = path.relative_to(REPO)
+        lines = unbroken_fold_field_lines(repo_text(path))
+        if lines:
+            yield Finding(
+                "queue-render",
+                rel,
+                "folded field line(s) "
+                + ", ".join(str(line) for line in lines)
+                + " lost the two trailing spaces that break them onto their "
+                "own rendered lines",
+                "run `automation/reconcile/reconcile.py --fix-queue-fold`; it "
+                "is whitespace-only, idempotent, and identity-preserving",
+            )
 
 
 def check_explanation_shape():
@@ -9386,8 +10051,12 @@ CHECKS = {
     "queue-location": check_queue_location,
     "queue-schema": check_queue_schema,
     "human-attention": check_human_attention,
+    "record-swallow": check_record_swallow,
+    "fold-shape": check_fold_shape,
+    "queue-render": check_queue_render,
     "explanation-shape": check_explanation_shape,
     "queue-resolution": check_queue_resolution,
+    "queue-frozen-skeleton": check_queue_frozen_skeleton,
     "queue-boundary": check_active_queue_boundaries,
     "queue-task-reciprocity": check_queue_task_reciprocity,
     "open-actions": check_open_actions,
@@ -9866,6 +10535,13 @@ def reconcile(argv=None):
     parser.add_argument("--fix-open-actions", action="store_true",
                         help="regenerate message-queue/open-actions.md")
     parser.add_argument(
+        "--fix-queue-fold",
+        nargs="*",
+        metavar="PATH",
+        help="re-emit the ## For the record fold; default targets are the three "
+             "human queue templates and every live human item already folded",
+    )
+    parser.add_argument(
         "--fail-on-advisory",
         action="store_true",
         help="also exit 1 on advisory findings; for maintenance runs, never the gate",
@@ -9942,6 +10618,14 @@ def reconcile(argv=None):
     if args.fix_index:
         (MEMORY / "index.md").write_text(generated_index(), encoding="utf-8")
         print("memory/index.md regenerated")
+        if not (args.check or args.file_retries or args.fix_open_actions):
+            return 0
+
+    if args.fix_queue_fold is not None:
+        changed = fix_queue_fold(args.fix_queue_fold)
+        for name in changed:
+            print(f"{name} refolded")
+        print(f"queue fold: {len(changed)} file(s) rewritten")
         if not (args.check or args.file_retries or args.fix_open_actions):
             return 0
 

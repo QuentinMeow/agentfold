@@ -532,6 +532,24 @@ def render_inline_code(text):
     return "".join(output)
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
+def visible_html_text(text):
+    """Return source with code blanked and raw HTML left standing, line for line.
+
+    This is the view a caller needs to reason about the markup itself rather than
+    about what it renders: fenced code, indented-code-free, and inline code spans
+    are blanked, while every raw-HTML line survives at its original line number.
+    A caller that wants to admit one exact tag shape subtracts it from this view;
+    `contains_raw_html` is the degenerate case that admits none.
+
+    Like every view here it is positional: the returned text has the same number of
+    lines as its input, so a line index means the same thing in both.
+    """
+    return strip_inline_code(
+        _semantic_text(text or "", preserve_visible_html=True)
+    )
+
+
 def contains_raw_html(text):
     """Conservatively detect raw HTML outside fenced and inline code.
 
@@ -539,10 +557,7 @@ def contains_raw_html(text):
     instead of trying to reproduce a browser's handling of arbitrary tags and
     attributes.
     """
-    clean = strip_inline_code(
-        _semantic_text(text or "", preserve_visible_html=True)
-    )
-    return bool(RAW_HTML_TOKEN_RE.search(clean))
+    return bool(RAW_HTML_TOKEN_RE.search(visible_html_text(text)))
 
 
 def split_indentation(value):
