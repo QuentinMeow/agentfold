@@ -820,11 +820,18 @@ Two figures in the record did **not** survive:
   `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` labels "the worst
   file" is from `non-blocking-review-template-first-explanation.md`, which measures 790
   and 27 — **fourth of ten**. The excerpt's bytes are faithful; only its label is wrong.
-- That same item's "Ten of the fifteen questions waiting for you" is the pre-branch count.
-  At this tip: **17** live `needs-human/` items, **15** with `Status: waiting`, **10**
-  carrying bookkeeping above the answer line and **7** below. Neither claim can be
-  repaired while the item is live — see the worklog entry for the three routes tried and
-  refused.
+- That same item's "Ten of the fifteen questions waiting for you" was the pre-branch
+  count. At this tip: **17** live `needs-human/` items, **15** with `Status: waiting`,
+  **10** carrying bookkeeping above the answer line and **7** below. **Both claims are now
+  repaired.** Editing the live item is refused, and amending its filing commit is refused
+  too (at hook time HEAD still holds the old item, so the check sees a live rewrite). The
+  legal route was to rebuild the filing commit from its parent, so the item is born
+  correct: `reconcile --check` reports `0 blocking finding(s)` on that rebuilt commit. The
+  item now reads "Ten of the seventeen questions in your queue", states 7 under / 10 above,
+  and excerpts `non-blocking-review-layered-development-workspace.md`, the measured worst
+  of the ten at 1,013 characters and 33 lines. The two handovers that project the item were
+  rebuilt the same way, because a committed handover is immutable and its projection had to
+  be born correct as well.
 
 ## The word budget: 800, on held-out evidence
 
