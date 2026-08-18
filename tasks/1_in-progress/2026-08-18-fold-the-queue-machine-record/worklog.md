@@ -23,3 +23,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Second surprise: `record-swallow` does not fire on the attack where a fold swallows the
   answer line, because that attack destroys the very landmark the region's lower half is
   defined by. `fold-shape` refuses it. Recorded in `design.md` rather than papered over.
+- Third surprise, and the one worth remembering: the hard break lands *inside* the parsed
+  value. `FIELD_RE` captured `'pending  '` and `'______  '`, and `PLACEHOLDER_RE` stops
+  recognising an unfilled slot with two spaces after it. Most readers happened to strip
+  first, so it was safe by luck. Fixed at the source — trailing whitespace is
+  presentation, never value — and measured inert on 620 of 623 tracked files.
+- Second commit closes five gate holes a weak-model authoring run found: the 700-word
+  budget (a coin flip at ~12 words of headroom, now 800 with the count and the cut in the
+  finding), a human `Blocks at:` accepting a bare calendar date, `Answer by` allowed to
+  equal `Filed`, `operation:` rejecting version dots, and an unfollowable `Review
+  revision` message. The sixth, a warning in `message-queue/needs-human/reviews/README.md`
+  that the existing files predate the current format, was **not done**: this session was
+  told to treat every file under `message-queue/` as frozen. It needs its own commit.
