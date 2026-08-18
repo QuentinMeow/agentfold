@@ -10,11 +10,21 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 3. Today / What this would change / What this does not decide are true and specific.
 4. Two or more readings, each with a cost and a concrete *Example consequence:*.
 5. The axis sentence opens Your choices and says what the readings differ on.
-6. My working assumption names one reading shown; its counter-case sits beside it.
+6. My working assumption repeats one shown reading's `### ` label text; its
+   counter-case sits beside it. The check compares text, so paraphrasing fails.
 7. No machine field, hash, or token appears above the answer line.
 8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 800 words before the answer. Four choices cost about 700 on their own,
+9. Under 700 words before the answer. Four choices cost about 700 on their own,
    so cut background, never a choice or its example consequence.
+
+Three shapes a checker enforces that nothing else shows you:
+- Every **Key:** value and every *Example consequence:* is read one physical line at
+  a time. Wrap one onto a second line and the reader sees the whole sentence while
+  every check sees only its first half. Keep each on one line, however long.
+- Confidence is exactly `high`, `medium` or `low`, then a space, an em dash (U+2014),
+  a space, and what you checked and did not. A hyphen or a bare adjective is refused.
+- There is no **Look-at:** field. Say where to look in the prose, and put the
+  machine copy in Full context.
 
 An agent recommending an answer to "what did you mean?" puts words in the owner's
 mouth. State what you will assume and do instead.
@@ -66,10 +76,10 @@ show you how it read your words before acting.
 <summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
 **Status:** waiting  
-**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]  
+**Filed:** < YYYY-MM-DD >, by < who >[, from task `<id>`]  
 **Full context:** `<root-relative path to the durable source>`  
 **Resolution evidence:** `<durable non-queue file that folding this answer will change>`  
-**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
+**Answer by:** < UTC YYYY-MM-DD — 90 days from Filed unless something real dates it >
 
 </details>
 

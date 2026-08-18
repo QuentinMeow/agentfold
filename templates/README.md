@@ -25,11 +25,32 @@ Placeholders look like `<this>`; every `**Key:**` line shown is required unless 
 optional. The reconciler (`automation/reconcile/reconcile.py`) validates required keys
 on real files and skips this folder.
 
+**Copy the template, never the nearest existing file.** The live corpus is mid-migration
+by design — a filed item is immutable, so items written under an earlier shape stay as
+they are and age out as they resolve. Copying one therefore reproduces a format the
+current checks reject, and the newest shapes have no live example at all until the next
+item is filed. The template is the schema; a neighbouring file is only evidence of what
+was true when it was written.
+
 **Copy-and-fill is the contract.** Copying a template, replacing its `<placeholders>`,
 and committing must produce a valid item with no further edits. So every required field
 is a real Markdown line: nothing a check reads is ever hidden inside an HTML comment,
 because `semantic_text()` blanks comments before `fields()` parses. Comments carry only
 guidance and optional-field syntax, and deleting them changes nothing.
+
+**A value is one physical line.** Every `**Key:** value` and every `*Example
+consequence:*` is read by a per-line pattern, and CommonMark joins the next non-blank
+line into the same rendered paragraph. So a value written as ordinary wrapped prose
+renders whole and parses only as far as its first newline: the rest is visible to the
+reader and invisible to every check, including the one that requires a recommendation to
+name a choice actually shown. Keep the value on one line however long it gets, and put a
+blank line before any paragraph that is not part of it. On queue items `record-swallow`
+blocks the wrap; nowhere else does, so nowhere else is it safe.
+
+A bare `<word>` placeholder is deleted by GitHub's HTML sanitizer, which reads it as an
+unknown tag, so a copying agent reading the rendered page sees an empty slot. Where the
+angle brackets have to survive on screen they are backticked, or spaced as `< like this >`
+— neither shape parses as a tag, and both still read as one placeholder to fill.
 
 ## The one schema whose artifact is not a repository file
 
@@ -96,8 +117,14 @@ Nothing inside those three lines is a placeholder, so copy-and-fill cannot break
 shape. Every field line but the last ends in two spaces, a Markdown hard break that costs
 no height while the fold is closed; `.gitattributes` stops Git stripping them, and
 `automation/reconcile/reconcile.py --fix-queue-fold` re-emits the whole block from
-whatever shape it is in. A live item is never retro-folded: folding changes its action
-identity, which the queue's own resolution gate refuses.
+whatever shape it is in — except where refolding could not leave the file valid, which is
+rules 9 and 4-in-a-table: it then rewrites nothing, prints what is wrong, and exits 1,
+because the fold and the answer line are the two things a half-repair loses. A live item
+is never retro-folded: folding changes its action identity, which the queue's own
+resolution gate refuses, so **the two `needs-agent/` templates carry no fold and no
+three-field header on purpose** — their reader is an agent reading raw bytes, there is no
+rendered-height complaint to answer, and wrapping an agent item in the human fold would
+add a construct with no beneficiary and a shape to get wrong.
 
 ## Fields with no template of their own
 

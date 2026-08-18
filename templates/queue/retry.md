@@ -11,6 +11,14 @@ for that class's fields, shown once in `templates/README.md`. Every field line h
 real Markdown, so a filled copy of this file is a valid item exactly as it stands;
 guidance that is not a field stays inside comments like this one, which the reconciler
 blanks before parsing and a filing agent may delete.
+
+This template deliberately differs from the three `needs-human/` ones: no collapsed
+fold, no three-field header, no answer line. Its reader is an agent reading raw bytes,
+so there is no rendered height to collapse and nothing to fold. Do not copy the human
+shape onto an agent item.
+
+Every **Key:** value is read one physical line at a time. Wrap one onto a second line
+and the reader sees the whole sentence while every check sees only its first half.
 -->
 
 # <The broken invariant, one line>
