@@ -748,11 +748,19 @@ d5195b5    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 file
 5951c39    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 d2ba47e    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 58e701d    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+e292b21    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+cb245eb    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+16aceb6    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+2cf5479    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 ```
 
-The table is measured at `58e701d`, so the commit that records this row is the one commit
-not in it — that regress has to stop somewhere. It passed the same pre-commit hook at commit
-time, and the next range run covers it.
+Every commit on the branch except the one carrying this table is in it, and that regress
+has to stop somewhere: a table cannot contain the commit that writes it. Rather than a
+count that goes stale on the next commit, the invariant is the one to check —
+`git rev-list fc8c0af..HEAD` names the rows that should exist, every commit listed above
+was gated by checkout in a fresh clone with the hook installed, and the range run below
+covers the whole branch including the rows recorded after the fact. No commit used
+`--no-verify`.
 
 **The two 14/15 rows are stated rather than smoothed over.** `de1e62b` and `19a3b7e` are
 record-only coordination commits that change no code, so they inherit `main`'s state at
@@ -769,7 +777,7 @@ AttributeError: module 'ast' has no attribute 'Str'
 The `ast.Str` guard rides on `c1c78a6`, the first commit that touches code. Splitting the
 old first commit moved the first green row one commit later; it introduced nothing. The
 gate the hook actually runs — core scope, the reconciler, and the staged-path test lane —
-passed on all ten at commit time, because both coordination commits stage only record
+passed on every commit at commit time, because both coordination commits stage only record
 paths and their lane selects no test file.
 
 Two corrections in this file are stale as of this session and are corrected here rather
@@ -779,6 +787,44 @@ than edited above, because the record above is what that session measured:
   names no longer exist on the branch and survive only on `backup/pre-ceremony-a2ab98d`.
 - "`message-queue/needs-human/reviews/README.md` still lacks its one-line warning" — it
   now carries it.
+
+## Re-measured on the correction pass (2026-08-18, later session)
+
+The landing gate at the branch tip, full object ids, and the whole branch re-gated:
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range \
+    fc8c0af0bb7f434c5463eda9f6eda8d570f58afa...2cf5479273ec052fa12d77840027dfe17dd5316e
+reconcile: 0 blocking finding(s), 5 advisory (not blocking)
+exit=0
+```
+
+Every commit `fc8c0af..2cf5479` was checked out detached in a fresh clone with the hook
+installed and gated individually: **0 blocking on all of them**, and the advisory column
+reproduces the table above exactly — blank through `89a11fe`, `5 advisory` from `234bceb`
+onward.
+
+The rendered-volume figures recorded for the ten legacy items were re-derived from scratch
+rather than trusted, and reproduce exactly: **106** bookkeeping field lines, **7,385**
+painted characters, **252** lines of screen at 40 columns, against **740** characters and
+**30** lines collapsed — −90.0% characters, −88.1% screen. Width sensitivity reproduces
+too: 32 → 290, 40 → 252, 48 → 221. Scope is every `**Key:** value` line above the answer
+line except `Action`, `Why-you-might-care` and `If-you-do-nothing`; painted characters are
+those lines with `**` and backticks removed; a phone line is a greedy wrap at 40 columns.
+
+Two figures in the record did **not** survive:
+
+- The worst single file is
+  `message-queue/needs-human/reviews/non-blocking-review-layered-development-workspace.md`
+  at **1,013** characters and **33** lines over 11 field lines. The excerpt that
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` labels "the worst
+  file" is from `non-blocking-review-template-first-explanation.md`, which measures 790
+  and 27 — **fourth of ten**. The excerpt's bytes are faithful; only its label is wrong.
+- That same item's "Ten of the fifteen questions waiting for you" is the pre-branch count.
+  At this tip: **17** live `needs-human/` items, **15** with `Status: waiting`, **10**
+  carrying bookkeeping above the answer line and **7** below. Neither claim can be
+  repaired while the item is live — see the worklog entry for the three routes tried and
+  refused.
 
 ## The word budget: 800, on held-out evidence
 
