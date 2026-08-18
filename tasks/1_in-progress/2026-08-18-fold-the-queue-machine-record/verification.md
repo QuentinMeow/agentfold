@@ -817,9 +817,10 @@ Two figures in the record did **not** survive:
 - The worst single file is
   `message-queue/needs-human/reviews/non-blocking-review-layered-development-workspace.md`
   at **1,013** characters and **33** lines over 11 field lines. The excerpt that
-  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` labels "the worst
-  file" is from `non-blocking-review-template-first-explanation.md`, which measures 790
-  and 27 — **fourth of ten**. The excerpt's bytes are faithful; only its label is wrong.
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` originally labelled
+  "the worst file" was from `non-blocking-review-template-first-explanation.md`, which
+  measures 790 and 27 — **fourth of ten**. Its bytes were faithful and only its label was
+  wrong; the next bullet records how both were repaired.
 - That same item's "Ten of the fifteen questions waiting for you" was the pre-branch
   count. At this tip: **17** live `needs-human/` items, **15** with `Status: waiting`,
   **10** carrying bookkeeping above the answer line and **7** below. **Both claims are now
@@ -857,18 +858,23 @@ Both are the coordinator's measurements and neither was re-derived here. What th
 verified is the consequence: at 800, `reconcile --check` is 0 blocking, every live governed
 item has headroom, and the new counter reports it.
 
+Re-run unabridged at the branch tip after the repair above. It supersedes an earlier run of
+the same command recorded here, which reported 694 words for
+`non-blocking-choose-what-happens-to-the-ten-older-question-files.md`; correcting that item
+lengthened it to 716, and no other line moved. Re-run it rather than trust these numbers:
+
 ```
 $ python3 automation/reconcile/reconcile.py --word-count
 templates/queue/decision.md: 226 of 800 words — 574 to spare
 templates/queue/clarification.md: 227 of 800 words — 573 to spare
 templates/queue/review.md: 296 of 800 words — 504 to spare
-…/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md: 687 of 800 words — 113 to spare
-…/non-blocking-choose-what-happens-to-the-ten-older-question-files.md: 694 of 800 words — 106 to spare
-…/non-blocking-dispose-five-half-read-values-in-two-frozen-questions.md: 727 of 800 words — 73 to spare
-…/non-blocking-re-ask-the-older-questions-in-plainer-words.md: 676 of 800 words — 124 to spare
-…/non-blocking-stop-a-principle-from-copying-the-line-budget.md: 700 of 800 words — 100 to spare
-…/non-blocking-review-the-explanation-standard.md: 696 of 800 words — 104 to spare
-…/non-blocking-review-the-pull-request-shape.md: 675 of 800 words — 125 to spare
+message-queue/needs-human/decisions/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md: 687 of 800 words — 113 to spare
+message-queue/needs-human/decisions/non-blocking-choose-what-happens-to-the-ten-older-question-files.md: 716 of 800 words — 84 to spare
+message-queue/needs-human/decisions/non-blocking-dispose-five-half-read-values-in-two-frozen-questions.md: 727 of 800 words — 73 to spare
+message-queue/needs-human/decisions/non-blocking-re-ask-the-older-questions-in-plainer-words.md: 676 of 800 words — 124 to spare
+message-queue/needs-human/decisions/non-blocking-stop-a-principle-from-copying-the-line-budget.md: 700 of 800 words — 100 to spare
+message-queue/needs-human/reviews/non-blocking-review-the-explanation-standard.md: 696 of 800 words — 104 to spare
+message-queue/needs-human/reviews/non-blocking-review-the-pull-request-shape.md: 675 of 800 words — 125 to spare
 word count: 10 file(s), 0 over budget
 exit=0
 ```
