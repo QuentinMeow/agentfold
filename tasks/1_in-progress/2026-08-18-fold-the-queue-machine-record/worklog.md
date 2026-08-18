@@ -125,15 +125,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   `handover-queue-projection` freezes a committed handover and its own repair text says to
   record the correction in a new one, so that is where it went, phrased as a command
   rather than a number so it cannot go stale again.
-- **Not fixed, and not fixable in place:**
-  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` says "Ten of the
+- **Repaired by rebuilding the filing commit.**
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` said "Ten of the
   fifteen questions waiting for you" in its title, its `Why this matters` and its `Today`
-  line, and labels an excerpt "the worst file" that measurement ranks fourth of ten. The
-  corrected body is written and passes every check at 716 of 800 words, but landing it
-  requires rewriting `5951c39`, the commit that created the item — the only legal route,
-  since `queue-resolution` refuses an identity edit on a live item and deletion requires a
-  human response an agent may never write. That is a history rewrite of an unpushed branch
-  and it is the owner's call.
+  line, and labelled an excerpt "the worst file" that measurement ranks fourth of ten.
+  Editing the live item is refused by `queue-resolution`, and amending its filing commit is
+  refused too, because at hook time HEAD still holds the old item and the check sees a live
+  rewrite. Rebuilding the filing commit from its parent is legal — the item is then born
+  correct and there is no prior version to rewrite — and that is what landed, the following
+  commits being replayed onto it. The two handovers that project the item were rebuilt the
+  same way, since a committed handover is immutable and its projection had to be born
+  correct as well. This was a history rewrite of an unpushed branch, authorized before it
+  was performed.
 - Re-derived rather than trusted: the ten legacy files measure 106 field lines, 7,385
   painted characters and 252 phone lines at 40 columns, reproducing the committed record
   exactly; the worst single file is
