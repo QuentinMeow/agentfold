@@ -108,3 +108,34 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Not done, and deliberately: the task stays in `1_in-progress`. Nothing is pushed and no
   pull request is opened, so moving it to `3_in-review` would claim a review that has not
   been asked for. The PR body is drafted and waiting.
+
+## 2026-08-18 — correct the ship-gate blockers (claude)
+
+- A ship gate on the branch tip found four published falsehoods. Three are fixed; the
+  fourth cannot be, and that is the finding of this session.
+- The word budget's justification cited `pass^2` figures and a McNemar p-value from a
+  harness that is not in this repository. The comment now carries the reasoning and names
+  the task record holding the figures, so nothing in shipped source rests on evidence a
+  reader cannot reach.
+- `roadmap/current-state.md` still described the pre-branch tree. Re-measured at HEAD: 17
+  live `needs-human/` items, 15 waiting, 10 with bookkeeping above the answer line and 7
+  below, of which the 2 this task filed are the only folded items anywhere. The record
+  said fifteen live, none folded, zero production exercise.
+- The previous handover's "(10 commits, nothing pushed)" was 12 when written.
+  `handover-queue-projection` freezes a committed handover and its own repair text says to
+  record the correction in a new one, so that is where it went, phrased as a command
+  rather than a number so it cannot go stale again.
+- **Not fixed, and not fixable in place:**
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` says "Ten of the
+  fifteen questions waiting for you" in its title, its `Why this matters` and its `Today`
+  line, and labels an excerpt "the worst file" that measurement ranks fourth of ten. The
+  corrected body is written and passes every check at 716 of 800 words, but landing it
+  requires rewriting `5951c39`, the commit that created the item — the only legal route,
+  since `queue-resolution` refuses an identity edit on a live item and deletion requires a
+  human response an agent may never write. That is a history rewrite of an unpushed branch
+  and it is the owner's call.
+- Re-derived rather than trusted: the ten legacy files measure 106 field lines, 7,385
+  painted characters and 252 phone lines at 40 columns, reproducing the committed record
+  exactly; the worst single file is
+  `non-blocking-review-layered-development-workspace.md` at 1,013 characters and 33 lines,
+  not the one the item excerpts.
