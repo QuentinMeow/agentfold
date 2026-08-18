@@ -329,18 +329,21 @@ What is true today, mapped to the desired-state lines.
   function of the queue files: no calendar date enters the output, because tracked bytes
   that depended on today would fail a tree nobody touched the morning a deadline passed.
   Lateness stays with the advisory `stale-queue` check, which is where it belongs.
-- **New human questions hide their bookkeeping; the fifteen live ones do not (2026-08-18)**:
+- **New human questions hide their bookkeeping; the ten oldest live ones do not (2026-08-18)**:
   the three `needs-human/` templates carry their machine block below the answer line inside
   one collapsed `<details>`, held by four checks — `record-swallow` (a field a renderer
   shows and no parser reads, scoped by line position, not by key name), `fold-shape` (nine
   rules), a narrowed raw-HTML rule admitting exactly three anchored line shapes, and
-  `queue-frozen-skeleton` (raw bytes changing while action identity does not). Not one live
-  item is folded and none can be: folding changes action identity and `queue-resolution`
-  refuses it, so the corpus is deliberately mid-migration and the fold has zero production
-  exercise. Ten of the fifteen live human items still open with their bookkeeping above the
-  question; what to do about them is now the owner's, as
-  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md`. The word budget is
-  800 after a held-out gate measured 700 refusing well-written items, and
+  `queue-frozen-skeleton` (raw bytes changing while action identity does not). Of the 17
+  live `needs-human/` items, exactly the 2 this task filed are folded; no pre-existing item
+  can be, because folding changes action identity and `queue-resolution` refuses it. So the
+  corpus is deliberately mid-migration and the fold's only production exercise is those two
+  filings. 10 of the 17 still open with their bookkeeping above the question, 7 carry it
+  below; what to do about the 10 is now the owner's, as
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md` — whose own title
+  and `Today` line still say "ten of the fifteen", the pre-branch count, and cannot be
+  corrected while it is live. The word budget is 800 after a gate measured 700 refusing
+  well-written items, and
   `reconcile.py --word-count` prints the count against it for any file, because the one
   threshold of that format an author could not self-check was the one they kept breaching.
   What is still unenforced: nothing checks that an item was copied from a template rather
