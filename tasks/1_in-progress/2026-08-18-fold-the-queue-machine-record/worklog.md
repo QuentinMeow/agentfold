@@ -35,3 +35,34 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   revision` message. The sixth, a warning in `message-queue/needs-human/reviews/README.md`
   that the existing files predate the current format, was **not done**: this session was
   told to treat every file under `message-queue/` as frozen. It needs its own commit.
+
+## 2026-08-18 — repair the defects review found (claude)
+
+- Two kill shots closed. `queue-frozen-skeleton` dropped whole mutable field lines, so the
+  red team's payload only had to move to the end of one; it now drops a line only when its
+  value is byte-identical to the parsed value and carries no raw-HTML token, making
+  (skeleton, mutable values) a total partition of the file's bytes. `--fix-queue-fold`
+  folded the human's answer line away irreversibly; it never harvests that line now and
+  refuses to write any result it cannot leave clean.
+- Byte-identical to the shipped skeleton on all 9191 historical queue blobs, so "0 new
+  refusals" is proven rather than sampled. Every named lifecycle edge re-tested.
+- `record_visible_lines` now blanks indented code exactly as `semantic_text` does. That one
+  view disagreement was a blocking false positive *and* an emitter that promoted a code
+  sample to a real machine field; fixing it at the root closed both.
+- The shape rule reads nested and ordered markers and non-first table cells; a collapsed
+  record region and a value wrapped onto a second line are reported rather than passing in
+  silence. Still 0 unscoped across all 628 tracked files.
+- The 800-word budget is reverted to 700. Measured afterwards, the raise made freshly
+  authored items 9.3 % longer with the quality difference inside noise — the opposite of
+  the volume complaint. The finding now carries the count, the ceiling and the cut.
+- Five claims in `verification.md` are corrected rather than defended, the largest being
+  that `main` at `fc8c0af` is 14/15 on Python 3.14.6: the `ast.Str` guard rides on this
+  branch, and the specification was right to call it owed.
+- `7aaf11f` is squashed into `20c8e8f`, so no commit on the branch is one the reconciler
+  refuses on checkout. Replaying the real hook against each commit's staged diff is
+  stricter and found two more; one is fixed, and one — the first commit creating its task
+  directly in `1_in-progress` — cannot be, because the documented repair needs a pickup
+  request under the frozen `message-queue/`. It is a ship blocker and is written down as
+  one.
+- Not done, again: the one-line warning in `message-queue/needs-human/reviews/README.md`.
+  Same reason. It still needs its own commit from a session allowed to write there.

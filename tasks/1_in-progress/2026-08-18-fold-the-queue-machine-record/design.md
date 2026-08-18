@@ -68,6 +68,44 @@ whole file whenever the answer line is missing would police prose and reintroduc
 false positives that killed the key-scoped predicate, so the region stays empty and the
 attack is refused by `fold-shape` alone. `verification.md` records both facts.
 
+## What review changed, and what it could not
+
+A red-team pass and an independent authoring measurement found two kill shots and nine
+defects in the first implementation. Three of the resulting decisions are design-level
+rather than repairs, and are recorded here because a reader who only sees the diff would
+have to re-derive them.
+
+**Identity is not integrity, and the integrity view has to be total.** The first
+implementation compared raw lines with lifecycle-mutable field lines dropped, which was
+correct on the structural axis and blind on one: a payload appended to the *end* of
+`**Answer by:**` left with the line. The repair does not make the skeleton compare mutable
+values — it cannot, because their whole purpose is to change — it requires them to be
+*exposed*: byte-identical to the value `semantic_text` parses, and free of raw-HTML
+tokens. Every byte of the file is then either frozen in the skeleton or inside an exposed
+value, which is a total partition and is asserted as one by a test. The human's own
+response line keeps the raw-HTML exemption, because a person may type an angle-bracketed
+word and their answer commit is the one edit no rule may refuse.
+
+**A repair a check names must be a repair that works.** `--fix-queue-fold` was named by
+three findings it could not fix, and on one of them it destroyed the item — harvesting
+`**Your review:**` into the fold, which the same check calls its worst state, with no way
+back. The rule adopted: an emitter refuses to write any result that is still malformed,
+and a finding whose repair is structural says what to move rather than naming a command.
+Naming a command that cannot help is worse than naming none, because a weak model runs it.
+
+**The fold has zero production exercise, and will keep it.** `queue-resolution` refuses a
+retro-fold, so all 15 live human items stay unfolded permanently; the fold path is
+exercised only by items filed from today's templates, and none has been filed yet. That is
+not a gap to close later — it is the direct consequence of the safety rule this design
+chose, and it means the mechanism ships tested against fixtures and untested against use.
+
+**What could not be repaired.** The branch's first commit creates its task directly in
+`1_in-progress`, which the `--range` landing gate refuses. The documented repair — file in
+`0_backlog`, claim in a second commit — needs a canonical pickup request under
+`message-queue/needs-agent/requests/`, and this session was instructed to treat that tree
+as frozen. It is recorded in `verification.md` with the exact refusal rather than worked
+around.
+
 ## Core fit
 
 **Agent substitution:** pass — every mechanism is a Python check over committed Markdown bytes; no agent runtime, model, or prompt participates in producing or evaluating the fold.
