@@ -722,7 +722,7 @@ commit after it was replayed through the real pre-commit hook; none used `--no-v
 
 ```
 $ python3 automation/reconcile/reconcile.py --check --range \
-    fc8c0af0bb7f434c5463eda9f6eda8d570f58afa...d2ba47e...
+    fc8c0af0bb7f434c5463eda9f6eda8d570f58afa...58e701d29cf3cd01a6f192374c2868cac2337183
 reconcile: 0 blocking finding(s), 5 advisory (not blocking)
 exit=0
 ```
@@ -747,7 +747,12 @@ d5195b5    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 file
 92c03f3    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 5951c39    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 d2ba47e    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+58e701d    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
 ```
+
+The table is measured at `58e701d`, so the commit that records this row is the one commit
+not in it — that regress has to stop somewhere. It passed the same pre-commit hook at commit
+time, and the next range run covers it.
 
 **The two 14/15 rows are stated rather than smoothed over.** `de1e62b` and `19a3b7e` are
 record-only coordination commits that change no code, so they inherit `main`'s state at
