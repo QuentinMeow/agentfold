@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-02
+**Last-updated:** 2026-08-18
 
 What is true today, mapped to the desired-state lines.
 
@@ -329,3 +329,21 @@ What is true today, mapped to the desired-state lines.
   function of the queue files: no calendar date enters the output, because tracked bytes
   that depended on today would fail a tree nobody touched the morning a deadline passed.
   Lateness stays with the advisory `stale-queue` check, which is where it belongs.
+- **New human questions hide their bookkeeping; the fifteen live ones do not (2026-08-18)**:
+  the three `needs-human/` templates carry their machine block below the answer line inside
+  one collapsed `<details>`, held by four checks — `record-swallow` (a field a renderer
+  shows and no parser reads, scoped by line position, not by key name), `fold-shape` (nine
+  rules), a narrowed raw-HTML rule admitting exactly three anchored line shapes, and
+  `queue-frozen-skeleton` (raw bytes changing while action identity does not). Not one live
+  item is folded and none can be: folding changes action identity and `queue-resolution`
+  refuses it, so the corpus is deliberately mid-migration and the fold has zero production
+  exercise. Ten of the fifteen live human items still open with their bookkeeping above the
+  question; what to do about them is now the owner's, as
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md`. The word budget is
+  800 after a held-out gate measured 700 refusing well-written items, and
+  `reconcile.py --word-count` prints the count against it for any file, because the one
+  threshold of that format an author could not self-check was the one they kept breaching.
+  What is still unenforced: nothing checks that an item was copied from a template rather
+  than from the nearest legacy file, and `memory/decisions/` has no integrity gate at all —
+  an appended HTML comment, fence, or indented block on a decided ADR is 0 blocking under
+  `--check` and under `--range`, unlike the same append to a handover or a live queue item.

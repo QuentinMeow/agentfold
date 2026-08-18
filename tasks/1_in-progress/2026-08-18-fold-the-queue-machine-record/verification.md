@@ -705,3 +705,186 @@ already meant.
   from here.
 - **Generator use is unenforced.** Nothing checks that an item came from a template rather
   than from the nearest legacy file, and `--new-queue-item` was not built.
+
+---
+
+# Landing session — 2026-08-18, by claude
+
+Everything under this heading was produced after the record above, on the repaired branch.
+Where it contradicts the record above, this section is the later measurement and says so.
+
+## The lifecycle blocker is repaired, and the landing gate passes
+
+The first commit was split into a `0_backlog` filing commit carrying the canonical
+`task-pickup` request, and a claim coordination commit that sets `Claimed-by`, moves the
+folder to `1_in-progress`, adds `plan.md` and `worklog.md`, and deletes the request. Every
+commit after it was replayed through the real pre-commit hook; none used `--no-verify`.
+
+```
+$ python3 automation/reconcile/reconcile.py --check --range \
+    fc8c0af0bb7f434c5463eda9f6eda8d570f58afa...d2ba47e...
+reconcile: 0 blocking finding(s), 5 advisory (not blocking)
+exit=0
+```
+
+The `[task-admission]` finding that refused the branch — "task snapshot … was created
+directly in 1_in-progress" — is gone. The 5 advisories are the two frozen items with values
+cut mid-sentence, unchanged and expected.
+
+## Every commit gated by checkout
+
+Each commit checked out in a fresh clone with the hook installed, then gated:
+
+```
+commit     reconcile --check                                   run_tests.py
+de1e62b    reconcile: 0 blocking finding(s)                    tests: 14/15 files passed
+19a3b7e    reconcile: 0 blocking finding(s)                    tests: 14/15 files passed
+c1c78a6    reconcile: 0 blocking finding(s)                    tests: 15/15 files passed
+e628ad4    reconcile: 0 blocking finding(s)                    tests: 15/15 files passed
+89a11fe    reconcile: 0 blocking finding(s)                    tests: 15/15 files passed
+234bceb    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+d5195b5    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+92c03f3    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+5951c39    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+d2ba47e    reconcile: 0 blocking finding(s), 5 advisory        tests: 15/15 files passed
+```
+
+**The two 14/15 rows are stated rather than smoothed over.** `de1e62b` and `19a3b7e` are
+record-only coordination commits that change no code, so they inherit `main`'s state at
+`fc8c0af` exactly — including its Python 3.14.6 failure:
+
+```
+$ git checkout --detach 19a3b7e && python3 automation/run_tests.py
+FAIL automation/tests/test_reconcile_queue.py
+tests: 14/15 files passed
+$ python3 -m unittest automation.tests.test_reconcile_queue
+AttributeError: module 'ast' has no attribute 'Str'
+```
+
+The `ast.Str` guard rides on `c1c78a6`, the first commit that touches code. Splitting the
+old first commit moved the first green row one commit later; it introduced nothing. The
+gate the hook actually runs — core scope, the reconciler, and the staged-path test lane —
+passed on all ten at commit time, because both coordination commits stage only record
+paths and their lane selects no test file.
+
+Two corrections in this file are stale as of this session and are corrected here rather
+than edited above, because the record above is what that session measured:
+
+- "`bccfe0d`'s lifecycle topology … an unrepaired ship blocker" — repaired; the shas it
+  names no longer exist on the branch and survive only on `backup/pre-ceremony-a2ab98d`.
+- "`message-queue/needs-human/reviews/README.md` still lacks its one-line warning" — it
+  now carries it.
+
+## The word budget: 800, on held-out evidence
+
+The revert to 700 recorded above was measured wrong, and both measurements are kept.
+
+```
+                                     700 ceiling      800 ceiling
+TRAIN, freshly authored items
+  mean words before the answer             673.4            736.2   (+9.3 %)
+  mean rendered lines                       43.5             55.1   (+27 %)
+  items over 700 words                       3/8              6/8
+  paired quality difference                        McNemar p = 0.50 (inside noise)
+
+HELD-OUT, same candidate prose under both gates
+  Tier C pass^2                            0.375            0.750
+  blocking findings, 16 files                 11                4
+  human items over budget                   7/10             0/10
+  mean words before the answer                     724.7
+  worst overrun at 700                          92 words (baseline's worst: 5)
+```
+
+Both are the coordinator's measurements and neither was re-derived here. What this session
+verified is the consequence: at 800, `reconcile --check` is 0 blocking, every live governed
+item has headroom, and the new counter reports it.
+
+```
+$ python3 automation/reconcile/reconcile.py --word-count
+templates/queue/decision.md: 226 of 800 words — 574 to spare
+templates/queue/clarification.md: 227 of 800 words — 573 to spare
+templates/queue/review.md: 296 of 800 words — 504 to spare
+…/non-blocking-choose-the-gate-for-externally-changed-instruction-files.md: 687 of 800 words — 113 to spare
+…/non-blocking-choose-what-happens-to-the-ten-older-question-files.md: 694 of 800 words — 106 to spare
+…/non-blocking-dispose-five-half-read-values-in-two-frozen-questions.md: 727 of 800 words — 73 to spare
+…/non-blocking-re-ask-the-older-questions-in-plainer-words.md: 676 of 800 words — 124 to spare
+…/non-blocking-stop-a-principle-from-copying-the-line-budget.md: 700 of 800 words — 100 to spare
+…/non-blocking-review-the-explanation-standard.md: 696 of 800 words — 104 to spare
+…/non-blocking-review-the-pull-request-shape.md: 675 of 800 words — 125 to spare
+word count: 10 file(s), 0 over budget
+exit=0
+```
+
+The command exits 1 when anything is over, so an author can use it as a self-check before
+the commit that would otherwise be the first place the number appears.
+
+## `memory/decisions/` has no integrity gate at all
+
+Measured in a throwaway clone at the branch head, hook installed, one payload appended at
+end of file, staged, then gated. Each row is an independent probe from a clean tree:
+
+```
+target                                        payload          reconcile --check
+memory/decisions/2026-07-22-bold-key-…md      visible prose    0 blocking, 5 advisory
+memory/decisions/2026-07-22-bold-key-…md      HTML comment     0 blocking, 5 advisory
+memory/decisions/2026-07-22-bold-key-…md      fenced block     0 blocking, 5 advisory
+memory/decisions/2026-07-22-bold-key-…md      indented code    0 blocking, 5 advisory
+history/conversations/…/handover.md           HTML comment     1 blocking, 5 advisory
+history/conversations/…/handover.md           visible prose    1 blocking, 5 advisory
+
+$ git commit -m "probe: append an invisible directive to a decided ADR"   # hook: OK
+$ python3 automation/reconcile/reconcile.py --check --range <base>...<head>
+reconcile: 0 blocking finding(s), 5 advisory (not blocking)
+```
+
+The handover rows are `handover-queue-projection` ("handover record was modified after
+queue-projection adoption"). So the original finding's class is closed where it was raised:
+queue items by `queue-frozen-skeleton`, handovers by an existing byte-level gate. What
+remains is different in kind — `memory/decisions/` has no integrity check to be blind, and
+the boot sequence sends every agent to read it. Filed as
+`message-queue/needs-agent/requests/non-blocking-freeze-decided-records-against-invisible-appends.md`.
+
+## The rendering win, measured
+
+Definition, stated because the number is meaningless without it. *Painted characters* are
+the characters a renderer paints for the machine field lines: the bold key text, the colon,
+the space and the value, with the `**` and backtick syntax removed. *Phone lines* is a
+greedy word wrap of each painted line at 40 columns, at least one line each.
+
+```
+the ten live human items that predate the current format
+  106 field lines · 7,385 painted characters · 252 phone lines
+collapsed behind one `<summary>` each
+      10 lines ·   740 painted characters ·  30 phone lines
+                                            −90.0 % characters, −88.1 % lines
+
+worst single file  message-queue/needs-human/reviews/non-blocking-review-layered-development-workspace.md
+                   1,013 painted characters, 33 phone lines -> 74 characters, 3 phone lines
+```
+
+Width sensitivity, because "phone" is a wrap width and not a device:
+
+```
+  32 columns: 290 -> 30 lines      40 columns: 252 -> 30      48 columns: 221 -> 20
+```
+
+**One inherited figure did not reproduce.** The pair "524 → 89 painted characters, 17 → 3
+phone lines" was handed to this session as measured. The line half reproduces exactly:
+`non-blocking-review-the-pull-request-shape.md` has 9 record fields wrapping to 17 lines at
+40 columns, against 3 for the collapsed summary. The character half does not reproduce
+under any single consistent definition — that file's record section measures 521 painted
+characters including its heading and caption, 451 for its field lines alone, against 74 for
+the summary. The figures above are this session's own, with the definition stated, and the
+inherited pair should not be requoted.
+
+## What this session did not verify
+
+- **GitHub's own renderer.** No network call was made from here either. The claim that YAML
+  front matter renders as a table above the first heading is attributed in the ADR that
+  uses it, and is not this repository's measurement.
+- **The authoring numbers**, train and held-out alike. Both tables above are the
+  coordinator's; this session verified only that acting on them refuses nothing live.
+- **The fold in production.** Still zero exercise: `queue-resolution` refuses a retro-fold,
+  so all 15 live human items stay unfolded, and the three items filed this session are
+  agent-written rather than a real authoring run. Two of them carry the fold; nobody has
+  yet opened one on a phone.

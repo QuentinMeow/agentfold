@@ -106,6 +106,25 @@ chose, and it means the mechanism ships tested against fixtures and untested aga
 as frozen. It is recorded in `verification.md` with the exact refusal rather than worked
 around.
 
+**Repaired by the landing session, once that constraint was narrowed.** The first commit is
+now two: a `0_backlog` filing carrying the canonical pickup request, and a claim
+coordination commit that resolves it. The landing gate passes. Two consequences are worth
+carrying forward. Splitting an implementation commit means the record-only halves inherit
+whatever `main` was — so the two coordination commits are 14/15 on Python 3.14.6, because
+the `ast.Str` guard rides on the code commit and `main` was already red there. And one line
+of `design.md` had to change to make the split legal: `check_core_scope.is_placeholder`
+reads any value containing `<` as unfilled, so a `Provider substitution` reason that named
+the fold by its tag failed the hook on its own staged diff.
+
+**A budget is a threshold nobody can see.** The 700-word ceiling was reverted to on a
+training-set length ratchet, then a held-out gate measured the same prose at pass^2 0.750
+under 800 and 0.375 under 700, with a natural mean of 724.7 words. Both readings are kept
+on the constant, because they answer different questions: the ratchet measures how long
+authors write, the held-out gate measures whether the threshold refuses good work, and only
+the second is what a budget is for. The deeper defect was neither number — an author could
+not measure themselves before the gate refused them, so `--word-count` prints the count
+against the budget for any file, committed or not.
+
 ## Core fit
 
 **Agent substitution:** pass — every mechanism is a Python check over committed Markdown bytes; no agent runtime, model, or prompt participates in producing or evaluating the fold.
