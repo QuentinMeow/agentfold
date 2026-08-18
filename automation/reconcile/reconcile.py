@@ -290,22 +290,24 @@ HUMAN_MACHINE_FIELDS = frozenset({
 # Dead fields that may not drift back. `Look-at` had six live uses, no template,
 # no contract sentence, and no reader; the source is named once in the prose.
 BANNED_QUEUE_FIELDS = ("Look-at",)
-# 800, and neither the number nor the way it moved is free. Two measurements say
-# opposite-sounding things and both are recorded, because acting on one alone is what
-# produced the wrong value twice.
+# 800, and neither the number nor the way it moved is free. Two measurements pointed
+# opposite ways and both are kept, because acting on one alone is what produced the
+# wrong value twice.
 #
-#   Training scenarios, 700 -> 800: freshly authored items grew from a mean of 673.4
-#   words to 736.2 (+9.3 %) and from 43.5 rendered lines to 55.1 (+27 %), while the
-#   paired quality difference stayed inside noise (McNemar p = 0.50). Authors expand
-#   into a ceiling. That is real, and it is why the raise is not free.
+#   Raising the ceiling made freshly authored items measurably longer, in words and in
+#   rendered lines, with no quality difference that could be told apart from noise.
+#   Authors expand into a ceiling. That is real, and it is why the raise is not free.
 #
-#   Held-out scenarios, the same prose under both gates: pass^2 0.750 at 800 against
-#   0.375 at 700, with 7 of 10 items over 700 and 0 of 10 over 800, worst overrun 92
-#   words. Mean length on unseen briefs is 724.7 words — so ~725 words is what a
-#   complete, competent ask costs here, and 700 refuses well-written items.
+#   But judged against items written without this gate in view, 700 refused work that
+#   was not too long: most such items landed above 700 and none above 800, so a 700
+#   ceiling mostly refuses complete, competent asks rather than padded ones.
 #
-# The ratchet measures how long authors write; the held-out gate measures whether the
-# threshold refuses good work. Only the second is what a budget is for, so 800 stands.
+# The first says how long authors write; the second says whether the threshold refuses
+# good work, and only the second is what a budget is for — so 800 stands. The figures,
+# the runs behind them, and the reverted 700 they corrected are recorded in the task
+# that set this number, `2026-08-18-fold-the-queue-machine-record`; this comment carries
+# the conclusion rather than the evidence, so it cannot drift away from it.
+#
 # The real repair is not the number: it is that an author could not see the count until
 # the gate refused them. `--word-count` prints it on demand and the finding carries it,
 # so the threshold is now something a person can check rather than guess at.
