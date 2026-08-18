@@ -16,4 +16,5 @@ response cannot be folded after the target changes — you only fill
 that records crossing or cancellation; it never doubles as the reviewed target.
 
 File one with a timing-prefixed name by copying `templates/queue/review.md`; answer
-after `**Your review:**`.
+after `**Your review:**`. Copy that template and never a neighbouring file: every
+review already sitting here predates the current format, and the template governs.

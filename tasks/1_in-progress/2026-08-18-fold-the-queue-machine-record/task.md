@@ -4,7 +4,7 @@
 **Filed:** 2026-08-18, by claude, from chat
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** none
+**Queue actions:** `message-queue/needs-human/decisions/non-blocking-choose-what-happens-to-the-ten-older-question-files.md`; `message-queue/needs-human/decisions/non-blocking-dispose-five-half-read-values-in-two-frozen-questions.md`
 
 ## Goal
 
