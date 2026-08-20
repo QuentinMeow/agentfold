@@ -301,9 +301,9 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [stop-a-restack-from-being-blamed-for-another-branchs-deletion](needs-agent/requests/non-blocking-pick-up-stop-a-restack-from-being-blamed-for-another-branchs-deletion.md)
   - [stop-a-wrapped-line-from-reading-as-a-command](needs-agent/requests/non-blocking-pick-up-stop-a-wrapped-line-from-reading-as-a-command.md)
   - [bind-task-branch-pushes-to-observed-tips](needs-agent/requests/non-blocking-pick-up-bind-task-branch-pushes-to-observed-tips.md)
-  - [make-linked-worktree-bootstrap-concurrency-safe](needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md)
   - [one-line-human-responses-refresh-open-actions-safely](needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md)
   - [stop-a-withdrawn-exemption-from-dirtying-past-edges](needs-agent/requests/non-blocking-pick-up-stop-a-withdrawn-exemption-from-dirtying-past-edges.md)
+  - [stop-workspace-boundary-tests-from-flaking-under-sharding](needs-agent/requests/non-blocking-pick-up-stop-workspace-boundary-tests-from-flaking-under-sharding.md)
 
   </details>
 

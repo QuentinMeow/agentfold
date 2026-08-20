@@ -9,6 +9,5 @@ than it is written.
   Never use coded cross-references ("see §6b") — use descriptive links.
 - Operating docs (`collaboration-modes.md`, `git-workflow.md`, `github-projection.md`,
   `decision-guide.md`, `naming-conventions.md`, `adoption-guide.md`) may be improved
-  freely. Contract
-  precedence is owned by `principles/folder-as-a-service.md`; this folder does not
-  restate or invert it.
+  freely. Contract precedence is owned by `principles/folder-as-a-service.md`; this
+  folder does not restate or invert it.

@@ -1,10 +1,10 @@
 # Make linked-worktree bootstrap concurrency-safe
 
-**Claimed-by:** unclaimed
+**Claimed-by:** sol-high bootstrap implementer
 **Filed:** 2026-08-03, by codex, from task `2026-08-03-plan-multi-worktree-safety-remediation` and GitHub issue #74
 **Parent:** 2026-08-03-plan-multi-worktree-safety-remediation
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-make-linked-worktree-bootstrap-concurrency-safe.md`; `message-queue/needs-agent/requests/non-blocking-track-github-issue-74-worktree-bootstrap.md`
+**Queue actions:** `message-queue/needs-agent/requests/non-blocking-track-github-issue-74-worktree-bootstrap.md`
 
 ## Goal
 
@@ -14,19 +14,20 @@ Preserve real user files and avoid user-global or provider-specific configuratio
 
 ## Acceptance criteria
 
-- [ ] A linked worktree bootstrap creates that worktree's ignored `CLAUDE.md` and skill
+- [x] A linked worktree bootstrap creates that worktree's ignored `CLAUDE.md` and skill
       adapters, and each adapter points into its own checkout.
-- [ ] Worktree-local setup does not rewrite shared `.git/config` when `core.hooksPath` is
+- [x] Worktree-local setup does not rewrite shared `.git/config` when `core.hooksPath` is
       already correct.
-- [ ] Six concurrent fresh-worktree bootstraps and twelve concurrent repeated bootstraps
+- [x] Six concurrent fresh-worktree bootstraps and twelve concurrent repeated bootstraps
       exit 0 without `config.lock` failures and leave identical valid adapters.
-- [ ] Bootstrap never clobbers a real non-symlink adapter path and reports one actionable
+- [x] Bootstrap never clobbers a real non-symlink adapter path and reports one actionable
       error when safe setup is impossible.
-- [ ] The boot contract distinguishes once per common repository from once per worktree.
-- [ ] Tests use real linked worktrees and assert both common-dir and local Git-dir behavior.
+- [x] The boot contract distinguishes once per common repository from once per worktree.
+- [x] Tests use real linked worktrees and assert both common-dir and local Git-dir behavior.
 
 ## Links
 
 - Planning task: `2026-08-03-plan-multi-worktree-safety-remediation`
 - GitHub projection: https://github.com/QuentinMeow/agentfold/issues/74
+- Draft implementation: https://github.com/QuentinMeow/agentfold/pull/79
 - Installer: `automation/install.py`
