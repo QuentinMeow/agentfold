@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 14 questions waiting on you, 53 actions waiting on an agent. 3 others not yours right now.
+**Nothing is stopping work.** 15 questions waiting on you, 53 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -39,7 +39,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 11
+### Never stops work — 12
 
 - [Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.](needs-human/reviews/non-blocking-review-template-first-explanation.md) — answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -79,6 +79,14 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** Three core changes are live on main today without the review each of them declared mandatory before merge, and no commit can now satisfy that gate.
 
   **If you do nothing:** The reviews stay live and answerable, their tasks complete without them, and the crossing stays visible in Git history.
+
+  </details>
+- [Say whether this is the standard every human-facing message is held to, or name what to change.](needs-human/reviews/non-blocking-review-the-explanation-standard.md) — answer by 2026-10-30
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Every report, pull request, and question you get from an agent from now on is written to this standard, so a wrong rule here compounds across every future message.
+
+  **If you do nothing:** The standard stands as written and agents follow it; nothing stops, and it can be changed later by editing one file.
 
   </details>
 - [Say whether this pull-request shape works for you, or name the section to move, add, or drop.](needs-human/reviews/non-blocking-review-the-pull-request-shape.md) — answer by 2026-10-30
@@ -337,13 +345,5 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.
 
   **If you do nothing:** The repaired format becomes and stays the repository standard without your judgment on record.
-
-  </details>
-- [Say whether this is the standard every human-facing message is held to, or name what to change.](needs-human/reviews/non-blocking-review-the-explanation-standard.md) — status awaiting-artifact
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** Every report, pull request, and question you get from an agent from now on is written to this standard, so a wrong rule here compounds across every future message.
-
-  **If you do nothing:** The standard stands as written and agents follow it; nothing stops, and it can be changed later by editing one file.
 
   </details>
