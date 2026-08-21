@@ -48,12 +48,12 @@ show you how it read your words before acting.
 
 Bookkeeping the reconciler reads. Nothing here needs you.
 
-**Status:** waiting
+**Status:** awaiting-artifact
 **Filed:** 2026-08-01, by claude, from task `2026-08-01-write-the-explanation-skill`
 **Full context:** `docs/designs/explaining-work-to-the-owner.md`
 **Resolution evidence:** `memory/decisions/2026-08-02-the-explanation-standard-disposition.md`
-**Review target:** `skills/explain-to-human/SKILL.md`
-**Review revision:** sha256:924bd7e1ace80c468b02413968558b782efbaff91c9a9bd4134fa0abad5aa180
+**Review target:** pending
+**Review revision:** pending
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Answer by:** 2026-10-30
