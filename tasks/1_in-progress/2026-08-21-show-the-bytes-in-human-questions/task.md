@@ -1,10 +1,10 @@
 # Make a human question answerable from its own bytes
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude, 2026-08-21
 **Filed:** 2026-08-21, by claude, from chat — the owner rejected four live review items as unanswerable
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-show-the-bytes-in-human-questions.md`
+**Queue actions:** none
 
 ## Goal
 
