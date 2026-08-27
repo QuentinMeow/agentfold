@@ -20,10 +20,10 @@ $ <exact command>
 
 Those three elements are the closed receipt both gates read. The heading is exact, only
 blank lines may separate them, and the receipt ends here, at the first other nonblank
-line. Write each `core-fit` line exactly as shown — plain, unindented, on one line, with
-no emphasis, code marks, quote marker, checkbox or raw HTML anywhere up to the verdict
-word. The finding is ordinary prose on that same line. Delete this section when no review
-was run. Every other lens records its verdict below, with the verdict word in a code span,
-because a bare one outside the receipt reads as a new human ask and refuses the commit:
+line. Decorating a `core-fit` line refuses the whole receipt rather than dropping just
+that verdict. A finding is ordinary one-line prose, kept on one line and free of raw HTML
+tags. Delete this section when no review was run. Every other lens records its verdict
+below, with the verdict word in a code span, because a bare one outside the receipt reads
+as a new human ask and refuses the commit:
 
 - <reviewer / lens>: `<approve | block>` — <one-line finding or "could not break it">
