@@ -336,3 +336,19 @@ What is true today, mapped to the desired-state lines.
   function of the queue files: no calendar date enters the output, because tracked bytes
   that depended on today would fail a tree nobody touched the morning a deadline passed.
   Lateness stays with the advisory `stale-queue` check, which is where it belongs.
+- **Five branches are one screened landing set (2026-08-16)**: every open branch is now
+  behind a pull request that merges cleanly in any order — 79, 82, 83, 85, and 86. Two were
+  unmergeable and one had never been published at all; the stale-base repair filed as
+  `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` had been finished and
+  pushed on 2026-08-04 with its verification transcript, and sat unpublished for twelve
+  days. `automation/integrate.py plan` found two colliding pairs that no single branch's
+  green checks could have shown: the agent-instruction refactor and the bootstrap repair
+  rewrite the same two contract paragraphs, and the bootstrap repair and the review-receipt
+  rebuild both regenerate `memory/index.md` and `message-queue/open-actions.md`. Both are
+  resolved inside the branches, and a replay of the four green legs reported zero blocking
+  findings at every merge transition with 16/16 test files at the end. Merge order also
+  decides `task-action-origin`: making a branch's history newly reachable turns its
+  intermediate commits into edges, so the review-receipt rebuild sits at the top of the set
+  rather than under it. That branch keeps one red merge-boundary check, owned by backlog
+  task `2026-08-08-stop-a-withdrawn-exemption-from-dirtying-past-edges`, and lands red by
+  the owner's instruction under the advisory-gate decision of 2026-08-02.
