@@ -90,3 +90,11 @@ change to what it found.
   12/12 files; `reconcile.py --check` 0 blocking.
 - The task stays in `1_in-progress` for the owner to move; pull request #66 is updated in
   place rather than reopened.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #66 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output,
+  `automation/check_action_projection.py` and the advisory rules are present on `main`, and
+  no live blocking agent action names this task.

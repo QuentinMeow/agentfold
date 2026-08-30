@@ -55,3 +55,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   instead so the item is born with wording a projection can carry. Nothing on `main` was
   rewritten, and the item was never visible to the owner under the old wording.
 
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #67 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output and the corrected
+  contract text is present on `main`. The two decisions in `Queue actions` are non-blocking
+  human items, which outlive the task and do not hold it open.

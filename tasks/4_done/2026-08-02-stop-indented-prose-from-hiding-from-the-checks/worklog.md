@@ -33,3 +33,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Six of the seven named consumers are demonstrably un-blinded. `field_counts` is the
   seventh and could never have been blinded: `FIELD_RE` is anchored at column zero, so a
   field on an indented line was never a field. A test pins that.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #69 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output, the CommonMark-correct
+  `strip_indented_code` is present in `automation/markdown_semantics.py` on `main`, and no
+  live blocking agent action names this task.

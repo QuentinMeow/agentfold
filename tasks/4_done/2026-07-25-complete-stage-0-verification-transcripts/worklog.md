@@ -62,3 +62,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   coordinate slot. Reworded rather than waived; the detector is untouched. Filed already as
   2026-08-02-stop-a-wrapped-line-from-reading-as-a-command.
 - The task stays in `1_in-progress` for the owner to move.
+
+## 2026-08-09 — close-tasks-whose-work-already-merged (claude)
+
+- The work merged to `main` in pull request #70 on 2026-08-03; only the folder never moved,
+  so its status has misreported reality since. Moved to `4_done` to match.
+- Verified before moving: `verification.md` holds real command output, the four owed Stage 0
+  transcripts are present on `main`, and no live blocking agent action names this task.
