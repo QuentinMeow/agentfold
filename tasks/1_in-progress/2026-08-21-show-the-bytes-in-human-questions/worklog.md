@@ -33,3 +33,7 @@ Not done: the eval could not test the quote mechanism end-to-end. Three of four 
 name files this repository does not contain, and a grounded replacement turned out to
 duplicate a live queue item, which both authors correctly detected and declined. The
 mechanism claim rests on the five adversarial probes, which test it directly.
+
+## 2026-08-30 — resume the upper PR during stack recovery
+
+The owner authorized recovery of all useful local and open-PR changes. Codex resumes the inactive claim from 2026-08-21 as sole claimant; the original claim remains in Git history. The task and branch stay in progress. Recovery task `2026-08-30-rebuild-the-open-pr-stack` coordinates the two-layer stack. Existing code, human questions, review-rebinding transitions, and immutable records remain preserved. Reproduced defects in source verification and successor-review boundaries are being repaired before publication. No task was unstarted or started by this continuation.

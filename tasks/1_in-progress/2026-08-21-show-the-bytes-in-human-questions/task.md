@@ -1,6 +1,7 @@
 # Make a human question answerable from its own bytes
 
-**Claimed-by:** claude, 2026-08-21
+**Claimed-by:** codex, 2026-08-30
+**Mode:** autonomous
 **Filed:** 2026-08-21, by claude, from chat — the owner rejected four live review items as unanswerable
 **Parent:** none
 **Repository scope:** core
