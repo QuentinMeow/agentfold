@@ -1909,7 +1909,7 @@ def choice_sections(body):
 def blockquote_runs(text):
     """Return each contiguous run of blockquote lines, marker stripped."""
     runs, current = [], []
-    for line in text.splitlines():
+    for line in commonmark_lines(text):
         if re.match(r"^[ \t]{0,3}>", line):
             current.append(re.sub(r"^[ \t]{0,3}>[ \t]?", "", line).rstrip())
             continue
@@ -2010,7 +2010,7 @@ def anchored_section_source(target, fragment, raw=None):
         raw = quote_source_text(target)
     if raw is None:
         return None
-    raw_lines = raw.splitlines()
+    raw_lines = [line.removesuffix("\n") for line in commonmark_lines(raw)]
     line_range = re.fullmatch(r"L([1-9][0-9]*)(?:-L([1-9][0-9]*))?", fragment)
     if line_range:
         first, last = line_range.group(1), line_range.group(2) or line_range.group(1)
@@ -2025,7 +2025,7 @@ def anchored_section_source(target, fragment, raw=None):
         return None
     if target.suffix.lower() != ".md":
         return None
-    semantic_lines = semantic_text(raw).splitlines()
+    semantic_lines = [line.removesuffix("\n") for line in commonmark_lines(semantic_text(raw))]
     heads = [
         (index, matched.group(1), matched.group(2))
         for index, line in enumerate(semantic_lines)
@@ -10939,8 +10939,11 @@ def check_links():
             )
         candidates = set(BACKTICK_RE.findall(text))
         candidates.update(markdown_link_destinations(text))
-        for cand in sorted(candidates):
-            cand, _, fragment = cand.partition("#")
+        quoted_sources = {
+            destination for _label, destination, _body in sourced_quotes(text)
+        } if parts[:2] == ("message-queue", "needs-human") else set()
+        for destination in sorted(candidates):
+            cand, _, fragment = destination.partition("#")
             if cand.startswith(LINK_SKIP_PREFIXES) or any(c in cand for c in "*<>{}$"):
                 continue
             if cand.count("/") < 1 or (cand.count("/") == 1 and cand.endswith("/")):
@@ -10967,6 +10970,31 @@ def check_links():
                 # (`message-queue/AGENTS.md`), so any citation of one — from a
                 # design doc's evidence trail, not only from the queue's own
                 # predeclared fields above — names history, not a live link.
+                continue
+            if destination in quoted_sources:
+                # The quote and the ordinary link scan must select the same
+                # captured artifact. Generic links retain their existing path
+                # policy; a source citation never follows an unstaged symlink
+                # or switches from a queue-local source to a root-name collision.
+                target = quote_link_target(md, destination)
+                relative = target.relative_to(REPO).as_posix() if target is not None else None
+                exists = bool(relative is not None and (
+                    git_index_entry_mode(relative) is not None or bool(git_index_entries(relative))
+                )) if (REPO / ".git").exists() else target is not None and quote_source_text(target) is not None
+                if not exists:
+                    yield Finding("link-check", rel, f"`{cand}` does not exist",
+                                  "fix the path, create the target, or unquote if not a path")
+                    continue
+                raw = quote_source_text(target)
+                # Line fragments are not heading names. Their bounds and quoted
+                # content belong to the advisory source-evidence check.
+                line_fragment = re.fullmatch(r"L[0-9]+(?:-L[0-9]+)?", fragment)
+                if fragment and not line_fragment and target.suffix.lower() == ".md" \
+                        and raw is not None and anchored_section_source(target, fragment, raw) is None:
+                    yield Finding("link-check", rel,
+                                  f"`{cand}` has no `{fragment}` heading anchor",
+                                  f"point the link at a heading in `{cand}` or add "
+                                  f"one whose slug is `{fragment}`")
                 continue
             if PurePosixPath(cand).suffix not in LINK_PATH_EXTENSIONS:
                 top = cand.split("/", 1)[0]

@@ -20085,6 +20085,77 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.assertEqual([], evidence)
                 self.assertEqual([], findings)
 
+    def test_source_line_links_agree_with_evidence_check(self):
+        for prefix in ("docs/source.md", "../../../docs/source.md"):
+            for selector, quoted in (("#L3", "MAX_LIMIT stays ten."),
+                                     ("#L3-L4", "MAX_LIMIT stays ten.\nMIN_LIMIT stays one.")):
+                with self.subTest(prefix=prefix, selector=selector), self.repo() as root:
+                    item = self.source_evidence_item(root, quoted, prefix + selector,
+                        source="# Source\n\nMAX_LIMIT stays ten.\nMIN_LIMIT stays one.\n")
+                    evidence, findings = self.source_evidence_findings(item)
+                    self.assertEqual([], evidence)
+                    self.assertEqual([], findings)
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        self.assertEqual([], self.messages(RECONCILE.check_links()))
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_line_link_bounds_remain_an_advisory(self):
+        for prefix in ("docs/source.md", "../../../docs/source.md"):
+            for selector in ("#L0", "#L3-L2", "#L1-L99", "#L" + "9" * 5000):
+                with self.subTest(prefix=prefix, selector=selector[:40]), self.repo() as root:
+                    item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", prefix + selector,
+                        source="# Source\n\nMAX_LIMIT stays ten.\n")
+                    evidence, findings = self.source_evidence_findings(item)
+                    self.assertTrue(any("source selector" in problem for problem in evidence), evidence)
+                    self.assertTrue(any(f.advisory and "source selector" in f.message for f in findings), findings)
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        self.assertEqual([], self.messages(RECONCILE.check_links()))
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_link_paths_use_the_same_captured_target(self):
+        for collision in (False, True):
+            for symlink in (False, True):
+                with self.subTest(collision=collision, symlink=symlink), self.repo() as root:
+                    target = "message-queue/needs-human/decisions/README.md"
+                    item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", "./README.md#limit",
+                        target=target, source="# Limit\nMAX_LIMIT stays ten.\n")
+                    if collision:
+                        self.write(root, "README.md", "# Repository\nA different root document.\n")
+                        self.git(root, "add", ".")
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        if symlink:
+                            source = root / target
+                            source.unlink()
+                            source.symlink_to("absent.md")
+                        self.assertEqual([], RECONCILE.evidence_problems(item, RECONCILE.repo_text(item)))
+                        self.assertEqual([], self.messages(RECONCILE.check_links()))
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_selectors_only_split_on_physical_line_endings(self):
+        for separator in ("\v", "\f", "\x85", "\u2028", "\u2029"):
+            for ending in ("\n", "\r\n", "\r"):
+                for selector in ("#L4", "#forged"):
+                    with self.subTest(separator=separator, ending=ending, selector=selector), self.repo() as root:
+                        tail = ("Good." + separator + "Hidden attribution" if selector == "#L4"
+                                else "Good." + separator + "## Forged" + ending + "Hidden attribution")
+                        raw = "# Source" + ending + "## Limit" + ending + tail + ending
+                        item = self.source_evidence_item(root, "Hidden attribution",
+                            "../../../docs/source.md" + selector, source=raw)
+                        evidence, findings = self.source_evidence_findings(item)
+                        self.assertTrue(any("source selector" in problem for problem in evidence), evidence)
+                        self.assertTrue(any(f.advisory and "source selector" in f.message for f in findings), findings)
+                with self.subTest(separator=separator, ending=ending, valid=True), self.repo() as root:
+                    quoted = "Good." + separator + "Hidden attribution"
+                    item = self.source_evidence_item(root, quoted, "../../../docs/source.md#L3",
+                        source="# Source" + ending + "## Limit" + ending + quoted + ending)
+                    self.assertEqual([], self.source_evidence_findings(item)[0])
+
     def test_source_evidence_verifies_short_case_and_identifier_bytes(self):
         for quoted in ("Nobody waits.", "MAXLIMIT stays ten.", "max_limit stays ten."):
             with self.subTest(quoted=quoted), self.repo() as root:
