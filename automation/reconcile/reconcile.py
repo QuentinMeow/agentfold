@@ -417,7 +417,6 @@ QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)
 SOURCE_STRING_RE = re.compile(
     r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""", re.S
 )
-SOURCE_LITERAL_RE = re.compile(SOURCE_STRING_RE.pattern + r"|`(?:\\.|[^`\\])*`", re.S)
 # A missing source must be stated explicitly, not inferred from an empty slot.
 NO_SOURCE_LITERAL = "No source document — everything you need is above."
 # A backticked token shaped like a repository *file*. Backticks render as code, so
@@ -2046,7 +2045,7 @@ def anchored_section_source(target, fragment, raw=None):
     return "\n".join(raw_lines[start + 1:end])
 
 
-def quote_presentation_text(value, preserve_strings=False):
+def quote_presentation_text(value, preserve_strings=False, normalize_whitespace=False, literal_bounds=None):
     """Normalize paired prose emphasis while preserving code's literal contents.
 
     This is deliberately a small presentation allowance, not a Markdown renderer.
@@ -2096,15 +2095,23 @@ def quote_presentation_text(value, preserve_strings=False):
         if changed == value:
             break
         value = changed
+    if normalize_whitespace:
+        # Literal code is still protected here. A second collapse after restoring
+        # it would turn distinct code bytes such as `A  B` and `A B` into a match.
+        value = quote_whitespace(value)
     for index in range(len(protected) - 1, -1, -1):
-        value = value.replace(prefix + str(index) + "\ue001", protected[index])
+        content = protected[index]
+        if literal_bounds and content.strip():
+            content = literal_bounds[0] + content + literal_bounds[1]
+        value = value.replace(prefix + str(index) + "\ue001", content)
     return value
 
 
-def raw_quote_presentations(quoted):
+def raw_quote_presentations(quoted, normalize_whitespace=False):
     """Permit quote presentation without normalizing raw source strings."""
-    yield quoted
-    yield quote_presentation_text(quoted, preserve_strings=True)
+    yield quote_whitespace(quoted) if normalize_whitespace else quoted
+    yield quote_presentation_text(quoted, preserve_strings=True,
+                                  normalize_whitespace=normalize_whitespace)
     stripped = quoted.strip()
     if inline_code_spans(stripped) == [(0, len(stripped))]:
         yield render_inline_code(stripped)
@@ -2115,51 +2122,138 @@ def raw_quote_presentations(quoted):
         if stripped.startswith(delimiter) and stripped.endswith(delimiter):
             body = stripped[len(delimiter):-len(delimiter)]
             if body and body == body.strip():
-                yield body
+                yield quote_whitespace(body) if normalize_whitespace else body
 
 
-def quote_whitespace(value):
-    """Collapse wrapping outside literals; spaces inside a string are its bytes."""
+def quote_literal_spans(value):
+    """Locate literal bytes for quote comparison, without changing parser policy."""
+    spans = [(match.start(), match.end()) for match in SOURCE_STRING_RE.finditer(value)]
+    spans.extend(inline_code_spans(value))
+    fence, start, offset = None, 0, 0
+    exposed = semantic_line_offsets(value)
+    for index, line in enumerate(exact_source_lines(value)):
+        matched = re.match(r"^ {0,3}(`{3,}|~{3,})(.*?)[\r\n]*$", line)
+        if fence is not None:
+            if matched and matched.group(1)[0] == fence[0] \
+                    and len(matched.group(1)) >= len(fence) and not matched.group(2).strip():
+                spans.append((start, offset + len(line)))
+                fence = None
+        elif matched:
+            fence, start = matched.group(1), offset
+        elif index not in exposed and re.match(r"^(?: {4}|\t)", line):
+            spans.append((offset, offset + len(line)))
+        offset += len(line)
+    if fence is not None:
+        spans.append((start, len(value)))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def quote_whitespace(value, literal_bounds=None, normalize=True):
+    """Collapse wrapping outside literal strings and equal-width code spans."""
     literals = []
     prefix = "\ue000LITERAL"
     while prefix in value:
         prefix += "Q"
-
-    def protect(matched):
-        literals.append(matched.group())
-        return prefix + str(len(literals) - 1) + "\ue001"
-
-    value = " ".join(SOURCE_LITERAL_RE.sub(protect, value).split())
+    for start, end in reversed(quote_literal_spans(value)):
+        literals.append(value[start:end])
+        value = value[:start] + prefix + str(len(literals) - 1) + "\ue001" + value[end:]
+    if normalize:
+        value = " ".join(value.split())
     for index, literal in enumerate(literals):
+        if literal_bounds:
+            literal = literal_bounds[0] + literal + literal_bounds[1]
         value = value.replace(prefix + str(index) + "\ue001", literal)
     return value
 
 
 def quote_is_verbatim(quoted, source, markdown=True):
-    """Check every excerpt length, in order, without changing spelling or case."""
-    def flatten(value):
-        return quote_whitespace(value)
+    """Compare bounded excerpts, allowing only omissions outside original literals."""
+    prefix = "\ue000QUOTE_MATCH"
+    while prefix in quoted or prefix in source:
+        prefix += "Q"
+    marker, opening, closing = (prefix + suffix + "\ue001" for suffix in ("OMISSION", "OPEN", "CLOSE"))
+    bounds = (opening, closing)
+    literal_spans = quote_literal_spans(quoted)
+    marked = quoted
+    # Mark omissions before removing any presentation delimiters: code/string
+    # ellipses must stay literal through every comparison route.
+    for match in reversed(list(QUOTE_ELISION_RE.finditer(quoted))):
+        if not any(start < match.end() and match.start() < end for start, end in literal_spans):
+            marked = marked[:match.start()] + " " + marker + " " + marked[match.end():]
 
-    def matches(needle, haystack):
-        needle, haystack = flatten(needle), flatten(haystack)
-        if needle and needle in haystack:
+    def source_view(value):
+        # Presentation may remove code delimiters. Retain their source context
+        # until matching, then remove only our collision-free bookkeeping marks.
+        pieces, spans, cursor, offset, depth, start = [], [], 0, 0, 0, 0
+        for match in re.finditer(re.escape(opening) + "|" + re.escape(closing), value):
+            chunk = value[cursor:match.start()]
+            pieces.append(chunk)
+            offset += len(chunk)
+            if match.group() == opening:
+                if depth == 0:
+                    start = offset
+                depth += 1
+            else:
+                depth -= 1
+                if depth == 0:
+                    spans.append((start, offset))
+            cursor = match.end()
+        pieces.append(value[cursor:])
+        return "".join(pieces), spans
+
+    def occurrence(segment, haystack, spans, cursor=0, after_omission=False, before_omission=False):
+        pattern = re.escape(segment)
+        if re.match(r"\w", segment[0]):
+            pattern = r"(?<!\w)" + pattern
+        if re.match(r"\w", segment[-1]):
+            pattern += r"(?!\w)"
+        for found in re.compile(pattern).finditer(haystack, cursor):
+            if any((after_omission and start < found.start() < end)
+                   or (before_omission and start < found.end() < end) for start, end in spans):
+                continue
+            return found.end()
+        return None
+
+    def matches(needle, omissions, protected_source):
+        haystack, spans = source_view(protected_source)
+        if needle.strip() and occurrence(needle, haystack, spans) is not None:
             return True
-        segments = [flatten(part) for part in QUOTE_ELISION_RE.split(needle) if flatten(part)]
+        if marker not in omissions:
+            return False
+        parts = omissions.split(marker)
+        segments = [(index, part.strip()) for index, part in enumerate(parts) if part.strip()]
         if not segments:
             return False
         cursor = 0
-        for segment in segments:
-            found = haystack.find(segment, cursor)
-            if found < 0:
+        for index, segment in segments:
+            cursor = occurrence(segment, haystack, spans, cursor,
+                                after_omission=index > 0, before_omission=index < len(parts) - 1)
+            if cursor is None:
                 return False
-            cursor = found + len(segment)
         return True
 
-    if matches(quoted, source):
+    if matches(quote_whitespace(quoted), quote_whitespace(marked), quote_whitespace(source, bounds)):
         return True
     if markdown:
-        return matches(quote_presentation_text(quoted), quote_presentation_text(source))
-    return any(matches(presentation, source) for presentation in raw_quote_presentations(quoted))
+        for normalized in (False, True):
+            if matches(quote_presentation_text(quoted, normalize_whitespace=normalized),
+                       quote_presentation_text(marked, normalize_whitespace=normalized),
+                       quote_presentation_text(source, normalize_whitespace=normalized, literal_bounds=bounds)):
+                return True
+        return False
+    for normalized in (False, True):
+        haystack = quote_whitespace(source, bounds, normalize=normalized)
+        for presentation, omissions in zip(raw_quote_presentations(quoted, normalized),
+                                            raw_quote_presentations(marked, normalized)):
+            if matches(presentation, omissions, haystack):
+                return True
+    return False
 
 
 def has_no_source_statement(text):

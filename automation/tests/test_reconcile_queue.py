@@ -20642,6 +20642,97 @@ class ReconcileQueueTests(unittest.TestCase):
                 evidence, _ = self.source_evidence_findings(item)
                 self.assertEqual(quoted == 'LABEL = "Approved"', bool(evidence), evidence)
 
+    def source_quote_fidelity_case(self, source, quoted, valid, *, suffix="md", kind="decision"):
+        with self.repo() as root:
+            target = "docs/source." + suffix
+            raw = "# Source\n\n## Limit\n\n" + source + "\n" if suffix == "md" else source + "\n"
+            selector = "#limit" if suffix == "md" else "#L1-L" + str(len(source.split("\n")))
+            item = self.source_evidence_item(root, quoted, "../../../" + target + selector,
+                kind=kind, source=raw, target=target)
+            evidence, findings = self.source_evidence_findings(item)
+            if valid:
+                self.assertEqual([], evidence)
+                self.assertEqual([], findings)
+            else:
+                self.assertTrue(any("not the words" in problem for problem in evidence), evidence)
+                self.assertTrue(any("not the words" in finding.message and finding.advisory
+                                    for finding in findings), self.messages(findings))
+
+    def test_source_quote_fidelity_rejects_partial_word_matches(self):
+        cases = (("MAX_LIMIT = 100", "MAX_LIMIT = 10", "py"),
+                 ("DISALLOW = False", "ALLOW = False", "py"),
+                 ("The plan is unapproved.", "approved", "md"),
+                 ("MAX_LIMIT stays ten.", "LIMIT stays ten.", "md"),
+                 ("The numeric value is 100.", "00", "txt"),
+                 ("unapproved then final", "approved [...] final", "md"),
+                 ("first then unapproved", "first [...] approved", "md"))
+        for source, quoted, suffix in cases:
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, False, suffix=suffix)
+
+    def test_source_quote_fidelity_accepts_bounded_excerpts(self):
+        cases = (("The plan is unapproved; the replacement is approved.", "approved"),
+                 ("Before MAX_LIMIT = 100; after.", "MAX_LIMIT = 100"),
+                 ("Before (approved), after.", "approved"),
+                 ("First unapproved then approved; intervening words; final.", "approved […] final."))
+        for kind in ("decision", "clarification", "review"):
+            for source, quoted in cases:
+                with self.subTest(kind=kind, source=source, quoted=quoted):
+                    self.source_quote_fidelity_case(source, quoted, True, kind=kind)
+
+    def test_source_quote_fidelity_preserves_inline_code_whitespace(self):
+        for delimiter in ("`", "``", "```"):
+            for quoted in ("The " + delimiter + "A B" + delimiter + " stays.", "The A B stays."):
+                with self.subTest(delimiter=delimiter, quoted=quoted):
+                    source = "The " + delimiter + "A  B" + delimiter + " stays."
+                    self.source_quote_fidelity_case(source, quoted, False)
+        for source, quoted in (("The ``A `  B`` stays.", "The ``A ` B`` stays."),
+                               ("```text\nA  B\n```", "`A B`"),
+                               ("~~~text\nA  B\n~~~", "`A B`")):
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, False)
+
+    def test_source_quote_fidelity_accepts_code_bytes_and_prose_presentation(self):
+        for delimiter in ("`", "``", "```"):
+            source = "The " + delimiter + "A  B" + delimiter + " stays **exact**."
+            for quoted in ("The " + delimiter + "A  B" + delimiter + " stays\nexact.",
+                           "The A  B stays exact."):
+                with self.subTest(delimiter=delimiter, quoted=quoted):
+                    self.source_quote_fidelity_case(source, quoted, True)
+        self.source_quote_fidelity_case("The ``A `  B`` stays.", "The ``A `  B``\nstays.", True)
+        self.source_quote_fidelity_case("~~~text\nA  B\n~~~", "`A  B`", True)
+
+    def test_source_quote_fidelity_keeps_literal_elisions_exact(self):
+        for suffix in ("py", "txt"):
+            for omission in ("...", "[…]", "…", "[...]"):
+                for wrapper in ("", "`", "``"):
+                    with self.subTest(suffix=suffix, omission=omission, wrapper=wrapper):
+                        self.source_quote_fidelity_case('LABEL = "AXB"',
+                            wrapper + 'LABEL = "A' + omission + 'B"' + wrapper, False, suffix=suffix)
+        for source, quoted in (("The `A secret B` stays.", "The A...B stays."),
+                               ("The ``A secret B`` stays.", "The A[…]B stays."),
+                               ("The `A secret B` stays.", "The A [...] B stays."),
+                               ("The `AXB` stays.", "The `A...B` stays."),
+                               ("The ``AXB`` stays.", "The ``A[…]B`` stays."),
+                               ("The ``A ` X B`` stays.", "The ``A ` ... B`` stays."),
+                               ('```python\nLABEL = "AXB"\n```', '`LABEL = "A...B"`'),
+                               ("~~~text\nAXB\n~~~", "`A…B`")):
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, False)
+
+    def test_source_quote_fidelity_accepts_omissions_outside_literals(self):
+        cases = (("First. `A secret B` ignored. Last.", "First. [...] Last.", "md"),
+                 ("The `A secret B` stays; later The A secret B stays.", "The A...B stays.", "md"),
+                 ("First sentence. Middle sentence. Last sentence.", "**First sentence. [...] Last sentence.**", "md"),
+                 ("The `A  B` starts. Middle sentence. The ``C ` D`` ends.",
+                  "The `A  B` starts. […] The ``C ` D`` ends.", "md"),
+                 ('LABEL = "A...B"', '``LABEL = "A...B"``', "py"),
+                 ("The ``A[…]B`` stays.", "The ``A[…]B`` stays.", "md"),
+                 ('LABEL = "A  B"\nIGNORED = 1\nLAST = 2', 'LABEL = "A  B" [...] LAST = 2', "py"))
+        for source, quoted, suffix in cases:
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, True, suffix=suffix)
+
     def test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review(self):
         for kind in ("decision", "review"):
             with self.subTest(kind=kind), self.repo() as root:
