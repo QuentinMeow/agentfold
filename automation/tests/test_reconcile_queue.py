@@ -16347,6 +16347,21 @@ class ReconcileQueueTests(unittest.TestCase):
                 for message in messages
             ), messages)
 
+    def test_fold_shape_rejects_a_close_before_its_open(self):
+        """Equal tag counts must not conceal an unclosed fold around the ask."""
+        misplaced = "</details>\n\n<details>\n" + self.FOLD_SUMMARY_LINE + "\n"
+        for text in (
+            misplaced + self.HUMAN_ATTENTION_REVIEW,
+            self.HUMAN_ATTENTION_REVIEW.replace(
+                "## For the record\n", "## For the record\n\n" + misplaced
+            ),
+        ):
+            with self.subTest(text=text), self.repo() as root:
+                problems = RECONCILE.fold_shape_problems(text)
+                self.assertTrue(any("must follow" in p for p in problems), problems)
+                messages = self.fold_messages(root, text)
+                self.assertTrue(any("must follow" in m for m in messages), messages)
+
     def test_fold_shape_rejects_a_missing_blank_line_after_summary(self):
         """The swallow point: without it, `semantic_text` erases every field."""
         broken = self.folded_human_review().replace(

@@ -1468,6 +1468,8 @@ def fold_shape_problems(text):
         )
     bounds = fold_bounds(lines)
     if bounds is None:
+        if len(opens) == len(closes) == 1 and closes[0] < opens[0]:
+            problems.append("`</details>` must follow its `<details>` opener")
         return problems
     opening, closing = bounds
     if lines[opening] != "<details>":
