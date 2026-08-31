@@ -43,3 +43,28 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   orchestration sweep correctly refused to remove them.
 - No implementation choice is recorded yet; the next edge is requirements interrogation,
   research, executable scenarios, and child-task decomposition.
+
+## 2026-08-31 — workflow architecture adjudicated for publication (codex)
+
+- Recovered the missing S3 integration worktree and deleted remote task branch from
+  preserved commit `24c387b01c6178324d114fd2c35b1b31d488ba41`; merge commit
+  `ed8761ca95a29008b22ba75a098da3d3ac0c9e1d` carries it onto the current baseline.
+- Opened draft [pull request #94](https://github.com/QuentinMeow/agentfold/pull/94) so
+  the recovery record and this design remain reviewable. `verification.md` records the
+  checks actually run against the current candidate.
+- The resulting design maps ten development cycles and a fault-injection/evaluation ladder.
+  It does not claim any behavior implementation or completed disposable scenario.
+- Adjudicated the architecture as a durable repository evidence kernel plus
+  runtime-authoritative expiring observations and a rebuildable read-only view. It separates
+  work items, change sets, session observations, writer authorities, and integration runs
+  rather than treating one task/branch/session as one object.
+- Replanned the serial implementation order around six existing correctness prerequisites:
+  displaced-tip restack provenance, exact expected-OID publication, finalized coordination
+  write rules, stale-base admission, handover durability, and merged-task status drift.
+  Visibility and external-product bake-offs follow only after those source records are
+  truthful and the current cardinality contract has an explicit migration.
+- No behavior change or disposable cycle trial is complete yet. The next reviewed slice is
+  the existing restack-provenance task after the owner resolves whether task claims keep a
+  narrow direct-`main` exception or move to a PR/ref compare-and-swap protocol. Its worker
+  must preserve genuine discarded-action detection while removing the inherited-base false
+  accusation.
