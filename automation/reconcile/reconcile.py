@@ -407,13 +407,9 @@ OPTION_RE = re.compile(r"^### Option(?:\s|$)", re.M)
 EXAMPLE_CONSEQUENCE_RE = re.compile(
     r"^\*Example consequence:\*\s*(.+)$", re.M
 )
-# The one shape a citation may take above the answer line: the source's own words,
-# then the exact heading or bounded source lines they stand under. Dependabot inlines its changelog as a
-# blockquote with a "Sourced from" attribution link and is the most-read
-# machine-written request in the world; the measured alternative — writing the
-# reader an argument they cannot cheaply check — raises agreement with wrong
-# recommendations as readily as with right ones. So this asks for bytes and never
-# for reasoning.
+# A decisive source citation carries the source's own words, then the heading
+# or bounded source lines that contain them. The check compares those bytes;
+# it does not establish whether the source supports the author's judgment.
 QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)\s*")
 # Keep quoted literal contents intact when allowing presentation whitespace.
 SOURCE_STRING_RE = re.compile(
@@ -7400,11 +7396,9 @@ def check_explanation_shape():
                 "cost nobody can picture is a cost nobody weighs",
             )
 
-    # One finding for the whole frozen set, not one per item. Acceptance of an
-    # advisory falls about 30% for every additional alert a reader is shown, so
-    # nine permanent lines arguing that advisories go unread would be the failure
-    # they describe. `aggregate_findings` keys on (check, subject), so this also
-    # projects into `--file-retries` as one repair item rather than nine.
+    # One finding covers the frozen set. `aggregate_findings` keys on
+    # (check, subject), so `--file-retries` projects one repair item for the
+    # aggregate instead of a separate permanent item for each old question.
     if stuck:
         yield Finding(
             "explanation-shape",
