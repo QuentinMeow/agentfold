@@ -35,8 +35,10 @@ was true when it was written.
 **Copy-and-fill is the contract.** Copying a template, replacing its `<placeholders>`,
 and committing must produce a valid item with no further edits. So every required field
 is a real Markdown line: nothing a check reads is ever hidden inside an HTML comment,
-because `semantic_text()` blanks comments before `fields()` parses. Comments carry only
-guidance and optional-field syntax, and deleting them changes nothing.
+because `semantic_text()` blanks comments before `fields()` parses. Human templates
+contain no instructional HTML comments: their authoring instructions live below, so the
+copy also obeys the live-human HTML restriction. Agent-template comments carry only
+guidance and optional-field syntax; leaving them in changes no parsed field.
 
 **A value is one physical line.** Every `**Key:** value` and every `*Example
 consequence:*` is read by a per-line pattern, and CommonMark joins the next non-blank
@@ -54,12 +56,84 @@ number. `automation/reconcile/reconcile.py --word-count <file>` prints the count
 the budget for any file, committed or not; with no path it measures the three human
 templates and every live item the format governs. The budget's single source of truth is
 `HUMAN_ATTENTION_WORD_BUDGET`, which the finding, that command, and a test that would
-fail if the templates said a different number all read.
+fail if this guide stated a different number all read.
 
 A bare `<word>` placeholder is deleted by GitHub's HTML sanitizer, which reads it as an
 unknown tag, so a copying agent reading the rendered page sees an empty slot. Where the
 angle brackets have to survive on screen they are backticked, or spaced as `< like this >`
 — neither shape parses as a tag, and both still read as one placeholder to fill.
+
+## Before filing a human question
+
+Read this guide before copying a human queue template. Its filename uses one delivery
+prefix from `message-queue/AGENTS.md` and a slug from `handbook/naming-conventions.md`.
+The template carries the fields; `handbook/human-action-guide.md` owns their lifecycle.
+Check the filled item against this authoring checklist:
+
+1. The title is a question the owner can answer without knowing this repository.
+2. Exactly three fields appear above the first heading: Action, Why this matters, and
+   If you do nothing.
+3. Today, What this would change, and What this does not decide are true and specific.
+4. Two or more choices each state a cost and a concrete *Example consequence:*.
+5. The sentence opening Your choices says what the choices differ on.
+6. Recommendation repeats one displayed `### ` choice label exactly, with its strongest
+   counter-case beside it. For a clarification, My working assumption repeats a displayed
+   reading: state what you will assume and do, rather than recommend the owner's intent.
+7. No machine field, hash, or token appears above the answer line.
+8. Include the decisive source passage and attribution as described under Source excerpts
+   in human items; For the record keeps the machine copies.
+9. Under 800 words before the answer. Run
+   `python3 automation/reconcile/reconcile.py --word-count <this file>` to see the count
+   and remaining budget. Keep every meaningful choice, its consequence, and decisive source quotations; shorten
+   background instead.
+
+Keep every field value and every *Example consequence:* on one physical line as described
+above. Confidence is exactly `high`, `medium`, or `low`, then a space, an em dash (U+2014),
+another space, and what you checked and did not. A hyphen or a bare adjective is refused.
+There is no `Look-at` field: put the reader's source link in the prose and its machine
+copy in Full context.
+
+Decision and clarification templates start with `waiting`; the folding agent changes that
+to `folding` on its separate claim edge. Use only the timing fields in the table below.
+Add `External assignment` or `External source` only for a provider binding. A concrete
+human response is immutable. To answer a counter-question, fold it into Resolution
+evidence and create a successor with the same delivery timing and `Supersedes` naming
+the original item; never rewrite the response.
+
+## Review bindings and optional fields
+
+The review template ships `waiting` with a local file target and the SHA-256 of that
+file's bytes. Before the artifact exists, use `awaiting-artifact` with both `Review target`
+and `Review revision` literally `pending`. Publish a binding in a later commit that moves
+the status to `waiting`; the folding agent claims it with a separate `folding` edge.
+
+A Git range uses `Review target: git:<base>...<head>` with a byte-identical
+`Review revision`, both unbackticked and naming full 40- or 64-hex object IDs. A branch
+name or abbreviated ID can move. An HTTPS artifact uses one URL and a `sha256:` revision.
+The actual fields retain the bold-key syntax shown in the template. Full context explains
+the judgment and never replaces the target.
+
+`Reviewed revision` and `Review outcome` belong to the folding agent. Once the human's
+response is committed, it copies `Review revision` into `Reviewed revision` and replaces
+`pending` with `approved`, `changes-requested`, `rejected`, `abandoned`, or `unanswerable`
+exactly once. The last means the human lacked enough context to decide; it settles nothing
+about the subject and requires a fresh question.
+A changes-requested resolution also adds `Successor action` and `Follow-up review` to the
+record. Provider bindings use `External assignment` or `External source` only when needed.
+Timing uses the table below. The retraction and republication procedure when an artifact
+changes is owned by `handbook/human-action-guide.md`.
+
+For an unanswerable resolution, add `**Successor action:** <new needs-human/reviews path>`
+to the resolving record. Create that distinct new review in the same resolution commit,
+with `**Supersedes:** <old review path>` pointing back. Preserve Full context, the exact
+Review target and Review revision, the delivery prefix, and every dependency-timing field
+used by the original item’s schema, including any task boundary.
+
+The successor is `waiting`, with a blank Your review, blank Reviewed revision, and
+`pending` Review outcome. An existing, answered, or `awaiting-artifact` item cannot serve
+as this successor. Supply the missing context without changing the judgment or artifact;
+a later artifact change follows retraction and publication. The original human response
+stays immutable, and its predeclared Resolution evidence changes on the resolving commit.
 
 ## The one schema whose artifact is not a repository file
 

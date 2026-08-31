@@ -8,6 +8,7 @@ have to open another file to know what they are agreeing to, the item failed.
 **This file does not define the format.** The fields, their order, and the lifecycle around
 them are owned elsewhere and must not be restated here:
 
+- Before copying, read the authoring checklist in `templates/README.md`.
 - The exact schema to copy: `templates/queue/decision.md`, `templates/queue/review.md`,
   `templates/queue/clarification.md`.
 - What a human action must contain and how it resolves: `handbook/human-action-guide.md`.
@@ -111,7 +112,7 @@ form that the option is there; an affordance nobody is told about is not one.
 
 ## Before you file it
 
-Nine schema checks sit in the header comment of the template you copied; run them there.
+Run the nine authoring checks in `templates/README.md` before filing the copied template.
 Three things no template can check are yours: every repository-local term glossed at first
 use, every source the answer turns on quoted here and linked at its heading or selected
 lines, and a recommendation naming one shown option with a real counter-case beside it.

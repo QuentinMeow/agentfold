@@ -16,7 +16,7 @@ Reconstruct final source deltas and recreate every necessary task and review tra
 
 ## Chosen
 
-Preserve both histories and repair forward in a shallow two-layer stack. Independent research found no unique useful local experiment and no demonstrated historical-range obstacle. Keep current main task-completion moves, regenerate indexes from their sources, and correct current-state prose without rewriting immutable history. The lower layer repairs retry-note mutability; the upper layer repairs source citations and the replacement-question lifecycle.
+Preserve both histories and repair forward in a shallow two-layer stack. Independent research found no unique useful local experiment. An update of the old upper branch would replay two withdrawn legacy transcript edges already present on main; a new bounded child task starts at the repaired lower layer and retains the old upper history through a merge. The ordinary hooks and exact first-push and PR ranges admit that history without changing receipt rules. Keep current main task-completion moves, regenerate indexes from their sources, and correct current-state prose without rewriting immutable history. The lower layer repairs retry-note mutability and moves authoring comments into the guide so genuine copy-and-fill preserves the sanctioned fold; the upper layer repairs source citations and the replacement-question lifecycle.
 
 The notes exception is limited to exposed diagnostic prose inside a semantic Agent notes section; hidden markup and structural boundaries remain protected. A replacement for an unanswerable review keeps the original timing tuple, stable context, exact target/revision, and an unanswered review state. Source comparisons preserve identifiers and use candidate bytes rather than unstaged symlink resolution.
 
@@ -30,3 +30,5 @@ The owner checkout, original branches, probes, and backups stay preserved. Only 
 **User-global writes:** none
 **Why AgentFold core:** These are repairs to existing portable queue invariants and authoring protocols. Orchestration state and machine-specific backups remain outside the tracked repository.
 **Thin adapter:** none
+
+The retry-note boundary partially amends the earlier frozen-skeleton decision; its canonical rationale is `memory/decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md`. The live-human HTML rule is unchanged.

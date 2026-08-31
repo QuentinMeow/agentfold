@@ -42,13 +42,16 @@ from check_action_projection import (
 from markdown_semantics import (
     MARKDOWN_LINK_RE,
     RAW_HTML_TOKEN_RE,
+    commonmark_lines,
     contains_raw_html,
     markdown_link_destinations,
     markdown_links,
     normalized_action_tokens,
     render_inline_code,
     rendered_human_text,
+    semantic_line_offsets,
     semantic_text,
+    strip_default_ignorable_characters,
     strip_indented_code,
     strip_inline_code,
     visible_html_text,
@@ -3791,20 +3794,72 @@ def queue_frozen_skeleton(path, text):
     carrying the owner's committed answer, in a shape no reader is shown and no
     check reads, without changing the item's action identity.
 
-    This is total over the file's own lines instead. Only `rstrip` and the same
-    lifecycle-mutable field lines are discarded, so re-applying or stripping the
-    fold's hard breaks stays legal at any time, and everything else — a comment, a
-    fence, an indented block, a hidden `<div>` — moves the skeleton.
+    This is total over the file's own lines instead. Only `rstrip`, exposed
+    lifecycle-mutable field lines, and exposed retry diagnostic prose are discarded.
+    Re-applying or stripping the fold's hard breaks stays legal at any time, while
+    a comment, fence, indented block, or hidden `<div>` still moves the skeleton,
+    even inside retry notes. Existing notes headings stay frozen.
 
     Dropping a mutable line is what makes the lifecycle legal, and it is also the
     one place bytes can hide: a payload appended to the *end* of `**Answer by:**`
     leaves with the line. So a line is dropped only when it is `exposed_field_value`
     — when every byte of its value is a byte a reader is shown and a parser reads.
-    A line carrying anything else is frozen like any other, which makes the pair
-    (skeleton, mutable values) a total partition of the file's bytes rather than a
-    subtractive view with a blind spot.
+    A line carrying anything else is frozen like any other. Retry notes use the
+    same exposure rule plus a semantic section map, so protected bytes, mutable
+    field values, and diagnostic prose account for the complete source.
     """
     return "\n".join(frozen_skeleton_lines(path, text)).strip()
+
+
+def retry_notes_line_offsets(text):
+    """Map real retry notes to source lines, without trusting a raw heading.
+
+    Only exposed diagnostic prose and its paragraph separators are mutable.
+    Existing headings, fields, comments, code, and raw HTML stay in the skeleton,
+    including blank lines inside hidden blocks. The parser supplies those offsets;
+    comparing a blank semantic line alone would lose that distinction.
+    """
+    raw_lines = commonmark_lines(text)
+    parsed = commonmark_lines(semantic_text(text or ""))
+    exposed = semantic_line_offsets(text or "")
+    headings, body, diagnostics = set(), set(), set()
+    in_notes = False
+    reference_definition = False
+    for index, raw in enumerate(raw_lines):
+        line = raw.rstrip()
+        clean = parsed[index].rstrip() if index < len(parsed) else ""
+        heading = re.match(r"^[ ]{0,3}(#{1,6})(?:[ \t]|$)", clean)
+        if index in exposed and heading and len(heading.group(1)) <= 2:
+            in_notes = clean == "## Agent notes" and line == clean
+            reference_definition = False
+            if in_notes:
+                headings.add(index)
+            continue
+        if not in_notes:
+            continue
+        body.add(index)
+        # A link reference definition and its continuation can carry destinations
+        # or titles that no reader sees. Keep that source paragraph frozen too.
+        if re.match(r"^[ ]{0,3}\[[^\]\n]+\]:", clean):
+            reference_definition = True
+        if not line:
+            reference_definition = False
+        # Setext headings introduce a new top-level section too. Freeze the
+        # preceding title as well; a thematic break is conservatively a boundary.
+        if index in exposed and re.fullmatch(r"[ ]{0,3}(?:=+|-+)[ \t]*", clean):
+            title = index - 1
+            while title in diagnostics and raw_lines[title].strip():
+                diagnostics.remove(title)
+                title -= 1
+            in_notes = False
+            continue
+        if index in exposed and line == clean and not heading \
+                and not reference_definition \
+                and strip_default_ignorable_characters(line) == line \
+                and not FIELD_RE.fullmatch(line) \
+                and not RAW_HTML_TOKEN_RE.search(line):
+            diagnostics.add(index)
+    return headings, body, diagnostics
 
 
 def frozen_skeleton_lines(path, text):
@@ -3813,17 +3868,49 @@ def frozen_skeleton_lines(path, text):
     actor = parts[1] if len(parts) > 1 else ""
     leaf = parts[2] if len(parts) > 2 else ""
     mutable_fields = lifecycle_mutable_fields(actor, leaf)
-    parsed = semantic_text(text or "").splitlines()
+    parsed = commonmark_lines(semantic_text(text or ""))
+    _headings, notes_body, diagnostics = (
+        retry_notes_line_offsets(text)
+        if (actor, leaf) == ("needs-agent", "retries")
+        else (set(), set(), set())
+    )
     lines = []
-    for index, line in enumerate(text.splitlines() if text else []):
+    for index, line in enumerate(commonmark_lines(text)):
         stripped = line.rstrip()
+        if index in diagnostics:
+            continue
         matched = FIELD_RE.fullmatch(stripped)
-        if matched and matched.group(1) in mutable_fields and exposed_field_value(
-            matched, parsed[index] if index < len(parsed) else ""
-        ):
+        if index not in notes_body and matched \
+                and matched.group(1) in mutable_fields and exposed_field_value(
+                    matched, parsed[index] if index < len(parsed) else ""
+                ):
             continue
         lines.append(stripped)
     return lines
+
+
+def introduces_final_retry_notes(source, before, destination, after):
+    """Allow one new final diagnostic section, never an existing boundary edit."""
+    if any(Path(path).parts[1:3] != ("needs-agent", "retries")
+           for path in (source, destination)):
+        return False
+    before_headings, _body, _diagnostics = retry_notes_line_offsets(before)
+    after_headings, _body, diagnostics = retry_notes_line_offsets(after)
+    if before_headings or len(after_headings) != 1:
+        return False
+    heading = next(iter(after_headings))
+    lines = commonmark_lines(after)
+    if not any(index > heading and lines[index].strip() for index in diagnostics):
+        return False
+    if any(line.strip() and index not in diagnostics
+           for index, line in enumerate(lines) if index > heading):
+        return False
+    # Compare the complete preexisting content, including its hidden bytes. Only
+    # the appended heading and exposed diagnosis are new; no old prose can be
+    # reclassified as mutable by inserting a heading before it.
+    return queue_frozen_skeleton(source, before) == queue_frozen_skeleton(
+        destination, "".join(lines[:heading])
+    )
 
 
 def exposed_field_value(matched, parsed_line):
@@ -5945,8 +6032,9 @@ def check_queue_frozen_skeleton():
     So this runs only where the identity gate said "unchanged", and asks the
     complementary question over raw lines: did anything change at all? Sanctioned
     migrations change identity, so they are `queue-resolution`'s business and are
-    never double-reported here. The one edit that must stay legal — re-applying
-    or stripping the fold's hard breaks — is `rstrip`-invariant and passes.
+    never double-reported here. Exposed lifecycle fields and retry diagnoses
+    remain editable; existing notes structure and hidden bytes stay protected.
+    Re-applying or stripping the fold's hard breaks is `rstrip`-invariant too.
     """
     if not (REPO / ".git").exists():
         return
@@ -5964,6 +6052,8 @@ def check_queue_frozen_skeleton():
         if queue_frozen_skeleton(source, before) \
                 == queue_frozen_skeleton(destination, after):
             continue
+        if introduces_final_retry_notes(source, before, destination, after):
+            continue
         if destination in reported:
             continue
         reported.add(destination)
@@ -5971,10 +6061,11 @@ def check_queue_frozen_skeleton():
             "queue-frozen-skeleton",
             Path(destination),
             "live queue item changed bytes that its action identity cannot "
-            "see; a comment, a fenced or indented block, or hidden markup was "
-            "added to or removed from a frozen record",
-            "revert the invisible edit; only lifecycle fields and trailing "
-            "whitespace may change while an item is live, and anything else "
+            "see; hidden content or protected structure changed in a frozen record",
+            "revert the protected edit; only exposed lifecycle fields, retry "
+            "diagnostic prose, and trailing whitespace may change while live; "
+            "a new final Agent notes section may contain exposed prose only; "
+            "anything else "
             "belongs in a distinct successor action",
         )
 

@@ -207,8 +207,8 @@ committed (`memory/known-issues/2026-07-31-review-outcome-classification-is-atte
 
 ## Reviews: target, revision, and the retraction path
 
-`templates/queue/review.md` owns what `Review target` and `Review revision` may hold, and
-when `pending` is allowed. Two content rules are this guide's:
+`templates/queue/review.md` owns the copied fields; the review-binding instructions in
+`templates/README.md` own their allowed values and when `pending` is allowed. Two content rules are this guide's:
 
 - `Full context` explains the judgment. It never substitutes for the target or its
   immutable revision.
@@ -226,7 +226,7 @@ A rejected or abandoned review never authorizes crossing its boundary.
 | `changes-requested` | Create two items. One same-timing `needs-agent` action solely owns the concrete repair, its context, and its resolution evidence. One distinct `needs-human` re-review awaits that artifact and depends on the repair action, so the boundary stays closed without duplicating the repair. |
 | `rejected` | End pursuit. Restore a rejected Git candidate path-for-path to its reviewed base; a rejected local target changes or disappears. A task-bound rejection stays live until that task is removed. |
 | `abandoned` | End pursuit, on the same terms as `rejected`. |
-| `unanswerable` | The reader could not decide from what the item showed them. Create one new, distinct, unanswered `needs-human/reviews` item that supplies the missing context and keeps the same judgment, artifact, revision, and timing boundary. Nothing about the subject was decided; the replacement stays ready for review. Follow the binding and lineage rules in `templates/queue/review.md`. |
+| `unanswerable` | The reader could not decide from what the item showed them. Create one new, distinct, unanswered `needs-human/reviews` item that supplies the missing context and keeps the same judgment, artifact, revision, and timing boundary. Nothing about the subject was decided; the replacement stays ready for review. Follow the binding and lineage rules in `templates/README.md`. |
 
 An unanswerable review follows the ordinary claim and evidence-changing resolution flow;
 its human response is never rewritten. Re-asking repairs the explanation, not the artifact.
