@@ -7,7 +7,7 @@
 
 ## decisions
 - [AgentFold core requires generality, portability, and repository-local state](decisions/2026-07-22-agentfold-core-requires-substitutability.md) **[superseded]** — Core must survive agent, provider, and adopted-repository substitution; personal setup and user-global writes stay external
-- [Frontmatter is bold-key markdown lines, not YAML](decisions/2026-07-22-bold-key-frontmatter.md) — All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
+- [Frontmatter is bold-key markdown lines, not YAML](decisions/2026-07-22-bold-key-frontmatter.md) **[amended]** — All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
 - [Conversation timestamps are local time plus timezone abbreviation](decisions/2026-07-22-conversation-timestamps-local-time.md) — history/conversations/ folders use YYYY-MM-DD-HHMM<TZ>-<slug> — wall-clock time a human recognizes, zone made explicit
 - [Core portability uses deterministic admission and manually selected semantic review](decisions/2026-07-22-core-portability-review-is-manually-selected.md) — Core substitution evidence remains automatic; independent-agent review is manual, explicit, and revision-bound
 - [Guardrails are template-first and mode-configurable](decisions/2026-07-22-guardrails-are-template-first-and-mode-configurable.md) **[amended]** — Guardrails ship as templates controlled by one hard, soft, off, or manual mode surface; sandboxing is deferred
@@ -44,6 +44,8 @@
 - [Use a closed contiguous grammar for formal review receipts](decisions/2026-08-04-review-receipt-parser-authorization.md) **[amended]** — Formal core-review receipts use one closed contiguous block so verdict tokens can be distinguished from human requests without interpreting general Markdown structure.
 - [Withdraw the first review-receipt implementation and rebuild to the authorized shape](decisions/2026-08-07-withdraw-the-first-review-receipt-implementation.md) — The first closed-receipt implementation is discarded and rebuilt to the narrow authorized grammar, with the character alphabet, reviewer-similarity rule, and second panel grammar excluded unless a demonstrated failure forces them back.
 - [Explicit contracts constrain global engineering defaults](decisions/2026-08-09-agent-instruction-defaults.md) — Cross-repository engineering preferences never silently override explicit public contracts, repository dependency boundaries, or bounded migration bridges
+- [Bold-key metadata stays, but two of the reasons given for it are false](decisions/2026-08-18-bold-key-metadata-stays-on-corrected-grounds.md) — Keeps `**Key:** value` metadata while retiring two false premises — YAML front matter is not invisible on GitHub, and bold-key lines do not render as readable bold text everywhere
+- [A live human question hides its machine record in one sanctioned fold, checked by position](decisions/2026-08-18-the-machine-record-is-folded-and-checked-by-position.md) — Machine fields on new human queue items live below the answer line inside one `<details>`, and the checks that hold that shape are scoped by line position rather than by key name
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes

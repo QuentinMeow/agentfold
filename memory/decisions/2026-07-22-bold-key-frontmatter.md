@@ -4,7 +4,8 @@
 **Date:** 2026-07-22
 **Decided-by:** agent
 **Description:** All item metadata uses `**Key:** value` lines; renders on GitHub, parses with one stdlib regex
-**Review-by:** 2027-01-22
+**Review-by:** 2027-02-21
+**Amended-by:** `memory/decisions/2026-08-18-bold-key-metadata-stays-on-corrected-grounds.md` — the "invisible on rendered GitHub pages" premise under Alternatives considered, and the "Renders as readable bold text everywhere markdown renders" clause under Consequences
 
 ## Context
 

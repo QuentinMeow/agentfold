@@ -62,15 +62,20 @@ The summary must be enough to act on by itself. The link to full context is dept
 missing prerequisite. And a recommendation is evidence, not permission to hide an
 alternative.
 
-## Point `Full context` at something that will still be there
+## Point every path at something that will still be there
 
-`Full context` names the durable source behind the ask. A task's path is not durable,
-because a task's status is the folder it sits in and that folder changes
-(`tasks/AGENTS.md`). Two exceptions exist:
+A task's path is not durable, because a task's status is the folder it sits in and that
+folder changes (`tasks/AGENTS.md`). The rule is the whole item, not one field: no
+`tasks/<status>/…` path may appear anywhere in a queue item — not in `Full context`, not
+in `Resolution evidence`, not in the prose. Name the durable artifact, and refer to a task
+by its id. Two exceptions exist:
 
 - A **task-pickup request** may name a moving task path as live context, because the commit
   that claims the task also deletes the request.
 - A **retry record** may quote a moving path, but only as evidence of broken state.
+
+`Full context` in particular names the durable source behind the ask, and it is the field
+authors reach for a task path first.
 
 ## The order of the file is the contract
 

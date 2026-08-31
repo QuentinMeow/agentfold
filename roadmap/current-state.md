@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-09
+**Last-updated:** 2026-08-30
 
 What is true today, mapped to the desired-state lines.
 
@@ -352,3 +352,22 @@ What is true today, mapped to the desired-state lines.
   rather than under it. That branch keeps one red merge-boundary check, owned by backlog
   task `2026-08-08-stop-a-withdrawn-exemption-from-dirtying-past-edges`, and lands red by
   the owner's instruction under the advisory-gate decision of 2026-08-02.
+- **New human questions hide their bookkeeping; the ten oldest live ones do not (2026-08-18)**:
+  the three `needs-human/` templates carry their machine block below the answer line inside
+  one collapsed `<details>`, held by four checks — `record-swallow` (a field a renderer
+  shows and no parser reads, scoped by line position, not by key name), `fold-shape` (nine
+  rules), a narrowed raw-HTML rule admitting exactly three anchored line shapes, and
+  `queue-frozen-skeleton` (raw bytes changing while action identity does not). Of the 17
+  live `needs-human/` items, exactly the 2 this task filed are folded; no pre-existing item
+  can be, because folding changes action identity and `queue-resolution` refuses it. So the
+  corpus is deliberately mid-migration and the fold's only production exercise is those two
+  filings. 10 of the 17 still open with their bookkeeping above the question, 7 carry it
+  below; what to do about the 10 is now the owner's, as
+  `non-blocking-choose-what-happens-to-the-ten-older-question-files.md`. The word budget is 800 after a gate measured 700 refusing
+  well-written items, and
+  `reconcile.py --word-count` prints the count against it for any file, because the one
+  threshold of that format an author could not self-check was the one they kept breaching.
+  What is still unenforced: nothing checks that an item was copied from a template rather
+  than from the nearest legacy file, and `memory/decisions/` has no integrity gate at all —
+  an appended HTML comment, fence, or indented block on a decided ADR is 0 blocking under
+  `--check` and under `--range`, unlike the same append to a handover or a live queue item.
