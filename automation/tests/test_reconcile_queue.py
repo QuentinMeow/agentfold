@@ -14993,6 +14993,34 @@ class ReconcileQueueTests(unittest.TestCase):
                         "## Agent notes\n\nNone yet.\n", "## Agent notes\n\n" + diagnosis + "\n", generated=generated)
                     self.assertEqual([], self.messages(skeleton + resolution + schema))
 
+    def test_retry_notes_freeze_format_controls_across_unicode_versions(self):
+        # Arabic/Egyptian controls assigned after Python 3.9's Unicode 13 DB.
+        # Raw and encoded bytes must reach the same guard on both runtimes.
+        for codepoint in (0x0890, 0x0891, 0x13439, 0x1343F):
+            for encoded in (False, True):
+                spelling = "&#x%X;" % codepoint if encoded else chr(codepoint)
+                for generated in (False, True):
+                    with self.subTest(codepoint=codepoint, encoded=encoded, generated=generated), self.repo() as root:
+                        before = "## Agent notes\n\nVisible diagnosis.\n"
+                        after = before + "Payload " + spelling + "\n"
+                        skeleton, resolution, schema = self.retry_notes_findings(root, before, after, generated=generated)
+                        self.assertEqual([], self.messages(resolution + schema))
+                        self.assertEqual(1, len(skeleton), self.messages(skeleton))
+        for visible in ("\U0001342f", "\U00013000", "\u088f", "\uff21"):
+            with self.subTest(visible=repr(visible)), self.repo() as root:
+                skeleton, resolution, schema = self.retry_notes_findings(root,
+                    "## Agent notes\n\nBefore.\n", "## Agent notes\n\nAfter " + visible + "\n")
+                self.assertEqual([], self.messages(skeleton + resolution + schema))
+
+    def test_mutable_fields_freeze_format_controls_across_unicode_versions(self):
+        for codepoint in (0x0890, 0x0891, 0x13439, 0x1343F):
+            for spelling in (chr(codepoint), "&#x%X;" % codepoint):
+                with self.subTest(spelling=repr(spelling)):
+                    before = self.field_exposure_review() + "**Re-asked:** before\n"
+                    after = before.replace("**Re-asked:** before", "**Re-asked:** after" + spelling)
+                    skeleton, _ = self.field_exposure_findings(before, after)
+                    self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
     def test_retry_notes_entity_escapes_follow_backslash_parity(self):
         entities = (("&#xE0061;", "&#xE0062;"), ("&#x0E0061;", "&#x0E0062;"),
                     ("&#0917601;", "&#0917602;"), ("&ZeroWidthSpace;", "&zwj;"))

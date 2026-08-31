@@ -34,3 +34,5 @@ The owner checkout, original branches, probes, and backups stay preserved. Only 
 The retry-note boundary partially amends the earlier frozen-skeleton decision; its canonical rationale is `memory/decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md`. The live-human HTML rule is unchanged.
 
 The complete source inventory and original staged-file listing are in `recovery-inventory.md`; the owner’s exact request is in `requirements.md`. Unsupported historical measurement rhetoric is omitted from active guidance and code comments, while original immutable records remain intact.
+
+The new invisible-byte predicate pins Unicode 16 `General_Category=Cf` ranges so Python 3.9 and 3.14 classify the same source bytes. Its existing non-format default-ignorable ranges remain; the older NFKC prose-normalization helper is unchanged. Future Unicode assignments require an explicit data update, rather than silently changing this guard with the interpreter. Source: [Unicode 16 category data](https://www.unicode.org/Public/16.0.0/ucd/extracted/DerivedGeneralCategory.txt).

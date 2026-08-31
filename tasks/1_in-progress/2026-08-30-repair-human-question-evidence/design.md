@@ -30,3 +30,5 @@ A new unanswerable-review successor preserves the original-schema timing tuple, 
 **User-global writes:** none
 **Why AgentFold core:** These are scoped repairs to existing portable source and queue lifecycle checks, not provider configuration or an optional product integration.
 **Thin adapter:** none
+
+Source comparisons also preserve token boundaries and literal spans. A quoted number or identifier cannot match only part of a longer token. Code and string-literal spacing survives presentation normalization, and prose omission markers cannot cut through a source literal. Actual literal ellipsis characters remain literal text. These are bounded quotation-fidelity rules, not a general Markdown renderer or a claim of semantic relevance.
