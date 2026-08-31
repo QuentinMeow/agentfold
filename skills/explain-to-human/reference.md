@@ -184,10 +184,37 @@ The exception is a link the reader is being sent to on purpose — the queue ite
 being asked to answer. That link is the action, not evidence, so its label is the action
 and no "you need not open this" is added to it.
 
-- Bare: "See `docs/designs/queue-resolution-order-independence.md`."
+There are three rungs, and most writing stops one too early.
+
+- Bare: "See `docs/designs/queue-resolution-order-independence.md`." Backticks render as
+  code, so this is clickable nowhere, and it names a whole document without saying which
+  part of it matters.
 - Annotated: "The full ordering proof is in
   [the queue-resolution design](../../docs/designs/queue-resolution-order-independence.md)
   — you do not need it to answer this; it only shows why the two orders cannot diverge."
+- Quoted — the rung to use whenever the reader's answer turns on what that document
+  actually says:
+
+  > The gate proves *the deletion commit also touched the named file*.
+  >
+  > — [what the evidence gate actually proves](../../docs/designs/queue-resolution-order-independence.md#finding-1--the-gate-is-already-empty)
+
+Annotated is right for evidence the reader may safely skip. Quoted is required when the
+sentence decides the question, because a summary of it is the one thing they cannot check.
+
+Link a decisive Markdown passage at a heading written with `#`, not at the whole file.
+For text, code, or an underlined heading, select the lines with `#Lx` or `#Lx-Ly`, using positive line numbers within that file. Quote
+only the passage that decides the question, and do not repeat it in a summary.
+
+Keep the wording, identifier spelling, and case unchanged, even in a short quotation.
+Paired emphasis and wrapping outside recognized literal text may change presentation;
+literal spaces and symbols stay exact. The supported forms are listed in `templates/README.md`;
+an exact excerpt avoids unsupported formatting. Marked omissions keep the remaining
+passages in their original order. A citation proves no more than the source actually says.
+
+Annotated background remains useful when the reader can safely skip it. In a human queue
+item, put that background below the answer inside the existing record fold; local source
+links above the answer accompany the passages the reader needs to decide.
 
 ## Sentences, paragraphs, and the actor
 

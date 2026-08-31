@@ -8,6 +8,7 @@ have to open another file to know what they are agreeing to, the item failed.
 **This file does not define the format.** The fields, their order, and the lifecycle around
 them are owned elsewhere and must not be restated here:
 
+- Before copying, read the authoring checklist in `templates/README.md`.
 - The exact schema to copy: `templates/queue/decision.md`, `templates/queue/review.md`,
   `templates/queue/clarification.md`.
 - What a human action must contain and how it resolves: `handbook/human-action-guide.md`.
@@ -21,8 +22,6 @@ good enough. Read `../reference.md` for the craft behind each rule.
 
 > Could someone who has never seen this repository answer correctly, from this file alone,
 > without wanting to ask a question first?
-
-Every rule below exists to make that answer yes.
 
 ## Write the title as the question, not the verdict
 
@@ -47,6 +46,37 @@ Separate three things, and never let them blur:
 - **What this does not decide** — the adjacent thing the reader will assume is in scope
   and is not.
 
+## Show the source's own words
+
+The owner needs the effect, not the investigation that found it. But when the answer turns
+on what another document says, they need that document's own words: your summary of them is
+the one thing they cannot check. Quote every source whose wording determines the answer,
+and give the quotation its own attribution link.
+
+> A legitimate exception is finding-specific, content-bound, attributable, reasoned,
+> expiring, and visible. The producing agent cannot self-approve a confirmed critical finding.
+>
+> — [what the design says an exception must be](../../../docs/designs/risk-tiered-agent-guardrails.md#make-escape-hatches-narrower-than-the-rule)
+
+Link a Markdown passage at a heading written with `#`, or select text, code, or an
+underlined heading with `#Lx` or `#Lx-Ly`.
+Line numbers start at one, stay within the file, and run forwards. An attribution may use
+an ordinary destination or CommonMark angle brackets, such as
+`[selected lines](<../../../docs/source notes.txt#L2-L4>)`. A backticked path alone is not
+a clickable citation. Quote the decisive passage without repeating it in a summary.
+
+Preserve wording, identifier spelling, and case, however short the quotation. Paired
+emphasis and wrapping outside recognized literal text may change; literal spaces and
+symbols stay exact. `templates/README.md` names the supported forms. Marked omissions keep the
+remaining passages in source order. When the question is "does X still match Y", quote
+both sides.
+
+If no source wording determines the answer, replace the source block with
+`> No source document — everything you need is above.` A local-file review must still
+quote the file it asks about; that sentence cannot waive its evidence. Put optional
+annotated background links below the answer, inside the existing record fold. They need
+no quotation when the reader can safely skip them.
+
 ## Give the choices a shared axis, then make each one concrete
 
 Open the choices with one sentence naming what they differ on. Without it, two options
@@ -55,23 +85,6 @@ read as two paragraphs and the reader has to build the comparison themselves.
 Then, for each option: what it accepts, at least one cost, and an *example consequence* —
 a concrete scenario of life after that answer. The example consequence is the most
 important sentence in the file, because it is how a non-expert experiences the difference.
-
-> **Option A — Keep the gate hard.** No branch merges while any review it names is open.
-> *Example consequence:* the three branches that filed their own reviews stay unmergeable
-> until you answer three reviews, and any future branch that files a review blocks itself
-> the same way.
->
-> **Option B — Skip an action the range itself filed.** A branch may merge past a review it
-> created; the review is reported again at the next boundary.
-> *Example consequence:* a change merges before you have judged its design, and you find
-> out at the next merge rather than at this one. The undo is `git revert -m 1`.
-
-Two options is the minimum. Four is the maximum: past that, readers defer instead of
-choosing. Never pad the list with an outcome nobody would pick — if declining is not
-actually available, say so in the axis sentence instead of writing a fake third option.
-
-When the options differ on more than one dimension, put them in one table whose rows are
-the same criteria for every option. Prose paragraphs are not comparable.
 
 ## Recommend, then argue against yourself
 
@@ -85,18 +98,6 @@ exactly one of the options shown. Beside it, two things:
   "Medium — I verified the three stuck branches and read the check, but did not simulate a
   branch that files two reviews" is useful. "Medium confidence" alone is not.
 
-## Inline the effect, link the evidence
-
-The owner needs the effect to decide. They do not need the investigation that found it.
-
-- Inline: the ask, the options, each cost, the recommendation, the default if nobody
-  answers, the reversal cost, and every number your reasoning uses.
-- Link: the logs, the failing run, the design document, the code, the transcript.
-
-Link the source exactly once, in the prose, with a label that says what is behind it and
-why the reader does not need to open it. Machine-readable copies of paths belong below the
-answer line, with the rest of the bookkeeping.
-
 ## Ask for one thing
 
 One file, one answerable judgment. Two questions in one file produce an answer to one of
@@ -106,30 +107,41 @@ Never ask the owner to copy a hash, a revision, a field name, or any offered voc
 plain-English sentence is a complete answer; the agent that folds it does the bookkeeping
 and shows the owner how it read their words before acting.
 
+One answer is not the only answer. If the file did not carry enough to decide, the owner may
+say so in the same blank, in their own words, with no vocabulary to copy. That is a defect
+report about your item rather than a verdict on its question: it is folded as a disposition,
+and you owe a fresh item carrying what was missing (`handbook/decision-guide.md`). Say on the
+form that the option is there; an affordance nobody is told about is not one.
+
 ## Before you file it
 
-- [ ] The title is a question, answerable in a word or two, with no verdict in it.
-- [ ] `Today` describes reality, not the proposal.
-- [ ] Every option has a cost and a concrete example consequence.
-- [ ] The recommendation names one option shown, with a real counter-case beside it.
-- [ ] Nothing above the answer line requires opening another file.
-- [ ] No hash, field name, or machine token appears above the answer line.
-- [ ] Every uncommon term is glossed at first use.
+Run the nine authoring checks in `templates/README.md` before filing the copied template.
+Three things no template can check are yours: every repository-local term glossed at first
+use, every source the answer turns on quoted here and linked at its heading or selected
+lines, and a recommendation naming one shown option with a real counter-case beside it.
 
 ## Part of this is reported back to you
 
 The reconciler's `explanation-shape` check reports, as an **advisory** finding, a section
-missing from the item's own template, a section that sits out of that template's order, and
-any `### ` choice with no concrete `*Example consequence:*` line under it. Advisory means it
-prints with an `(advisory)` marker and is counted, and never fails a commit or a merge
+missing from the item's own template, a section out of that template's order, and any
+`### ` choice with no concrete `*Example consequence:*` line under it. In the commit that
+creates an item it also checks local citations against the captured candidate's regular
+file bytes. It reports altered quotations, including short ones; invalid headings or line
+ranges; missing, escaping, nonregular, or binary sources; local links above the answer with
+no quotation; and a local-file review that never quotes its target. An item with neither
+an attributed quotation nor the exact no-source sentence also receives an advisory.
+
+Source paths resolve within the repository, relative to the item or the repository root;
+unstaged files and symlinks cannot change the captured evidence. External content is not
+fetched or machine-verified. A matching local quotation does not prove its relevance or
+truth. Advisory means the finding prints with an `(advisory)` marker and is counted;
+it never fails an ordinary commit or merge
 (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
 
-It does not read every live item. An item written under an earlier field spelling is judged
-by the schema it was written under, because a record is immutable — eleven of the fifty-four
-live items are in that state today and are skipped. Anything you file now is checked,
-including a new item that copies an older neighbour's field names.
+It does not read every live item. One written under an earlier field spelling is judged by
+the schema it was written under, because a record is immutable; those are skipped, and
+named together in one finding that asks for a fresh item rather than an edit. A diagnostic
+does not authorize rewriting or replacing a live ask; its ordinary lifecycle still applies.
 
-Nothing else on the checklist above is checked. Whether the title is really a question,
-whether `Today` describes reality, and whether the counter-case is real rather than hedged
-are judgments a program cannot make — an item can satisfy every rule a machine can see and
-still be unanswerable. The advisory line catches the shape; the rest is still yours.
+What no check can see is whether the sentence you quoted is the one that matters, or
+whether the counter-case is real rather than hedged. The shape is caught; the rest is yours.

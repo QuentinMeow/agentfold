@@ -53,7 +53,7 @@ Bookkeeping the reconciler reads. Nothing here needs you.
 **Full context:** `docs/designs/explaining-work-to-the-owner.md`
 **Resolution evidence:** `memory/decisions/2026-08-02-the-explanation-standard-disposition.md`
 **Review target:** `skills/explain-to-human/SKILL.md`
-**Review revision:** sha256:924bd7e1ace80c468b02413968558b782efbaff91c9a9bd4134fa0abad5aa180
+**Review revision:** sha256:45058a9c0196dfb3f76bdaa3ba7d3b259258b2cf36511576a2c541f91239a80b
 **Reviewed revision:** ______
 **Review outcome:** pending
 **Answer by:** 2026-10-30

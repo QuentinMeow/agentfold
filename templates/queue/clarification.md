@@ -1,24 +1,3 @@
-<!--
-Filename: one delivery prefix, then a kebab-case slug. The three prefixes, what each
-one means, and the rule that the filename is canonical (so no separate **Blocking:**
-field exists) are stated once in `message-queue/AGENTS.md`, under "Routing: three
-independent axes". Slug grammar: `handbook/naming-conventions.md`.
-
-Before you file, check all nine. Lifecycle law lives in handbook/human-action-guide.md.
-1. The title is a question the owner can answer without knowing this repository.
-2. Exactly three fields above the first heading: Action, Why this matters, If you do nothing.
-3. Today / What this would change / What this does not decide are true and specific.
-4. Two or more readings, each with a cost and a concrete *Example consequence:*.
-5. The axis sentence opens Your choices and says what the readings differ on.
-6. My working assumption names one reading shown; its counter-case sits beside it.
-7. No machine field, hash, or token appears above the answer line.
-8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 700 words before the answer. Cut background, not choices.
-
-An agent recommending an answer to "what did you mean?" puts words in the owner's
-mouth. State what you will assume and do instead.
--->
-
 # <The question the owner can answer, in plain English>
 
 **Action:** <one imperative sentence; handovers copy this verbatim as the link label>
@@ -31,9 +10,20 @@ mouth. State what you will assume and do instead.
 **What this would change:** <the delta a different reading would produce>
 **What this does not decide:** <adjacent things a reader will assume are in scope>
 
-<One or two short value-neutral paragraphs from zero context. Link the source exactly
-once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
-alone: the reader should be able to answer without opening anything.>
+<One or two short value-neutral paragraphs from zero context. This must stand alone: the
+reader should be able to answer without opening anything.>
+
+> <the source's own words — the sentence that decides this, copied, not paraphrased>
+>
+> — [<what this passage says>](<../../../ path to the file.md#heading-anchor>)
+
+<Quote each decisive source; a comparison quotes both sides. Link a Markdown heading
+written with #, or bounded lines with #Lx or #Lx-Ly for text or code. Preserve wording,
+case, and code literals; paired emphasis and wrapping outside literals may change.
+Keep marked omissions in source order. If no source wording decides
+the answer, replace this whole source block with a blockquote containing exactly
+`No source document — everything you need is above.` A local-file review still quotes
+its target. Put optional background below the answer, inside the fold.>
 
 ## Your choices
 
@@ -53,30 +43,22 @@ alone: the reader should be able to answer without opening anything.>
 **Strongest case against this:** <the best argument for a different reading>
 **Confidence:** <high | medium | low> — <what you checked, and what you did not>
 
-Answer in plain words — one sentence is enough. You do not need to copy anything or use
-particular vocabulary; the agent that folds your answer does the bookkeeping and will
-show you how it read your words before acting.
+Answer in plain words — one sentence is enough. You never need to copy anything; the agent
+that folds it shows you how it read your words before acting. If this page did not give you
+enough to decide, say so and say what is missing — that is a complete answer, not a
+rejection.
 
 **Your answer:** ______
 
 ## For the record
 
-Bookkeeping the reconciler reads. Nothing here needs you.
+<details>
+<summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting
-**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<root-relative path to the durable source>`
-**Resolution evidence:** `<durable non-queue file that folding this answer will change>`
-**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
-<!-- Status ships as `waiting`, the only status a newly filed item may hold; the
-folding agent moves it to `folding` on its claim edge.
-Then exactly one timing field matching the filename:
-blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
-future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-non-blocking-* -> neither; If you do nothing above is the unattended outcome.
-A needs-human item may bind only transition:start on a 0_backlog task, or
-operation:<name> for one act with no undo. Merging, moving a task, and recording it
-done never wait on an answer (message-queue/AGENTS.md owns this rule).
-Add External assignment / External source only for a provider binding. A concrete
-response is immutable: if it is a counter-question, fold the answer into Resolution
-evidence and create a same-timing successor naming this path in Supersedes. -->
+**Status:** waiting  
+**Filed:** < YYYY-MM-DD >, by < who >[, from task `<id>`]  
+**Full context:** `<root-relative path to the durable source>`  
+**Resolution evidence:** `<durable non-queue file that folding this answer will change>`  
+**Answer by:** < UTC YYYY-MM-DD — 90 days from Filed unless something real dates it >
+
+</details>

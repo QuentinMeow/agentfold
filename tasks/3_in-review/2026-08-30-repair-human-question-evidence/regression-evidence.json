@@ -1,0 +1,2557 @@
+{
+  "schema": "agentfold-independent-regression-evidence-v2",
+  "reviewer": "final_coverage",
+  "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+  "lower": "5a9f044f84fbcc21597f7bf44466cab9b3694b42",
+  "verdict": "pass-with-stated-scope-limits",
+  "core_fit": "pass",
+  "extends": {
+    "candidate": "26d6b2b0afcf5cf251767bdec0adbd8d5cf6e611",
+    "prior_map_sha256": "2791e88fbcf8056d23fe8dc496bb8d96354030c1e58d4e8db89c75c87ba52543",
+    "unchanged_source_rows": 68,
+    "carried_execution_results": 0
+  },
+  "definition_of_recovery_addition": "A ReconcileQueueTests method present at candidate but absent from original PR89 f56084d61aeb24d1907b711de13b3ba8c86719e7.",
+  "source": {
+    "test_path": "automation/tests/test_reconcile_queue.py",
+    "test_blob": "12354db7fa6c414d6c35995210fc37bd5988aeae",
+    "runtime_path": "automation/reconcile/reconcile.py",
+    "runtime_blob": "e6b09fb6d30aa3ea4c3a582716789b61767216b3"
+  },
+  "count_order": [
+    "testsRun",
+    "assertion_failures",
+    "errors",
+    "skips",
+    "subtests",
+    "failing_subtests"
+  ],
+  "counts_note": "Assertions outside subTest can make assertion_failures exceed failing_subtests. Red means an observed assertion failure, never an error, skip, or empty selection.",
+  "summary": {
+    "discovered_total": 586,
+    "recovery_methods": 74,
+    "runner_discovered_recovery_methods": 74,
+    "candidate_green_methods_py314": 74,
+    "candidate_green_methods_py39": 74,
+    "independently_red_methods": 74,
+    "new_since_r3": 6,
+    "original_retention": {
+      "af6a7438ed7e362de35fee825c70a767573e4fb6": {
+        "count": 507,
+        "removed": []
+      },
+      "f56084d61aeb24d1907b711de13b3ba8c86719e7": {
+        "count": 512,
+        "removed": []
+      }
+    },
+    "prior_methods_changed": []
+  },
+  "ownership": {
+    "automation/reconcile/reconcile.py": {
+      "kind": "tests",
+      "queue_tests_selected": true
+    },
+    "automation/tests/test_reconcile_queue.py": {
+      "kind": "tests",
+      "queue_tests_selected": true
+    },
+    "automation/markdown_semantics.py": {
+      "kind": "tests",
+      "queue_tests_selected": true
+    },
+    "templates/queue/review.md": {
+      "kind": "tests",
+      "queue_tests_selected": true
+    },
+    "templates/README.md": {
+      "kind": "tests",
+      "queue_tests_selected": true
+    }
+  },
+  "environment": {
+    "cwd": "/private/tmp",
+    "test_sources_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+    "shared_candidate_sources_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+    "fixtures": "/private/tmp/final-coverage-upper-r4-fixtures-*",
+    "bytecode": "disabled",
+    "git_global_config": "/dev/null",
+    "git_system_config": "disabled"
+  },
+  "control_semantics": "Historical controls restore the specified Git-pinned reconciler body while retaining r4 shared modules, templates and tests; these are localized rollbacks, not pristine historical-tree runs. Other faults alter the named rule in memory on r4. The Unicode rollback restores only the old format-control predicate. The identifier-supplement control removes only the r4 additions table. Every candidate and control count was freshly observed in this r4 audit.",
+  "runtime_helper_sha256": "016c4ba7cc4c86bf8cf0ea663c249ba99c4c468dee5d5db3fc8db3affb9d723c",
+  "runs": {
+    "candidate_py314": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /opt/homebrew/bin/python3.14 /private/tmp/final-coverage-upper-r4-run.py candidate > /private/tmp/final-coverage-upper-r4-candidate-py314.log",
+      "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "git": "git version 2.55.0",
+      "selected": 74,
+      "failed_methods": 0,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 1072,
+      "red_subcases": 0
+    },
+    "candidate_py39": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-run.py candidate > /private/tmp/final-coverage-upper-r4-candidate-py39.log",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "git": "git version 2.55.0",
+      "selected": 74,
+      "failed_methods": 0,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 1072,
+      "red_subcases": 0
+    },
+    "historical_py314": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /opt/homebrew/bin/python3.14 /private/tmp/final-coverage-upper-r4-run.py history-control > /private/tmp/final-coverage-upper-r4-history-control-py314.log",
+      "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "git": "git version 2.55.0",
+      "selected": 72,
+      "failed_methods": 49,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 1044,
+      "red_subcases": 427
+    },
+    "mutants_py314": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /opt/homebrew/bin/python3.14 /private/tmp/final-coverage-upper-r4-run.py remaining-control > /private/tmp/final-coverage-upper-r4-remaining-control-py314.log",
+      "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "git": "git version 2.55.0",
+      "selected": 23,
+      "failed_methods": 23,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 410,
+      "red_subcases": 231
+    },
+    "unicode_rollback_py39": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-run.py unicode-control > /private/tmp/final-coverage-upper-r4-unicode-control-py39.log",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "git": "git version 2.55.0",
+      "selected": 2,
+      "failed_methods": 2,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 28,
+      "red_subcases": 24
+    },
+    "new_history_py39": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-run.py new-history > /private/tmp/final-coverage-upper-r4-new-history-py39.log",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "git": "git version 2.55.0",
+      "selected": 6,
+      "failed_methods": 4,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 287,
+      "red_subcases": 69
+    },
+    "identifier_supplement_py39": {
+      "command": "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-run.py new-identifier-control > /private/tmp/final-coverage-upper-r4-new-identifier-control-py39.log",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "git": "git version 2.55.0",
+      "selected": 1,
+      "failed_methods": 1,
+      "errored_methods": 0,
+      "skips": 0,
+      "subcases": 24,
+      "red_subcases": 16
+    }
+  },
+  "faults": {
+    "pinned_reconciler_af6a7438ed_historical_py314": {
+      "description": "restore-entire-pinned-reconciler-body; retain-final-shared-modules-and-templates",
+      "source_pin": "af6a7438ed7e362de35fee825c70a767573e4fb6",
+      "run": "historical_py314"
+    },
+    "freeze-all-mutable-values": {
+      "description": "freeze-all-mutable-values",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "restore-pinned-interpreter-dependent-Cf-predicate": {
+      "description": "restore-pinned-interpreter-dependent-Cf-predicate",
+      "source_pin": "3d951d8fd5cf1d06a6e73e456fe15026aa66fb9c",
+      "run": "unicode_rollback_py39"
+    },
+    "omit-raw-byte-protection": {
+      "description": "omit-raw-byte-protection",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "pinned_reconciler_f56084d61a_historical_py314": {
+      "description": "restore-entire-pinned-reconciler-body; retain-final-shared-modules-and-templates",
+      "source_pin": "f56084d61aeb24d1907b711de13b3ba8c86719e7",
+      "run": "historical_py314"
+    },
+    "omit-review-target-evidence": {
+      "description": "omit-review-target-evidence",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "select-whole-source-for-any-anchor": {
+      "description": "select-whole-source-for-any-anchor",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "misclassify-all-boundaries-as-identifier-continuations": {
+      "description": "misclassify-all-boundaries-as-identifier-continuations",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "omit-presentation-normalization": {
+      "description": "omit-presentation-normalization",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "omit-supported-elision-syntax": {
+      "description": "omit-supported-elision-syntax",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "pinned_reconciler_3d951d8fd5_historical_py314": {
+      "description": "restore-entire-pinned-reconciler-body; retain-final-shared-modules-and-templates",
+      "source_pin": "3d951d8fd5cf1d06a6e73e456fe15026aa66fb9c",
+      "run": "historical_py314"
+    },
+    "consume-prose-period-as-number": {
+      "description": "consume-prose-period-as-number",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "pinned_reconciler_e34265086b_historical_py314": {
+      "description": "restore-entire-pinned-reconciler-body; retain-final-shared-modules-and-templates",
+      "source_pin": "e34265086b94f709869530cbbb952cd45b7fca30",
+      "run": "historical_py314"
+    },
+    "misclassify-visible-nonascii-boundaries-as-identifier-continuations": {
+      "description": "misclassify-visible-nonascii-boundaries-as-identifier-continuations",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "omit-quoted-literal-recognition": {
+      "description": "omit-quoted-literal-recognition",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "pinned_reconciler_26d6b2b0af_new_history_py39": {
+      "description": "restore-entire-pinned-reconciler-body; retain-final-shared-modules-and-templates",
+      "source_pin": "26d6b2b0afcf5cf251767bdec0adbd8d5cf6e611",
+      "run": "new_history_py39"
+    },
+    "remove-Unicode16-identifier-supplement": {
+      "description": "remove-Unicode16-identifier-supplement",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "identifier_supplement_py39"
+    },
+    "remove-unanswerable-outcome": {
+      "description": "remove-unanswerable-outcome",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    },
+    "discard-concrete-human-response-bytes": {
+      "description": "discard-concrete-human-response-bytes",
+      "source_pin": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "run": "mutants_py314"
+    }
+  },
+  "scope_audit": {
+    "prior": "26d6b2b0afcf5cf251767bdec0adbd8d5cf6e611",
+    "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+    "lower": "5a9f044f84fbcc21597f7bf44466cab9b3694b42",
+    "prior_method_count": 580,
+    "candidate_method_count": 586,
+    "added_methods": [
+      "ReconcileQueueTests.test_source_quote_fidelity_r4_accepts_exact_triples_and_escape_parity",
+      "ReconcileQueueTests.test_source_quote_fidelity_r4_keeps_omissions_outside_complete_triples",
+      "ReconcileQueueTests.test_source_quote_fidelity_r4_preserves_embedded_triple_literals",
+      "ReconcileQueueTests.test_source_quote_fidelity_r5_accepts_new_visible_unicode_boundaries",
+      "ReconcileQueueTests.test_source_quote_fidelity_r5_preserves_new_identifier_continuations",
+      "ReconcileQueueTests.test_source_quote_fidelity_r5_preserves_unicode_decimal_number_boundaries"
+    ],
+    "removed_methods": [],
+    "changed_existing_methods": [],
+    "r3_recovery_methods_source_hash_match": 68,
+    "original_retention": {
+      "af6a7438ed7e362de35fee825c70a767573e4fb6": {
+        "count": 507,
+        "removed": []
+      },
+      "f56084d61aeb24d1907b711de13b3ba8c86719e7": {
+        "count": 512,
+        "removed": []
+      }
+    },
+    "protected_surface_delta": {
+      "automation/hooks/": [],
+      "automation/run_tests.py": [],
+      "automation/check_action_projection.py": [],
+      "automation/check_core_scope.py": [],
+      "automation/review_receipt.py": [],
+      "AGENTS.md": [],
+      "automation/AGENTS.md": [],
+      "handbook/principles/": [],
+      "history/": [],
+      "templates/queue/": []
+    },
+    "markdown_blob_matches_lower": true,
+    "ancestors": {
+      "26d6b2b0afcf5cf251767bdec0adbd8d5cf6e611": true,
+      "5a9f044f84fbcc21597f7bf44466cab9b3694b42": true,
+      "326d8ed5fa4f89eaa1402a54d8377dba5946be12": true,
+      "af6a7438ed7e362de35fee825c70a767573e4fb6": true,
+      "f56084d61aeb24d1907b711de13b3ba8c86719e7": true
+    }
+  },
+  "unicode_exhaustive_audit": {
+    "314": {
+      "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "unicode_database": "16.0.0",
+      "codepoints_checked": 1114112,
+      "identifier_count": 145620,
+      "native_identifier_count": 145620,
+      "identifier_sha256": "bcba375c662e0c46717cc9f83ecd403d37fb0c47569ecaad96d271b9d7141246",
+      "native_identifier_sha256": "bcba375c662e0c46717cc9f83ecd403d37fb0c47569ecaad96d271b9d7141246",
+      "decimal_count": 760,
+      "native_decimal_count": 760,
+      "decimal_sha256": "ab88e3ee0246b07c1571f120d76c05ca84af0f0da81e1b6de44fbdba68b1ec90",
+      "native_decimal_sha256": "ab88e3ee0246b07c1571f120d76c05ca84af0f0da81e1b6de44fbdba68b1ec90",
+      "identifier_supplement_count": 10132,
+      "identifier_supplement_sorted_nonoverlapping": true,
+      "supplement_on_assigned_native_characters": 10132
+    },
+    "39": {
+      "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "unicode_database": "13.0.0",
+      "codepoints_checked": 1114112,
+      "identifier_count": 145620,
+      "native_identifier_count": 135488,
+      "identifier_sha256": "bcba375c662e0c46717cc9f83ecd403d37fb0c47569ecaad96d271b9d7141246",
+      "native_identifier_sha256": "b700676dc7f18fb27c6a75bfb397ad57e1147185c1eacd2d8699b7d2b612beb2",
+      "decimal_count": 760,
+      "native_decimal_count": 650,
+      "decimal_sha256": "ab88e3ee0246b07c1571f120d76c05ca84af0f0da81e1b6de44fbdba68b1ec90",
+      "native_decimal_sha256": "710a98c5dfd6bd473ca5213698d423cf20bd321fb462cc15c189611787b703ac",
+      "identifier_supplement_count": 10132,
+      "identifier_supplement_sorted_nonoverlapping": true,
+      "supplement_on_assigned_native_characters": 0
+    }
+  },
+  "guidance_probes": {
+    "314": {
+      "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "cases_run": 3,
+      "cases_passed": 3,
+      "skips": 0,
+      "cases": [
+        {
+          "source": "R's release preserves users' work.",
+          "quote": "R's release preserves users' work.",
+          "accepted_expected_and_observed": true
+        },
+        {
+          "source": "R's release preserves users' work.",
+          "quote": "R's release\npreserves users' work.",
+          "accepted_expected_and_observed": false
+        },
+        {
+          "source": "R's  release'",
+          "quote": "R's release'",
+          "accepted_expected_and_observed": false
+        }
+      ]
+    },
+    "39": {
+      "candidate": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+      "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+      "cases_run": 3,
+      "cases_passed": 3,
+      "skips": 0,
+      "cases": [
+        {
+          "source": "R's release preserves users' work.",
+          "quote": "R's release preserves users' work.",
+          "accepted_expected_and_observed": true
+        },
+        {
+          "source": "R's release preserves users' work.",
+          "quote": "R's release\npreserves users' work.",
+          "accepted_expected_and_observed": false
+        },
+        {
+          "source": "R's  release'",
+          "quote": "R's release'",
+          "accepted_expected_and_observed": false
+        }
+      ]
+    }
+  },
+  "additional_commands": [
+    "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /opt/homebrew/bin/python3.14 /private/tmp/final-coverage-upper-r4-unicode-audit.py > /private/tmp/final-coverage-upper-r4-unicode-audit-py314.log",
+    "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-unicode-audit.py > /private/tmp/final-coverage-upper-r4-unicode-audit-py39.log",
+    "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /opt/homebrew/bin/python3.14 /private/tmp/final-coverage-upper-r4-guidance-probe.py > /private/tmp/final-coverage-upper-r4-guidance-probe-py314.log",
+    "env PYTHONDONTWRITEBYTECODE=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null /usr/bin/python3 /private/tmp/final-coverage-upper-r4-guidance-probe.py > /private/tmp/final-coverage-upper-r4-guidance-probe-py39.log"
+  ],
+  "clone_clean_check": {
+    "command": "env GIT_OPTIONAL_LOCKS=0 git --no-replace-objects diff --quiet --exit-code HEAD",
+    "cwd": "/private/tmp/agentfold-final-review-upper-r4",
+    "exit_code": 0
+  },
+  "methods": [
+    {
+      "method": "test_fold_shape_rejects_a_close_before_its_open",
+      "test_source_sha256": "8f01068ec7099856426fa2b5416e442b53ef77c860a28ea7091892ce86904a81",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        2,
+        2
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_entities_respect_escaped_code_delimiters",
+      "test_source_sha256": "8e602f67cb128ca32491f636ecd0e4406027859eb1d86019b2fd0c47a48efc83",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        8,
+        4
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_entity_escapes_follow_backslash_parity",
+      "test_source_sha256": "56b398dff226c7499ce6bf36cbc8a479706d49988fa5b00736bc9f0c9bbd0a6d",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        51,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        51,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        27,
+        0,
+        0,
+        51,
+        27
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_first_response_cannot_hide_other_edits",
+      "test_source_sha256": "e48168e1b2a3eefb6c196d1c9fc5fa2d6c0c99201ec082ce1713b182648a5f97",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        2,
+        2
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_first_response_preserves_other_line_endings",
+      "test_source_sha256": "11d1b006c38563849c3fffd3a8579fa14e0b75119920cfe016c9edd9c0ef1b8f",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        6,
+        3
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_freezes_invisible_values",
+      "test_source_sha256": "02122457eb0f74ce5fb5e577e75e1e27cbd8904e0ef00c0e0c3c609a091d3e3e",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        6,
+        0,
+        0,
+        6,
+        6
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_freezes_outer_wrappers",
+      "test_source_sha256": "5907ffc0f59b2c4820668c309985887692d05a206fa67fa8cf179fbcfa34b8c1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        5,
+        0,
+        0,
+        7,
+        4
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_keeps_exposed_values_editable",
+      "test_source_sha256": "6d425d612f1646f46096d118cfe55e327ce874e52bd44ca41e325521d53b8ea9",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "red_control": "freeze-all-mutable-values",
+      "red": [
+        1,
+        9,
+        0,
+        0,
+        8,
+        8
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_later_metadata_stays_frozen",
+      "test_source_sha256": "02155960b66d91b2ee855896e5b83e4e8381553000b45ebf12ccb2171eaddf00",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_literal_nonentities_remain_editable",
+      "test_source_sha256": "1cabda271a8ea65b3bb7bb6864664249d90d915f0fd414834cd47b31d71b925a",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "freeze-all-mutable-values",
+      "red": [
+        1,
+        7,
+        0,
+        0,
+        7,
+        7
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_never_neutralizes_agent_folds",
+      "test_source_sha256": "da72841b9acdbe460247fda4eaf0f45704419402196ff5fbb4657705e219bea0",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_only_exempts_a_valid_fold",
+      "test_source_sha256": "df83556afc51df71daf99125c1e7fccca0282b69dada7f34e236a745aab593d6",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        6,
+        0,
+        0,
+        7,
+        6
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_preserves_first_response_compatibility",
+      "test_source_sha256": "7d98d432fc1d4fa642ef0080d8627f01ddf682731fe28dff0c80abedd277ba0d",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        27,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        27,
+        0
+      ],
+      "red_control": "freeze-all-mutable-values",
+      "red": [
+        1,
+        27,
+        0,
+        0,
+        27,
+        27
+      ]
+    },
+    {
+      "method": "test_mutable_field_source_context_response_cannot_escape_outer_markup",
+      "test_source_sha256": "d39f34785e4e7e8bdb4e4bde37364293e4e93f840a0997b12335968ec0d41d11",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        4,
+        2
+      ]
+    },
+    {
+      "method": "test_mutable_fields_freeze_format_controls_across_unicode_versions",
+      "test_source_sha256": "b491f90f786ed313ca1862d7ab848c1a7275415b18617f192ce87490708390ec",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "red_control": "restore-pinned-interpreter-dependent-Cf-predicate",
+      "red": [
+        1,
+        8,
+        0,
+        0,
+        8,
+        8
+      ]
+    },
+    {
+      "method": "test_retry_notes_accept_visible_unicode_without_compatibility_rewriting",
+      "test_source_sha256": "fc882b812c75111291272c52f0f22fd3a79f4834adbb9bd7430e1f785b767484",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        12,
+        0,
+        0,
+        12,
+        12
+      ]
+    },
+    {
+      "method": "test_retry_notes_allow_exposed_diagnosis_and_new_final_section",
+      "test_source_sha256": "38cb61afbcc593517412eb5ba4876105484ccf2b530bec8f31c4281e8d92c097",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        10,
+        0,
+        0,
+        10,
+        10
+      ]
+    },
+    {
+      "method": "test_retry_notes_do_not_hide_content_after_a_section_boundary",
+      "test_source_sha256": "a40ec5edf87d81d1e42ace6c6aa2ff6677a44b136fff7c3b52b1bd12675b23da",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        4,
+        3
+      ]
+    },
+    {
+      "method": "test_retry_notes_entities_respect_escaped_code_delimiters",
+      "test_source_sha256": "2ea496969ae1e3e3f12ec0478a5aff6795afd64917f5c83015df878b249ef5cb",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        16,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        16,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        8,
+        0,
+        0,
+        16,
+        8
+      ]
+    },
+    {
+      "method": "test_retry_notes_entity_escapes_follow_backslash_parity",
+      "test_source_sha256": "2d44d7a110dfb20de120304fe68bf1031a7f7e4d8809fd42b7b3d2484759696c",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        54,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        54,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        24,
+        0,
+        0,
+        54,
+        24
+      ]
+    },
+    {
+      "method": "test_retry_notes_freeze_format_controls_across_unicode_versions",
+      "test_source_sha256": "0afa72bb18fdf8804f0b5a16872182674a1022218d70178b92545c502ad0411e",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "red_control": "restore-pinned-interpreter-dependent-Cf-predicate",
+      "red": [
+        1,
+        16,
+        0,
+        0,
+        20,
+        16
+      ]
+    },
+    {
+      "method": "test_retry_notes_freeze_invisible_entities_but_allow_literal_spellings",
+      "test_source_sha256": "56e7f0b85b5a2501f2b159a62095b924e26a2558062b6d345b7794303a2758f5",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        8,
+        0,
+        0,
+        20,
+        8
+      ]
+    },
+    {
+      "method": "test_retry_notes_freeze_nested_and_multiline_reference_definitions",
+      "test_source_sha256": "38c946bb89f4587e96b9038ff4bae2ca2b34da5974fe6d42870c4b7f128a5451",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        24,
+        0,
+        0,
+        24,
+        24
+      ]
+    },
+    {
+      "method": "test_retry_notes_keep_blank_lines_inside_hidden_blocks_frozen",
+      "test_source_sha256": "8a33e66408ed750d720fee064d2a0347b962d3b50846d2bd2676c07f4d73d201",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        20,
+        0,
+        0,
+        20,
+        20
+      ]
+    },
+    {
+      "method": "test_retry_notes_keep_existing_headings_and_fields_frozen",
+      "test_source_sha256": "00b65d2164e0c64d80a7949ce974fa2b5b784611dd91ae542cc9bb24b9f80288",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        14,
+        2
+      ]
+    },
+    {
+      "method": "test_retry_notes_keep_multiline_inline_html_content_frozen",
+      "test_source_sha256": "8c812c69c2e71e21c8fdd9e7cbca7625021c7e22f403f0a59bbadddfd06ed4e1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        16,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        16,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        16,
+        0,
+        0,
+        16,
+        16
+      ]
+    },
+    {
+      "method": "test_retry_notes_literal_nonentities_remain_editable",
+      "test_source_sha256": "747ef559d5f41c5bfae543c91889d9ede9b84fac166521a7593a8e6f263a9c10",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        14,
+        0,
+        0,
+        14,
+        14
+      ]
+    },
+    {
+      "method": "test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis",
+      "test_source_sha256": "57417b88749dfe68ed2b2339904de698c2cd8792dcaa14a5460efaba04faf78f",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "red_control": "pinned_reconciler_af6a7438ed_historical_py314",
+      "red": [
+        1,
+        10,
+        0,
+        0,
+        10,
+        10
+      ]
+    },
+    {
+      "method": "test_retry_notes_refuse_fake_headings_inside_hidden_blocks",
+      "test_source_sha256": "af9af9cf8175663a2793c141a8d0b92d66f202f477e095c0aa76176d2bff50b9",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        12,
+        0,
+        0,
+        12,
+        12
+      ]
+    },
+    {
+      "method": "test_retry_notes_refuse_hidden_payloads_inside_real_notes",
+      "test_source_sha256": "7b7e6a96e0fe729d1a626b7e27c7404f54b27cf98958cc4104dc2c604f96cab1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        18,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        18,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        18,
+        0,
+        0,
+        18,
+        18
+      ]
+    },
+    {
+      "method": "test_retry_notes_refuse_unsafe_new_sections",
+      "test_source_sha256": "a57cd9db6cb5d7b5024de3a9b455ff0fdbebf8a3ca7643369bb696d80b16f722",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      "red_control": "omit-raw-byte-protection",
+      "red": [
+        1,
+        9,
+        0,
+        0,
+        10,
+        9
+      ]
+    },
+    {
+      "method": "test_source_evidence_accepts_presentation_and_ordered_elisions",
+      "test_source_sha256": "b249e126815a3d1409b40a1b3cfb3b32634316b757063351fc321fea5bd037f9",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        8,
+        4
+      ]
+    },
+    {
+      "method": "test_source_evidence_cannot_reorder_elisions_or_strip_inline_code",
+      "test_source_sha256": "8c445d906e17145b91e9e8720681becfeb2eb954d31ef31c8e98bd176389a8df",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        5,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        5,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        5,
+        0,
+        0,
+        5,
+        5
+      ]
+    },
+    {
+      "method": "test_source_evidence_captured_bytes_ignore_unstaged_files_and_symlinks",
+      "test_source_sha256": "78ac34cd3be508167170a01654d4313901e02fa9bdbb504ed36e9668b03edb78",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        6,
+        3
+      ]
+    },
+    {
+      "method": "test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review",
+      "test_source_sha256": "29a81d8331f76c7ffd043b15f260525614b22c334ca8e25e7107b4cf4262d438",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "red_control": "omit-review-target-evidence",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        2,
+        1
+      ]
+    },
+    {
+      "method": "test_source_evidence_extreme_line_selector_is_an_advisory",
+      "test_source_sha256": "86b6d194b1da7750211af08140744d21cb02452ff9efa972bac7793663839e0b",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_source_evidence_line_selectors_preserve_markdown_code_bytes",
+      "test_source_sha256": "ad13248596dcb2e7c841a232e71523912c4661533f5bd80d94fb0c8585f478aa",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        2,
+        1
+      ]
+    },
+    {
+      "method": "test_source_evidence_no_source_sentence_and_optional_background",
+      "test_source_sha256": "7b786b57908247cea676dac42d99b8449821a9a866578b434c479e3796aca05e",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        3,
+        3
+      ]
+    },
+    {
+      "method": "test_source_evidence_preserves_literal_code_and_text_symbols",
+      "test_source_sha256": "3582912be48857eaf41e17d77e38fc49b3b7dbc0ae4f92703f5cd69fb04bff16",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        12,
+        0,
+        0,
+        12,
+        12
+      ]
+    },
+    {
+      "method": "test_source_evidence_preserves_whitespace_inside_code_strings",
+      "test_source_sha256": "d0d7748e8c7758d994bcbd3bc197bca34406352e63dcc8185ccd7dd5c49386a2",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        6,
+        3
+      ]
+    },
+    {
+      "method": "test_source_evidence_real_templates_accept_headings_and_line_selectors",
+      "test_source_sha256": "eaafde20aebdfded2fefaf55306d5c47989fb52445f55f3dcab41044293ecd04",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        3,
+        2
+      ]
+    },
+    {
+      "method": "test_source_evidence_rejects_missing_escaping_and_nonregular_sources",
+      "test_source_sha256": "1efba0079c263f0adb198ade80db3988136e3366039a0a69256aa846f1ae8ade",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        7,
+        0,
+        0,
+        7,
+        7
+      ]
+    },
+    {
+      "method": "test_source_evidence_rejects_unselected_and_invalid_ranges",
+      "test_source_sha256": "18b9c948349b3fde35ce6ee494fc5c867c48e55cb514a2cd70a03152cbaed4fa",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "select-whole-source-for-any-anchor",
+      "red": [
+        1,
+        6,
+        0,
+        0,
+        7,
+        6
+      ]
+    },
+    {
+      "method": "test_source_evidence_uses_real_links_and_exact_no_source_sentence",
+      "test_source_sha256": "f8e585a7cba03e7c808bffd4fc6f8c81ff924770c76bf4c31271a664ef2c9a9a",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        4,
+        3
+      ]
+    },
+    {
+      "method": "test_source_evidence_verifies_short_case_and_identifier_bytes",
+      "test_source_sha256": "56372ffe51c5b6d07eeb6abe63a6de1df0894ec03690fd905fc8a26f00b01f21",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        3,
+        3
+      ]
+    },
+    {
+      "method": "test_source_line_link_bounds_remain_an_advisory",
+      "test_source_sha256": "32306066e6aacfec73fa98350db139922b427995f102df095ece444495e1bd6c",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        8,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        8,
+        0,
+        0,
+        8,
+        8
+      ]
+    },
+    {
+      "method": "test_source_line_links_agree_with_evidence_check",
+      "test_source_sha256": "bf7b1de6ae24f31bdb3ba1a020beb6a749f7981e984d1d1370a07637f7f0fd26",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        4,
+        4
+      ]
+    },
+    {
+      "method": "test_source_link_paths_use_the_same_captured_target",
+      "test_source_sha256": "41b2ca7c6a73e3338956d6cb56b2d85f538cbadf4bbde350a9a26c978ee2c535",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        4,
+        3
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_accepts_bounded_excerpts",
+      "test_source_sha256": "fe70118c7274be65fa8d0139058ccbfd173b3668553649ffc32ce00ef696c732",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        12,
+        0
+      ],
+      "red_control": "misclassify-all-boundaries-as-identifier-continuations",
+      "red": [
+        1,
+        12,
+        0,
+        0,
+        12,
+        12
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_accepts_code_bytes_and_prose_presentation",
+      "test_source_sha256": "b3728eec4dfbad0cc942ac9be9e75930ca1043b1fdbe34dc532ce732eaaa6dc7",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        6,
+        0
+      ],
+      "red_control": "omit-presentation-normalization",
+      "red": [
+        1,
+        7,
+        0,
+        0,
+        6,
+        6
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_accepts_omissions_outside_literals",
+      "test_source_sha256": "39195e142c1ee5ff5434b8e1a1fbd00d45d3a84db4c5f59e05e455741d42f8f4",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "omit-supported-elision-syntax",
+      "red": [
+        1,
+        5,
+        0,
+        0,
+        7,
+        5
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_keeps_literal_elisions_exact",
+      "test_source_sha256": "7190223f1d8dd36d6bfe5b9babb1238e897e472931fa2e8daca452106bbb341a",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        32,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        32,
+        0
+      ],
+      "red_control": "pinned_reconciler_3d951d8fd5_historical_py314",
+      "red": [
+        1,
+        32,
+        0,
+        0,
+        32,
+        32
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_preserves_inline_code_whitespace",
+      "test_source_sha256": "2e56d78b507a5bfff29df3f9a4d870098d271d04777f8ea55ec9fd75f81b71c1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        9,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        9,
+        0
+      ],
+      "red_control": "pinned_reconciler_3d951d8fd5_historical_py314",
+      "red": [
+        1,
+        9,
+        0,
+        0,
+        9,
+        9
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_accepts_numeric_literals_and_prose_periods",
+      "test_source_sha256": "e676bcc5ef4d971fedb0cbc1b79de1d61f258684594e418cc262c1a99d4aa9a8",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      "red_control": "consume-prose-period-as-number",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        20,
+        3
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_accepts_prose_apostrophes",
+      "test_source_sha256": "a19d86d29a2b2646e17d14db09cd7f4552285294662282a332bfe2ac808fd626",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        27,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        27,
+        0
+      ],
+      "red_control": "pinned_reconciler_e34265086b_historical_py314",
+      "red": [
+        1,
+        24,
+        0,
+        0,
+        27,
+        24
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_accepts_unicode_words_and_visible_boundaries",
+      "test_source_sha256": "d2739a136a0d8d6c6ae2ab480997bac35ec73af9f7bf9ff6dfb8906f342dddf6",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        9,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        9,
+        0
+      ],
+      "red_control": "misclassify-visible-nonascii-boundaries-as-identifier-continuations",
+      "red": [
+        1,
+        2,
+        0,
+        0,
+        9,
+        2
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_keeps_actual_quoted_strings_literal",
+      "test_source_sha256": "02837d3f312288ce45110c24a4abbad13a037525251b19cce9cc13ff0a6b7817",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        19,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        19,
+        0
+      ],
+      "red_control": "pinned_reconciler_e34265086b_historical_py314",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        19,
+        3
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_preserves_complete_literal_prefixes",
+      "test_source_sha256": "abd915792064f3242a8cd9bad0ed9b4e8470cb88d92367917867cd197ca21fdb",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "red_control": "pinned_reconciler_e34265086b_historical_py314",
+      "red": [
+        1,
+        7,
+        0,
+        0,
+        24,
+        6
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_preserves_numeric_tokens",
+      "test_source_sha256": "303c30ae47572e1a6a6b60f8743084eed9ca3e8766340074d3a6e5ddb16af32c",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        40,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        40,
+        0
+      ],
+      "red_control": "pinned_reconciler_e34265086b_historical_py314",
+      "red": [
+        1,
+        33,
+        0,
+        0,
+        40,
+        32
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r2_preserves_unicode_identifier_continuations",
+      "test_source_sha256": "1f30b9a94f27becfdbee5117b59ce1afa9968502b5b498386bbbe8faf2d60b72",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        14,
+        0
+      ],
+      "red_control": "pinned_reconciler_e34265086b_historical_py314",
+      "red": [
+        1,
+        15,
+        0,
+        0,
+        14,
+        14
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r4_accepts_exact_triples_and_escape_parity",
+      "test_source_sha256": "1d051156a0df1b1c91a48ac88d6665240bd14f32408972e85eb056dd691c2bd9",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        42,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        42,
+        0
+      ],
+      "red_control": "omit-quoted-literal-recognition",
+      "red": [
+        1,
+        4,
+        0,
+        0,
+        42,
+        4
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r4_keeps_omissions_outside_complete_triples",
+      "test_source_sha256": "dbb0769b2bbb9afd2b44dff7707bbae0f9274c5c45568e600318664e44212dc1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        34,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        34,
+        0
+      ],
+      "red_control": "pinned_reconciler_26d6b2b0af_new_history_py39",
+      "red": [
+        1,
+        6,
+        0,
+        0,
+        34,
+        6
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r4_preserves_embedded_triple_literals",
+      "test_source_sha256": "c26eb48b7230e26c4a53e9c76b7a8d7174aec7714cf7622255b22db92792450b",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        52,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        52,
+        0
+      ],
+      "red_control": "pinned_reconciler_26d6b2b0af_new_history_py39",
+      "red": [
+        1,
+        31,
+        0,
+        0,
+        52,
+        31
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r5_accepts_new_visible_unicode_boundaries",
+      "test_source_sha256": "76c218f7392bbfcb2c95bcc253158ae8e5ffc97dc000180ffd84776f71ef3669",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        35,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        35,
+        0
+      ],
+      "red_control": "pinned_reconciler_26d6b2b0af_new_history_py39",
+      "red": [
+        1,
+        20,
+        0,
+        0,
+        35,
+        20
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r5_preserves_new_identifier_continuations",
+      "test_source_sha256": "9ff19d130d4624bb8a2fb66fa500a5244f085cc910c0afcec15fba842101fcba",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        24,
+        0
+      ],
+      "red_control": "remove-Unicode16-identifier-supplement",
+      "red": [
+        1,
+        16,
+        0,
+        0,
+        24,
+        16
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_r5_preserves_unicode_decimal_number_boundaries",
+      "test_source_sha256": "263b9149fb45dbf370125691cf3e6368c3bad79930a1a119c19c3278035761cf",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        100,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        100,
+        0
+      ],
+      "red_control": "pinned_reconciler_26d6b2b0af_new_history_py39",
+      "red": [
+        1,
+        12,
+        0,
+        0,
+        100,
+        12
+      ]
+    },
+    {
+      "method": "test_source_quote_fidelity_rejects_partial_word_matches",
+      "test_source_sha256": "62079a1d8e547f296bb7a5c6cd8b9ac881462d03e42b3f07c64db246e608840a",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "pinned_reconciler_3d951d8fd5_historical_py314",
+      "red": [
+        1,
+        7,
+        0,
+        0,
+        7,
+        7
+      ]
+    },
+    {
+      "method": "test_source_selectors_only_split_on_physical_line_endings",
+      "test_source_sha256": "33c3359f05fb79a668170e943ce082ba2dc7d33358ce1b4ff8c066204453f4c1",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        45,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        45,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        45,
+        0,
+        0,
+        45,
+        45
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_full_template_lifecycle_preserves_the_response",
+      "test_source_sha256": "9ad650364e867cc7caa160f2e5ee69b25947580fd927a7b56f4d7a360d437660",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "remove-unanswerable-outcome",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_resolution_cannot_rewrite_original_response",
+      "test_source_sha256": "7a00af693ed2b058a09f84f94e98d698873e3e075f5dda2ca4866fcbd32a44d5",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "discard-concrete-human-response-bytes",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_resolution_requires_changed_declared_evidence",
+      "test_source_sha256": "fccab614da24ced1e4ae2ea82b5f331b1a755df25a88c914e9b8f4b769776b1f",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_successor_cannot_change_binding_or_context",
+      "test_source_sha256": "32cca038e7e7d131847df9720557205560d04c4d58664f14c50f7f77a3bddc37",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        3,
+        3
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_successor_must_be_a_waiting_unanswered_review",
+      "test_source_sha256": "24e22f427eda2eac80057d860ace8fad12575aab76e9d50c50ba8d4f7db119bf",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        8,
+        0,
+        0,
+        7,
+        7
+      ]
+    },
+    {
+      "method": "test_unanswerable_review_successor_preserves_the_entire_original_timing",
+      "test_source_sha256": "4aa7fd9809f6c96cd81b65612f9728ea24c1cd21b50442a0a3d07f1a96d5d11e",
+      "candidate_py314": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "candidate_py39": [
+        1,
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      "red_control": "pinned_reconciler_f56084d61a_historical_py314",
+      "red": [
+        1,
+        3,
+        0,
+        0,
+        3,
+        3
+      ]
+    }
+  ],
+  "limits": [
+    "Focused method runs and runner-API discovery/ownership checks; the parent whole-suite matrix is neither duplicated nor used as evidence.",
+    "Coverage does not certify all language syntax or infer semantic relevance of a matching quotation; documented spelling-based literal limitations remain.",
+    "No certification of hosted CI, mergeability, final records, publication/admission ranges, or original-owner index/probes/refs preservation."
+  ]
+}

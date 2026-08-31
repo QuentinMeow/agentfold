@@ -5,12 +5,23 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 13 questions waiting on you, 53 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
 To answer one, open it and write a sentence in its blank `**Your answer:**` or `**Your review:**`
 line. That is the whole protocol — one edit, and nothing else to fill in.
+
+### Stops work now — 1
+
+- [Choose whether to authorize sending the published recovery code and diffs to Claude for one read-only review, or accept the five native reviews without that additional check.](needs-human/decisions/blocking-authorize-the-external-recovery-review.md) — blocks operation:external-recovery-code-review · answer by 2026-11-29
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Sending repository code to another service adds a recipient, and that disclosure cannot be undone by deleting a local file.
+
+  **If you do nothing:** No code is sent to Claude; the two prepared PRs remain available with their native reviews and passing checks.
+
+  </details>
 
 ### Stops work at a named boundary — 3
 
@@ -39,7 +50,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 10
+### Never stops work — 12
 
 - [Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.](needs-human/reviews/non-blocking-review-template-first-explanation.md) — answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -121,6 +132,22 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Nothing stops. The two files keep quoting numbers that are no longer true, and every agent that reads them inherits the wrong ones.
 
   </details>
+- [Choose whether the ten older question files are rewritten to hide their bookkeeping, migrated one at a time with your sign-off, or left alone.](needs-human/decisions/non-blocking-choose-what-happens-to-the-ten-older-question-files.md) — answer by 2026-11-16
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Ten of the seventeen questions in your queue put a screen of paths and checksums above the ask, so on a phone the question starts below the fold.
+
+  **If you do nothing:** Nothing stops. Those ten keep the shape you saw, and every question written from today's template already hides its bookkeeping behind one line.
+
+  </details>
+- [Choose whether the five half-read sentences are left alone, repaired by teaching the reader to follow a wrapped line, or rewritten with your sign-off.](needs-human/decisions/non-blocking-dispose-five-half-read-values-in-two-frozen-questions.md) — answer by 2026-11-16
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Anything that later quotes one of those sentences to you — a summary, a notification — would show a sentence that stops mid-thought, and nobody would notice.
+
+  **If you do nothing:** Nothing stops. The two questions stay answerable as they are, and a warning about them prints on every run until you answer them.
+
+  </details>
 
 ## Waiting on an agent
 
@@ -175,7 +202,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 45
+### Never stops work — 46
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -271,6 +298,12 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   <details><summary>what happens if nobody acts</summary>
 
   **If you do nothing:** Nothing stops, but the open provider source remains visible as agent work.
+
+  </details>
+- [Add a check that refuses an edit to a decided record under `memory/decisions/` other than the lineage fields and `Review-by` bump `memory/AGENTS.md` allows, computed over raw bytes rather than a subtractive parse view.](needs-agent/requests/non-blocking-freeze-decided-records-against-invisible-appends.md)
+  <details><summary>what happens if nobody acts</summary>
+
+  **If you do nothing:** Nothing stops. Decided ADRs stay editable without any check noticing, exactly as they are today, and the queue and handover gates keep holding their own record classes.
 
   </details>
 - **29 backlog tasks are waiting for an agent to pick one up.**

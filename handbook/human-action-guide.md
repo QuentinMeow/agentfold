@@ -53,7 +53,7 @@ Copy the matching template from `templates/queue/`, then fill it so a zero-conte
 can do all five of these:
 
 1. Identify one concrete response.
-2. Follow one durable source for depth.
+2. Read the decisive source wording here, with a durable link for depth when needed.
 3. Understand the meaningful dispositions and how their consequences differ.
 4. See one small example.
 5. Know the boundary, or the safe result of leaving it unattended.
@@ -62,15 +62,20 @@ The summary must be enough to act on by itself. The link to full context is dept
 missing prerequisite. And a recommendation is evidence, not permission to hide an
 alternative.
 
-## Point `Full context` at something that will still be there
+## Point every path at something that will still be there
 
-`Full context` names the durable source behind the ask. A task's path is not durable,
-because a task's status is the folder it sits in and that folder changes
-(`tasks/AGENTS.md`). Two exceptions exist:
+A task's path is not durable, because a task's status is the folder it sits in and that
+folder changes (`tasks/AGENTS.md`). The rule is the whole item, not one field: no
+`tasks/<status>/…` path may appear anywhere in a queue item — not in `Full context`, not
+in `Resolution evidence`, not in the prose. Name the durable artifact, and refer to a task
+by its id. Two exceptions exist:
 
 - A **task-pickup request** may name a moving task path as live context, because the commit
   that claims the task also deletes the request.
 - A **retry record** may quote a moving path, but only as evidence of broken state.
+
+`Full context` in particular names the durable source behind the ask, and it is the field
+authors reach for a task path first.
 
 ## The order of the file is the contract
 
@@ -114,8 +119,11 @@ them. A plain-English sentence is a complete answer. The agent that folds the an
 the bookkeeping. It also shows the person how it read their words before acting. (Folding
 is the claim that turns a committed human response into repository change.)
 
-State the source once, as one clickable link in the prose. The machine-readable copy of
-that path goes in `Full context`, below the answer line.
+When the answer depends on another source's wording, quote the decisive passage and link
+its heading or selected lines. Optional background belongs below the answer, inside the
+record fold. If no source wording determines the answer, use the template's explicit
+no-source sentence; it never replaces a quotation from a local file being reviewed.
+`Full context` still belongs below the answer line.
 
 A file that already carries a concrete response is a record, not an ask. Never reformat it.
 It keeps the schema it was written under.
@@ -199,8 +207,8 @@ committed (`memory/known-issues/2026-07-31-review-outcome-classification-is-atte
 
 ## Reviews: target, revision, and the retraction path
 
-`templates/queue/review.md` owns what `Review target` and `Review revision` may hold, and
-when `pending` is allowed. Two content rules are this guide's:
+`templates/queue/review.md` owns the copied fields; the review-binding instructions in
+`templates/README.md` own their allowed values and when `pending` is allowed. Two content rules are this guide's:
 
 - `Full context` explains the judgment. It never substitutes for the target or its
   immutable revision.
@@ -218,6 +226,11 @@ A rejected or abandoned review never authorizes crossing its boundary.
 | `changes-requested` | Create two items. One same-timing `needs-agent` action solely owns the concrete repair, its context, and its resolution evidence. One distinct `needs-human` re-review awaits that artifact and depends on the repair action, so the boundary stays closed without duplicating the repair. |
 | `rejected` | End pursuit. Restore a rejected Git candidate path-for-path to its reviewed base; a rejected local target changes or disappears. A task-bound rejection stays live until that task is removed. |
 | `abandoned` | End pursuit, on the same terms as `rejected`. |
+| `unanswerable` | The reader could not decide from what the item showed them. Create one new, distinct, unanswered `needs-human/reviews` item that supplies the missing context and keeps the same judgment, artifact, revision, and timing boundary. Nothing about the subject was decided; the replacement stays ready for review. Follow the binding and lineage rules in `templates/README.md`. |
+
+An unanswerable review follows the ordinary claim and evidence-changing resolution flow;
+its human response is never rewritten. Re-asking repairs the explanation, not the artifact.
+If the artifact later changes, use the retraction and publication path above.
 
 Distinct cancellation evidence records the disposition without rewriting the reviewed
 bytes. The legacy value `not-approved` is the old spelling of `changes-requested` and

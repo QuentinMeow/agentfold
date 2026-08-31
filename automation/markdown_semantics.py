@@ -95,6 +95,32 @@ RAW_HTML_TOKEN_RE = re.compile(
     r"<(?:!--|!\[CDATA\[|\?|![A-Za-z]|/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>]))",
     re.I,
 )
+# Unicode 16.0 General_Category=Cf, pinned across supported Python versions.
+# https://www.unicode.org/Public/16.0.0/ucd/extracted/DerivedGeneralCategory.txt
+# Python 3.9 bundles Unicode 13 and otherwise misses later assigned controls.
+FORMAT_CONTROL_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x0600, 0x0605),
+    (0x061C, 0x061C),
+    (0x06DD, 0x06DD),
+    (0x070F, 0x070F),
+    (0x0890, 0x0891),
+    (0x08E2, 0x08E2),
+    (0x180E, 0x180E),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x2064),
+    (0x2066, 0x206F),
+    (0xFEFF, 0xFEFF),
+    (0xFFF9, 0xFFFB),
+    (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD),
+    (0x13430, 0x1343F),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0001, 0xE0001),
+    (0xE0020, 0xE007F),
+)
 DEFAULT_IGNORABLE_NONFORMAT_RANGES = (
     (0x034F, 0x034F),
     (0x115F, 0x1160),
@@ -134,9 +160,10 @@ def strip_block_quote_markers(line, limit=None):
 
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
-def _semantic_text(text, preserve_visible_html=False):
+def _semantic_view(text, preserve_visible_html=False):
     """Blank fenced and raw-HTML blocks while preserving source line boundaries."""
     output = []
+    hidden_lines = set()
     fence_char = None
     fence_length = 0
     fence_quote_depth = 0
@@ -146,7 +173,7 @@ def _semantic_text(text, preserve_visible_html=False):
     html_until_blank_quote_depth = 0
     inline_comment = False
 
-    for line in commonmark_lines(text):
+    for index, line in enumerate(commonmark_lines(text)):
         candidate = line[:-1] if line.endswith("\n") else line
         blank = "\n" if line.endswith("\n") else ""
         quote_depth, syntax_candidate = strip_block_quote_markers(candidate)
@@ -168,6 +195,7 @@ def _semantic_text(text, preserve_visible_html=False):
                     fence_char = None
                     fence_length = 0
                     fence_quote_depth = 0
+                hidden_lines.add(index)
                 output.append(blank)
                 continue
 
@@ -182,6 +210,7 @@ def _semantic_text(text, preserve_visible_html=False):
                 if html_end.search(html_candidate):
                     html_end = None
                     html_quote_depth = 0
+                hidden_lines.add(index)
                 output.append(line if preserve_visible_html else blank)
                 continue
 
@@ -197,10 +226,12 @@ def _semantic_text(text, preserve_visible_html=False):
                 if re.fullmatch(r"[ \t]*", html_candidate):
                     html_until_blank = False
                     html_until_blank_quote_depth = 0
+                hidden_lines.add(index)
                 output.append(line if preserve_visible_html else blank)
                 continue
 
         if inline_comment:
+            hidden_lines.add(index)
             comment_end = candidate.find("-->")
             if comment_end < 0:
                 output.append(blank)
@@ -218,6 +249,7 @@ def _semantic_text(text, preserve_visible_html=False):
             fence_char = marker[0]
             fence_length = len(marker)
             fence_quote_depth = quote_depth
+            hidden_lines.add(index)
             output.append(blank)
             continue
 
@@ -231,6 +263,7 @@ def _semantic_text(text, preserve_visible_html=False):
             if start.match(syntax_candidate):
                 html_end = None if end.search(syntax_candidate) else end
                 html_quote_depth = quote_depth if html_end else 0
+                hidden_lines.add(index)
                 output.append(line if preserve_visible_html else blank)
                 break
         else:
@@ -238,9 +271,11 @@ def _semantic_text(text, preserve_visible_html=False):
                     or RAW_HTML_TYPE7_START_RE.match(syntax_candidate):
                 html_until_blank = True
                 html_until_blank_quote_depth = quote_depth
+                hidden_lines.add(index)
                 output.append(line if preserve_visible_html else blank)
             else:
                 while "<!--" in candidate:
+                    hidden_lines.add(index)
                     comment_start = candidate.find("<!--")
                     comment_end = candidate.find("-->", comment_start + 4)
                     if comment_end < 0:
@@ -254,7 +289,11 @@ def _semantic_text(text, preserve_visible_html=False):
                     )
                 output.append(candidate + blank)
 
-    return "".join(output)
+    return "".join(output), frozenset(hidden_lines)
+
+
+def _semantic_text(text, preserve_visible_html=False):
+    return _semantic_view(text, preserve_visible_html)[0]
 
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
@@ -445,6 +484,15 @@ def rendered_human_text(text):
     )
 
 
+def contains_default_ignorable_characters(text):
+    """Detect invisible controls without normalizing visible compatibility text."""
+    return any(
+        any(start <= ord(character) <= end
+            for start, end in FORMAT_CONTROL_RANGES + DEFAULT_IGNORABLE_NONFORMAT_RANGES)
+        for character in (text or "")
+    )
+
+
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_default_ignorable_characters(text):
     """Remove invisible Unicode controls from an already isolated prose view.
@@ -532,6 +580,24 @@ def render_inline_code(text):
     return "".join(output)
 
 
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
+def visible_html_text(text):
+    """Return source with code blanked and raw HTML left standing, line for line.
+
+    This is the view a caller needs to reason about the markup itself rather than
+    about what it renders: fenced code, indented-code-free, and inline code spans
+    are blanked, while every raw-HTML line survives at its original line number.
+    A caller that wants to admit one exact tag shape subtracts it from this view;
+    `contains_raw_html` is the degenerate case that admits none.
+
+    Like every view here it is positional: the returned text has the same number of
+    lines as its input, so a line index means the same thing in both.
+    """
+    return strip_inline_code(
+        _semantic_text(text or "", preserve_visible_html=True)
+    )
+
+
 def contains_raw_html(text):
     """Conservatively detect raw HTML outside fenced and inline code.
 
@@ -539,10 +605,7 @@ def contains_raw_html(text):
     instead of trying to reproduce a browser's handling of arbitrary tags and
     attributes.
     """
-    clean = strip_inline_code(
-        _semantic_text(text or "", preserve_visible_html=True)
-    )
-    return bool(RAW_HTML_TOKEN_RE.search(clean))
+    return bool(RAW_HTML_TOKEN_RE.search(visible_html_text(text)))
 
 
 def split_indentation(value):
@@ -633,7 +696,7 @@ def _block_state_after(width, rest, content_columns, paragraph_open):
 
 
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
-def strip_indented_code(text):
+def _indented_code_view(text):
     """Blank the lines CommonMark reads as an indented code block.
 
     A line is one when it is indented at least four columns past the content column
@@ -649,18 +712,25 @@ def strip_indented_code(text):
     either; it only updates paragraph state, so how quoted source reads is unchanged.
     """
     output = []
+    hidden_lines = set()
+    code_open = False
+    pending_blanks = []
     content_columns = []
     paragraph_open = False
-    for line in commonmark_lines(text):
+    for index, line in enumerate(commonmark_lines(text)):
         candidate = line[:-1] if line.endswith("\n") else line
         ending = "\n" if line.endswith("\n") else ""
         quote_depth, quoted = strip_block_quote_markers(candidate)
         if quote_depth:
+            code_open = False
+            pending_blanks.clear()
             paragraph_open = bool(quoted.strip())
             output.append(line)
             continue
         width, rest = split_indentation(candidate)
         if not rest.strip():
+            if code_open:
+                pending_blanks.append(index)
             paragraph_open = False
             output.append(line)
             continue
@@ -669,13 +739,67 @@ def strip_indented_code(text):
                 content_columns.pop()
         base = content_columns[-1] if content_columns else 0
         if not paragraph_open and width - base >= INDENTED_CODE_MARGIN:
+            hidden_lines.add(index)
+            hidden_lines.update(pending_blanks)
+            pending_blanks.clear()
+            code_open = True
             output.append(ending)
             continue
+        code_open = False
+        pending_blanks.clear()
         output.append(line)
         paragraph_open = _block_state_after(
             width, rest, content_columns, paragraph_open
         )
-    return "".join(output)
+    return "".join(output), frozenset(hidden_lines)
+
+
+def strip_indented_code(text):
+    """Blank indented code without changing the source line boundaries."""
+    return _indented_code_view(text)[0]
+
+
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
+def _raw_html_line_offsets(text):
+    """Protect raw HTML content even when an inline tag spans source lines."""
+    parser = _RenderedHumanHTMLParser()
+    source = strip_inline_code(strip_indented_code(
+        _semantic_text(text or "", preserve_visible_html=True)
+    ))
+    structural = commonmark_lines(semantic_text(text or ""))
+    protected = set()
+    for index, line in enumerate(commonmark_lines(source)):
+        # A Markdown heading opens its own block after benign unclosed angle
+        # prose, such as a generated retry's <the named finding clears> value.
+        # A hidden container or incomplete tag cannot donate that boundary.
+        if not parser.hidden and not parser.rawdata and index < len(structural) \
+                and re.match(r"^[ ]{0,3}#{1,6}(?:[ \t]|$)", structural[index]):
+            parser.stack.clear()
+        in_html = bool(parser.stack or parser.rawdata)
+        parser.feed(line)
+        if in_html or parser.stack or parser.rawdata \
+                or RAW_HTML_TOKEN_RE.search(line):
+            protected.add(index)
+        parser.output.clear()
+    parser.close()
+    return frozenset(protected)
+
+
+@functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
+def semantic_line_offsets(text):
+    """Return source line offsets outside hidden constructs and raw HTML.
+
+    Unlike comparing raw and semantic strings, this distinguishes an exposed blank
+    separator from an empty line inside a fence, HTML block, or indented code.
+    Lines with partial inline comments are protected too. The HTML parser also
+    protects the content and blank lines inside multiline inline HTML, which the
+    structural Markdown view otherwise leaves exposed between its tag lines.
+    """
+    view, block_hidden = _semantic_view(text)
+    _view, indented_hidden = _indented_code_view(view)
+    return frozenset(range(len(commonmark_lines(text)))) - (
+        block_hidden | indented_hidden | _raw_html_line_offsets(text)
+    )
 
 
 def visible_markdown_link_source(text):

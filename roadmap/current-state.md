@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-09
+**Last-updated:** 2026-08-31
 
 What is true today, mapped to the desired-state lines.
 
@@ -352,3 +352,31 @@ What is true today, mapped to the desired-state lines.
   rather than under it. That branch keeps one red merge-boundary check, owned by backlog
   task `2026-08-08-stop-a-withdrawn-exemption-from-dirtying-past-edges`, and lands red by
   the owner's instruction under the advisory-gate decision of 2026-08-02.
+- **Recovered human-question folds and retry diagnosis (2026-08-31)**: new human
+  questions retain one sanctioned metadata fold below the answer. Genuine copied and
+  filled templates pass without authoring comments inside the question. The byte guard
+  protects hidden source and structural boundaries while permitting exposed retry
+  diagnosis and a person's first answer. Its format-control classification uses explicit
+  Unicode 16 data on Python 3.9 and 3.14. Existing frozen questions stay unchanged; their
+  migration and wrapped-value questions remain open in the canonical queue. The budget
+  and self-check command remain in `templates/README.md`.
+- **Unchanged automation limits**: no check proves that a question was copied from
+  a template, and the queue/handover raw-byte guard does not add an ADR integrity gate.
+  The original task `2026-08-18-fold-the-queue-machine-record` retains its measured
+  ADR-edit results in its verification record. This recovery does not resolve those limits.
+- **Open-PR recovery (2026-08-31)**: PR90 replaces the conflicting PR88 on current main;
+  PR91 carries source-evidence and unanswered-review repairs above it. Both replacement
+  code candidates passed the normal checks and independent native review before the old
+  PRs closed. Neither replacement is merged to main. The source inventory, original
+  staged-file list, actual verification and preserved decisions belong to recovery task
+  `2026-08-30-rebuild-the-open-pr-stack`. The external-vendor review has no result because
+  execution security refused the proposed transmission; its sole authorization item
+  withholds that external act, not Git publication or task completion.
+- **Captured source evidence and unanswered review obligations (2026-08-31)**: local
+  evidence uses captured regular-file bytes and supported heading/line citations. Exact
+  matching preserves whole identifiers, complete numeric tokens, literal spacing and
+  triple-quoted strings. Unicode 16 boundaries agree on Python 3.9 and 3.14. Source
+  quality remains advisory and does not establish truth or relevance; external content
+  is not fetched. Lexically ambiguous R-prefixed prose uses the documented exact-spacing
+  fallback. An unanswerable review keeps the same unmet obligation in a fresh unanswered
+  waiting review. The upper recovery task owns the verification and regression map.

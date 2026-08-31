@@ -1,21 +1,3 @@
-<!--
-Filename: one delivery prefix, then a kebab-case slug. The three prefixes, what each
-one means, and the rule that the filename is canonical (so no separate **Blocking:**
-field exists) are stated once in `message-queue/AGENTS.md`, under "Routing: three
-independent axes". Slug grammar: `handbook/naming-conventions.md`.
-
-Before you file, check all nine. Lifecycle law lives in handbook/human-action-guide.md.
-1. The title is a question the owner can answer without knowing this repository.
-2. Exactly three fields above the first heading: Action, Why this matters, If you do nothing.
-3. Today / What this would change / What this does not decide are true and specific.
-4. Two or more choices, each with a cost and a concrete *Example consequence:*.
-5. The axis sentence opens Your choices and says what the choices differ on.
-6. Recommendation names one choice shown; its counter-case sits beside it.
-7. No machine field, hash, or token appears above the answer line.
-8. The source is linked once in the prose; For the record keeps the machine copies.
-9. Under 700 words before the answer. Cut background, not choices.
--->
-
 # <The question the owner can answer, in plain English>
 
 **Action:** <one imperative sentence; handovers copy this verbatim as the link label>
@@ -28,9 +10,20 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 **What this would change:** <the delta being judged, stated as a proposal>
 **What this does not decide:** <adjacent things a reader will assume are in scope>
 
-<One or two short value-neutral paragraphs from zero context. Link the source exactly
-once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
-alone: the reader should be able to answer without opening anything.>
+<One or two short value-neutral paragraphs from zero context. This must stand alone: the
+reader should be able to answer without opening anything.>
+
+> <the source's own words — the sentence that decides this, copied, not paraphrased>
+>
+> — [<what this passage says>](<../../../ path to the file.md#heading-anchor>)
+
+<Quote each decisive source; a comparison quotes both sides. Link a Markdown heading
+written with #, or bounded lines with #Lx or #Lx-Ly for text or code. Preserve wording,
+case, and code literals; paired emphasis and wrapping outside literals may change.
+Keep marked omissions in source order. If no source wording decides
+the answer, replace this whole source block with a blockquote containing exactly
+`No source document — everything you need is above.` A local-file review still quotes
+its target. Put optional background below the answer, inside the fold.>
 
 ## Your choices
 
@@ -56,41 +49,26 @@ in the axis sentence — never pad an outcome nobody would pick.>
 **Strongest case against this:** <the best argument for a different answer>
 **Confidence:** <high | medium | low> — <what you checked, and what you did not>
 
-Answer in plain words — one sentence is enough. You do not need to copy anything or use
-particular vocabulary; the agent that folds your answer does the bookkeeping and will
-show you how it read your words before acting.
+Answer in plain words — one sentence is enough. You never need to copy anything; the agent
+that folds it shows you how it read your words before acting. If this page did not give you
+enough to decide, say so and say what is missing — that is a complete answer, not a
+rejection.
 
 **Your review:** ______
 
 ## For the record
 
-Bookkeeping the reconciler reads. Nothing here needs you.
+<details>
+<summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting
-**Filed:** <YYYY-MM-DD>, by <who>[, from task `<id>`]
-**Full context:** `<root-relative path to the durable source>`
-**Resolution evidence:** `<non-queue path distinct from Review target>`
-**Review target:** `<root-relative path to the exact file being judged>`
-**Review revision:** sha256:<64 hex digits of that file's bytes>
-**Reviewed revision:** ______
-**Review outcome:** pending
-**Answer by:** <UTC YYYY-MM-DD — 90 days from Filed unless something real dates it>
-<!-- Status ships as `waiting` with a local file bound. Before the artifact exists,
-file it with **Status:** awaiting-artifact and both target and revision literally
-`pending`, then publish the binding in one later commit that moves the status to
-`waiting`; the folding agent moves it to `folding` on its claim edge.
-A Git range uses **Review target:** git:<base>...<head> with an identical
-**Review revision:**; an HTTPS artifact uses one URL with a sha256 revision. Full
-context explains the judgment; it is never the target.
-`Reviewed revision` and `Review outcome` are the folding agent's, written once over
-an already-committed response: it copies `Review revision` into `Reviewed revision`
-and replaces `pending` with approved, changes-requested, rejected, or abandoned.
-Then exactly one timing field matching the filename:
-blocking-*   -> Blocks now: <task:<id> | transition:<name> | operation:<name>>
-future-blocking-* -> Blocks at: <UTC YYYY-MM-DD | event:<name> | transition:<name>> [task:<id>]
-non-blocking-* -> neither; If you do nothing above is the unattended outcome.
-A needs-human item may bind only transition:start on a 0_backlog task, or
-operation:<name> for one act with no undo. Merging, moving a task, and recording it
-done never wait on an answer (message-queue/AGENTS.md owns this rule).
-Add External assignment / External source only for a provider binding. On a
-changes-requested resolution add Successor action and Follow-up review here. -->
+**Status:** waiting  
+**Filed:** < YYYY-MM-DD >, by < who >[, from task `<id>`]  
+**Full context:** `<root-relative path to the durable source>`  
+**Resolution evidence:** `<non-queue path distinct from Review target>`  
+**Review target:** `<root-relative path to the exact file being judged>`  
+**Review revision:** sha256:<64 hex digits of that file's bytes>  
+**Reviewed revision:** ______  
+**Review outcome:** pending  
+**Answer by:** < UTC YYYY-MM-DD — 90 days from Filed unless something real dates it >
+
+</details>
