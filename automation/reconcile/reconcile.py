@@ -3547,13 +3547,45 @@ def retry_reference_line_offsets(parsed_lines):
 
 
 def contains_invisible_source_characters(value):
-    """Detect raw controls and rendered entities without altering literal code.
+    """Detect raw controls and active invisible entities, without rendering text.
 
-    Decode entities once outside code spans: an escaped entity or a backticked
-    spelling renders as visible text. No compatibility normalization is needed.
+    This queue-only predicate recognizes escapes, closed code spans, and complete
+    CommonMark references solely to decide whether source can be omitted from a
+    frozen skeleton. It never supplies parsed values or changes original bytes.
+    Raw controls stay protected even in code or after a backslash.
     """
-    return contains_default_ignorable_characters(value) or \
-        contains_default_ignorable_characters(html.unescape(strip_inline_code(value)))
+    if contains_default_ignorable_characters(value):
+        return True
+    source = value or ""
+    entity = re.compile(r"&(?:#[xX][0-9A-Fa-f]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]*);")
+    ticks = re.compile(r"`+")
+    index = 0
+    while index < len(source):
+        if source[index] == "\\":
+            # Consume a backslash pair outside code. An odd run escapes '&' or
+            # '`'; an even run leaves the following punctuation active.
+            index += 2
+            continue
+        opening = ticks.match(source, index)
+        if opening:
+            width = opening.end() - index
+            closing = next((match for match in ticks.finditer(source, opening.end())
+                            if match.end() - match.start() == width), None)
+            # Backslashes inside a code span do not escape its closing run.
+            index = closing.end() if closing else opening.end()
+            continue
+        matched = entity.match(source, index)
+        if matched:
+            reference = matched.group()
+            # html.unescape accepts legacy partial names and missing semicolons;
+            # only whole references recognized by CommonMark reach the decoder.
+            if reference.startswith("&#") or reference[1:] in html.entities.html5:
+                if contains_default_ignorable_characters(html.unescape(reference)):
+                    return True
+            index = matched.end()
+            continue
+        index += 1
+    return False
 
 
 def retry_notes_line_offsets(text):

@@ -14993,6 +14993,52 @@ class ReconcileQueueTests(unittest.TestCase):
                         "## Agent notes\n\nNone yet.\n", "## Agent notes\n\n" + diagnosis + "\n", generated=generated)
                     self.assertEqual([], self.messages(skeleton + resolution + schema))
 
+    def test_retry_notes_entity_escapes_follow_backslash_parity(self):
+        entities = (("&#xE0061;", "&#xE0062;"), ("&#x0E0061;", "&#x0E0062;"),
+                    ("&#0917601;", "&#0917602;"), ("&ZeroWidthSpace;", "&zwj;"))
+        for generated in (False, True):
+            for slashes in range(6):
+                for old, new in entities:
+                    with self.subTest(generated=generated, slashes=slashes, entity=old), self.repo() as root:
+                        prefix = "## Agent notes\n\nPayload " + "\\" * slashes
+                        skeleton, resolution, schema = self.retry_notes_findings(
+                            root, prefix + old + "\n", prefix + new + "\n", generated=generated)
+                        self.assertEqual([], self.messages(resolution + schema))
+                        self.assertEqual(slashes % 2 == 0, bool(skeleton), self.messages(skeleton))
+            # An escaped first entity must not hide a later active entity or a
+            # literal control. Even backslashes leave the second entity active.
+            for tail in (" &#xE0061;", " \\\\&#xE0061;", " \U000e0061"):
+                with self.subTest(generated=generated, tail=tail), self.repo() as root:
+                    prefix = "## Agent notes\n\nLiteral \\&#xE0061; "
+                    skeleton, resolution, schema = self.retry_notes_findings(root,
+                        prefix + "before" + tail + "\n", prefix + "after" + tail + "\n", generated=generated)
+                    self.assertEqual([], self.messages(resolution + schema))
+                    self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_retry_notes_literal_nonentities_remain_editable(self):
+        for spelling in ("&#xE0061", "&#917601", "&#x00E0061;", "&#00917601;",
+                         "&shy", "&shyUnexpected;", "&ZeroWidthSpaceExtra;"):
+            for generated in (False, True):
+                with self.subTest(spelling=spelling, generated=generated), self.repo() as root:
+                    prefix = "## Agent notes\n\nLiteral " + spelling
+                    skeleton, resolution, schema = self.retry_notes_findings(root,
+                        prefix + " before\n", prefix + " after\n", generated=generated)
+                    self.assertEqual([], self.messages(skeleton + resolution + schema))
+
+    def test_retry_notes_entities_respect_escaped_code_delimiters(self):
+        cases = ((r"\`&#xE0061;`", True), (r"\\`&#xE0061;`", False),
+                 (r"\``&#xE0061;``", True), (r"\``&#xE0061;`", False),
+                 (r"`&#xE0061;\`", False), (r"``&#xE0061;` ``", False),
+                 (r"`&#xE0061;", True), (r"`literal` &#xE0061;", True))
+        for spelling, hidden in cases:
+            for generated in (False, True):
+                with self.subTest(spelling=spelling, generated=generated), self.repo() as root:
+                    prefix = "## Agent notes\n\nPayload " + spelling
+                    skeleton, resolution, schema = self.retry_notes_findings(root,
+                        prefix + " before\n", prefix + " after\n", generated=generated)
+                    self.assertEqual([], self.messages(resolution + schema))
+                    self.assertEqual(hidden, bool(skeleton), self.messages(skeleton))
+
     def test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis(self):
         blocks = (
             "<!-- Existing diagnostic context. -->\n",
@@ -17526,6 +17572,47 @@ class ReconcileQueueTests(unittest.TestCase):
                 after = before.replace(old, new)
                 skeleton, _ = self.field_exposure_findings(before, after)
                 self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_entity_escapes_follow_backslash_parity(self):
+        entities = (("&#xE0061;", "&#xE0062;"), ("&#x0E0061;", "&#x0E0062;"),
+                    ("&#0917601;", "&#0917602;"), ("&ZeroWidthSpace;", "&zwj;"))
+        for folded in (False, True):
+            for slashes in range(6):
+                for old, new in entities:
+                    with self.subTest(folded=folded, slashes=slashes, entity=old):
+                        field = "**Re-asked:** " + "\\" * slashes + old + "\n"
+                        before = self.field_exposure_review(folded=folded)
+                        before = before.replace("\n\n</details>", "\n" + field + "\n</details>") if folded else before + field
+                        after = before.replace(old, new)
+                        skeleton, _ = self.field_exposure_findings(before, after)
+                        self.assertEqual(slashes % 2 == 0, bool(skeleton), self.messages(skeleton))
+        for tail in (" &#xE0061;", " \\\\&#xE0061;", " \U000e0061"):
+            with self.subTest(tail=tail):
+                before = self.field_exposure_review() + "**Re-asked:** \\&#xE0061; before" + tail + "\n"
+                after = before.replace(" before", " after")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_literal_nonentities_remain_editable(self):
+        for spelling in ("&#xE0061", "&#917601", "&#x00E0061;", "&#00917601;",
+                         "&shy", "&shyUnexpected;", "&ZeroWidthSpaceExtra;"):
+            with self.subTest(spelling=spelling):
+                before = self.field_exposure_review() + "**Re-asked:** Literal " + spelling + " before\n"
+                after = before.replace(" before", " after")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual([], self.messages(skeleton))
+
+    def test_mutable_field_source_context_entities_respect_escaped_code_delimiters(self):
+        cases = ((r"\`&#xE0061;`", True), (r"\\`&#xE0061;`", False),
+                 (r"\``&#xE0061;``", True), (r"\``&#xE0061;`", False),
+                 (r"`&#xE0061;\`", False), (r"``&#xE0061;` ``", False),
+                 (r"`&#xE0061;", True), (r"`literal` &#xE0061;", True))
+        for spelling, hidden in cases:
+            with self.subTest(spelling=spelling):
+                before = self.field_exposure_review() + "**Re-asked:** Payload " + spelling + " before\n"
+                after = before.replace(" before", " after")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(hidden, bool(skeleton), self.messages(skeleton))
 
     def test_mutable_field_source_context_preserves_first_response_compatibility(self):
         values = ("Approve.", "Check <the detector> first.",
