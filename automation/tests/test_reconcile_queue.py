@@ -61,10 +61,12 @@ def fill_queue_template(text, digest):
     and writes a plausible value of the documented form — a date where the template
     asks for `YYYY-MM-DD`, a real digest where it asks for 64 hex, a repository path
     where it asks for one, and a sentence everywhere else. Nothing else is touched:
-    the HTML comments stay exactly as shipped, because a filer who leaves them in
-    must get a valid item too.
+    the actual fold tags stay intact and agent-template guidance comments remain
+    unchanged. Nested prose placeholders are filled completely.
     """
     def value(matched):
+        if matched.group() in ("<details>", "</details>", "<summary>", "</summary>"):
+            return matched.group()
         body = matched.group()[1:-1].strip().lower()
         if "yyyy-mm-dd" in body:
             return "2026-07-23"
@@ -80,9 +82,24 @@ def fill_queue_template(text, digest):
             return "manual"
         if "short name" in body:
             return "Keep the current shape"
+        if body == "high | medium | low":
+            return "high"
+        if "exactly one of the choices" in body or "exactly one of the readings" in body:
+            choice = re.search(r"^### (.+)$", text, flags=re.M)
+            return QUEUE_PLACEHOLDER_RE.sub(value, choice.group(1))
         return QUEUE_TEMPLATE_PROSE
 
-    return QUEUE_PLACEHOLDER_RE.sub(value, text)
+    def fill_prose(part):
+        while True:
+            filled = QUEUE_PLACEHOLDER_RE.sub(value, part)
+            if filled == part:
+                return filled
+            part = filled
+
+    return "".join(
+        part if part.startswith("<!--") else fill_prose(part)
+        for part in re.split(r"(<!--.*?-->)", text, flags=re.S)
+    )
 
 FIXTURE_GIT_PATH = Path(__file__).resolve().parent / "fixture_git.py"
 FIXTURE_GIT_SPEC = importlib.util.spec_from_file_location(
@@ -16547,7 +16564,7 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual([], self.fold_messages(root, text))
 
     def test_record_swallow_never_reads_an_html_comment(self):
-        """`templates/README.md` makes a comment the home of optional-field docs."""
+        """Commented examples never become parsed record fields."""
         text = self.HUMAN_ATTENTION_REVIEW.replace(
             "**Blocks at:** transition:start task:2026-07-23-example\n",
             "**Blocks at:** transition:start task:2026-07-23-example\n"
@@ -17516,13 +17533,11 @@ class ReconcileQueueTests(unittest.TestCase):
     def test_the_templates_name_the_word_budget_the_check_enforces(self):
         """Two numbers that must agree, held together by a test rather than care."""
         budget = RECONCILE.HUMAN_ATTENTION_WORD_BUDGET
-        for name in ("decision.md", "clarification.md", "review.md"):
-            with self.subTest(template=name):
-                text = (QUEUE_TEMPLATES / name).read_text(encoding="utf-8")
-                self.assertIn(f"Under {budget} words before the answer", text)
-                self.assertNotRegex(
-                    text, r"Under (?!%d\b)\d+ words before the answer" % budget
-                )
+        text = (REPO_ROOT / "templates/README.md").read_text(encoding="utf-8")
+        self.assertIn(f"Under {budget} words before the answer", text)
+        self.assertNotRegex(
+            text, r"Under (?!%d\b)\d+ words before the answer" % budget
+        )
 
     def test_word_count_measures_any_file_against_the_budget(self):
         """The budget stops being guesswork: the count is printable on demand."""
@@ -19790,7 +19805,18 @@ class ReconcileQueueTests(unittest.TestCase):
                         (QUEUE_TEMPLATES / name).read_text(encoding="utf-8"),
                         digest,
                     )
-                    self.assertNotIn("<", filled.split("-->")[-1])
+                    exposed = re.sub(r"<!--.*?-->", "", filled, flags=re.S)
+                    placeholders = [
+                        match.group() for match in QUEUE_PLACEHOLDER_RE.finditer(exposed)
+                        if match.group() not in (
+                            "<details>", "</details>", "<summary>", "</summary>"
+                        )
+                    ]
+                    self.assertEqual([], placeholders)
+                    if name in ("decision.md", "clarification.md", "review.md"):
+                        self.assertIn("<details>\n<summary>", filled)
+                        self.assertIn("</summary>\n\n", filled)
+                        self.assertIn("\n\n</details>\n", filled)
                     self.write(
                         root,
                         "message-queue/"
@@ -19804,6 +19830,8 @@ class ReconcileQueueTests(unittest.TestCase):
                         RECONCILE.check_queue_name,
                         RECONCILE.check_queue_location,
                         RECONCILE.check_links,
+                        RECONCILE.check_human_attention,
+                        RECONCILE.check_fold_shape,
                     ):
                         findings.extend(self.messages(check()))
                     self.assertEqual([], findings)

@@ -204,8 +204,8 @@ committed (`memory/known-issues/2026-07-31-review-outcome-classification-is-atte
 
 ## Reviews: target, revision, and the retraction path
 
-`templates/queue/review.md` owns what `Review target` and `Review revision` may hold, and
-when `pending` is allowed. Two content rules are this guide's:
+`templates/queue/review.md` owns the copied fields; the review-binding instructions in
+`templates/README.md` own their allowed values and when `pending` is allowed. Two content rules are this guide's:
 
 - `Full context` explains the judgment. It never substitutes for the target or its
   immutable revision.

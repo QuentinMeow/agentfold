@@ -8,6 +8,7 @@ have to open another file to know what they are agreeing to, the item failed.
 **This file does not define the format.** The fields, their order, and the lifecycle around
 them are owned elsewhere and must not be restated here:
 
+- Before copying, read the authoring checklist in `templates/README.md`.
 - The exact schema to copy: `templates/queue/decision.md`, `templates/queue/review.md`,
   `templates/queue/clarification.md`.
 - What a human action must contain and how it resolves: `handbook/human-action-guide.md`.
