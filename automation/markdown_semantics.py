@@ -95,6 +95,32 @@ RAW_HTML_TOKEN_RE = re.compile(
     r"<(?:!--|!\[CDATA\[|\?|![A-Za-z]|/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>]))",
     re.I,
 )
+# Unicode 16.0 General_Category=Cf, pinned across supported Python versions.
+# https://www.unicode.org/Public/16.0.0/ucd/extracted/DerivedGeneralCategory.txt
+# Python 3.9 bundles Unicode 13 and otherwise misses later assigned controls.
+FORMAT_CONTROL_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x0600, 0x0605),
+    (0x061C, 0x061C),
+    (0x06DD, 0x06DD),
+    (0x070F, 0x070F),
+    (0x0890, 0x0891),
+    (0x08E2, 0x08E2),
+    (0x180E, 0x180E),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x2064),
+    (0x2066, 0x206F),
+    (0xFEFF, 0xFEFF),
+    (0xFFF9, 0xFFFB),
+    (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD),
+    (0x13430, 0x1343F),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0001, 0xE0001),
+    (0xE0020, 0xE007F),
+)
 DEFAULT_IGNORABLE_NONFORMAT_RANGES = (
     (0x034F, 0x034F),
     (0x115F, 0x1160),
@@ -461,9 +487,8 @@ def rendered_human_text(text):
 def contains_default_ignorable_characters(text):
     """Detect invisible controls without normalizing visible compatibility text."""
     return any(
-        unicodedata.category(character) == "Cf"
-        or any(start <= ord(character) <= end
-               for start, end in DEFAULT_IGNORABLE_NONFORMAT_RANGES)
+        any(start <= ord(character) <= end
+            for start, end in FORMAT_CONTROL_RANGES + DEFAULT_IGNORABLE_NONFORMAT_RANGES)
         for character in (text or "")
     )
 
