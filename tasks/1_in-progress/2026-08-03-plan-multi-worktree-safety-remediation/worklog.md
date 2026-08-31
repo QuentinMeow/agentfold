@@ -30,3 +30,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   its event carried stale base `4dbb22e...` while checkout used merge candidate `4bee4fc...`
   whose first parent is `73492c5...`; this is the pre-existing defect tracked by issue #78,
   not a bootstrap test failure. Planning PR #73 is green.
+
+## 2026-08-31 — development-cycle implementation resumed (codex)
+
+- Resumed the stale parent from its recorded handover for the owner's broader request to
+  implement and prove the multi-agent Git workflow across common human/agent development
+  cycles.
+- Started S3 orchestration run `2026-08-31-prove-and-land-the-common-8dba` with isolated
+  worktrees, a six-hour interactive-to-autonomous switch, research-first planning, a
+  five-lens fresh-context panel, and cross-vendor refutation.
+- Preserved the earlier pending recovery run and its uncontained branches after the
+  orchestration sweep correctly refused to remove them.
+- No implementation choice is recorded yet; the next edge is requirements interrogation,
+  research, executable scenarios, and child-task decomposition.
