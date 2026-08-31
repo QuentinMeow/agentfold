@@ -414,9 +414,11 @@ EXAMPLE_CONSEQUENCE_RE = re.compile(
 # or bounded source lines that contain them. The check compares those bytes;
 # it does not establish whether the source supports the author's judgment.
 QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)\s*")
-# Keep quoted literal contents intact when allowing presentation whitespace.
+# Keep complete quoted literals intact, including triple-delimited bodies with
+# embedded short quotes. Escaped delimiters stay in the body; matching triples
+# before short delimiters prevents the opener becoming an empty quote pair.
 SOURCE_STRING_RE = re.compile(
-    r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""", re.S
+    r"""(?P<delimiter>"{3}|'{3}|["'])(?:\\.|(?!(?P=delimiter))[^\\])*(?P=delimiter)""", re.S
 )
 # Bounded source-number spellings, not an expression or language parser. A dot
 # belongs to a number when fractional digits or an exponent follow it; prose

@@ -20857,6 +20857,70 @@ class ReconcileQueueTests(unittest.TestCase):
                         self.source_quote_fidelity_case(source, quoted, valid, suffix=suffix)
         self.source_quote_fidelity_case('First r"**A**" last.', 'First r"A" last.', False)
 
+    def test_source_quote_fidelity_r4_preserves_embedded_triple_literals(self):
+        cases = (("'", "", "Don't  change", "Don't change"),
+                 ("'", "", "Don't remove the middle, don't stop", "Don't [...] don't stop"),
+                 ("'", "r", "Don't  change", "Don't change"),
+                 ('"', "", 'Use "A  B" here', 'Use "A B" here'),
+                 ('"', "", 'Use ""A  B"" here', 'Use ""A B"" here'),
+                 ("'", "", "Don't\nchange", "Don't change"),
+                 ('"', "", 'Use "A"\n\n  B', 'Use "A"\n B'),
+                 ('"', "", 'Use "**A**" here', 'Use "A" here'),
+                 ("'", "", "Don't ... change", "Don't change"))
+        for quote, prefix, original, altered in cases:
+            delimiter = quote * 3
+            source = "LABEL = " + prefix + delimiter + original + delimiter
+            changed = "LABEL = " + prefix + delimiter + altered + delimiter
+            ast.parse(source)
+            ast.parse(changed)
+            wrappers = ("", "**") if "\n" in changed else ("", "**", chr(96) * 2)
+            for suffix in ("py", "md"):
+                for wrapper in wrappers:
+                    with self.subTest(source=source, suffix=suffix, wrapper=wrapper):
+                        self.source_quote_fidelity_case(source, wrapper + changed + wrapper, False, suffix=suffix)
+
+    def test_source_quote_fidelity_r4_keeps_omissions_outside_complete_triples(self):
+        for quote in ("'", '"'):
+            for prefix in ("", "r", "u8"):
+                delimiter = quote * 3
+                literal = prefix + delimiter + "Don't remove the middle, don't stop" + delimiter
+                source = "First " + literal + " middle. Last."
+                cases = (("First […] stop" + delimiter + " middle. Last.", False),
+                         ("First " + prefix + delimiter + "Don't […] don't stop" + delimiter + " middle. Last.", False),
+                         ("First […] Last.", True),
+                         ("First " + literal + " […] Last.", True),
+                         ("First […] " + literal + " middle. Last.", True))
+                if prefix:
+                    cases += (("First […] " + literal[len(prefix):] + " middle. Last.", False),)
+                for quoted, valid in cases:
+                    with self.subTest(delimiter=delimiter, prefix=prefix, quoted=quoted):
+                        self.source_quote_fidelity_case(source, quoted, valid)
+
+    def test_source_quote_fidelity_r4_accepts_exact_triples_and_escape_parity(self):
+        for quote in ("'", '"'):
+            delimiter = quote * 3
+            for prefix in ("", "r", "u", "b", "f"):
+                literal = prefix + delimiter + "A " + quote + "inside" + quote + "  B\nC...D" + delimiter
+                source = "LABEL = " + literal
+                ast.parse(source)
+                for kind in ("decision", "clarification", "review"):
+                    with self.subTest(quote=quote, prefix=prefix, kind=kind):
+                        self.source_quote_fidelity_case(source, source, True, suffix="py", kind=kind)
+            for slash_count in (1, 2, 3, 4):
+                # Odd runs escape the first would-be closing quote; even runs
+                # end the literal, leaving the following prose free to wrap.
+                body = "A " + "\\" * slash_count + delimiter
+                literal = "r" + delimiter + body
+                if slash_count % 2:
+                    literal += "  B" + delimiter
+                ast.parse("LABEL = " + literal)
+                source = "Before " + literal + " after this."
+                with self.subTest(quote=quote, slash_count=slash_count, valid=True):
+                    self.source_quote_fidelity_case(source, "Before " + literal + " after\nthis.", True)
+                if slash_count % 2:
+                    with self.subTest(quote=quote, slash_count=slash_count, valid=False):
+                        self.source_quote_fidelity_case(source, source.replace("  B", " B"), False)
+
     def test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review(self):
         for kind in ("decision", "review"):
             with self.subTest(kind=kind), self.repo() as root:
