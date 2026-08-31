@@ -14972,6 +14972,27 @@ class ReconcileQueueTests(unittest.TestCase):
                     )
                     self.assertEqual([], self.messages(skeleton + resolution + schema))
 
+    def test_retry_notes_freeze_invisible_entities_but_allow_literal_spellings(self):
+        for generated in (False, True):
+            for old, new in (("&#xE0061;", "&#xE0062;"), ("&#917601;", "&#917602;"),
+                             ("&ZeroWidthSpace;", "&zwj;")):
+                for append in (False, True):
+                    with self.subTest(generated=generated, entity=old, append=append), self.repo() as root:
+                        prefix = "## Agent notes\n\nVisible diagnosis.\n\n"
+                        before = prefix if append else prefix + "Payload " + old + "\n"
+                        after = prefix + "Payload " + new + "\n"
+                        skeleton, resolution, schema = self.retry_notes_findings(root, before, after, generated=generated)
+                        self.assertEqual([], self.messages(resolution + schema))
+                        self.assertEqual(1, len(skeleton), self.messages(skeleton))
+            for diagnosis in ("The literal `&#xE0061;` is shown.",
+                              "The escaped &amp;ZeroWidthSpace; is shown.",
+                              "The literal &lt;span hidden&gt; is shown.",
+                              "The Ａ key still fails."):
+                with self.subTest(generated=generated, diagnosis=diagnosis), self.repo() as root:
+                    skeleton, resolution, schema = self.retry_notes_findings(root,
+                        "## Agent notes\n\nNone yet.\n", "## Agent notes\n\n" + diagnosis + "\n", generated=generated)
+                    self.assertEqual([], self.messages(skeleton + resolution + schema))
+
     def test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis(self):
         blocks = (
             "<!-- Existing diagnostic context. -->\n",
@@ -17381,6 +17402,188 @@ class ReconcileQueueTests(unittest.TestCase):
                     template=unpublished,
                 )
                 self.assertEqual([], self.messages(skeleton))
+
+    def field_exposure_review(self, *, folded=False, blank_response=False,
+                              record_heading=True):
+        text = self.FROZEN_REVIEW
+        if blank_response:
+            text = text.replace("partially reviewed, mostly correct, continue", "______")
+        if folded:
+            marker = "## For the record\n\n"
+            above, record = text.split(marker)
+            text = above + marker + "<details>\n<summary>For the record</summary>\n\n" + record.rstrip("\n") + "\n\n</details>\n"
+        if not record_heading:
+            text = text.replace("## For the record\n\n", "")
+        return text
+
+    def field_exposure_findings(self, before, after, *, commit=False, path=None):
+        """Check a real staged Git mutation without normalizing its line endings."""
+        path = self.FROZEN_REVIEW_PATH if path is None else path
+        with self.repo() as root:
+            self.init_git(root)
+            self.write(root, "message-queue/AGENTS.md", QUEUE_SCHEMA_MARKERS)
+            artifact = self.write(root, "docs/design.md", "# Design\n")
+            self.write(root, "docs/disposition.md", "# Disposition\n")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            before, after = (value.replace("{digest}", digest) for value in (before, after))
+            item = self.write(root, path)
+            item.write_bytes(before.encode())
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "record the preexisting field source")
+            base = self.git(root, "rev-parse", "HEAD")
+            item.write_bytes(after.encode())
+            self.git(root, "add", ".")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                self.assertEqual(after, RECONCILE.repo_text(item))
+                skeleton = list(RECONCILE.check_queue_frozen_skeleton())
+                resolution = list(RECONCILE.check_queue_resolution())
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+            if commit:
+                self.git(root, "commit", "-m", "record the first human response")
+                with mock.patch.object(RECONCILE, "CHANGE_RANGE", base + "..." + self.git(root, "rev-parse", "HEAD")):
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        skeleton += list(RECONCILE.check_queue_frozen_skeleton())
+                        resolution += list(RECONCILE.check_queue_resolution())
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+            return skeleton, resolution
+
+    def test_mutable_field_source_context_freezes_outer_wrappers(self):
+        wrappers = (
+            "Text <span hidden>\n**Re-asked:** old\n</span>\n",
+            "Text <span>\n**Re-asked:** old\n</span>\n",
+            'Text <div style="display:none">\n\n**Re-asked:** old\n\n</div>\n',
+            'Text <span title="\n**Re-asked:** old\n">end</span>\n',
+            "<!--\n**Re-asked:** old\n-->\n",
+            "```\n**Re-asked:** old\n```\n",
+            "    **Re-asked:** old\n",
+        )
+        for wrapper in wrappers:
+            with self.subTest(wrapper=wrapper):
+                before = self.field_exposure_review() + "\n" + wrapper
+                after = before.replace("Re-asked:** old", "Re-asked:** new")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+                self.assertFalse(skeleton[0].advisory)
+        # A same-value visible field cannot prove that the hidden occurrence is exposed.
+        before = self.field_exposure_review() + "\n**Re-asked:** old\n\n" + wrappers[0]
+        after = before.replace("Text <span hidden>\n**Re-asked:** old", "Text <span hidden>\n**Re-asked:** new")
+        self.assertEqual(1, len(self.field_exposure_findings(before, after)[0]))
+
+    def test_mutable_field_source_context_only_exempts_a_valid_fold(self):
+        folded = self.field_exposure_review(folded=True)
+        damaged = (
+            folded.replace("<details>", "<details hidden>"),
+            folded.replace("</details>", ""),
+            folded.replace("</summary>\n\n", "</summary>\n"),
+            folded + "\n<details>\n<summary>extra</summary>\n\n**Re-asked:** old\n\n</details>\n",
+            folded.replace("<details>", "Text <span hidden>\n<details>").replace("</details>", "</details>\n</span>"),
+            folded.replace("**Status:** waiting", "Text <span hidden>\n**Status:** waiting\n</span>"),
+            # In the reversed case the field must actually be after the opener;
+            # exposed fields between a stray closer and opener are not hidden.
+            folded.replace("<details>", "__OPEN__").replace("</details>", "<details>").replace("__OPEN__", "</details>").replace("**Status:** waiting\n", "") + "\n**Status:** waiting\n",
+        )
+        for before in damaged:
+            with self.subTest(before=before):
+                after = before.replace("**Status:** waiting", "**Status:** folding")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_keeps_exposed_values_editable(self):
+        for folded in (False, True):
+            for old, new in (("old", "new"), ("old Ａ", "new Ｂ"),
+                             ("`&#xE0061;`", "`&#xE0062;`"),
+                             ("&lt;span&gt;", "&lt;div&gt;")):
+                with self.subTest(folded=folded, old=old):
+                    before = self.field_exposure_review(folded=folded)
+                    field = "**Re-asked:** " + old + "\n"
+                    before = before.replace("\n\n</details>", "\n" + field + "\n</details>") if folded else before + field
+                    after = before.replace(field, "**Re-asked:** " + new + "\n")
+                    self.assertEqual([], self.messages(self.field_exposure_findings(before, after)[0]))
+        before = self.field_exposure_review(folded=True)
+        after = before.replace("**Status:** waiting", "**Status:** folding")
+        self.assertEqual([], self.messages(self.field_exposure_findings(before, after)[0]))
+
+    def test_mutable_field_source_context_never_neutralizes_agent_folds(self):
+        before = self.field_exposure_review(folded=True)
+        after = before.replace("**Status:** waiting", "**Status:** folding")
+        # The shape is sanctioned only for human records. A record-shaped HTML
+        # container in another actor's file cannot donate exposed mutable fields.
+        skeleton, _ = self.field_exposure_findings(before, after,
+            path="message-queue/needs-agent/requests/future-blocking-fold-lookalike.md")
+        self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_freezes_invisible_values(self):
+        controls = (("\U000e0061", "\U000e0062"), ("\u200b", "\u200d"),
+                    ("\u034f", "\u115f"), ("&#xE0061;", "&#xE0062;"),
+                    ("&#917601;", "&#917602;"), ("&ZeroWidthSpace;", "&zwj;"))
+        for old, new in controls:
+            with self.subTest(control=repr(old)):
+                before = self.field_exposure_review() + "**Re-asked:** old" + old + "\n"
+                after = before.replace(old, new)
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_preserves_first_response_compatibility(self):
+        values = ("Approve.", "Check <the detector> first.",
+                  "`docs/design.md` looks good.", "`<span hidden>` is literal code.",
+                  "Use `a < b`.", "Check <span hidden> own markup </span>.",
+                  "Check <span hidden> this", "  Check <span hidden> this  ",
+                  "Approve \U000e0061 as written.")
+        for folded, heading in ((False, True), (True, True), (False, False)):
+            for value in values:
+                with self.subTest(folded=folded, heading=heading, value=value):
+                    before = self.field_exposure_review(folded=folded, blank_response=True, record_heading=heading)
+                    after = before.replace("**Your review:** ______", "**Your review:** " + value)
+                    skeleton, resolution = self.field_exposure_findings(before, after, commit=True)
+                    self.assertEqual([], self.messages(skeleton))
+                    self.assertEqual([], self.messages(resolution))
+
+    def test_mutable_field_source_context_first_response_cannot_hide_other_edits(self):
+        for changed in ("new", "old\U000e0061"):
+            with self.subTest(changed=changed):
+                before = self.field_exposure_review(blank_response=True) + "**Re-asked:** old\n"
+                after = before.replace("**Your review:** ______", "**Your review:** Check <span hidden> this").replace(
+                    "**Re-asked:** old", "**Re-asked:** " + changed)
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_later_metadata_stays_frozen(self):
+        before = self.field_exposure_review(blank_response=True).replace(
+            "**Your review:** ______", "**Your review:** Check <span hidden> this") + "**Re-asked:** old\n"
+        after = before.replace("**Re-asked:** old", "**Re-asked:** new")
+        skeleton, _ = self.field_exposure_findings(before, after)
+        self.assertEqual(1, len(skeleton), self.messages(skeleton))
+
+    def test_mutable_field_source_context_first_response_preserves_other_line_endings(self):
+        for ending in ("\n", "\r\n", "\r"):
+            for rewrite_endings in (False, True):
+                with self.subTest(ending=repr(ending), rewrite_endings=rewrite_endings):
+                    before = self.field_exposure_review(blank_response=True).replace("\n", ending)
+                    after = before.replace("**Your review:** ______", "**Your review:** Check <span hidden> this")
+                    if rewrite_endings:
+                        after = after.replace(ending, "\r\n" if ending == "\n" else "\n")
+                    skeleton, resolution = self.field_exposure_findings(before, after, commit=not rewrite_endings)
+                    self.assertEqual(rewrite_endings, bool(skeleton), self.messages(skeleton))
+                    if not rewrite_endings:
+                        self.assertEqual([], self.messages(resolution))
+
+    def test_mutable_field_source_context_response_cannot_escape_outer_markup(self):
+        for opening, closing in (("Text <span hidden>", "</span>"), ("Text <span>", "</span>"),
+                                 ("<!--", "-->"), ("```", "```")):
+            with self.subTest(opening=opening):
+                before = self.field_exposure_review(blank_response=True).replace("**Your review:** ______",
+                    opening + "\n**Your review:** ______\n" + closing)
+                after = before.replace("**Your review:** ______", "**Your review:** Approve <the detector>.")
+                skeleton, _ = self.field_exposure_findings(before, after)
+                self.assertEqual(1, len(skeleton), self.messages(skeleton))
+        before = self.field_exposure_review(blank_response=True).replace("**Your review:** ______",
+            "**Your review:** ______ <!-- unchanged -->")
+        after = before.replace("<!-- unchanged -->", "<!-- hidden edit -->")
+        self.assertEqual(1, len(self.field_exposure_findings(before, after)[0]))
 
     def test_the_frozen_skeleton_accounts_for_every_byte_of_the_file(self):
         """Integrity needs a view that is total, and this asserts that it is.

@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import html
 import re
 import subprocess
 import sys
@@ -3545,6 +3546,16 @@ def retry_reference_line_offsets(parsed_lines):
 
 
 
+def contains_invisible_source_characters(value):
+    """Detect raw controls and rendered entities without altering literal code.
+
+    Decode entities once outside code spans: an escaped entity or a backticked
+    spelling renders as visible text. No compatibility normalization is needed.
+    """
+    return contains_default_ignorable_characters(value) or \
+        contains_default_ignorable_characters(html.unescape(strip_inline_code(value)))
+
+
 def retry_notes_line_offsets(text):
     """Map real retry notes to source lines, without trusting a raw heading.
 
@@ -3582,11 +3593,92 @@ def retry_notes_line_offsets(text):
             continue
         if index in exposed and line == clean and not heading \
                 and index not in references \
-                and not contains_default_ignorable_characters(line) \
+                and not contains_invisible_source_characters(line) \
                 and not FIELD_RE.fullmatch(line) \
                 and not RAW_HTML_TOKEN_RE.search(line):
             diagnostics.add(index)
     return headings, body, diagnostics
+
+
+def exact_source_lines(text):
+    """Split CommonMark line endings without normalizing any source bytes."""
+    return [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
+
+
+def field_exposure_lines(path, text):
+    """Make only the validated human record fold transparent to exposure checks.
+
+    These lines never supply fields or frozen bytes. The original source still
+    owns both; this local view only proves which mutable field lines are outside
+    comments, code, and enclosing HTML. Outer/nested containers remain intact.
+    """
+    lines = exact_source_lines(text)
+    if Path(path).parts[1:2] != ("needs-human",):
+        return lines
+    bounds = fold_bounds(record_visible_lines(text))
+    if bounds is None or fold_shape_problems(text):
+        return lines
+    opening, closing = bounds
+    indices = (opening, opening + 1, closing)
+    forms = (FOLD_OPEN_RE, FOLD_SUMMARY_RE, FOLD_CLOSE_RE)
+    if any(index >= len(lines) or not form.fullmatch(lines[index].rstrip("\r\n"))
+           for index, form in zip(indices, forms)):
+        return lines
+    for index in indices:
+        lines[index] = lines[index][len(lines[index].rstrip("\r\n")):]
+    return lines
+
+
+def field_source_line_exposed(actor, index, matched, view_lines, offsets):
+    """Exempt a human response's own angle prose, never its outer context."""
+    if actor != "needs-human" or not HUMAN_RESPONSE_LINE_RE.match(matched.group()):
+        return index in offsets
+    neutral = list(view_lines)
+    start, end = matched.span(2)
+    line = neutral[index]
+    neutral[index] = line[:start] + "response" + line[end:]
+    return index in semantic_line_offsets("".join(neutral))
+
+
+def pure_first_human_response(source, before, destination, after):
+    """Allow reclassification caused solely by the first response's own bytes.
+
+    An unclosed angle phrase can hide later unchanged metadata from the exposure
+    map. This pairwise exception keeps that first reply legal only when every byte
+    outside its one value is identical, including CRLF/CR endings. It does not
+    neutralize response values for later metadata edits or change action identity.
+    """
+    if source != destination or Path(source).parts[1:2] != ("needs-human",):
+        return False
+    if first_concrete_response(human_response_fields(before)) is not None \
+            or first_concrete_response(human_response_fields(after)) is None:
+        return False
+    documents = []
+    for text in (before, after):
+        lines = exact_source_lines(text)
+        parsed = commonmark_lines(semantic_text(text))
+        responses = [
+            (index, matched)
+            for index, line in enumerate(lines)
+            for matched in [FIELD_RE.fullmatch(line.rstrip())]
+            if matched and HUMAN_RESPONSE_LINE_RE.match(matched.group())
+        ]
+        if len(responses) != 1:
+            return False
+        index, matched = responses[0]
+        if not exposed_field_value(matched, parsed[index] if index < len(parsed) else ""):
+            return False
+        view = field_exposure_lines(source, text)
+        if not field_source_line_exposed("needs-human", index, matched, view, set()):
+            return False
+        # A person's value is everything after the unchanged bold label on this
+        # one physical line, including their leading/trailing spaces. Keep the
+        # exact label and line terminator; neither belongs to the answer value.
+        start = HUMAN_RESPONSE_LINE_RE.match(lines[index]).end()
+        end = len(lines[index].rstrip("\r\n"))
+        lines[index] = lines[index][:start] + "response" + lines[index][end:]
+        documents.append("".join(lines))
+    return documents[0] == documents[1]
 
 
 def frozen_skeleton_lines(path, text):
@@ -3595,6 +3687,8 @@ def frozen_skeleton_lines(path, text):
     actor = parts[1] if len(parts) > 1 else ""
     leaf = parts[2] if len(parts) > 2 else ""
     mutable_fields = lifecycle_mutable_fields(actor, leaf)
+    view = field_exposure_lines(path, text)
+    offsets = semantic_line_offsets("".join(view))
     parsed = commonmark_lines(semantic_text(text or ""))
     _headings, notes_body, diagnostics = (
         retry_notes_line_offsets(text)
@@ -3608,7 +3702,9 @@ def frozen_skeleton_lines(path, text):
             continue
         matched = FIELD_RE.fullmatch(stripped)
         if index not in notes_body and matched \
-                and matched.group(1) in mutable_fields and exposed_field_value(
+                and matched.group(1) in mutable_fields \
+                and field_source_line_exposed(actor, index, matched, view, offsets) \
+                and exposed_field_value(
                     matched, parsed[index] if index < len(parsed) else ""
                 ):
             continue
@@ -3662,7 +3758,11 @@ def exposed_field_value(matched, parsed_line):
         return False
     if HUMAN_RESPONSE_LINE_RE.match(matched.group(0)):
         return True
-    return not RAW_HTML_TOKEN_RE.search(matched.group(2))
+    value = matched.group(2)
+    return not (
+        RAW_HTML_TOKEN_RE.search(value)
+        or contains_invisible_source_characters(value)
+    )
 
 
 def retry_action_identity(path, text):
@@ -5733,6 +5833,8 @@ def check_queue_frozen_skeleton():
                 == queue_frozen_skeleton(destination, after):
             continue
         if introduces_final_retry_notes(source, before, destination, after):
+            continue
+        if pure_first_human_response(source, before, destination, after):
             continue
         if destination in reported:
             continue
