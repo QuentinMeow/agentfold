@@ -151,3 +151,85 @@ The [recorded publication snapshot](publication-code-state.json) preserves the a
 ## Captured reviewer reports
 
 The files under `review-evidence/` are JSON captures of the independent reports, including each original UTF-8 text and its SHA-256. Their approval language and local execution paths are transcript data, not new human requests or repository path declarations. The table above summarizes the lower-specific verdicts; a report that also discusses an older upper checkpoint does not certify that upper checkpoint as final.
+
+## Closing-record validation
+
+The record snapshot `a202233c10705e544b2292734cacbe698218b9a5` received the following separate checks. No implementation files differ from the reviewed code pin. The normal record commit selected zero test files by the runner’s record-ownership rule; that empty selection is not runtime-test evidence. The complete-suite and real-Git commands below supply the separately executed checks.
+
+### full-314
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: python3 automation/run_tests.py --jobs 4 --verbose
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+tests: 16/16 files passed
+test elapsed: 36.20s
+exit: 0; elapsed: 36.24s
+```
+
+### corpus-314
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: python3 -m unittest -v automation.tests.test_reconcile_queue.ReconcileQueueTests.test_the_frozen_skeleton_accounts_for_every_byte_of_the_file automation.tests.test_reconcile_queue.ReconcileQueueTests.test_the_frozen_skeleton_files_no_new_refusal_on_real_history automation.tests.test_reconcile_queue.ReconcileQueueTests.test_record_swallow_is_inert_on_every_live_item_in_this_repository
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+Ran 3 tests in 3.049s
+OK
+exit: 0; elapsed: 3.27s
+```
+
+### full-39
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: /usr/bin/python3 automation/run_tests.py --jobs 4 --verbose
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+tests: 16/16 files passed
+test elapsed: 37.78s
+exit: 0; elapsed: 37.84s
+```
+
+### corpus-39
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: /usr/bin/python3 -m unittest -v automation.tests.test_reconcile_queue.ReconcileQueueTests.test_the_frozen_skeleton_accounts_for_every_byte_of_the_file automation.tests.test_reconcile_queue.ReconcileQueueTests.test_the_frozen_skeleton_files_no_new_refusal_on_real_history automation.tests.test_reconcile_queue.ReconcileQueueTests.test_record_swallow_is_inert_on_every_live_item_in_this_repository
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+Ran 3 tests in 3.442s
+OK
+exit: 0; elapsed: 3.65s
+```
+
+### pr-range
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-30-rebuild-the-open-pr-stack --range 326d8ed5fa4f89eaa1402a54d8377dba5946be12...a202233c10705e544b2292734cacbe698218b9a5
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+reconcile: 0 blocking finding(s), 5 advisory (not blocking)
+exit: 0; elapsed: 9.55s
+```
+
+### push-range
+
+```text
+cwd: /private/tmp/agentfold-final-review-lower-closing
+command: python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-30-rebuild-the-open-pr-stack --range 5a9f044f84fbcc21597f7bf44466cab9b3694b42...a202233c10705e544b2292734cacbe698218b9a5 --displaced-tip 5a9f044f84fbcc21597f7bf44466cab9b3694b42
+candidate: a202233c10705e544b2292734cacbe698218b9a5
+reconcile: 0 blocking finding(s), 5 advisory (not blocking)
+exit: 0; elapsed: 2.94s
+```
+
+The full suite retains the same five deliberately skipped methods described above; the separate corpus commands cover all three real-history methods without skips. The code-candidate matrix records the opt-in projection result. The macOS filename limitation remains explicit.
+
+## Closing record review evidence
+
+Three independent reviewers examined the task input changes, unchanged implementation bytes, stable authorization evidence and captured verification records. Their full reports are preserved losslessly as JSON under `review-evidence/`; each records actual commands and the limits of its judgment. These are record-validation verdicts, not a second claim that the unexecuted external review ran.
+
+## Review verdicts
+
+**Reviewed revision:** a202233c10705e544b2292734cacbe698218b9a5
+
+- core-fit / final_history: approve — Confirmed preserved history and legitimate task and queue transitions with unchanged repository mechanisms.
+- core-fit / final_docs: approve — Confirmed stable evidence, canonical action projections and explicit verification limits across agents, providers and repositories.
+- core-fit / final_coverage: approve — Confirmed unchanged implementation and test discovery, faithful regression evidence and bounded completion claims.
