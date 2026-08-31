@@ -49,10 +49,8 @@ name a choice actually shown. Keep the value on one line however long it gets, a
 blank line before any paragraph that is not part of it. On queue items `record-swallow`
 blocks the wrap; nowhere else does, so nowhere else is it safe.
 
-**A threshold you cannot see is a wish.** The word budget on a live human item is the
-one rule of that format an author cannot check by reading their own file, and a held-out
-authoring run breached it seven times out of ten because nothing ever showed them the
-number. `automation/reconcile/reconcile.py --word-count <file>` prints the count against
+**Measure the word count before filing.**
+`automation/reconcile/reconcile.py --word-count <file>` prints the count against
 the budget for any file, committed or not; with no path it measures the three human
 templates and every live item the format governs. The budget's single source of truth is
 `HUMAN_ATTENTION_WORD_BUDGET`, which the finding, that command, and a test that would
