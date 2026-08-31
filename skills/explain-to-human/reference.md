@@ -203,10 +203,18 @@ There are three rungs, and most writing stops one too early.
 Annotated is right for evidence the reader may safely skip. Quoted is required when the
 sentence decides the question, because a summary of it is the one thing they cannot check.
 
-Link the heading, never the file: a long document with no anchor is not a pointer, it is a
-reading assignment. Quote the sentence that decides it, not the section around it. And
-never quote *and* summarize the same passage — the summary is the half the reader cannot
-check, so it is the half to cut.
+Link a decisive Markdown passage at its heading, not at the whole file. For text or code,
+select the lines with `#Lx` or `#Lx-Ly`, using positive line numbers within that file. Quote
+only the passage that decides the question, and do not repeat it in a summary.
+
+Keep the wording, identifier spelling, and case unchanged, even in a short quotation.
+Wrapping and Markdown emphasis may change presentation; marked omissions may remove words
+only while keeping the remaining passages in their original order. A citation proves no
+more than the source actually says.
+
+Annotated background remains useful when the reader can safely skip it. In a human queue
+item, put that background below the answer inside the existing record fold; local source
+links above the answer accompany the passages the reader needs to decide.
 
 ## Sentences, paragraphs, and the actor
 

@@ -13,8 +13,9 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 6. Recommendation repeats one shown choice's `### ` label text; its counter-case
    sits beside it. The check compares text, so paraphrasing the label fails.
 7. No machine field, hash, or token appears above the answer line.
-8. Each source the answer turns on is quoted and linked at its heading; For the
-   record keeps the machine copies.
+8. Each decisive source is quoted and linked at its heading or selected lines;
+   optional background and machine copies stay in For the record. See the source
+   excerpt guidance in templates/README.md.
 9. Under 800 words before the answer, and you never have to guess where you are:
    `python3 automation/reconcile/reconcile.py --word-count <this file>` prints
    your count against the budget. Four choices cost about 700 on their own, so
@@ -49,9 +50,12 @@ reader should be able to answer without opening anything.>
 >
 > — [<what this passage says>](<../../../ path to the file.md#heading-anchor>)
 
-<One quote block per document the answer turns on; a "does X still match Y" question has
-two. A review quotes its Review target. If the answer turns on no document at all, write
-the line `> No source document — everything you need is above.` and delete the attribution.>
+<Quote each decisive source; a comparison quotes both sides. Link a Markdown heading,
+or bounded lines with #Lx or #Lx-Ly for text or code. Preserve wording and case; wrapping,
+emphasis, and marked omissions in source order are allowed. If no source wording decides
+the answer, replace this whole source block with exactly
+`> No source document — everything you need is above.` A local-file review still quotes
+its target. Put optional background below the answer, inside the fold.>
 
 ## Your choices
 
@@ -123,5 +127,16 @@ A needs-human item may bind only transition:start on a 0_backlog task, or
 operation:<name> for one act with no undo. Merging, moving a task, and recording it
 done never wait on an answer (message-queue/AGENTS.md owns this rule).
 Add External assignment / External source only for a provider binding. On a
-changes-requested resolution add Successor action and Follow-up review here; an
-unanswerable one adds Successor action alone, naming the re-asked human item. -->
+changes-requested resolution add Successor action and Follow-up review here.
+For unanswerable, add **Successor action:** `<new needs-human/reviews path>` alone
+on the resolving item. Create that distinct, new review in the same resolution
+commit, with **Supersedes:** `<old review path>` pointing back. Preserve Full
+context and the exact Review target and Review revision. Keep its delivery prefix
+and every field the original item's schema uses for dependency timing, including
+any task boundary.
+The new item is waiting, with a blank Your review, blank Reviewed revision, and
+pending Review outcome. An existing, answered, or awaiting-artifact item cannot be
+this successor. Supply the missing context without changing the judgment or the
+artifact; a later artifact change uses the ordinary retraction/publication path.
+The old response stays immutable, and its predeclared Resolution evidence still
+changes in the resolving commit. -->

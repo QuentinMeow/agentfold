@@ -49,22 +49,29 @@ Separate three things, and never let them blur:
 
 The owner needs the effect, not the investigation that found it. But when the answer turns
 on what another document says, they need that document's own words: your summary of them is
-the one thing they cannot check. Cite a source and you owe both, in the same breath.
+the one thing they cannot check. Quote every source whose wording determines the answer,
+and give the quotation its own attribution link.
 
 > A legitimate exception is finding-specific, content-bound, attributable, reasoned,
 > expiring, and visible. The producing agent cannot self-approve a confirmed critical finding.
 >
 > — [what the design says an exception must be](../../../docs/designs/risk-tiered-agent-guardrails.md#make-escape-hatches-narrower-than-the-rule)
 
-Link the heading, never the file: a backticked path is clickable nowhere, and a 710-line
-document with no anchor is not a pointer. Quote the sentence that decides it, not the
-section around it, and never quote *and* summarize the same passage — the summary is the
-half the reader cannot check, so it is the half to cut.
+Link a Markdown passage at its heading, or select text or code with `#Lx` or `#Lx-Ly`.
+Line numbers start at one, stay within the file, and run forwards. An attribution may use
+an ordinary destination or CommonMark angle brackets, such as
+`[selected lines](<../../../docs/source notes.txt#L2-L4>)`. A backticked path alone is not
+a clickable citation. Quote the decisive passage without repeating it in a summary.
 
-When the question is "does X still match Y", quote X and quote Y; one side is not a
-comparison, and a review quotes the file it asks about. If nothing outside this file bears
-on the answer, write `> No source document — everything you need is above.`, so a missing
-quote reads as missing rather than as unnecessary.
+Preserve wording, identifier spelling, and case, however short the quotation. Wrapping,
+Markdown emphasis, and marked omissions are allowed; the remaining passages keep their
+source order. When the question is "does X still match Y", quote both sides.
+
+If no source wording determines the answer, replace the source block with
+`> No source document — everything you need is above.` A local-file review must still
+quote the file it asks about; that sentence cannot waive its evidence. Put optional
+annotated background links below the answer, inside the existing record fold. They need
+no quotation when the reader can safely skip them.
 
 ## Give the choices a shared axis, then make each one concrete
 
@@ -106,24 +113,31 @@ form that the option is there; an affordance nobody is told about is not one.
 
 Nine schema checks sit in the header comment of the template you copied; run them there.
 Three things no template can check are yours: every repository-local term glossed at first
-use, every document the answer turns on quoted here and linked at its heading, and a
-recommendation naming one shown option with a real counter-case beside it.
+use, every source the answer turns on quoted here and linked at its heading or selected
+lines, and a recommendation naming one shown option with a real counter-case beside it.
 
 ## Part of this is reported back to you
 
 The reconciler's `explanation-shape` check reports, as an **advisory** finding, a section
 missing from the item's own template, a section out of that template's order, and any
 `### ` choice with no concrete `*Example consequence:*` line under it. In the commit that
-creates an item it also reads its citations: a quote whose words are not the words at the
-heading it names, an anchor that names no heading, a path above the answer line that
-nothing quotes, a review that never quotes its own `Review target`, and an item carrying
-neither a quote nor the `> No source document` line. Advisory means it prints with an
-`(advisory)` marker and is counted, and never fails a commit or a merge
+creates an item it also checks local citations against the captured candidate's regular
+file bytes. It reports altered quotations, including short ones; invalid headings or line
+ranges; missing, escaping, nonregular, or binary sources; local links above the answer with
+no quotation; and a local-file review that never quotes its target. An item with neither
+an attributed quotation nor the exact no-source sentence also receives an advisory.
+
+Source paths resolve within the repository, relative to the item or the repository root;
+unstaged files and symlinks cannot change the captured evidence. External content is not
+fetched or machine-verified. A matching local quotation does not prove its relevance or
+truth. Advisory means the finding prints with an `(advisory)` marker and is counted;
+it never fails an ordinary commit or merge
 (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
 
 It does not read every live item. One written under an earlier field spelling is judged by
 the schema it was written under, because a record is immutable; those are skipped, and
-named together in one finding that asks for a fresh item rather than an edit.
+named together in one finding that asks for a fresh item rather than an edit. A diagnostic
+does not authorize rewriting or replacing a live ask; its ordinary lifecycle still applies.
 
 What no check can see is whether the sentence you quoted is the one that matters, or
 whether the counter-case is real rather than hedged. The shape is caught; the rest is yours.

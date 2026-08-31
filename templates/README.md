@@ -71,6 +71,33 @@ follow it. Its `What to review` section is the only part a check reads
 (`automation/check_action_projection.py`), and `handbook/git-workflow.md` owns what that
 check requires.
 
+## Source excerpts in human items
+
+The three human templates show the quotation and attribution together. Copy the decisive
+passage, then name its location with `> — [what this passage says](destination#anchor)`.
+CommonMark angle destinations, such as
+`> — [selected lines](<../../../docs/source notes.txt#L2-L4>)`, are also accepted. Resolve
+local paths from the queue item's folder or the repository root. Select a Markdown heading
+or bounded text/code lines with `#Lx` or `#Lx-Ly`: line numbers start at one, run forwards,
+and cannot exceed the file. A bare file link does not select a passage.
+
+Preserve the source's wording, identifier spelling, and case, including in short quotes.
+Wrapping and Markdown emphasis may change presentation. Mark omissions with `…`, `...`,
+`[…]`, or `[...]`, keeping the remaining passages in source order. Quote both sides of a
+comparison. Optional annotated background belongs below the answer inside the record fold
+and needs no quotation; the reader must be able to decide without opening it.
+
+When no source wording decides the answer, replace the whole source block with exactly
+`> No source document — everything you need is above.` Keep the required context fields.
+A review of a local file still quotes its target; the no-source sentence cannot replace
+that evidence.
+
+Source findings are advisory. Local comparisons use the captured candidate's regular-file
+bytes; missing, outside-repository, nonregular, binary, and invalidly selected sources do
+not count as verified evidence. External content is not fetched or machine-verified.
+Matching text establishes neither its relevance nor its truth; the author still checks
+whether the selected passage supports the judgment.
+
 ## Queue delivery timing
 
 Every live queue filename starts with exactly one delivery prefix. What the prefixes

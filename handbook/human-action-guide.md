@@ -53,7 +53,7 @@ Copy the matching template from `templates/queue/`, then fill it so a zero-conte
 can do all five of these:
 
 1. Identify one concrete response.
-2. Follow one durable source for depth.
+2. Read the decisive source wording here, with a durable link for depth when needed.
 3. Understand the meaningful dispositions and how their consequences differ.
 4. See one small example.
 5. Know the boundary, or the safe result of leaving it unattended.
@@ -119,8 +119,11 @@ them. A plain-English sentence is a complete answer. The agent that folds the an
 the bookkeeping. It also shows the person how it read their words before acting. (Folding
 is the claim that turns a committed human response into repository change.)
 
-State the source once, as one clickable link in the prose. The machine-readable copy of
-that path goes in `Full context`, below the answer line.
+When the answer depends on another source's wording, quote the decisive passage and link
+its heading or selected lines. Optional background belongs below the answer, inside the
+record fold. If no source wording determines the answer, use the template's explicit
+no-source sentence; it never replaces a quotation from a local file being reviewed.
+`Full context` still belongs below the answer line.
 
 A file that already carries a concrete response is a record, not an ask. Never reformat it.
 It keeps the schema it was written under.
@@ -223,7 +226,11 @@ A rejected or abandoned review never authorizes crossing its boundary.
 | `changes-requested` | Create two items. One same-timing `needs-agent` action solely owns the concrete repair, its context, and its resolution evidence. One distinct `needs-human` re-review awaits that artifact and depends on the repair action, so the boundary stays closed without duplicating the repair. |
 | `rejected` | End pursuit. Restore a rejected Git candidate path-for-path to its reviewed base; a rejected local target changes or disappears. A task-bound rejection stays live until that task is removed. |
 | `abandoned` | End pursuit, on the same terms as `rejected`. |
-| `unanswerable` | The reader could not tell from what the item showed them, so nothing about the subject was decided and the boundary does not move. Create one same-timing `needs-human` successor that carries what was missing — quoted, not linked — and names this path in **Supersedes:**. |
+| `unanswerable` | The reader could not decide from what the item showed them. Create one new, distinct, unanswered `needs-human/reviews` item that supplies the missing context and keeps the same judgment, artifact, revision, and timing boundary. Nothing about the subject was decided; the replacement stays ready for review. Follow the binding and lineage rules in `templates/queue/review.md`. |
+
+An unanswerable review follows the ordinary claim and evidence-changing resolution flow;
+its human response is never rewritten. Re-asking repairs the explanation, not the artifact.
+If the artifact later changes, use the retraction and publication path above.
 
 Distinct cancellation evidence records the disposition without rewriting the reviewed
 bytes. The legacy value `not-approved` is the old spelling of `changes-requested` and
