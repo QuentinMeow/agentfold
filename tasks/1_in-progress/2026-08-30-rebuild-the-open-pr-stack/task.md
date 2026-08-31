@@ -1,11 +1,11 @@
 # Recover useful local and open-PR changes into a mergeable stack
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex
 **Mode:** autonomous
 **Filed:** 2026-08-30, by codex, from the owner request to recover the open pull requests
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-rebuild-the-open-pr-stack.md`
+**Queue actions:** none
 ## Goal
 
 Assess PRs 88 and 89 together with the unfinished local merge and retained experiments. Preserve useful behavior in a shallow, verified PR stack, excluding superseded experiments without losing recoverable source state. Existing PRs may be repaired or replaced; the delivered implementation remains open for review.
