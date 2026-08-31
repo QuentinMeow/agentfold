@@ -44,6 +44,7 @@ from markdown_semantics import (
     RAW_HTML_TOKEN_RE,
     commonmark_lines,
     contains_raw_html,
+    inline_code_spans,
     markdown_link_destinations,
     markdown_links,
     normalized_action_tokens,
@@ -413,22 +414,15 @@ EXAMPLE_CONSEQUENCE_RE = re.compile(
 # reader an argument they cannot cheaply check — raises agreement with wrong
 # recommendations as readily as with right ones. So this asks for bytes and never
 # for reasoning.
-QUOTE_ATTRIBUTION_RE = re.compile(
-    r"^—[ \t]+\[(?P<label>[^\]]+)\]\((?P<dest>[^()\s]+)\)[ \t]*$"
-)
-# Quoting a long passage means eliding. Every remaining segment must still appear
-# in the source, in order: eliding is permitted, paraphrasing inside a blockquote
-# is not.
 QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)\s*")
 # Below this, a run of words is short enough to appear in an unrelated document by
 # coincidence, so a failed match is not evidence of fabrication and is not
 # reported. It is a floor on *verification*, never a floor on quote length: a
 # six-word sentence that decides the question is a better quote than twelve padded
 # ones, and a minimum length is an invitation to pad.
-QUOTE_VERIFY_MIN_WORDS = 8
 # AR 25-50's device, and OpenVEX's: a claim that there is nothing to show must be
 # stated, because a blank slot is indistinguishable from a skipped one.
-NO_SOURCE_LITERAL = "no source document — everything you need is above."
+NO_SOURCE_LITERAL = "No source document — everything you need is above."
 # A backticked token shaped like a repository *file*. Backticks render as code, so
 # it is not clickable on any surface a human reads an item on. A directory is
 # exempt: it has no passage to quote, so a link is the honest form for it.
@@ -1939,57 +1933,99 @@ def sourced_quotes(text):
         body = [line for line in run if line.strip()]
         if len(body) < 2:
             continue
-        attribution = QUOTE_ATTRIBUTION_RE.match(body[-1].strip())
-        if attribution:
-            found.append((
-                " ".join(attribution.group("label").split()),
-                attribution.group("dest"),
-                "\n".join(body[:-1]),
-            ))
+        attribution = body[-1].strip()
+        linked = attribution.removeprefix("— ").strip()
+        # Use the same destination grammar as ordinary prose links, including
+        # CommonMark angle destinations and optional link titles.
+        matched = MARKDOWN_LINK_RE.fullmatch(linked)
+        links = markdown_links(linked) if matched and attribution.startswith("— ") else []
+        if len(links) == 1:
+            label, destination = links[0]
+            found.append((" ".join(label.split()), destination, "\n".join(body[:-1])))
+
     return found
 
 
-def quote_link_target(item, destination):
-    """Resolve one link destination to a tracked repository file, or None.
+def external_quote_destination(destination):
+    return bool(re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", destination)) \
+        or destination.startswith("//")
 
-    `check_links` cannot serve here and this is the whole reason the check owns
-    its own resolution: `LINK_SKIP_PREFIXES` contains `"../"`, and the skip
-    returns before the anchor comparison, so every relative link a queue item
-    writes — the form `templates/queue/*.md` mandates — is accepted without its
-    anchor ever being read. Removing that prefix is not the cheaper repair: it
-    would newly evaluate every `../` destination in the repository, nearly all of
-    them in immutable handovers naming paths that have legitimately moved.
+
+def quote_link_target(item, destination):
+    """Select a lexical repository path without consulting worktree symlinks.
+
+    Queue-relative links take precedence; root-relative repository spellings are
+    also accepted. Only captured regular-file modes and bytes establish a source.
+    Keep a missing lexical target so the caller can report it instead of silently
+    treating a bad local citation as an external link.
     """
     path = destination.partition("#")[0]
-    if not path or path.startswith(("http://", "https://", "mailto:")):
+    if external_quote_destination(destination) or path.startswith("/"):
         return None
-    for candidate in ((item.parent / path).resolve(), (REPO / path).resolve()):
-        try:
-            rel = candidate.relative_to(REPO.resolve()).as_posix()
-        except (ValueError, OSError):
-            continue
-        if repo_artifact_bytes(REPO / rel) is not None:
-            return REPO / rel
-    return None
+    bases = (item.parent.relative_to(REPO).parts, ()) if path else ((),)
+    candidates = []
+    for base in bases:
+        parts = list(base)
+        for part in PurePosixPath(path or item.relative_to(REPO).as_posix()).parts:
+            if part == "..":
+                if not parts:
+                    break
+                parts.pop()
+            elif part != ".":
+                parts.append(part)
+        else:
+            candidate = REPO.joinpath(*parts)
+            if candidate not in candidates:
+                candidates.append(candidate)
+    for candidate in candidates:
+        relative = candidate.relative_to(REPO).as_posix()
+        if (REPO / ".git").exists():
+            if git_index_entry_mode(relative) is not None:
+                return candidate
+        elif not any(parent.is_symlink() for parent in (candidate, *candidate.parents)
+                     if parent != REPO and REPO in parent.parents):
+            if candidate.is_file():
+                return candidate
+    return candidates[0] if candidates else None
 
 
-def anchored_section_source(target, fragment):
-    """Return the source one `#fragment` selects, or None when it selects none.
-
-    Headings are located in the semantic view, so a `#` inside a fenced code block
-    is not a heading; the span is then cut from the raw lines, so a quote may
-    legitimately include fenced code. `semantic_text` preserves line count, which
-    is what lets one index serve both views. The heading pattern is
-    `markdown_headings`' own, so this and `anchor_resolves` can never disagree
-    about which headings exist or how a repeated slug is numbered.
-    """
-    if target.suffix != ".md":
+def quote_source_text(target):
+    """Read a candidate regular text blob, never repo_text's draft fallback."""
+    if not (REPO / ".git").exists() and any(
+        parent.is_symlink() for parent in (target, *target.parents)
+        if parent != REPO and REPO in parent.parents
+    ):
+        return None
+    raw = repo_artifact_bytes(target)
+    if raw is None or b"\x00" in raw:
         return None
     try:
-        raw = repo_text(target)
-    except (GitSnapshotError, OSError, UnicodeDecodeError):
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def anchored_section_source(target, fragment, raw=None):
+    """Select a Markdown heading section or an inclusive, bounded line range."""
+    if raw is None:
+        raw = quote_source_text(target)
+    if raw is None:
         return None
     raw_lines = raw.splitlines()
+    line_range = re.fullmatch(r"L([1-9][0-9]*)(?:-L([1-9][0-9]*))?", fragment)
+    if line_range:
+        first, last = line_range.group(1), line_range.group(2) or line_range.group(1)
+        # Bound the decimal strings before int(): an enormous malformed selector
+        # is an advisory, not Python's integer-conversion-limit exception.
+        digits = len(str(len(raw_lines)))
+        if len(first) > digits or len(last) > digits:
+            return None
+        start, end = int(first), int(last)
+        if 1 <= start <= end <= len(raw_lines):
+            return "\n".join(raw_lines[start - 1:end])
+        return None
+    if target.suffix.lower() != ".md":
+        return None
     semantic_lines = semantic_text(raw).splitlines()
     heads = [
         (index, matched.group(1), matched.group(2))
@@ -2011,26 +2047,101 @@ def anchored_section_source(target, fragment):
     return "\n".join(raw_lines[start + 1:end])
 
 
-def quote_is_verbatim(quoted, source):
-    """Whether every un-elided segment appears in the source, in order.
+def quote_presentation_text(value):
+    """Normalize paired prose emphasis while preserving code's literal contents.
 
-    Collapses only what a faithful quoter legitimately changes — line wrapping and
-    added emphasis — and nothing else.
+    This is deliberately a small presentation allowance, not a Markdown renderer.
+    In particular, intraword underscores, operators, unmatched delimiters, and the
+    contents of inline/fenced/indented code cannot disappear during comparison.
     """
-    def flatten(value):
-        return " ".join(re.sub(r"[*_`]", "", value or "").split()).lower()
+    protected = []
+    prefix = "\ue000QUOTE"
+    while prefix in value:
+        prefix += "Q"
 
-    haystack = flatten(source)
-    cursor = 0
-    for segment in QUOTE_ELISION_RE.split(quoted or ""):
-        segment = flatten(segment)
-        if not segment:
-            continue
-        found = haystack.find(segment, cursor)
-        if found < 0:
+    def protect(content):
+        protected.append(content)
+        return prefix + str(len(protected) - 1) + "\ue001"
+
+    exposed = semantic_line_offsets(value)
+    lines = commonmark_lines(value)
+    fence = None
+    for index, line in enumerate(lines):
+        matched = re.match(r"^ {0,3}(`{3,}|~{3,})(.*?)(?:\n)?$", line)
+        if fence is not None:
+            if matched and matched.group(1)[0] == fence[0] \
+                    and len(matched.group(1)) >= len(fence) and not matched.group(2).strip():
+                fence = None
+                lines[index] = "\n"
+            else:
+                lines[index] = protect(line)
+        elif matched:
+            fence = matched.group(1)
+            lines[index] = "\n"
+        elif index not in exposed:
+            lines[index] = protect(line)
+    value = "".join(lines)
+    for start, end in reversed(inline_code_spans(value)):
+        value = value[:start] + protect(render_inline_code(value[start:end])) + value[end:]
+    # Whole delimiter runs with word boundaries: never erase the underscore in
+    # MAX_LIMIT or the multiplication operator in A*B.
+    emphasis = re.compile(r"(?<![\w*\\])(?P<stars>\*{1,3})(?=\S)(?P<body>.+?)(?<=\S)(?P=stars)(?![\w*])"
+                          r"|(?<![\w_\\])(?P<unders>_{1,3})(?=\S)(?P<ubody>.+?)(?<=\S)(?P=unders)(?![\w_])", re.S)
+    while True:
+        changed = emphasis.sub(lambda m: m.group("body") if m.group("stars") else m.group("ubody"), value)
+        if changed == value:
+            break
+        value = changed
+    for index in range(len(protected) - 1, -1, -1):
+        value = value.replace(prefix + str(index) + "\ue001", protected[index])
+    return value
+
+
+def raw_quote_presentations(quoted):
+    """For code/text sources, permit only a wrapper around the entire excerpt."""
+    yield quoted
+    stripped = quoted.strip()
+    if inline_code_spans(stripped) == [(0, len(stripped))]:
+        yield render_inline_code(stripped)
+    fenced = re.fullmatch(r"(`{3,}|~{3,})[^\n]*\n(.*?)\n\1", stripped, re.S)
+    if fenced:
+        yield fenced.group(2)
+    for delimiter in ("***", "**", "*", "___", "__", "_"):
+        if stripped.startswith(delimiter) and stripped.endswith(delimiter):
+            body = stripped[len(delimiter):-len(delimiter)]
+            if body and body == body.strip():
+                yield body
+
+
+def quote_is_verbatim(quoted, source, markdown=True):
+    """Check every excerpt length, in order, without changing spelling or case."""
+    def flatten(value):
+        return " ".join(value.split())
+
+    def matches(needle, haystack):
+        needle, haystack = flatten(needle), flatten(haystack)
+        if needle and needle in haystack:
+            return True
+        segments = [flatten(part) for part in QUOTE_ELISION_RE.split(needle) if flatten(part)]
+        if not segments:
             return False
-        cursor = found + len(segment)
-    return True
+        cursor = 0
+        for segment in segments:
+            found = haystack.find(segment, cursor)
+            if found < 0:
+                return False
+            cursor = found + len(segment)
+        return True
+
+    if matches(quoted, source):
+        return True
+    if markdown:
+        return matches(quote_presentation_text(quoted), quote_presentation_text(source))
+    return any(matches(presentation, source) for presentation in raw_quote_presentations(quoted))
+
+
+def has_no_source_statement(text):
+    return any(run == [NO_SOURCE_LITERAL] for run in blockquote_runs(text))
 
 
 def evidence_problems(item, text):
@@ -2049,47 +2160,37 @@ def evidence_problems(item, text):
     shown, attributed = set(), set()
     for label, destination, quoted in quotes:
         attributed.add(destination)
-        target = quote_link_target(item, destination)
-        if target is None:
+        if external_quote_destination(destination):
+            # This check never fetches external content or presents it as verified.
             continue
-        shown.add(target.relative_to(REPO).as_posix())
+        target = quote_link_target(item, destination)
         path, _, fragment = destination.partition("#")
-        source = None
+        if target is None:
+            problems.append(f"quote `{label}` has a source outside the repository: `{path}`")
+            continue
+        raw = quote_source_text(target)
+        if raw is None:
+            problems.append(f"quote `{label}` source `{path}` is missing, nonregular, or not readable candidate text")
+            continue
         if not fragment:
+            problems.append(f"quote `{label}` points at the whole of `{path}`; select a heading or bounded line range")
+            continue
+        source = anchored_section_source(target, fragment, raw)
+        if source is None:
+            problems.append(f"quote `{label}` source selector `#{fragment}` does not select a heading or bounded line range in `{path}`")
+            continue
+        if not quote_is_verbatim(quoted, source, markdown=target.suffix.lower() == ".md" and not re.fullmatch(r"L[0-9]+(?:-L[0-9]+)?", fragment)):
             problems.append(
-                f"quote `{label}` points at the whole of `{path}`; a reader sent "
-                "to a long document has not been pointed anywhere"
+                f"quote `{label}` is not the words that stand at `{path}#{fragment}`; "
+                "quote the source's own bytes, or drop the quotation marks and own the sentence yourself"
             )
         else:
-            source = anchored_section_source(target, fragment)
-            if source is None:
-                problems.append(
-                    f"quote `{label}` names `#{fragment}`, which is no heading "
-                    f"in `{path}`"
-                )
-        # A bad anchor must never switch the fabrication check off, so an
-        # unresolved fragment falls back to the whole document rather than
-        # skipping: otherwise a typo is the cheapest way to launder an invented
-        # quotation.
-        if source is None:
-            try:
-                source = repo_text(target)
-            except (GitSnapshotError, OSError, UnicodeDecodeError):
-                source = None
-        words = len(" ".join(quoted.split()).split())
-        if source is not None and words >= QUOTE_VERIFY_MIN_WORDS \
-                and not quote_is_verbatim(quoted, source):
-            problems.append(
-                f"quote `{label}` is not the words that stand at `{path}"
-                + (f"#{fragment}" if fragment else "")
-                + "`; quote the source's own bytes, or drop the quotation marks "
-                "and own the sentence yourself"
-            )
+            shown.add(target.relative_to(REPO).as_posix())
 
     for label, destination in markdown_links(above):
         if destination in attributed:
             continue
-        if quote_link_target(item, destination) is None:
+        if external_quote_destination(destination):
             continue
         problems.append(
             f"link `{' '.join(label.split())}` sends the reader to a file the "
@@ -2115,7 +2216,7 @@ def evidence_problems(item, text):
             + (f", and {len(stray) - 3} more" if len(stray) > 3 else "")
         )
 
-    if not quotes and NO_SOURCE_LITERAL not in " ".join(above.split()).lower():
+    if not quotes and not has_no_source_statement(above):
         problems.append(
             "no quoted source and no `> " + NO_SOURCE_LITERAL + "` line; a blank "
             "where evidence goes reads the same as evidence nobody looked for"
@@ -5762,7 +5863,7 @@ def review_reask_problem(path, text, prior_revision, revision):
     successor_path = candidates[0]
     successor_parts = Path(successor_path).parts
     if successor_path == path or not valid_queue_item_path(successor_path) \
-            or successor_parts[1] != "needs-human":
+            or successor_parts[1:3] != ("needs-human", "reviews"):
         return "unanswerable review successor is not a distinct canonical needs-human action"
     successor_bytes = candidate_artifact_bytes(successor_path, revision)
     if successor_bytes is None:
@@ -5779,6 +5880,15 @@ def review_reask_problem(path, text, prior_revision, revision):
         return "unanswerable review successor has no concrete **Action:**"
     if delivery_class(Path(successor_path).name) != delivery_class(Path(path).name):
         return "unanswerable review successor changes the dependency timing"
+    timing = delivery_class(Path(path).name)
+    for key in queue_timing_fields_for("needs-human", text).get(timing, ()):
+        if successor.get(key, "").strip() != got.get(key, "").strip():
+            return f"unanswerable review successor changes **{key}:**"
+    for key in ("Full context", "Review target", "Review revision"):
+        if successor.get(key, "").strip() != got.get(key, "").strip():
+            return f"unanswerable review successor changes **{key}:**"
+    if successor.get("Status", "").strip() != "waiting" or not unanswered_review(successor):
+        return "unanswerable review successor must be a waiting unanswered review"
     return None
 
 
@@ -5833,6 +5943,8 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                 )
             if outcome in REVIEW_REASK_OUTCOMES:
                 return review_reask_problem(
+                    path, text, prior_revision, revision
+                ) or resolution_evidence_problem(
                     path, text, prior_revision, revision
                 )
             if outcome in REVIEW_TERMINAL_OUTCOMES \
@@ -7199,7 +7311,8 @@ def check_explanation_shape():
                 and rel.as_posix() not in git_head_paths("message-queue") \
                 and not markdown_link_destinations(
                     human_attention_above_fold(text)
-                ):
+                ) \
+                and not has_no_source_statement(human_attention_above_fold(text)):
             # Birth-time only, and deliberately so. `handbook/human-action-guide.md`
             # asks for the source once, as one clickable link in the prose, with the
             # machine copy in `Full context` below the answer line — and nothing

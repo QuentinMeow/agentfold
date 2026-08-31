@@ -18366,86 +18366,102 @@ class ReconcileQueueTests(unittest.TestCase):
 
     def stage_unanswerable_resolution(self, root, successor_path=None,
                                       successor_timing=None, supersedes=None,
-                                      successor_predates_the_edge=False):
-        """Delete one unanswerable review, re-asking the question of a human.
-
-        `changes-requested` says the artifact was wrong. `unanswerable` says the
-        item was: nothing about the subject was decided, so the successor is a
-        fresh question for a person, not a repair for an agent.
-        """
+                                      successor_predates_the_edge=False,
+                                      successor_updates=None, original_timing=None,
+                                      change_evidence=True, rewrite_response=False,
+                                      commit_resolution=False):
+        """File, answer, claim, and resolve an actual bound review template."""
         self.init_git(root)
-        self.write(
-            root,
-            "message-queue/AGENTS.md",
-            "**Queue resolution schema:** v1\n"
-            "**Human-attention format:** v1\n",
-        )
-        target = self.write(root, "docs/source.md", "# Reviewed\n")
+        self.write(root, "message-queue/AGENTS.md", QUEUE_SCHEMA_MARKERS)
+        target = self.write(root, "docs/source.md", "# Reviewed\n\nExact artifact.\n")
         digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
-        old_path = (
-            "message-queue/needs-human/reviews/future-blocking-review.md"
-        )
+        old_path = "message-queue/needs-human/reviews/future-blocking-review.md"
         if successor_path is None:
-            successor_path = (
-                "message-queue/needs-human/reviews/"
-                "future-blocking-review-re-asked.md"
-            )
-        item = self.write(
-            root,
-            old_path,
-            "# Review\n\n"
-            "**Status:** waiting\n"
-            "**Filed:** 2026-07-23\n"
-            "**Action:** review exact bytes\n"
-            "**Full context:** `docs/source.md`\n"
-            "**Resolution evidence:** `docs/disposition.md`\n"
-            "**Review target:** `docs/source.md`\n"
-            f"**Review revision:** {digest}\n"
-            f"**Reviewed revision:** {digest}\n"
-            "**Review outcome:** unanswerable\n"
-            f"**Successor action:** `{successor_path}`\n"
-            + self.MODERN_REVIEW_TIMING
-            + "**Your review:** I cannot tell from this what I am agreeing to\n",
-        )
+            successor_path = "message-queue/needs-human/reviews/future-blocking-review-re-asked.md"
+        original_timing = self.MODERN_REVIEW_TIMING if original_timing is None else original_timing
+
+        def review(timing):
+            template = (QUEUE_TEMPLATES / "review.md").read_text()
+            start, end = template.index("> <the source's own words"), template.index("## Your choices")
+            template = template[:start] + "> Exact artifact.\n>\n> — [the reviewed bytes](../../../docs/source.md#reviewed)\n\n" + template[end:]
+            text = fill_queue_template(template, digest.removeprefix("sha256:"))
+            # The review is born with its original schema's timing vocabulary.
+            for key in ("Why this matters", "If you do nothing", "Answer by"):
+                text = re.sub(r"^\*\*" + key + r":\*\*[^\n]*\n", "", text, flags=re.M)
+            projections, boundaries = [], []
+            for line in timing.splitlines():
+                (projections if line.startswith(("**Why", "**If")) else boundaries).append(line)
+            text = re.sub(r"^(\*\*Action:\*\*[^\n]*\n)",
+                          lambda m: m.group() + "\n".join(projections) + "\n", text, count=1, flags=re.M)
+            text = text.replace("\n</details>", "\n" + "\n".join(boundaries) + "\n\n</details>")
+            if "**Until then:**" in timing:
+                text = text.replace("**Your review:**", "## Differences\n\nAccept the reviewed bytes or keep the old ones.\n\n## Example\n\nAcceptance adopts the reviewed sentence.\n\n**Your review:**")
+            return text
+
+        original = review(original_timing).replace("\n</details>", f"\n**Successor action:** `{successor_path}`  \n\n</details>")
+        item = self.write(root, old_path, original)
         self.write(root, "docs/disposition.md", "# Disposition\n")
         self.git(root, "add", ".")
-        self.git(root, "commit", "-m", "record the unanswerable response")
-        item.write_text(
-            item.read_text(encoding="utf-8").replace(
-                "**Status:** waiting", "**Status:** folding"
-            ),
-            encoding="utf-8",
-        )
+        for check in (RECONCILE.check_queue_schema, RECONCILE.check_human_attention,
+                      RECONCILE.check_fold_shape, RECONCILE.check_queue_resolution):
+            self.assertEqual([], self.messages(check()), check.__name__)
+        self.git(root, "commit", "-m", "file an unanswered bound review")
+        base = self.git(root, "rev-parse", "HEAD")
+        response = "I cannot tell from this what I am agreeing to"
+        answered = original.replace("**Your review:** ______", "**Your review:** " + response)
+        item.write_text(answered)
         self.git(root, "add", old_path)
-        self.git(root, "commit", "-m", "claim review")
-        self.write(
-            root,
-            successor_path,
-            "# Should the admission boundary move to the server?\n\n"
-            "**Status:** waiting\n"
-            "**Filed:** 2026-07-24\n"
-            "**Action:** answer the re-asked admission question\n"
-            "**Full context:** `docs/source.md`\n"
-            "**Resolution evidence:** `docs/disposition.md`\n"
-            "**Review target:** pending\n"
-            "**Review revision:** pending\n"
-            "**Reviewed revision:** ______\n"
-            "**Review outcome:** pending\n"
-            f"**Supersedes:** `{old_path if supersedes is None else supersedes}`\n"
-            + (self.MODERN_REVIEW_TIMING
-               if successor_timing is None else successor_timing)
-            + "**Your review:** ______\n",
-        )
+        self.assertEqual([], self.messages(RECONCILE.check_queue_resolution()))
+        self.assertEqual([], self.messages(RECONCILE.check_queue_frozen_skeleton()))
+        self.git(root, "commit", "-m", "record only the human response")
+        claimed = answered.replace("**Status:** waiting", "**Status:** folding").replace(
+            "**Reviewed revision:** ______", "**Reviewed revision:** " + digest).replace(
+            "**Review outcome:** pending", "**Review outcome:** unanswerable")
+        item.write_text(claimed)
+        self.git(root, "add", old_path)
+        self.assertEqual([], self.messages(RECONCILE.check_queue_resolution()))
+        self.assertEqual([], self.messages(RECONCILE.check_queue_frozen_skeleton()))
+        self.git(root, "commit", "-m", "claim and classify the unanswerable review")
+        successor = review(original_timing if successor_timing is None else successor_timing)
+        successor = re.sub(r"^\*\*Action:\*\*[^\n]*", "**Action:** review the clarified question about the same exact artifact", successor, count=1, flags=re.M)
+        successor = successor.replace("\n</details>", f"\n**Supersedes:** `{old_path if supersedes is None else supersedes}`  \n\n</details>")
+        if Path(successor_path).parts[1:3] != ("needs-human", "reviews"):
+            # A genuinely different action, not Git's similarity-detected rename
+            # of the answered review (which the older rewrite guard also refuses).
+            successor = ("# A separate action\n\n**Status:** waiting\n"
+                         "**Action:** answer a different question\n"
+                         f"**Supersedes:** `{old_path}`\n"
+                         "**Full context:** `docs/source.md`\n" + original_timing)
+        for key, value in (successor_updates or {}).items():
+            pattern = r"^(\*\*" + re.escape(key) + r":\*\*)[^\n]*"
+            successor, count = re.subn(pattern, lambda m: m.group(1) + " " + value, successor, flags=re.M)
+            if not count:
+                successor = successor.replace("\n</details>", f"\n**{key}:** {value}  \n\n</details>")
+        self.write(root, successor_path, successor)
         if successor_predates_the_edge:
             self.git(root, "add", successor_path)
             self.git(root, "commit", "-m", "file an unrelated question early")
+        if rewrite_response:
+            item.write_text(claimed.replace(response, "Approved without reservations."))
+            self.git(root, "add", old_path)
+            self.git(root, "commit", "-m", "try to rewrite the immutable response")
         item.unlink()
+        if change_evidence:
+            self.write(root, "docs/disposition.md", "# Disposition\n\nThe question was not answerable; a fresh review preserves the exact artifact and boundary.\n")
         self.git(root, "add", "-A")
         RECONCILE.start_git_snapshot_cache()
         try:
-            return self.messages(RECONCILE.check_queue_resolution())
+            messages = self.messages(RECONCILE.check_queue_resolution())
+            if commit_resolution and not messages:
+                self.assertEqual([], self.messages(RECONCILE.check_queue_schema()))
+                self.assertEqual([], self.messages(RECONCILE.check_human_attention()))
+                self.assertEqual([], self.messages(RECONCILE.check_queue_frozen_skeleton()))
         finally:
             RECONCILE.stop_git_snapshot_cache()
+        if commit_resolution:
+            self.git(root, "commit", "-m", "resolve with a newly authored replacement review")
+            messages = self.resolution_messages(root, base)
+        return messages
 
     def test_unanswerable_review_resolves_by_re_asking_a_human(self):
         """The fifth outcome exists so "I can't tell" is recordable at all.
@@ -18507,6 +18523,57 @@ class ReconcileQueueTests(unittest.TestCase):
                 "successor was not introduced by the resolution edge" in message
                 for message in messages
             ), messages)
+
+    def test_unanswerable_review_full_template_lifecycle_preserves_the_response(self):
+        with self.repo() as root:
+            self.assertEqual([], self.stage_unanswerable_resolution(root, commit_resolution=True))
+
+    def test_unanswerable_review_successor_cannot_change_binding_or_context(self):
+        for key, value in (("Full context", "`docs/disposition.md`"),
+                           ("Review target", "`docs/disposition.md`"),
+                           ("Review revision", "sha256:" + "a" * 64)):
+            with self.subTest(key=key), self.repo() as root:
+                messages = self.stage_unanswerable_resolution(root, successor_updates={key: value})
+                self.assertTrue(any("unanswerable review successor changes **" + key in message
+                                    for message in messages), messages)
+
+    def test_unanswerable_review_successor_preserves_the_entire_original_timing(self):
+        cases = (
+            (self.MODERN_REVIEW_TIMING, {"Blocks at": "transition:start"}),
+            (self.MODERN_REVIEW_TIMING.replace("transition:merge", "transition:merge task:2026-07-23-example"),
+             {"Blocks at": "transition:merge task:2026-07-23-other"}),
+            (self.LEGACY_REVIEW_TIMING, {"Until then": "the boundary can be ignored"}),
+        )
+        for timing, updates in cases:
+            with self.subTest(updates=updates), self.repo() as root:
+                messages = self.stage_unanswerable_resolution(root, original_timing=timing, successor_updates=updates)
+                self.assertTrue(any("unanswerable review successor changes **" in message for message in messages), messages)
+
+    def test_unanswerable_review_successor_must_be_a_waiting_unanswered_review(self):
+        cases = (
+            {"Status": "awaiting-artifact"}, {"Status": "folding"},
+            {"Review outcome": "approved"}, {"Your review": "Ship it."},
+            {"Your answer": "Approve."}, {"Reviewed revision": "sha256:" + "a" * 64},
+            {"Review target": "pending", "Review revision": "pending"},
+        )
+        for updates in cases:
+            with self.subTest(updates=updates), self.repo() as root:
+                messages = self.stage_unanswerable_resolution(root, successor_updates=updates)
+                self.assertTrue(any("unanswerable review successor" in message for message in messages), messages)
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(root, successor_path=
+                "message-queue/needs-human/decisions/future-blocking-other.md")
+            self.assertTrue(any("not a distinct canonical needs-human" in message for message in messages), messages)
+
+    def test_unanswerable_review_resolution_requires_changed_declared_evidence(self):
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(root, change_evidence=False)
+            self.assertTrue(any("resolution evidence was not created or changed" in message for message in messages), messages)
+
+    def test_unanswerable_review_resolution_cannot_rewrite_original_response(self):
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(root, rewrite_response=True, commit_resolution=True)
+            self.assertTrue(any("after the first concrete response" in message for message in messages), messages)
 
     def test_legacy_review_successor_is_still_compared_on_its_timing_prose(self):
         """The marker alone must not stop comparing a field the item still has.
@@ -19956,6 +20023,255 @@ class ReconcileQueueTests(unittest.TestCase):
             messages = self.messages(RECONCILE.check_links())
             self.assertTrue(any("guardrail-modes.md` does not exist" in message
                                 for message in messages), messages)
+
+    # --- source evidence reads the captured candidate, faithfully ---------------
+
+    def source_evidence_item(self, root, quoted, destination, *, kind="decision",
+                             source="# Source\n\n## Limit\n\nMAX_LIMIT stays ten.\n",
+                             target="docs/source.md", no_source=False):
+        """Author an actual human template beside a staged regular source."""
+        self.init_git(root)
+        self.write(root, "message-queue/AGENTS.md", QUEUE_SCHEMA_MARKERS)
+        self.write(root, "docs/source.md", "# Source\n")
+        artifact = self.write(root, target, source)
+        self.write(root, QUEUE_TEMPLATE_EVIDENCE, "# Disposition\n")
+        for template in QUEUE_TEMPLATES.glob("*.md"):
+            self.write(root, "templates/queue/" + template.name, template.read_text())
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "source evidence fixture baseline")
+        template = (QUEUE_TEMPLATES / (kind + ".md")).read_text()
+        begin = template.index("> <the source's own words")
+        end = template.index("## Your choices", begin)
+        quote = ("> No source document — everything you need is above.\n"
+                 if no_source else "\n".join("> " + line for line in quoted.split("\n"))
+                 + "\n>\n> — [the selected limit](" + destination + ")\n")
+        # Fill placeholders before introducing an angle-wrapped source link.
+        template = template[:begin] + "SOURCE_EXCERPT\n\n" + template[end:]
+        filled = fill_queue_template(template, hashlib.sha256(artifact.read_bytes()).hexdigest())
+        filled = filled.replace("SOURCE_EXCERPT\n", quote)
+        filled = filled.replace("**Review target:** `docs/source.md`",
+                                "**Review target:** `" + target + "`")
+        leaf = QUEUE_TEMPLATE_ENDPOINTS[kind + ".md"]
+        item = self.write(root, "message-queue/" + leaf + "/non-blocking-source.md", filled)
+        self.git(root, "add", ".")
+        return item
+
+    def source_evidence_findings(self, item):
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            text = RECONCILE.repo_text(item)
+            for check in (RECONCILE.check_queue_schema, RECONCILE.check_queue_name,
+                          RECONCILE.check_queue_location, RECONCILE.check_human_attention,
+                          RECONCILE.check_fold_shape, RECONCILE.check_queue_render):
+                self.assertEqual([], self.messages(check()), check.__name__)
+            return RECONCILE.evidence_problems(item, text), list(RECONCILE.check_explanation_shape())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_evidence_real_templates_accept_headings_and_line_selectors(self):
+        cases = (
+            ("decision", "docs/source.md", "# Source\n\n## Limit\n\nMAX_LIMIT stays ten.\n",
+             "../../../docs/source.md#limit", "MAX_LIMIT stays ten."),
+            ("clarification", "docs/source notes.txt", "MAX_LIMIT stays ten.\nNext line.\n",
+             "<../../../docs/source notes.txt#L1>", "MAX_LIMIT stays ten."),
+            ("review", "docs/limit.py", "MAX_LIMIT = 10\nMIN_LIMIT = 1\n",
+             "../../../docs/limit.py#L1-L2", "MAX_LIMIT = 10\nMIN_LIMIT = 1"),
+        )
+        for kind, target, source, destination, quoted in cases:
+            with self.subTest(kind=kind, destination=destination), self.repo() as root:
+                item = self.source_evidence_item(root, quoted, destination,
+                                                 kind=kind, source=source, target=target)
+                evidence, findings = self.source_evidence_findings(item)
+                self.assertEqual([], evidence)
+                self.assertEqual([], findings)
+
+    def test_source_evidence_verifies_short_case_and_identifier_bytes(self):
+        for quoted in ("Nobody waits.", "MAXLIMIT stays ten.", "max_limit stays ten."):
+            with self.subTest(quoted=quoted), self.repo() as root:
+                item = self.source_evidence_item(root, quoted, "../../../docs/source.md#limit")
+                evidence, findings = self.source_evidence_findings(item)
+                self.assertTrue(any("not the words" in problem for problem in evidence), evidence)
+                self.assertTrue(any("not the words" in f.message and f.advisory for f in findings))
+
+    def test_source_evidence_rejects_missing_escaping_and_nonregular_sources(self):
+        for kind in ("missing", "unstaged", "escaping", "symlink", "parent-symlink", "binary", "invalid-utf8"):
+            with self.subTest(kind=kind), self.repo() as root:
+                destination = "../../../docs/evidence.txt#L1"
+                if kind == "escaping":
+                    destination = "../../../../outside.txt#L1"
+                item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", destination)
+                if kind in ("unstaged", "symlink", "parent-symlink", "binary", "invalid-utf8"):
+                    target = root / "docs/evidence.txt"
+                    if kind == "symlink":
+                        target.symlink_to("source.md")
+                    elif kind == "parent-symlink":
+                        self.write(root, "real/evidence.txt", "MAX_LIMIT stays ten.\n")
+                        (root / "docs/alias").symlink_to(root / "real", target_is_directory=True)
+                        item.write_text(item.read_text().replace("docs/evidence.txt", "docs/alias/evidence.txt"))
+                    else:
+                        target.write_bytes(b"MAX_LIMIT stays ten.\x00\n" if kind == "binary" else
+                                           b"\xffMAX_LIMIT stays ten.\n" if kind == "invalid-utf8" else
+                                           b"MAX_LIMIT stays ten.\n")
+                    if kind != "unstaged":
+                        self.git(root, "add", ".")
+                evidence, findings = self.source_evidence_findings(item)
+                self.assertTrue(evidence, kind)
+                self.assertTrue(any(f.advisory and "source" in f.message for f in findings), findings)
+
+    def test_source_evidence_captured_bytes_ignore_unstaged_files_and_symlinks(self):
+        for staged_valid in (False, True):
+            for replacement in ("file", "symlink", "parent-symlink"):
+                with self.subTest(staged_valid=staged_valid, replacement=replacement), self.repo() as root:
+                    source = "MAX_LIMIT = " + ("10" if staged_valid else "20") + "\n"
+                    item = self.source_evidence_item(root, "MAX_LIMIT = 10", "../../../docs/limit.py#L1",
+                                                     source=source, target="docs/limit.py")
+                    RECONCILE.start_git_snapshot_cache()
+                    try:
+                        # Mutate the worktree *and index* after capture; both are outside this candidate.
+                        other = self.write(root, "outside/limit.py", "MAX_LIMIT = " + ("20" if staged_valid else "10") + "\n")
+                        target = root / "docs/limit.py"
+                        if replacement == "file":
+                            target.write_bytes(other.read_bytes())
+                        elif replacement == "symlink":
+                            target.unlink()
+                            target.symlink_to(other)
+                        else:
+                            (root / "docs").rename(root / "saved-docs")
+                            (root / "docs").symlink_to(other.parent, target_is_directory=True)
+                        self.git(root, "add", "docs")
+                        evidence = RECONCILE.evidence_problems(item, RECONCILE.repo_text(item))
+                        self.assertEqual(not staged_valid, bool(evidence), evidence)
+                    finally:
+                        RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_evidence_rejects_unselected_and_invalid_ranges(self):
+        for selector in ("", "#missing", "#L0", "#L2-L1", "#L1-L3", "#Lx", "#L1-L2-extra"):
+            with self.subTest(selector=selector), self.repo() as root:
+                item = self.source_evidence_item(root, "MAX_LIMIT = 10", "../../../docs/limit.py" + selector,
+                                                 source="MAX_LIMIT = 10\nMIN_LIMIT = 1\n", target="docs/limit.py")
+                evidence, _ = self.source_evidence_findings(item)
+                self.assertTrue(evidence, selector)
+
+    def test_source_evidence_preserves_literal_code_and_text_symbols(self):
+        cases = (
+            ("VALUE = A*B", "VALUE = AB"),
+            ('LABEL = "**Approved**"', 'LABEL = "Approved"'),
+            ('LABEL = "`Approved`"', 'LABEL = "Approved"'),
+            ('LABEL = "Approved"', 'LABEL = "**Approved**"'),
+            ("MAX_LIMIT = 10", "MAXLIMIT = 10"),
+            ("MAX_LIMIT = 10", "max_limit = 10"),
+        )
+        for suffix in ("py", "txt"):
+            for source, quoted in cases:
+                with self.subTest(suffix=suffix, quoted=quoted), self.repo() as root:
+                    target = "docs/source." + suffix
+                    item = self.source_evidence_item(root, quoted, "../../../" + target + "#L1",
+                                                     source=source + "\n", target=target)
+                    evidence, _ = self.source_evidence_findings(item)
+                    self.assertTrue(any("not the words" in problem for problem in evidence), evidence)
+
+    def test_source_evidence_accepts_presentation_and_ordered_elisions(self):
+        cases = (
+            ("**MAX_LIMIT** stays ten.", "MAX_LIMIT stays ten.", "md"),
+            ("MAX_LIMIT stays ten.", "**MAX_LIMIT** stays\nten.", "md"),
+            ("The `MAX_LIMIT` stays **ten**.", "The MAX_LIMIT stays ten.", "md"),
+            ("First sentence. Second sentence. Last sentence.", "First sentence. […] Last sentence.", "md"),
+            ("VALUE = A*B", "`VALUE = A*B`", "py"),
+            ('LABEL = "**Approved**"', 'LABEL = "**Approved**"', "py"),
+            ("VALUE = ...", "VALUE = ...", "txt"),
+        )
+        for source, quoted, suffix in cases:
+            with self.subTest(source=source, quoted=quoted), self.repo() as root:
+                target = "docs/source." + suffix
+                raw = "# Source\n\n## Limit\n\n" + source + "\n" if suffix == "md" else source + "\n"
+                selector = "#limit" if suffix == "md" else "#L1"
+                item = self.source_evidence_item(root, quoted, "../../../" + target + selector, source=raw, target=target)
+                evidence, _ = self.source_evidence_findings(item)
+                self.assertEqual([], evidence)
+
+    def test_source_evidence_cannot_reorder_elisions_or_strip_inline_code(self):
+        for source, quoted in (
+            ("First. Second. Last.", "Last. [...] First."),
+            ("First. Second. Last.", "[…]"),
+            ("The `A*B` stays.", "The AB stays."),
+            ('The `"**Approved**"` stays.', 'The "Approved" stays.'),
+            ('```python\nLABEL = "**Approved**"\n```', 'LABEL = "Approved"'),
+        ):
+            with self.subTest(source=source, quoted=quoted), self.repo() as root:
+                item = self.source_evidence_item(root, quoted, "../../../docs/source.md#limit",
+                                                 source="# Source\n\n## Limit\n\n" + source + "\n")
+                evidence, _ = self.source_evidence_findings(item)
+                self.assertTrue(any("not the words" in problem for problem in evidence), evidence)
+
+    def test_source_evidence_line_selectors_preserve_markdown_code_bytes(self):
+        for quoted in ('LABEL = "Approved"', 'LABEL = "**Approved**"'):
+            with self.subTest(quoted=quoted), self.repo() as root:
+                item = self.source_evidence_item(root, quoted, "../../../docs/source.md#L3",
+                    source='# Code\n```python\nLABEL = "**Approved**"\n```\n')
+                evidence, _ = self.source_evidence_findings(item)
+                self.assertEqual(quoted == 'LABEL = "Approved"', bool(evidence), evidence)
+
+    def test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review(self):
+        for kind in ("decision", "review"):
+            with self.subTest(kind=kind), self.repo() as root:
+                item = self.source_evidence_item(root, "An external claim.",
+                                                 "https://example.invalid/source#claim", kind=kind)
+                RECONCILE.start_git_snapshot_cache()
+                try:
+                    with mock.patch.object(RECONCILE, "quote_source_text", side_effect=AssertionError("external read"), create=True):
+                        evidence = RECONCILE.evidence_problems(item, RECONCILE.repo_text(item))
+                    self.assertEqual(kind == "review", bool(evidence), evidence)
+                finally:
+                    RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_evidence_uses_real_links_and_exact_no_source_sentence(self):
+        for destination in ("docs/source.md#limit", '<../../../docs/source.md#limit> "optional title"'):
+            with self.subTest(destination=destination), self.repo() as root:
+                item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", destination)
+                self.assertEqual([], self.source_evidence_findings(item)[0])
+        for altered in ("No source document — everything you need is above. Extra assurance.",
+                        "no source document — everything you need is above."):
+            with self.subTest(altered=altered), self.repo() as root:
+                item = self.source_evidence_item(root, "", "", no_source=True)
+                item.write_text(item.read_text().replace("No source document — everything you need is above.", altered))
+                self.git(root, "add", ".")
+                evidence, findings = self.source_evidence_findings(item)
+                self.assertTrue(any("no quoted source" in problem for problem in evidence), evidence)
+                self.assertTrue(any("no source link in the prose" in finding.message for finding in findings))
+        with self.repo() as root:
+            item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", "../../../docs/source.md#limit")
+            item.write_text(item.read_text().replace("## Your choices", "[missing context](../../../docs/missing.md#claim)\n\n## Your choices"))
+            self.git(root, "add", ".")
+            evidence, _ = self.source_evidence_findings(item)
+            self.assertTrue(any("item never quotes" in problem for problem in evidence), evidence)
+
+    def test_source_evidence_extreme_line_selector_is_an_advisory(self):
+        with self.repo() as root:
+            item = self.source_evidence_item(root, "MAX_LIMIT = 10",
+                "../../../docs/limit.py#L" + "9" * 5000, source="MAX_LIMIT = 10\n", target="docs/limit.py")
+            RECONCILE.start_git_snapshot_cache()
+            try:
+                findings = list(RECONCILE.check_explanation_shape())
+                self.assertTrue(any(f.advisory and "source selector" in f.message for f in findings))
+            finally:
+                RECONCILE.stop_git_snapshot_cache()
+
+    def test_source_evidence_no_source_sentence_and_optional_background(self):
+        for kind in ("decision", "clarification", "review"):
+            with self.subTest(kind=kind), self.repo() as root:
+                item = self.source_evidence_item(root, "", "", kind=kind, no_source=True)
+                evidence, findings = self.source_evidence_findings(item)
+                self.assertEqual(kind == "review", bool(evidence), evidence)
+                self.assertFalse(any("no source link in the prose" in f.message for f in findings), findings)
+                if kind == "review":
+                    self.assertTrue(any("file this asks the reader" in problem for problem in evidence))
+        with self.repo() as root:
+            item = self.source_evidence_item(root, "MAX_LIMIT stays ten.", "../../../docs/source.md#limit")
+            self.write(root, "docs/background.md", "# Background\n")
+            item.write_text(item.read_text().replace("\n</details>",
+                "\nOptional background: [background](../../../docs/background.md).\n\n</details>"))
+            self.git(root, "add", ".")
+            self.assertEqual([], self.source_evidence_findings(item)[0])
 
     # --- every queue template is copy-and-fill valid ----------------------------
 
