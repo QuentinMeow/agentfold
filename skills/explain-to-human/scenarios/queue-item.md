@@ -66,8 +66,8 @@ an ordinary destination or CommonMark angle brackets, such as
 a clickable citation. Quote the decisive passage without repeating it in a summary.
 
 Preserve wording, identifier spelling, and case, however short the quotation. Paired
-emphasis and wrapping outside code literals may change; literal spaces and symbols stay
-exact. `templates/README.md` names the supported forms. Marked omissions keep the
+emphasis and wrapping outside recognized literal text may change; literal spaces and
+symbols stay exact. `templates/README.md` names the supported forms. Marked omissions keep the
 remaining passages in source order. When the question is "does X still match Y", quote
 both sides.
 

@@ -32,3 +32,5 @@ A new unanswerable-review successor preserves the original-schema timing tuple, 
 **Thin adapter:** none
 
 Source comparisons also preserve token boundaries and literal spans. A quoted number or identifier cannot match only part of a longer token. Code and string-literal spacing survives presentation normalization, and prose omission markers cannot cut through a source literal. Actual literal ellipsis characters remain literal text. These are bounded quotation-fidelity rules, not a general Markdown renderer or a claim of semantic relevance.
+
+The literal recognizer deliberately stays lexical. Prefix-shaped apostrophe prose can be indistinguishable from an actual prefixed string, so exact spacing remains the safe fallback instead of weakening literal fidelity. The canonical guide states this advisory limitation. Unicode 16 identifier assignments are recognized on both supported Python versions without treating every unknown character as part of an identifier; later assignments require a deliberate data update. Neither repair changes lifecycle enforcement or claims a general language parser.

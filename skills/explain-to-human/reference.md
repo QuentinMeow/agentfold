@@ -207,8 +207,8 @@ For text, code, or an underlined heading, select the lines with `#Lx` or `#Lx-Ly
 only the passage that decides the question, and do not repeat it in a summary.
 
 Keep the wording, identifier spelling, and case unchanged, even in a short quotation.
-Paired emphasis and wrapping outside code literals may change presentation; literal
-spaces and symbols stay exact. The supported forms are listed in `templates/README.md`;
+Paired emphasis and wrapping outside recognized literal text may change presentation;
+literal spaces and symbols stay exact. The supported forms are listed in `templates/README.md`;
 an exact excerpt avoids unsupported formatting. Marked omissions keep the remaining
 passages in their original order. A citation proves no more than the source actually says.
 

@@ -155,12 +155,23 @@ Markdown heading written with one to six `#` characters, or bounded text/code li
 Underlined headings use line selections. A bare file link does not select a passage.
 
 Preserve the source's wording, identifier spelling, and case, including in short quotes.
-Paired emphasis and wrapping outside code literals may change presentation; spaces and
-symbols inside literals stay exact. This is a narrow presentation allowance, not a full
+Paired emphasis and wrapping outside recognized literal text may change presentation;
+spaces and symbols inside literals stay exact. This is a narrow presentation allowance, not a full
 Markdown renderer; an exact excerpt avoids unsupported formatting. Mark omissions with `…`, `...`,
 `[…]`, or `[...]`, keeping the remaining passages in source order. Quote both sides of a
 comparison. Optional annotated background belongs below the answer inside the record fold
 and needs no quotation; the reader must be able to decide without opening it.
+
+The check recognizes literals by their spelling; it does not infer whether a sentence
+is prose or code. For example, `R's release preserves users' work.` resembles a prefixed
+string. Rewrapping it can produce an advisory even though the wording is faithful;
+an excerpt with the source's exact spacing and line breaks passes. Literal detection
+remains conservative so an actual prefixed string such as `R's  release'` cannot
+silently lose a space.
+
+Unicode 16 identifier assignments have the same boundary treatment on the supported
+Python versions. Later assignments need an explicit data update to preserve that
+agreement; source spelling is never Unicode-normalized or case-folded.
 
 When no source wording decides the answer, replace the whole source block with exactly
 `> No source document — everything you need is above.` Keep the required context fields.

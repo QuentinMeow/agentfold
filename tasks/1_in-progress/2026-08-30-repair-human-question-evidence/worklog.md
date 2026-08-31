@@ -18,3 +18,8 @@
 - Independent review demonstrated truncated identifier/number matches, normalized inline-code spaces, and omission markers acting inside string literals. The runtime worker repaired token boundaries and preserved literal spans through the permitted presentation changes. Its committed tip is 284006004247949728904c68ea7af3d245017c71.
 - Six added methods failed 48 subcases against the prior runtime. The focused suite passed 24/24; both full local Python suites passed all 16 files. Fresh Git-bearing corpus runs passed 3/3 on each interpreter. Additional damaged controls covered first-occurrence matching, presentation, and omissions.
 - The parent combined the reviewed lower Unicode repair from 5a9f044f84fbcc21597f7bf44466cab9b3694b42 by a normal merge. Final combined native review, exact candidate checks, and upper PR publication remain parent-owned.
+
+## 2026-08-31 — complete literal boundaries and honest authoring limits (codex)
+
+- Final independent review found that triple-quoted literals containing apostrophes or quotes could lose protected contents, and that a blanket unassigned-Unicode rule falsely joined newer symbols to identifiers on Python 3.9. The bounded runtime repairs are included at 1fe228eef2f9b3a4314af13f6d413003d6e532c2. Their focused regressions and actual outputs are recorded separately in verification.
+- An independent authoring probe confirmed that prefix-shaped prose such as an R possessive is lexically ambiguous with a valid raw string. The guidance now promises wrapping outside recognized literals and states the exact-excerpt fallback, rather than weakening source-string protection.
