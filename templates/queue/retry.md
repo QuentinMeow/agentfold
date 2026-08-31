@@ -56,4 +56,6 @@ while the finding changes.>
 
 <Actor-owned diagnosis, claim notes, or rejection reason. A rejected repair moves any
 durable judgment to a decision/review item before deletion. Mechanical writers preserve
-this section on rerun. Bold-key queue fields never belong here.>
+this section on rerun. Only exposed prose and its paragraph separators are editable;
+headings, code, hidden markup, and record fields remain frozen. Bold-key queue fields
+never belong here.>

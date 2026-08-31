@@ -5,6 +5,7 @@
 **Decided-by:** agent (delegated: the owner's complaint was rendered volume and the shape is reversible — no live item is edited, and reverting the templates restores the previous layout exactly)
 **Description:** Machine fields on new human queue items live below the answer line inside one `<details>`, and the checks that hold that shape are scoped by line position rather than by key name
 **Review-by:** 2027-02-14
+**Amended-by:** `memory/decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md` — the queue-frozen-skeleton clause for exposed retry diagnosis
 
 ## Context
 
