@@ -458,6 +458,16 @@ def rendered_human_text(text):
     )
 
 
+def contains_default_ignorable_characters(text):
+    """Detect invisible controls without normalizing visible compatibility text."""
+    return any(
+        unicodedata.category(character) == "Cf"
+        or any(start <= ord(character) <= end
+               for start, end in DEFAULT_IGNORABLE_NONFORMAT_RANGES)
+        for character in (text or "")
+    )
+
+
 @functools.lru_cache(maxsize=_TEXT_VIEW_CACHE_SIZE)
 def strip_default_ignorable_characters(text):
     """Remove invisible Unicode controls from an already isolated prose view.

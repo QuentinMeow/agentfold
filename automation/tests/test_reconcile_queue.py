@@ -14933,6 +14933,45 @@ class ReconcileQueueTests(unittest.TestCase):
                         self.assertEqual([], resolution)
                         self.assertEqual([], schema)
 
+    def test_retry_notes_freeze_nested_and_multiline_reference_definitions(self):
+        references = (
+            "> [hidden]: https://example.invalid/old\n",
+            "- [hidden]: https://example.invalid/old\n",
+            "> 1. [hidden]: https://example.invalid/old\n",
+            "[\nhidden\n]: https://example.invalid/old\n",
+            "> [\n> hidden\n> ]: https://example.invalid/old\n",
+            "[hidden]:\n  https://example.invalid/old\n  \"invisible title\"\n",
+        )
+        for generated in (False, True):
+            for reference in references:
+                for operation in ("append", "change"):
+                    with self.subTest(generated=generated, reference=reference,
+                                      operation=operation), self.repo() as root:
+                        prefix = "## Agent notes\n\nVisible diagnosis.\n\n"
+                        before = prefix if operation == "append" else prefix + reference
+                        after = prefix + reference.replace("/old", "/changed")
+                        skeleton, resolution, schema = self.retry_notes_findings(
+                            root, before, after, generated=generated
+                        )
+                        self.assertEqual([], self.messages(resolution + schema))
+                        self.assertEqual(1, len(skeleton), self.messages(skeleton))
+                        self.assertFalse(skeleton[0].advisory)
+
+    def test_retry_notes_accept_visible_unicode_without_compatibility_rewriting(self):
+        for diagnosis in (
+            "The Ａ key fails.", "The ﬁle name is visible.",
+            "Stage Ⅳ failed; step ① passed.", "Café and 日本語 remain readable.",
+            "重试失败，输入为空。", "Le champ est vide\u00a0: réessayer.",
+        ):
+            for generated in (False, True):
+                with self.subTest(diagnosis=diagnosis, generated=generated), self.repo() as root:
+                    skeleton, resolution, schema = self.retry_notes_findings(
+                        root, "## Agent notes\n\nNone yet.\n",
+                        "## Agent notes\n\n" + diagnosis + "\n",
+                        generated=generated,
+                    )
+                    self.assertEqual([], self.messages(skeleton + resolution + schema))
+
     def test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis(self):
         blocks = (
             "<!-- Existing diagnostic context. -->\n",

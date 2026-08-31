@@ -44,6 +44,7 @@ from markdown_semantics import (
     RAW_HTML_TOKEN_RE,
     commonmark_lines,
     contains_raw_html,
+    contains_default_ignorable_characters,
     markdown_link_destinations,
     markdown_links,
     normalized_action_tokens,
@@ -3513,6 +3514,37 @@ def queue_frozen_skeleton(path, text):
     return "\n".join(frozen_skeleton_lines(path, text)).strip()
 
 
+def retry_reference_line_offsets(parsed_lines):
+    """Protect definition paragraphs, including container and multiline labels.
+
+    A definition's destination and optional title do not render as diagnosis.
+    Recognize its label before allowing any line of that source paragraph to
+    leave the frozen skeleton; seeing only its final `]:` line is too late.
+    Container removal is detection-only and never supplies structural evidence.
+    """
+    protected = set()
+    paragraph = []
+    definition = re.compile(r"(?m)^\[(?:\\[^\n]|[^\[\]\\]){1,999}\]:")
+
+    def flush():
+        content = "\n".join(line for _index, line in paragraph)
+        match = definition.search(content)
+        if match:
+            first = content.count("\n", 0, match.start())
+            protected.update(index for index, _line in paragraph[first:])
+        paragraph.clear()
+
+    for index, line in enumerate(parsed_lines):
+        content = re.sub(r"^" + RECORD_MARKER_PREFIX, "", line.rstrip("\r\n"))
+        if content.strip():
+            paragraph.append((index, content))
+        else:
+            flush()
+    flush()
+    return protected
+
+
+
 def retry_notes_line_offsets(text):
     """Map real retry notes to source lines, without trusting a raw heading.
 
@@ -3526,26 +3558,19 @@ def retry_notes_line_offsets(text):
     exposed = semantic_line_offsets(text or "")
     headings, body, diagnostics = set(), set(), set()
     in_notes = False
-    reference_definition = False
+    references = retry_reference_line_offsets(parsed)
     for index, raw in enumerate(raw_lines):
         line = raw.rstrip()
         clean = parsed[index].rstrip() if index < len(parsed) else ""
         heading = re.match(r"^[ ]{0,3}(#{1,6})(?:[ \t]|$)", clean)
         if index in exposed and heading and len(heading.group(1)) <= 2:
             in_notes = clean == "## Agent notes" and line == clean
-            reference_definition = False
             if in_notes:
                 headings.add(index)
             continue
         if not in_notes:
             continue
         body.add(index)
-        # A link reference definition and its continuation can carry destinations
-        # or titles that no reader sees. Keep that source paragraph frozen too.
-        if re.match(r"^[ ]{0,3}\[[^\]\n]+\]:", clean):
-            reference_definition = True
-        if not line:
-            reference_definition = False
         # Setext headings introduce a new top-level section too. Freeze the
         # preceding title as well; a thematic break is conservatively a boundary.
         if index in exposed and re.fullmatch(r"[ ]{0,3}(?:=+|-+)[ \t]*", clean):
@@ -3556,8 +3581,8 @@ def retry_notes_line_offsets(text):
             in_notes = False
             continue
         if index in exposed and line == clean and not heading \
-                and not reference_definition \
-                and strip_default_ignorable_characters(line) == line \
+                and index not in references \
+                and not contains_default_ignorable_characters(line) \
                 and not FIELD_RE.fullmatch(line) \
                 and not RAW_HTML_TOKEN_RE.search(line):
             diagnostics.add(index)
