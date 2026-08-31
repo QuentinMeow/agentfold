@@ -43,6 +43,14 @@ class CoreScopeTests(unittest.TestCase):
             )
         return task
 
+    @staticmethod
+    def refusal(error):
+        """Whether one error is the parser refusing a core-fit line it will not accept."""
+        return (
+            "Review verdicts refuses" in error
+            or "Review verdicts has a core-fit line" in error
+        )
+
     def test_core_path_boundary_excludes_designs_and_services(self):
         self.assertTrue(SCOPE.is_core_path("skills/example/SKILL.md"))
         self.assertTrue(SCOPE.is_core_path("automation/check.py"))
@@ -489,6 +497,730 @@ class CoreScopeTests(unittest.TestCase):
             self.assertEqual([], SCOPE.validate_task(
                 task, touched_core=True, require_review=True
             ))
+
+    def test_review_receipt_accepts_findings_written_in_ordinary_prose(self):
+        """A finding is a sentence, not a token: refusing one drops its verdict.
+
+        The withdrawn implementation constrained findings to a closed character set and
+        accepted one of these fourteen. Every rejection ended the receipt and discarded
+        the verdict on that line together with every verdict after it, which is the
+        fail-open recorded in the 2026-08-07 withdrawal decision.
+        """
+        findings = (
+            "the reviewer_identity helper keeps its only caller",
+            "`automation/check_core_scope.py` still owns the tally",
+            "the same hole as #81, now closed",
+            "adapter coverage rose from 40% to 100%",
+            "one risk remains: the stale-base repair still waits",
+            "portable, substitutable, and repository-local",
+            "the gate — the one both hooks run — refuses it now",
+            "matches [the authorization](../../memory/decisions/adr.md)",
+            "the reviewer’s counterexample no longer parses",
+            'tried the "two headings" case and could not break it',
+            "checked automation/reconcile/reconcile.py --check by hand",
+            "no finding (could not break it)",
+            "verdict holds for both sha1 and sha256 identities",
+            "substitution argument survives a second agent runtime",
+        )
+        for finding in findings:
+            with self.subTest(finding=finding), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=f"- core-fit / reviewer: approve — {finding}\n",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
+    def test_mixed_panel_tally_never_loses_a_verdict(self):
+        """One approve and two blocks is a block majority, and must be reported as one.
+
+        The withdrawn parser dropped the second verdict and every verdict after it, so
+        this panel passed the gate as `1 approve, 0 block`.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification=(
+                    "- core-fit / first: approve — the `automation/x.py` boundary holds\n"
+                    "- core-fit / second: block — 50% of the adapters break, see #81\n"
+                    "- core-fit / third: block — the reviewer’s case — nested — still parses\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(
+                any("(1 approve, 2 block)" in error for error in errors), errors
+            )
+
+    def test_a_verdict_the_receipt_cannot_accept_fails_it_loudly(self):
+        """A near-miss the rejector matches refuses the whole receipt.
+
+        The rejector's only power is to refuse, so it is far looser than the acceptor.
+        What it still cannot see is named in `automation/review_receipt.py`.
+        """
+        for malformed in (
+            "- core-fit / second: block - a hyphen where the em dash belongs",
+            "- core-fit / second: blocks — a verdict token that is not canonical",
+            "  - core-fit / second: block — indented out of the canonical shape",
+            "- core-fit / second: block —",
+            "- core-fit / second — no colon before the verdict token",
+        ):
+            with self.subTest(malformed=malformed), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — the boundary holds\n"
+                        f"{malformed}\n"
+                        "- core-fit / third: approve — the boundary still holds\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any(self.refusal(error) for error in errors), errors
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_a_verdict_outside_the_contiguous_block_fails_the_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification=(
+                    "- core-fit / first: approve — the boundary holds\n"
+                    "\nThe panel adjourned and reconvened the next day.\n\n"
+                    "- core-fit / second: approve — the boundary still holds\n"
+                ),
+            )
+            errors = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(
+                any("outside the contiguous receipt block" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any("independent reviewer" in error for error in errors), errors
+            )
+
+    def test_review_receipt_needs_exactly_one_real_heading_and_revision(self):
+        cases = (
+            "# Verification\n\n### Review verdicts\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            "- core-fit / reviewer: approve — decorated heading\n",
+            "# Verification\n\n## Review verdicts\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            "- core-fit / reviewer: approve — first section\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            "- core-fit / reviewer: approve — second section\n",
+            "# Verification\n\n## Review verdicts\n\n"
+            "The panel met on Tuesday.\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            "- core-fit / reviewer: approve — revision is not the first line\n",
+            "# Verification\n\n## Review verdicts\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+            "- core-fit / reviewer: approve — two revision fields\n",
+        )
+        for text in cases:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review", verification="")
+                (task / "verification.md").write_text(text, encoding="utf-8")
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_a_marker_or_dash_variant_never_leaves_the_tally_silently(self):
+        """The gate must not pass a panel that rejected the change.
+
+        Each of these is a verdict reaching for the shape and missing on the list
+        marker or the delimiter alone. Read as ordinary prose, each ends the receipt and
+        takes both block verdicts with it, so a one-approve two-block panel is tallied
+        `1 approve, 0 block` and the gate reports success.
+        """
+        variants = {
+            "ordered 1. marker": "1. core-fit / {0}: block — {1}\n",
+            "ordered 1) marker": "1) core-fit / {0}: block — {1}\n",
+            "no marker at all": "core-fit / {0}: block — {1}\n",
+            "bullet glyph marker": "• core-fit / {0}: block — {1}\n",
+            "ascii hyphen dash": "- core-fit / {0}: block - {1}\n",
+            "en dash": "- core-fit / {0}: block – {1}\n",
+        }
+        for name, shape in variants.items():
+            for placement in ("inside the block", "stranded after it"):
+                with self.subTest(case=name, placement=placement), \
+                        tempfile.TemporaryDirectory() as tmp:
+                    blocks = (
+                        shape.format("second", "a concrete bypass")
+                        + shape.format("third", "the same bypass")
+                    )
+                    if placement == "stranded after it":
+                        blocks = "\nThe panel adjourned.\n\n" + blocks
+                    task = self.make_task(
+                        tmp, status="3_in-review", claimant="author",
+                        verification=(
+                            "- core-fit / first: approve — could not break it\n"
+                            + blocks
+                        ),
+                    )
+                    errors = SCOPE.validate_task(
+                        task, touched_core=True, require_review=True
+                    )
+                    self.assertTrue(
+                        any(self.refusal(error) for error in errors), errors
+                    )
+                    self.assertTrue(
+                        any("independent reviewer" in error for error in errors), errors
+                    )
+
+    def test_a_reviewer_without_an_identity_is_refused_not_dropped(self):
+        """`identity_key` returns nothing for these, so the gate would drop the vote."""
+        for reviewer in ("  ", "🛑", "_", "...", "-", "( )"):
+            with self.subTest(reviewer=reviewer), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"- core-fit / {reviewer}: block — a concrete bypass\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("no identity" in error for error in errors), errors
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_only_the_exact_review_verdicts_heading_opens_a_receipt(self):
+        for heading in (
+            "## Review verdicts (when a review was explicitly run)",
+            "## Review verdicts today",
+            "### Review verdicts",
+            "## review verdicts",
+        ):
+            with self.subTest(heading=heading), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review", verification="")
+                (task / "verification.md").write_text(
+                    f"# Verification\n\n{heading}\n\n"
+                    f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                    "- core-fit / reviewer: approve — inexact heading\n",
+                    encoding="utf-8",
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_verdict_line_details_the_grammar_actually_depends_on(self):
+        """Each case is one mutation the suite would otherwise not have caught."""
+        accepted = {
+            "uppercase verdict token": "- core-fit / reviewer: APPROVE — case folds",
+            "uppercase core-fit label": "- Core-Fit / reviewer: approve — case folds",
+            "no space after the colon": "- core-fit / reviewer:approve — tight colon",
+            "two spaces after the colon": "- core-fit / reviewer:  approve — loose colon",
+            "tab after the colon": "- core-fit / reviewer:\tapprove — tab colon",
+        }
+        for name, line in accepted.items():
+            with self.subTest(accepted=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=line + "\n",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ), name)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / reviewer: BLOCK — case folds\n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("(0 approve, 1 block)" in error for error in errors), errors
+            )
+
+        with self.subTest(refused="empty finding"), tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / reviewer: approve — \n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any(self.refusal(error) for error in errors), errors
+            )
+
+    def test_a_second_revision_field_anywhere_in_the_section_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / reviewer: approve — a bound review\n\n"
+                "The panel adjourned.\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("Reviewed revision" in error for error in errors), errors
+            )
+
+    def test_a_later_h2_ends_the_receipt_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / reviewer: approve — a bound review\n\n"
+                "## Later notes\n\n"
+                "- core-fit / other: block — outside the section entirely\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            ))
+
+    def test_decoration_around_a_verdict_never_leaves_the_tally_silently(self):
+        """Widening the rejector can only refuse more; it never accepts anything new.
+
+        Each of these is a dissenting verdict a writer could plausibly type. One
+        decoration character was caught before; two were not, and the block verdict left
+        the tally with no error at all.
+        """
+        decorated = (
+            "**- core-fit / dissenter: block — a concrete bypass",
+            "- [ ] core-fit / dissenter: block — a concrete bypass",
+            "> - core-fit / dissenter: block — a concrete bypass",
+            "- `core-fit` / dissenter: block — a concrete bypass",
+            "- **core-fit** / dissenter: block — a concrete bypass",
+            "- _core-fit_ / dissenter: block — a concrete bypass",
+            "- ~~core-fit~~ / dissenter: block — a concrete bypass",
+            "- core‑fit / dissenter: block — a concrete bypass",
+            "- core - fit / dissenter: block — a concrete bypass",
+            "-- core-fit / dissenter: block — a concrete bypass",
+            "* * core-fit / dissenter: block — a concrete bypass",
+            "+ > core-fit / dissenter: block — a concrete bypass",
+            "1.. core-fit / dissenter: block — a concrete bypass",
+            "(1) core-fit / dissenter: block — a concrete bypass",
+            "  * core-fit / dissenter: block — a concrete bypass",
+            "• - core-fit / dissenter: block — a concrete bypass",
+        )
+        for line in decorated:
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"{line}\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any(self.refusal(error) for error in errors), errors
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_a_finding_carrying_markup_is_still_a_counted_verdict(self):
+        """Acceptance criterion 1: the core gate and the action gate must agree."""
+        for finding in (
+            "see <https://example.com/adr> for the rule",
+            "the &amp; in the finding survives",
+            "boundary holds for <div> containers",
+        ):
+            with self.subTest(finding=finding), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=f"- core-fit / reviewer: approve — {finding}\n",
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
+    def test_receipt_problems_name_the_file_the_line_and_the_block_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / first: approve — the boundary holds but\n"
+                "  the finding wraps onto this line\n"
+                "- core-fit / second: block — a flawless line\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            stranded = [error for error in errors if "outside the contiguous" in error]
+            self.assertEqual(1, len(stranded), errors)
+            self.assertIn("verification.md:9:", stranded[0])
+            self.assertIn("ended at line 8:", stranded[0])
+            self.assertIn("- core-fit / second: block — a flawless line", stranded[0])
+
+    def test_receipt_problems_are_capped_and_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification=(
+                    "- core-fit / first: approve — could not break it\n"
+                    + "".join(
+                        f"**- core-fit / r{index}: block — decorated\n"
+                        for index in range(12)
+                    )
+                ),
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            receipt_errors = [
+                error for error in errors if "Review verdicts" in error
+            ]
+            self.assertEqual(6, len(receipt_errors), receipt_errors)
+            self.assertTrue(
+                any("7 further problem(s) not listed" in error for error in errors),
+                errors,
+            )
+
+    def test_the_revision_field_must_be_the_first_line_of_the_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                "The panel met on Tuesday.\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "- core-fit / reviewer: approve — a bound review\n",
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            revision_errors = [
+                error for error in errors if "Reviewed revision" in error
+            ]
+            self.assertEqual(1, len(revision_errors), errors)
+            self.assertIn("verification.md:5:", revision_errors[0])
+            self.assertIn("first line of the receipt", revision_errors[0])
+
+    def test_an_equal_split_is_not_an_approve_majority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification=(
+                    "- core-fit / first: approve — could not break it\n"
+                    "- core-fit / second: block — a concrete bypass\n"
+                ),
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("(1 approve, 1 block)" in error for error in errors), errors
+            )
+
+    def test_one_reviewer_voting_twice_keeps_only_the_later_verdict(self):
+        cases = {
+            "block then approve": (
+                "- core-fit / first: block — a concrete bypass\n"
+                "- core-fit / first: approve — the bypass is fixed\n",
+                None,
+            ),
+            "approve then block": (
+                "- core-fit / first: approve — could not break it\n"
+                "- core-fit / first: block — a later bypass\n",
+                "(0 approve, 1 block)",
+            ),
+        }
+        for name, (verification, expected) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=verification,
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                if expected is None:
+                    self.assertEqual([], errors)
+                else:
+                    self.assertTrue(
+                        any(expected in error for error in errors), errors
+                    )
+
+    def test_a_reviewer_may_not_contain_a_colon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="- core-fit / lens:reviewer: approve — could not break it\n",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any(self.refusal(error) for error in errors), errors
+            )
+            self.assertTrue(
+                any("independent reviewer" in error for error in errors), errors
+            )
+
+    def test_decoration_anywhere_in_the_line_is_still_refused(self):
+        """The rejector searches the line; it is not anchored to its start.
+
+        Each of these left a dissenting verdict out of the tally with no error while the
+        rejector was anchored and its internal gap capped at three characters.
+        """
+        escapes = (
+            "- **core**-**fit** / dissenter: block — a concrete bypass",
+            "- `core` - `fit` / dissenter: block — a concrete bypass",
+            "- core -- fit / dissenter: block — a concrete bypass",
+            "- core...-...fit / dissenter: block — a concrete bypass",
+            "- core-fit ／ dissenter: block — a concrete bypass",
+            "- lens core-fit / dissenter: block — a concrete bypass",
+            "Note: core-fit / dissenter: block — a concrete bypass",
+            "- xcore-fit / dissenter: block — a concrete bypass",
+        )
+        for line in escapes:
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"{line}\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(self.refusal(error) for error in errors), errors)
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_no_run_length_before_the_slash_escapes_the_rejector(self):
+        """Nothing in the rejector is bounded, because a bound is a coverage decision.
+
+        A sixteen-character cap on the run before the slash let seventeen zero-width
+        spaces through, and such a line is visually identical to a canonical verdict —
+        the forms differ but a reader cannot see it, and `normalized_action_tokens`
+        returns the same tuple — so the diff reads as a rejection while the gate reports
+        an approve majority.
+        """
+        fillers = {
+            "16 zero-width spaces": "​" * 16,
+            "17 zero-width spaces": "​" * 17,
+            "40 zero-width spaces": "​" * 40,
+            "17 spaces": " " * 17,
+            "17 dots": "." * 17,
+            "200 combining marks": "́" * 200,
+        }
+        for name, filler in fillers.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"- core-fit{filler} / dissenter: block — a concrete bypass\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(self.refusal(error) for error in errors), errors)
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_no_run_length_inside_the_token_escapes_the_rejector(self):
+        """The rejector has two runs, and re-bounding either resurrects the same defect.
+
+        Its sibling varies the filler after `fit`; this one varies the filler between
+        `core` and `fit`. Capping only that inner run passed every other test while a
+        seventeen-character run silently dropped a dissent again — the same fail-open
+        one character position over.
+        """
+        fillers = {
+            "16 zero-width spaces": "\u200b" * 16,
+            "17 zero-width spaces": "\u200b" * 17,
+            "40 zero-width spaces": "\u200b" * 40,
+            "17 spaces": " " * 17,
+            "17 dots": "." * 17,
+            "200 combining marks": "\u0301" * 200,
+        }
+        for name, filler in fillers.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve \u2014 could not break it\n"
+                        f"- core{filler}fit / dissenter: block \u2014 a concrete bypass\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(any(self.refusal(error) for error in errors), errors)
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_a_core_fit_mention_without_a_slash_does_not_refuse(self):
+        """The other edge of the rejector, now that over-rejection is the named risk.
+
+        Dropping the slash requirement — so any line mentioning `core-fit` refuses —
+        passes every other test in this file. It would also make ordinary prose about
+        the lens unwritable inside the section that describes it.
+        """
+        endings = (
+            "The core-fit lens found nothing further.",
+            "- core-fit review notes follow in the next section.",
+            "- core-fit reviewer: approve \u2014 a shape with no slash at all",
+        )
+        for ending in endings:
+            with self.subTest(ending=ending), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve \u2014 could not break it\n\n"
+                        f"{ending}\n"
+                    ),
+                )
+                self.assertEqual([], SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                ))
+
+    def test_the_problem_cap_keeps_the_earliest_problems(self):
+        """Problems arrive in two passes, so visit order is not line order.
+
+        The hidden verdicts here are found by the second pass but sit above the near
+        misses the first pass reports. Keeping whatever arrived first would report the
+        end of a broken receipt and hide its beginning.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(tmp, status="3_in-review", verification="")
+            (task / "verification.md").write_text(
+                "# Verification\n\n## Review verdicts\n\n"
+                f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                "```\n"
+                "- core-fit / hidden-one: block \u2014 a concrete bypass\n"
+                "- core-fit / hidden-two: block \u2014 a concrete bypass\n"
+                "```\n"
+                + "".join(
+                    f"**- core-fit / later-{index}: block \u2014 decorated\n"
+                    for index in range(5)
+                ),
+                encoding="utf-8",
+            )
+            errors = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            reported = [error for error in errors if "Review verdicts" in error]
+
+            self.assertEqual(6, len(reported), reported)
+            self.assertIn("verification.md:8:", reported[0])
+            self.assertIn("verification.md:9:", reported[1])
+            self.assertTrue(
+                any("2 further problem(s) not listed" in error for error in reported),
+                reported,
+            )
+
+    def test_a_refused_receipt_does_not_ask_for_one_that_was_written(self):
+        """The two no-verdict messages describe different situations."""
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="**- core-fit / first: approve \u2014 decorated\n",
+            )
+            refused = SCOPE.validate_task(
+                task, touched_core=True, require_review=True
+            )
+            self.assertTrue(
+                any("the review receipt above was refused" in error
+                    for error in refused),
+                refused,
+            )
+            self.assertFalse(
+                any("verification.md needs `- core-fit /" in error
+                    for error in refused),
+                refused,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            task = self.make_task(
+                tmp, status="3_in-review", claimant="author",
+                verification="No independent review was run.\n",
+            )
+            absent = SCOPE.validate_task(task, touched_core=True, require_review=True)
+            self.assertTrue(
+                any("verification.md needs `- core-fit /" in error
+                    for error in absent),
+                absent,
+            )
+            self.assertFalse(
+                any("was refused" in error for error in absent), absent
+            )
+
+    def test_a_verdict_the_structural_view_drops_is_refused_not_skipped(self):
+        """`semantic_text` blanks these before any rejector could see them.
+
+        The receipt section's own raw lines are read for exactly this reason. Reading
+        them can only add an error, never a verdict.
+        """
+        hidden = {
+            "indented four spaces": "    - core-fit / d: block — a concrete bypass",
+            "indented eight spaces": "        - core-fit / d: block — a concrete bypass",
+            "div block": "<div>\n- core-fit / d: block — a concrete bypass\n</div>",
+            "inline span": "<span>- core-fit / d: block — a concrete bypass</span>",
+            "fenced": "```\n- core-fit / d: block — a concrete bypass\n```",
+            "html comment": "<!-- - core-fit / d: block — a concrete bypass -->",
+        }
+        for name, block in hidden.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(
+                    tmp, status="3_in-review", claimant="author",
+                    verification=(
+                        "- core-fit / first: approve — could not break it\n"
+                        f"{block}\n"
+                    ),
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                self.assertTrue(
+                    any("structural view does not carry" in error for error in errors)
+                    or any(self.refusal(error) for error in errors),
+                    errors,
+                )
+                self.assertTrue(
+                    any("independent reviewer" in error for error in errors), errors
+                )
+
+    def test_a_refused_heading_quotes_the_spelling_it_found(self):
+        cases = {
+            "## Review verdicts (when a review was explicitly run)": (
+                "`## Review verdicts (when a review was explicitly run)`"
+            ),
+            "### Review verdicts": "`### Review verdicts`",
+        }
+        for heading, quoted in cases.items():
+            with self.subTest(heading=heading), tempfile.TemporaryDirectory() as tmp:
+                task = self.make_task(tmp, status="3_in-review", verification="")
+                (task / "verification.md").write_text(
+                    f"# Verification\n\n{heading}\n\n"
+                    f"**Reviewed revision:** {REVIEWED_REVISION}\n\n"
+                    "- core-fit / reviewer: approve — inexact heading\n",
+                    encoding="utf-8",
+                )
+                errors = SCOPE.validate_task(
+                    task, touched_core=True, require_review=True
+                )
+                heading_errors = [error for error in errors if "found " in error]
+                self.assertEqual(1, len(heading_errors), errors)
+                self.assertIn(quoted, heading_errors[0])
+                self.assertIn("verification.md:3:", heading_errors[0])
 
     def test_home_access_in_core_executable_fails(self):
         content = "target = Path.home() / '.agent'\n"

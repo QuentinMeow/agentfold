@@ -19,14 +19,10 @@ if str(AUTOMATION) not in sys.path:
     sys.path.insert(0, str(AUTOMATION))
 
 from markdown_semantics import semantic_text
+from review_receipt import formatted_errors, parse_review_receipt
 
 REPO = Path(__file__).resolve().parents[1]
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)$", re.M)
-REVIEW_RE = re.compile(
-    r"^- core-fit / ([^:\r\n]+):[ \t]*(approve|block)[ \t]+[—-][ \t]+(.+)$",
-    re.I | re.M,
-)
-FULL_COMMIT_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 CORE_PREFIXES = (
     "skills/",
     "automation/",
@@ -314,36 +310,24 @@ def validate_task(
     elif require_review:
         verification = task / "verification.md"
         verification_text = evidence_text(verification, load_text) or ""
-        review_sections = named_sections(verification_text, "Review verdicts")
-        if len(review_sections) != 1:
-            errors.append("verification.md needs exactly one real `## Review verdicts` section")
-        review_section = review_sections[0] if len(review_sections) == 1 else ""
-        revision_matches = list(re.finditer(
-            rf"^\*\*Reviewed revision:\*\*[ \t]*({FULL_COMMIT_PATTERN})[ \t]*$",
-            review_section,
-            re.M,
-        ))
-        if len(revision_matches) != 1:
-            errors.append(
-                "Review verdicts needs exactly one real "
-                "`**Reviewed revision:** <commit>` field"
-            )
-            verdict_source = ""
-        else:
-            reviewed_revision = revision_matches[0].group(1)
-            verdict_source = review_section[revision_matches[0].end():]
-            if review_revision_check:
-                errors.extend(review_revision_check(reviewed_revision))
-        verdicts = REVIEW_RE.findall(verdict_source)
+        receipt = parse_review_receipt(verification_text)
+        errors.extend(formatted_errors(receipt, display(verification)))
+        if receipt.revision is not None and review_revision_check:
+            errors.extend(review_revision_check(receipt.revision))
         claimant = task_fields.get("Claimed-by", "")
         latest = {}
-        for reviewer, verdict, _ in verdicts:
-            reviewer_key = identity_key(reviewer)
-            if reviewer_key and not same_reviewer_as_claimant(reviewer, claimant):
-                latest[reviewer_key] = verdict.lower()
+        for entry in receipt.verdicts:
+            reviewer_key = identity_key(entry.reviewer)
+            if reviewer_key and not same_reviewer_as_claimant(entry.reviewer, claimant):
+                latest[reviewer_key] = entry.verdict
         approvals = sum(verdict == "approve" for verdict in latest.values())
         blocks = sum(verdict == "block" for verdict in latest.values())
-        if not latest:
+        if not latest and receipt.errors:
+            errors.append(
+                "the review receipt above was refused, so no "
+                "`- core-fit / <independent reviewer>: approve — <finding>` was counted"
+            )
+        elif not latest:
             errors.append(
                 "verification.md needs `- core-fit / <independent reviewer>: approve — <finding>`"
             )

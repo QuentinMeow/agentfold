@@ -26,7 +26,7 @@ python3 services/quote-cli/quote_cli.py <topic>    # on a topic; lists topics on
 ## Boundaries
 
 - Formatting decisions live here; data decisions live in quote-api.
-- Python standard library only; no network.
+- No network access.
 
 ## Endpoints (subfolders)
 

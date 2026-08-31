@@ -1,0 +1,785 @@
+# Worklog — stop completed review verdicts from looking like human asks
+
+Append-only; newest at the bottom. One entry per session that touched this task.
+
+## 2026-08-04 — reproduction and claim (codex planner)
+
+- Reproduced the contradiction on `main`: the exact receipt line required by
+  `check_core_scope.py --require-review` is returned as one actionable unit by
+  `task_action_unit_counts()` and then refused by `task-action-origin`.
+- Stopped the stale-base publication instead of weakening or bypassing either gate.
+- Filed GitHub issue #80 as a projection, claimed this prerequisite as its own core task,
+  and assigned implementation to a Sol high worker under the planner's review.
+- Independent design and test-inventory agents agreed on the narrow boundary: neutralize
+  only the exact structural verdict token and continue scanning reviewer and finding text.
+
+## 2026-08-04 — implement receipt-aware classification (codex sol-high implementer)
+
+- Moved the canonical core-fit verdict grammar into the shared Markdown semantics module;
+  the core-scope validator and task human-action detector now consume the same named
+  reviewer, verdict, and finding groups.
+- Limited the classification exception to `verification.md` and to the matched structural
+  `approve` or `block` token. Reviewer identities and finding tails still pass through the
+  ordinary detector; malformed lines and identical prose in other task artifacts receive
+  no special treatment.
+- Added unit coverage for valid approve/block receipts, hostile reviewer/finding prose,
+  questions, TODOs, and malformed near-misses, plus a staged task-admission regression.
+- Focused and full repository suites passed. Independent revision-bound review,
+  publication, issue closure, and resuming the parent stale-base repair remain for the
+  coordinating session as requested.
+
+## 2026-08-04 — repair blocked path and receipt-region scope (codex sol-high implementer)
+
+- The adversarial panel reviewed exact revision `85a044e67c725cf03d918432514c76ba1655c984`
+  and returned 0 approve, 3 block. All three reviewers found the same admission gap:
+  basename-only path matching and whole-file line normalization could hide approval-like
+  prose in nested or case-variant files and outside the formal receipt region.
+- Replaced the line-only sharing boundary with one formal parser for the real Review
+  verdicts section, its one valid full-commit field, and only verdicts after that field.
+  The detector separately requires the exact lowercase task-root verification path.
+- Added regressions for nested and case-variant paths, lines outside or before the bound
+  region, duplicate or missing sections and fields, malformed lines, and hostile findings.
+- Re-ran the full repository suite to capture its terminal result honestly: all 15 test
+  files passed in 68.19 seconds. The blocked panel is evidence about the prior revision,
+  not an invocation of the repaired revision's independent core-fit review.
+
+## 2026-08-04 — repair heading-aware receipt boundaries (codex sol-high implementer)
+
+- The second adversarial panel reviewed exact revision
+  `12a1f320a9916dd2223a6fe81fd5464ddc611aae` and returned 2 approve, 1 block. The
+  blocker was valid: the H2 extractor crossed ATX H1 and CommonMark setext H1/H2
+  boundaries, so a later approval-like line could inherit the receipt exception.
+- Kept the exact Review verdicts H2 opening grammar and made the shared extractor end at
+  the next real ATX H1/H2 or setext H1/H2. A setext heading's content line is excluded;
+  H3 detail remains inside the review section.
+- Added action-detector and core-scope regressions for ATX H1, ATX H2, both setext
+  underline forms, a revision-like setext heading, and an H3 canary.
+- Focused tests, all three owning modules, and the full repository suite passed; the full
+  lane ended with all 15 test files passing in 68.07 seconds.
+
+## 2026-08-04 — authorization boundary (codex planner)
+
+- Three candidate implementations stayed unpublished after adversarial review found
+  basename, section-boundary, and CommonMark-container gaps. Exact evidence remains on the
+  task branch through commit `3de329d8b34bb9bb8afcd325b75b1c47612e7997`.
+- Replanned to a closed contiguous receipt grammar that needs no general Markdown outline
+  parser. The workspace safety reviewer requires fresh owner authorization before that
+  security-sensitive parser and template change.
+- Filed the authorization question in
+  `message-queue/needs-human/decisions/non-blocking-authorize-the-closed-review-receipt-parser.md`
+  and paused without bypassing the review or task-action gates.
+
+## 2026-08-04 — owner authorization folded (codex planner)
+
+- The owner selected Option A and authorized the closed contiguous review-receipt parser
+  and template design. The answer was transcribed while the canonical item was waiting,
+  then claimed in a separate folding commit.
+- Recorded the durable decision in
+  `memory/decisions/2026-08-04-review-receipt-parser-authorization.md` and released the
+  completed human action from this task.
+- The authorization does not approve a pull request or replace independent review; the
+  implementation still owes focused and full verification plus a fresh adversarial panel.
+
+## 2026-08-04 — implement the authorized closed receipt grammar (codex sol-high implementer)
+
+- Replaced general Markdown section and heading-boundary inference with the authorized
+  literal receipt state machine: one exact top-level heading, one exact full-commit field
+  as its first content, then only exact one-line core-fit verdicts until the first nonblank
+  non-verdict.
+- Kept the task action exception at the exact lowercase task-root verification path and
+  limited neutralization to each structural `approve` or `block` token; hostile reviewer
+  identities and findings remain visible to the ordinary action detector.
+- Tightened the canonical template and line grammar, while allowing historical panel
+  revision fields outside the sole formal block. An adjacent duplicate formal field and
+  duplicate exact headings fail closed.
+- Added regressions for every prior panel reproduction, including nested/case paths,
+  malformed or misplaced structures, strict spelling, H1/H2/H3 and setext content,
+  blockquote/list containers, lazy blockquote plus thematic breaks, link references plus
+  thematic breaks, hostile findings, and the first-nonreceipt terminator.
+- Focused tests, all 15 repository test files, the reconciler, and the staged core-scope
+  gate passed. Independent review, publication, and issue closure remain with the
+  coordinating session.
+
+## 2026-08-04 — repair raw contiguity and reviewer authority (codex sol-high implementer)
+
+- The third panel reviewed exact revision
+  `25b75c3cdd7fcb17626a79135c1b4b787fe41f0c` and returned 1 approve, 2 block.
+  Both blockers were accepted: semantic blanking could bridge nonblank raw comments,
+  HTML, or code; and action projection neutralized punctuation-only or self reviewers
+  that the core gate could not accept as independent evidence.
+- Made raw source lines own contiguity while requiring each heading, revision, and
+  verdict line to be byte-equivalent in the structural semantic view. Any nonblank raw
+  nonreceipt now closes the block, including content that the semantic view blanks.
+- Moved normalized identity and independence checks into the shared Markdown semantics
+  module. Action projection now resolves the exact sibling task file from the selected
+  index or candidate revision and fails closed unless it has one concrete claimant and a
+  distinct reviewer with non-punctuation identity tokens.
+- Added action and core regressions for comments, raw HTML, fenced and indented code
+  before the first verdict and between verdicts, plus valid independent, self,
+  punctuation-only, missing, duplicate, placeholder, candidate-revision, and hostile
+  reviewer/finding cases.
+- Focused and owning-module tests, all 15 repository test files, range core-scope,
+  staged pre-commit tests, the reconciler, and diff checks passed. Publication and a
+  fresh independent review remain with the coordinating session.
+
+## 2026-08-04 — repair whitespace and rendered identity normalization (codex sol-high implementer)
+
+- The fourth panel reviewed exact revision
+  `e073358dec0a4f7c119597f94c61ed6adb02f0de` and returned 0 approve, 3 block.
+  The accepted blockers were Python's overbroad whitespace predicate, incomplete
+  LF/CRLF line-ending handling, and source-shaped reviewer identities that did not
+  match what a human sees or reject the repository's full placeholder vocabulary.
+- Replaced `.strip()` blank tests with an explicit ASCII Markdown predicate that accepts
+  only spaces or tabs plus an optional LF, CR, or CRLF ending. NBSP, form-feed,
+  vertical-tab, NEL, Unicode separators, default-ignorables, comments, HTML, and code
+  all terminate the receipt; a valid CRLF receipt remains accepted.
+- Made both claimant and reviewer identities pass through rendered-human HTML, removal
+  of default-ignorable characters, NFKC/casefold, and tokenization. Self-review through
+  zero-width characters or inline HTML now compares equal, markup-only identities are
+  empty, and the repository's complete placeholder vocabulary is rejected on either side.
+- Preserved normal independent reviewers, candidate-revision task lookup, and hostile
+  reviewer/finding scanning. Focused and owning tests, all 15 repository test files,
+  pre-commit, range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — repair Markdown identity aliases and decorated findings (codex sol-high implementer)
+
+- The fifth panel reviewed exact revision
+  `788bd4cb709c4ea4f20099013eb9ea598a39c289` and returned 0 approve, 3 block.
+  The accepted blockers were Markdown aliases that could disguise a self reviewer or
+  mint apparent voters, rendered placeholders that could enter the voter set, and
+  decorated finding text that could hide a human action after verdict neutralization.
+- Added one shared inline-Markdown identity renderer for link labels, full/collapsed/
+  shortcut reference labels, emphasis, inline code, visible HTML text, entities, and
+  default-ignorables. Link destinations and reference destinations never contribute to
+  identity; visually equivalent identities now compare equal.
+- Kept the formal receipt grammar deliberately small and fail closed: reviewer and
+  finding components must be literal plain text. Any Markdown or HTML decoration ends
+  the formal block, so its verdict token remains visible to ordinary action detection.
+  The template and task design record this compatibility cost.
+- Added regressions for every requested alias, rendered placeholder, duplicate-voter
+  alias, a normal plain receipt, and decorated approval-shaped findings including a
+  reference-link split. Focused and owning-module tests, all 15 repository test files,
+  pre-commit, range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — replace partial rendering with a source whitelist (codex sol-high implementer)
+
+- The next panel reviewed exact revision
+  `5c31f508b1166573b8f1b04c5f7410d033c0bace` and returned 0 approve with two
+  completed block verdicts. A security reviewer independently reproduced the remaining
+  finding bypass before its review tool errored. The accepted blockers were Markdown
+  image identities and destination-based vote stuffing, backslash-escaped identities,
+  and image-alt finding text that stayed human-visible after verdict neutralization.
+- Removed the partial inline renderer from the receipt-authority boundary. Formal
+  claimant, reviewer, and finding source now accepts only Unicode letters, marks, and
+  numbers; ASCII space; and the documented finite punctuation set. Tabs, non-ASCII
+  separators, controls, default-ignorables, and all Markdown/HTML introducers fail closed.
+- Applied the same source validation to the exact claimant field before NFKC, casefolding,
+  placeholder rejection, or tokenization. A decorated claimant or reviewer therefore has
+  no identity, while the canonical `codex planner / sol-high implementer` claimant and
+  ordinary Unicode reviewer names remain valid.
+- Added unit and end-to-end regressions for images, destinations, escapes, every prior
+  decorated form, formatted placeholders and findings, invalid claimant whitespace,
+  allowed punctuation and Unicode letters, duplicate image-voter aliases, and a normal
+  receipt. Focused and owning-module tests, all 15 repository test files, pre-commit,
+  range core-scope, the reconciler, and diff checks passed.
+
+## 2026-08-04 — bind claimant identity to raw source and fold Unicode marks (codex sol-high implementer)
+
+- The next panel reviewed exact revision
+  `2ba968faf027df5874de8847948568102513a497` and returned 0 approve, 3 block.
+  The three accepted blockers were a claimant helper that derived identity after semantic
+  rewriting, combining marks that could mint apparent reviewer identities, and combining
+  marks that could split human-action keywords. The earlier security tool error on
+  `5c31f50` remains reproduction evidence only and is not a vote in this panel.
+- Claimant extraction now locates one literal top-level field in raw `task.md`, validates
+  its unchanged suffix against the source whitelist, and only then confirms that the raw
+  line is structurally visible. Comments, markup, entities, links, images, code, escapes,
+  default-ignorables, hidden fields, malformed suffixes, and duplicates yield no identity.
+- Identity and action detection now apply NFKD and remove every Unicode category-M mark
+  before casefolding or tokenization. Composed/decomposed spellings compare equally;
+  accent-only distinctions conservatively collide; marked placeholders and action words
+  collapse to their ordinary forms.
+- Added unit, core-gate, and action-projection regressions for every requested raw claimant
+  form, multiple combining-mark positions, alias vote stuffing, marked approve/block
+  words, marked placeholders, legitimate Unicode, and composed/decomposed equivalence.
+  Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed.
+
+## 2026-08-04 — close ASCII authority and identity-alias gaps (codex sol-high implementer)
+
+- The sixth panel reviewed exact revision
+  `97c35ede09d045f63a45be13ba6452cd3aa13764` and returned 0 approve, 3 block. The
+  accepted blockers were punctuation-decorated placeholders, raw claimant lines that
+  CommonMark could treat as lazy paragraph continuation, and Cyrillic or mixed-script
+  authority text that could create a voter or hide an action word.
+- Restricted claimant, reviewer, and formal finding components to a finite ASCII source
+  alphabet. The em dash remains only the receipt delimiter; Unicode explanation stays
+  outside the formal receipt, where ordinary action detection still folds marks.
+- Made claimant extraction require file start or an immediately preceding ASCII-blank
+  line and reject an immediate raw Setext underline. Placeholder comparison now removes
+  allowed punctuation before checking the repository's placeholder vocabulary.
+- A follow-up design debate found that ASCII punctuation and token boundaries could still
+  disguise self-review or duplicate voters. One conservative key now sorts the case-folded
+  ASCII alphanumeric multiset, so punctuation, spacing, word order, and anagrams collide
+  fail-closed. Formal receipts therefore use distinct stable role labels rather than
+  personal or display names.
+- Added unit, core-gate, and action-projection regressions for all reported placeholder,
+  lazy-continuation, Setext, homoglyph, malformed-finding, punctuation-boundary,
+  word-order, and duplicate-vote cases. Focused, owning, full, staged, exact-range
+  core-scope, exact-range reconciler, and diff checks passed at implementation commit
+  `0326174c33d6ca35c266854235c4c7239d3f2a2d`.
+
+## 2026-08-04 — close placeholder, punctuation, and open-container gaps (codex sol-high implementer)
+
+- The seventh panel reviewed exact revision
+  `7cd22e79fc6d4ec3e3c151f0093a6ef4c251c344` and returned 0 approve, 3 block. The
+  accepted blockers were reordered/anagram placeholder spellings, a colon mismatch
+  between claimant and reviewer grammar, and claimants exposed structurally after a blank
+  line while still nested inside an open hidden HTML container.
+- Placeholder rejection now uses the exact sorted ASCII-alphanumeric multiset key used for
+  claimant comparison and duplicate-vote replacement. `yet none` and `D B T` therefore
+  cannot become voters.
+- Claimants and reviewers now share an explicit ASCII identity predicate that excludes
+  colon; findings use a separate predicate that retains colon. A canonical-looking
+  embedded-colon reviewer cannot enter either gate.
+- Claimant extraction still requires its literal line body at the same logical index in
+  both structural and rendered-human views. A shared HTML-prefix state check now also
+  rejects claimants and receipt headings under any still-open visible, hidden, non-prose,
+  nested, or custom container. Closed containers and fenced, indented, or inline-code
+  examples remain compatible, including CRLF input.
+- A finite-model preflight found the same open-container issue around the receipt heading.
+  It initially proposed global duplicate-revision counting, then retracted that proposal
+  after testing the immutable verification history and accepted decision boundary. The
+  parser retains scoped semantics: an immediate duplicate in the contiguous prologue
+  fails, while exact historical fields after a terminator remain ordinary history.
+- Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed at implementation commit
+  `d27c44174db0f1bb8d13b632be3c6f307d568707`. The final finite-model audit reported no
+  remaining blocker in the owner-authorized receipt scope.
+
+## 2026-08-04 — close pending-HTML, visibility, and scan-complexity gaps (codex sol-high implementer)
+
+- The eighth panel reviewed exact revision
+  `aa0a111d73da9807c8473848ed2dbf2f5c9828b5` and returned 0 approve, 3 block. The
+  accepted blockers were incomplete multiline HTML markers that left only parser-pending
+  input, receipt lines checked against structural but not rendered-human text, and prefix
+  reparsing inside duplicate-heading discovery.
+- Raw HTML prefix state now records `<`-prefixed pending parser input before `close()` and
+  treats parser failures as open authority state. This covers incomplete start, end,
+  comment, processing, CDATA, declaration, quote, and custom-tag forms with LF or CRLF,
+  including a marker completed only after the claimant or receipt.
+- Malformed HTML can no longer crash the rendered-human view. That view falls back to
+  code-masked source so action words stay detectable, while claimant and receipt prefix
+  checks still reject formal authority.
+- Receipt extraction now builds source, structural, and rendered line arrays once. The
+  heading, revision, and verdict lines must be character-identical at the same logical
+  position in all three views. Duplicate heading candidates fail after one linear scan;
+  a 1,000-heading regression records zero prefix-parser calls, and a unique candidate
+  records one.
+- Compatibility regressions preserve ordinary comparisons, closed markup, void tags,
+  fenced/indented/inline-code examples, LF/CRLF receipts, and scoped historical revision
+  fields. Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range
+  reconciler, and diff checks passed at implementation commit
+  `5b738fb1157fbdb53c2b3be9d9813d93d3eedd89`.
+- The final finite-model audit found no remaining blocker, independently exercised the
+  malformed-prefix matrix, and parsed the actual 49.6 KB verification history plus a final
+  receipt as one section, one revision, and one verdict with one prefix check.
+
+## 2026-08-04 — make verdict mapping linear and scope revision duplicates (codex sol-high implementer)
+
+- The ninth panel reviewed exact revision
+  `9e9dfa2218a71135c8e6ae3e638c26d92d42f5cf` and returned 1 approve, 2 block. The
+  accepted blockers were one full semantic-prefix scan per verdict token and a second
+  revision field invalidating an already collected receipt instead of terminating it.
+- Verdict neutralization now builds semantic line-start offsets once and walks the ordered
+  matches with a monotone cursor. A deterministic 16,000-verdict CRLF regression makes
+  `count` or `rfind` prefix scans raise immediately and proves every structural token is
+  blanked while every finding and logical line remains.
+- An actual before/after benchmark on complete neutralization measured 4,000 verdicts at
+  1.090s before and 0.657s after, then 8,000 at 2.975s before and 1.357s after. These are
+  observations from one run, not performance thresholds.
+- A duplicate revision before the first valid verdict still fails closed. The first valid
+  verdict ends that prologue; a revision immediately afterward is the first non-verdict
+  terminator, preserves earlier evidence, and leaves later canonical verdict lines under
+  ordinary action detection. Parser, core-gate, and action-projection regressions cover
+  both sides plus the existing historical-field cases.
+- The first full-suite attempt exposed a nested test helper that made the repository's AST
+  sharder fall back to whole-file execution. Replacing it with a configured mock restored
+  explicit discovery; both sharding meta-tests and the successful full rerun passed.
+- Focused, owning, full, staged pre-commit, exact-range core-scope, exact-range reconciler,
+  and diff checks passed at implementation commit
+  `189fd7ee27faef510a461678eb27fc854f77eb84`. The independent finite-model preflight found
+  no remaining blocker in the ninth-panel scope.
+
+## 2026-08-04 — close composite-claimant self-review aliases (codex sol-high implementer)
+
+- The tenth panel reviewed exact revision
+  `7e3c8d2b9ea082b9289509fe64132eaaa545b272` and returned 1 approve, 2 block. The accepted
+  blockers were treating an actual composite claimant only as one combined key and using
+  equality alone, which let a component or an extended prefix/suffix spelling appear
+  independent.
+- A shared `claimant_identity_keys` helper now validates the unchanged raw identity and
+  splits literal `/`, `+`, `;`, `,`, and standalone case-insensitive ASCII `and`. ASCII
+  spaces are trimmed per component; any empty, invalid, punctuation-only, or placeholder
+  component invalidates all claimant authority.
+- The whole claimant key is the separator-free sorted multiset union of every component
+  key before component deduplication, so separator spellings agree and repeated components
+  retain multiplicity. Whole-placeholder forms such as `D/B/T`, `D and B and T`, and
+  `N/A`, plus adjacent separators and `C++`, fail closed.
+- Independence now rejects reviewer equality, either-direction multiset containment, and
+  a multiset symmetric difference of at most two against the whole claimant and every
+  component. The finite-model preflight added the one-substitution cases `author`/`auth0r`
+  and `codex planner`/`codex plannez`; intended stable labels including `correctness
+  reviewer` remain independent.
+- Core majority calculation and action neutralization call the same helper. Reviewer vote
+  replacement remains keyed only by exact reviewer identity, and a compatibility regression
+  proves distinct containment-related reviewer roles do not merge.
+- Focused 12-test, owning 315-test, full 15-file, staged 13-file, exact-range core-scope,
+  exact-range reconciler, and diff checks passed at implementation commit
+  `984af3602d171ee3b66cfbf0bdcc646330911e6f`. The final finite-model audit reported no
+  blocker; identity labels remain deliberately conservative text, not authenticated
+  principals.
+
+## 2026-08-04 — checkpoint one-time claimant derivation (codex sol-high implementer)
+
+- The eleventh panel reviewed exact revision
+  `ea4bb732e2e4c1d0d4c2a3733298d40652fb9215` and returned 2 approve, 1 block. The accepted
+  performance finding was that both core admission and action neutralization rebuilt and
+  resorted the full composite claimant for every verdict.
+- A new key-level independence helper accepts precomputed reviewer and claimant keys. The
+  public identity helper remains compatible and delegates after deriving each side once.
+  Action neutralization now derives claimant keys once per document; core validation does
+  so once per task and reuses the already computed reviewer key for exact vote dedup.
+- Composite component dedup now also uses a set while preserving ordered output and whole
+  repeated-component multiplicity.
+- Deterministic focused tests use a 256-character claimant and 256 verdicts. They prove
+  claimant derivation is called exactly once and reviewer key derivation exactly 256 times
+  in both action neutralization and core validation; existing composite/self/independent
+  semantics remain unchanged. The focused slice passed 5/5 in 0.221s.
+- The implementation was committed as
+  `1abfc8d2d2e9f1baf184398f0591cb7e8632eef9`. Its staged hook passed core scope,
+  reconciliation, and 13/13 registered repository test files in 79.74s.
+- At the owner's wrap-up request, no additional manual full suite was started. Remaining
+  work is the deferred owning/full/exact-range verification and final durable eleventh-panel
+  record before a new independent revision-bound panel.
+
+## 2026-08-05 — complete deferred claimant-precompute verification (codex terra verifier)
+
+- Resumed from exact checkpoint `d39aedcf3b5c84e3b4ba411d0802f90c54f0ef2d`
+  without changing the implementation or adding a review receipt.
+- Re-ran the deterministic 5-test performance slice, all three owning modules, and the
+  full repository suite. They passed 5/5 in 0.370s, 317 tests with one skip in 37.062s,
+  and 15/15 files in 123.93s respectively.
+- The exact task range passed the core-scope gate with 8 core paths. The first sandboxed
+  reconciler attempt exposed a recovered index stat-cache difference and then failed to
+  acquire the linked worktree index lock; the coordinating root session refreshed the
+  shared index with escalated access and the exact-range retry reported zero findings.
+- The exact-range diff check passed and the checkpoint branch was clean and tracking its
+  remote. Plan step 20 is complete. Independent exact-revision review, publication,
+  merge, issue closure, and the stale-base repair remain pending in steps 21 and 22.
+
+## 2026-08-05 — repair the twelfth-panel blockers (codex sol-high implementer)
+
+- The twelfth panel reviewed exact revision
+  `1f79e4802b5d492d7388022eab453795155e3651` and returned 0 approve, 3 block. The
+  accepted blockers were unbounded claimant-component comparisons, start-anchored
+  reviewer or finding commands hidden by a formal receipt prefix, and action identity
+  keys that collapsed accented names into ASCII spellings.
+- Composite claimants now fail closed above 16 components. One shared helper derives the
+  claimant once, normalizes each distinct reviewer source once, memoizes independence by
+  reviewer key, and supplies the same accepted matches to core admission and action
+  classification. Maximum-shape 16-component, 256-verdict tests record one independence
+  comparison in both consumers; a 17-component claimant is rejected.
+- Task-action classification blanks accepted receipt lines from its ordinary prose view
+  and scans exact reviewer and finding components as standalone units. The compatibility
+  neutralizer retains its equal-width verdict-token behavior. Regressions cover hostile
+  reviewer and finding commands, pending approval, a do-not-merge directive, benign
+  receipt text, task origin, and malformed/self receipts.
+- Detection normalization still folds marks so combining characters cannot split an
+  action keyword. Action identity and Counter normalization now use NFKC/casefold while
+  preserving marks, so composed/decomposed `José` compare equal and ASCII `Jose` remains
+  distinct. Projection, task-origin Counter, and handover bindings cover that boundary.
+- The focused eight-test repair set passed in 2.708s, all four owning modules passed 777
+  tests with one skip in 241.185s, and the full 15-file repository suite passed in
+  141.90s. A new exact-revision approving panel, publication, and merge remain pending.
+
+## 2026-08-05 — independently rerun the repaired tree (codex sol-high verifier)
+
+- Took over the repair after the implementation session became unresponsive. The staged
+  diff matched the three accepted blockers and needed no further code change.
+- The focused eight-test slice passed in 4.928s, all four owning modules passed 777 tests
+  with one skip in 260.371s, and the isolated full suite passed all 15 files in 146.75s.
+- The interrupted implementation process completed commit `9fd8c258` while verification
+  was running. The same tree was tested throughout; the takeover session did not amend
+  that commit. This follow-up records independent evidence only. Final revision-bound
+  review, publication, and merge remain pending.
+
+## 2026-08-05 — repair the final panel blockers (codex sol-high implementer)
+
+- The final panel reviewed exact revision
+  `a87701ccbb493c561eece7691997703f0ec394cb` and returned 0 approve, 3 block. The
+  accepted blockers were the template's missing claimant-component ceiling, unbounded
+  identity-key lengths preserving quadratic comparison work, and addressed `block`
+  commands missed inside accepted reviewer or finding units.
+- Replaced sorted identity strings with fixed 36-bin ASCII-alphanumeric count vectors.
+  The sentinel and outer tuple shape, multiset equality, containment, anagram, distance,
+  placeholder, component-union, and duplicate-vote semantics remain unchanged. Long
+  claimant and 64 unique long-reviewer regressions prove each pair visits fixed-size keys.
+- Kept the 16-component ceiling and made the canonical verification template state the
+  exact maximum and that 17 components invalidate all claimant authority. A registered
+  input-owner test now binds the template wording to the enforced constant.
+- Added `block` to guarded ambiguous authority commands and the explicit task-record
+  authority vocabulary. Reviewer and finding components now expose addressed commands
+  under either structural verdict, while benign formal verdicts stay inert and the
+  declarative summary `Block size is 4096 bytes.` stays non-actionable.
+- The focused 10-test slice, 325 parser/projection/core tests, 458 task-origin/reconciler
+  tests, 67 staged-lane tests, and all 15 repository test files passed. The first broad
+  owning attempt was interrupted after the final grammar adjustment and is not counted.
+- The first committed exact-range reconciler then exposed 33 historical panel lines shaped
+  as `reviewer: block — finding` that the new general token had retroactively classified
+  as asks. The guarded ambiguous form now excludes only that completed-evidence
+  continuation; addressed commands and malformed ASCII-hyphen near-misses remain visible.
+- The compatibility-focused four tests and all six staged owners passed after that repair.
+  The full repository rerun passed all 15 files in 139.65s, and exact committed revision
+  `6c9568b6833a2f3b77eaa6b8581b6e920c0bbc27` passed nine-path core scope, the reconciler
+  with zero findings, and the range diff check. A fresh independent review must bind the
+  later record checkpoint, not this pre-record revision.
+
+## 2026-08-05 — scope completed-panel compatibility (codex sol-high implementer)
+
+- The final3 panel reviewed exact revision
+  `c5d676988eabb248f66000ecb2f3b72c47ef46b1` and returned 1 approve, 2 block. Both
+  blockers identified the global em-dash exception after `block`, which also hid ordinary
+  addressed commands such as `Owner, block — this release.` outside receipts.
+- Removing the exception reproduced exactly 33 task-action findings, all completed
+  adversarial-panel block records in this task verification file. The active path was
+  `task_action_unit_counts` to `action_like_task_record_prose` to
+  `TASK_AUTHORITY_DIRECTIVE_RE`, whose match was `: block`; the general verb regex also
+  saw the token but did not decide task-record actionability.
+- Both general grammars now recognize em-dash block commands. Task records retain the
+  declarative-summary guard, so `Block size is 4096 bytes.` remains inert.
+- Compatibility now exists only in the task-root verification classification view. It
+  removes an exact visible lowercase adversarial-panel evidence line, scans its stable
+  reviewer and nonempty same-line finding independently, and never changes formal
+  core-fit receipt authority. Wrong panels, reviewer shapes, punctuation, casing, and
+  out-of-region core-fit lines remain ordinary actions.
+- Focused coverage passed 6 tests in 1.210s, the two directly affected owning modules
+  passed 630 tests in 214.386s, and the full isolated suite passed all 15 files in
+  142.15s. The staged diff, two-path core-scope gate, and reconciler also passed before
+  the implementation checkpoint `50f2cf5da74524087dabc3dfefeeb627b045c767`.
+- The commit hook passed all six registered owner files in 72.65s. An initial exact-range
+  command used an abbreviated head that core scope accepted but the reconciler correctly
+  rejected; the immediate full-object-ID retry passed nine-path core scope, reconciliation
+  with zero findings, and the range diff check. The review candidate remains without an
+  approving receipt or status move.
+
+## 2026-08-05 — preserve human-visible completed findings (codex sol-high implementer)
+
+- The final4 panel reviewed exact revision
+  `7ddab99d446bf6befcd26b57515325c9a49fd436` and returned 1 approve, 2 block. The
+  accepted blockers were a conjoined courtesy command missed in an accepted formal
+  finding and image, reference-link, or inline-code decoration hidden when historical
+  panel compatibility removed the complete source line.
+- Kept the whole exact historical panel line in the task-root verification
+  classification view and blanks only its exact lowercase completed verdict token.
+  The full-source context renders visible finding labels and inline-code contents;
+  reviewer and finding units receive the same scoped completed-review classifier.
+- Added only the guarded ASCII `and` plus `please`/`kindly` completed-review rule. It is
+  not part of general task or provider prose, and benign approved-evidence, recorded
+  approval, bare conjoined verbs, and code-description cases remain inert.
+- Each historical panel occurrence now contributes at most one action even when both
+  the whole-line and component paths match. Two duplicate hostile lines remain two
+  Counter occurrences. Exact lowercase `approve` and `block` token compatibility is
+  explicit; malformed panel shapes remain ordinary prose.
+- The focused six-test slice passed in 2.242s, the two owning modules passed 634 tests
+  in 227.864s, and the full isolated repository suite passed all 15 files in 145.19s.
+  The task remains in progress without an approving receipt, status move, publication,
+  or GitHub mutation.
+
+## 2026-08-05 — continuation handover (codex planner)
+
+- Recorded the clean checkpoint `df0a5de03d37c5046354513b011ccb4578d571c7` and the
+  completed verification evidence for the next session in the
+  [continuation handover](../../../history/conversations/2026-08-05-1330PDT-continue-review-receipt-parser/handover.md).
+- Remaining sequence: obtain a fresh three-way independent review of that exact revision,
+  record only its receipt and worklog evidence, move the task to review, then push, open,
+  merge, and close GitHub issue #80.
+
+## 2026-08-07 — sixteenth panel blocked the change (claude opus 5 orchestrator)
+
+- Recreated the task worktree after every prior worktree was lost: they had been created
+  under the system temporary directory, which the operating system cleared between sessions. No commit was
+  lost, but `task/2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` was still
+  unpushed and existed only in this clone. `handbook/git-workflow.md` already prescribes
+  `../<task-id>`; the worktrees now live there.
+- Ran a three-lens independent panel on `ccbb9e4854faf42dc423638e6b6b39a284608f4b`. The
+  vote was 0 approve, 3 block. Findings and reproductions are in
+  [verification.md](verification.md) under the sixteenth-panel section.
+- The decisive finding is a fail-open on the merge gate's own output: a finding leaving the
+  closed source alphabet ends the receipt and discards its verdict and every later verdict,
+  so a one-approve, two-block panel is reported as one approve, zero block and passes. The
+  orchestrating session reproduced this independently before recording it.
+- The task stays in `1_in-progress` with no pull request. Nothing was published, and the
+  dependent stale-base and bootstrap work is unchanged by this session's finding.
+- Filed the strategic question for the owner rather than starting a seventeenth repair
+  round, because the authorized decision described a smaller and fail-closed parser.
+
+## 2026-08-07 — rebuilt the receipt parser to the authorized shape (claude opus 5)
+
+- Rebuilt from the withdrawal baseline `679a62a` rather than restoring any withdrawn code.
+  The whole grammar now lives in one new 141-line module, `automation/review_receipt.py`,
+  which both gates import: `check_core_scope.py` for the tally and
+  `check_action_projection.py` for neutralization. Net change against `main` over
+  `automation/` and `templates/` is 418 insertions and 32 deletions, against the withdrawn
+  implementation's 3746 and 81.
+- The finding is `.+` — any nonempty prose. Fourteen realistic findings covering an
+  underscore, a backticked path, a `#` reference, a percent, a colon, a comma, a second em
+  dash, a Markdown link, a curly apostrophe, and straight quotes all parse, which is what
+  removes the fail-open: the withdrawn parser accepted one of the fourteen and silently
+  dropped the rest of the panel.
+- Nothing inside the receipt is skipped. A line that reaches for the verdict shape and
+  misses, and a canonical verdict stranded after the block, both refuse the whole receipt
+  with a named error instead of ending it quietly. Any error yields zero verdicts, so the
+  core gate reports it and the action gate neutralizes nothing.
+- Neutralization replaces only the `approve`/`block` span with spaces of equal length. A
+  regression asserts byte equality at every other offset, so the reviewer identity, the
+  finding, and any line that wraps below it stay under ordinary human-action detection.
+- Excluded, per the 2026-08-07 withdrawal decision: the closed character alphabet,
+  reviewer-similarity independence, composite claimant rules, the second `adversarial
+  panel` grammar, raw-HTML container tracking, and widening the action vocabulary with
+  `block`. The claimant/reviewer identity check is `main`'s, unchanged. Also declined, as
+  unnamed by the authorization: restricting receipts to a `verification.md` path, whose
+  basename matching produced one of the sixteenth panel's findings.
+- `templates/task/verification.md` grew from 20 to 27 lines. The `core-fit` line moved
+  above the explanation so the revision field can be the receipt's first line, and the
+  explanation now doubles as the block terminator. A filled copy passes the action gate on
+  its `core-fit` line; its non-`core-fit` lens line still projects an action when filled
+  with `approve`, exactly as on `main`.
+- Eleven focused regressions, the full 15-file suite, the core-scope gate, and the
+  reconciler all pass with real output in [verification.md](verification.md). No review was
+  run against this work and no receipt was written for it; the task stays in
+  `1_in-progress` with nothing pushed.
+
+## 2026-08-07 — seventeenth panel blocked the rebuild; one consolidated repair (claude)
+
+- A three-lens panel on `1d536d0` returned 0 approve, 3 block. Reviewers confirmed the
+  evidence reproduces byte-for-byte with nothing fabricated; the block was a set of small
+  holes plus records work. All of it is repaired in one pass, not one finding at a time.
+- **Correction to the previous entry and to `1d536d0`'s commit message.** Both claimed
+  "nothing inside the receipt is skipped" and that a verdict "can never leave the tally
+  silently". That was false. A `core-fit` verdict that missed only on its list marker
+  (`1.`, `1)`, `•`, none) or, when stranded after the block, only on its dash, was neither
+  tallied nor reported — so a one-approve two-block panel was reported as `1 approve, 0
+  block` and the gate passed a panel that had rejected the change. A reviewer with no word
+  character parsed as a verdict and then vanished at the gate's identity filter. The module
+  docstring now states only what is demonstrated and names the residue.
+- One loose recognizer, blind to the list marker and stopping before the dash, is now
+  applied by a single loop on both sides of the block end, so the two scans cannot drift
+  apart again. A reviewer with no word token is refused with a reported error.
+- `## Review verdicts` must now match exactly, per the 2026-08-04 ADR. That also unblocks
+  this task: its own `verification.md` carried both spellings and so could host no receipt.
+  `templates/task/verification.md` moved its parenthetical into the prose to match.
+- Both gates now parse `semantic_text` of the same bytes. The action gate locates each
+  accepted verdict's line in the rendered view by literal search — the technique it already
+  uses for a projected queue link — and blanks the token there. That closes the raw-HTML
+  receipt (`<p>## Review verdicts</p>` …) without raw-HTML container tracking or
+  structural-versus-rendered agreement, both of which the 2026-08-07 ADR forbids.
+- The exemption is now restricted to a full `tasks/<status>/<id>/verification.md` path
+  shape. A receipt in the task's worklog or design record, or in a verification record
+  nested one directory deeper, gets ordinary classification. This reverses the previous
+  session's deliberate omission: it is
+  a narrowing, it fails closed, and the old basename bug came from matching loosely.
+- Removed as proved dead: the `if receipt.errors` guard in the span helper and the unread
+  `Verdict.finding` field.
+- `design.md` was `**Status:** decided` while specifying every mechanism the 2026-08-07 ADR
+  forbids. Rewritten to the shipped design, with a Known residue section.
+- Two unfenced panel transcripts in `verification.md` read as new human asks, so the
+  pull-request reconciler command exited 1. Both are fenced; no historical text was
+  deleted or reworded.
+- `Claimed-by` was `codex planner / sol-high implementer`, a composite that would let one
+  half review the other's work. It is now `claude`.
+- Ten focused regressions plus eighteen subtests proved to fail on `1d536d0`, the full
+  15-file suite, the core-scope gate, and `reconcile.py --check` pass with real output in
+  [verification.md](verification.md). No review was run against this pass and no receipt
+  was written for it; the task stays in `1_in-progress` with nothing pushed.
+- The pull-request reconciler command still exits 1, and fencing cannot fix it. Both
+  findings come from `50f2cf5` and `df0a5de`, not from the branch head: a task edge is
+  judged on its own commit's bytes, and those commits committed cleanly only because the
+  implementation they carried exempted `- adversarial panel / …` lines under the second
+  grammar the 2026-08-07 decision withdrew. The same command from the withdrawal baseline
+  forward reports 0 findings. Filed as
+  [a known issue](../../../memory/known-issues/2026-08-07-withdrawn-panel-grammar-reopens-two-branch-edges.md);
+  the three ways out all need the owner, because the only one that clears the edges
+  rewrites unpushed history and would strand the revisions sixteen panels are bound to.
+
+## 2026-08-07 — eighteenth panel: prose narrowed, rejector widened (claude)
+
+- Panel 3 on `4a83f18` returned 0 approve, 3 block, all three on the same root cause: the
+  prose promised more than the code delivered. The code was confirmed sound — 35 of 48
+  mutants killed, every round-2 repair pinned, no regressions across 267 whole-repo
+  results.
+- **The rejector is now as loose as it can be made, and the acceptor is untouched.** It
+  allowed exactly one decoration character, so any two escaped it: `**- core-fit / …`,
+  `- [ ] core-fit / …`, `> - core-fit / …`, a backticked or emphasised token, a non-ASCII
+  hyphen. Sixteen forms parsed as `1 approve, 0 block` with no error. All sixteen are now
+  reported. The direction matters and is written down: a rejector can only refuse, so
+  widening it is free; widening the acceptor is what grew the withdrawn implementation.
+- Acceptance criterion 1 was checked but not met. A finding containing an HTML entity, an
+  autolink, or an inline tag was counted by the core gate and reported by the action gate,
+  which refuses the commit. The token is now placed by the verdict's own prefix — marker,
+  reviewer, token — so markup after it cannot move it. One shape still fails, closed: raw
+  HTML in the *reviewer identity*. Stated in the criterion itself and in Known residue
+  rather than left as a tick.
+- **Every claim narrowed to what is demonstrated.** "A line that reaches for the verdict
+  shape and misses is reported" was false and is now stated as exactly what the rejector
+  matches, with the three shapes that escape it named: no slash at all, a letter fused to
+  the token, a homoglyph inside the word. "Neither gate can accept a receipt the other
+  refuses" was false and is now the one-way statement that holds. The residue list grew
+  from three to five: a claimant-matching reviewer and an `identity_key` collision also
+  leave the tally in silence. Corrected in the module, `design.md`,
+  `templates/task/verification.md`, a test docstring, and the "each one bites"
+  overstatement in this file — only three of the six round-2 tests fail at `1d536d0`.
+- Receipt problems now carry the file and line, name the line that actually ended the
+  block instead of the flawless verdict after it, quote the heading spelling they found,
+  and cap at five with a count of the rest.
+- The template and `skills/adversarial-review/SKILL.md` told writers to record other-lens
+  verdicts in a shape that blocks the commit when the verdict is `approve`. It never fired
+  only because every panel line recorded here so far happened to be `block`. Both now ask
+  for the verdict word in a code span, and the filled template projects nothing in either
+  fill — the last residue from the first pass.
+- Six mutation-surviving behaviors now have tests: the revision field's first-line rule,
+  receipt path anchoring, the unmatched-prefix guard, the tie boundary, latest-wins in
+  both directions, and a colon in the reviewer.
+- Filed `2026-08-07-migrate-the-review-verdicts-heading` with its pickup request: nineteen
+  records still carry the older parenthesized heading, four of them live core tasks. The
+  task names the trap — a repo-wide rename would give this task's own record two exact
+  headings and collapse the receipt it already holds.
+- The pull-request reconciler command is re-recorded with a derived range so it reproduces
+  as written at any head. Its two findings are unchanged and still come from `50f2cf5` and
+  `df0a5de`; the known issue is unchanged.
+
+## 2026-08-07 — nineteenth panel: one regression, two wider refusals, no more counting (claude)
+
+- Panel 4: 1 approve, 2 block. The approving reviewer verified zero real flips across 360
+  whole-repo runs. One block was a regression the previous pass introduced; the rest was
+  the same prose failure for the fourth round.
+- **Regression, introduced by chasing acceptance criterion 1.** Placement scanned the
+  rendered view from line 0 for the first line opening with the verdict's prefix, and
+  nothing bound that scan to the receipt. A superseded `- core-fit / dana: approved — …`
+  above the receipt absorbed the blanking: the real verdict was reported as an unqueued
+  ask, and `approved` became `       d` — seven characters of an unrelated word erased on
+  a line in no receipt at all. `Verdict` now carries the document line number the parser
+  already computed; placement uses it, and the prefix fallback is bounded to the receipt's
+  own verdict lines and requires a non-alphanumeric boundary after the token.
+- **The rejector is far looser, in both directions I had missed.** It was applied with
+  `match`, so any letter before `core` carried a line past it, and its internal gap was
+  capped at three characters. It is now searched, both runs are bounded at sixteen, and
+  slash-like characters beyond ASCII count. Eight demonstrated escapes are closed.
+- **A silent-drop family I did not know about.** `semantic_text` blanks fenced, commented,
+  indented and HTML-wrapped lines before any rejector sees them, so a verdict written that
+  way vanished with no error and the gate passed — the withdrawal ADR's decisive outcome
+  through another door. The parser now also reads the receipt section's own raw lines.
+  That is refusal-only: it can add an error, never a verdict.
+- **Stopped counting.** Four rounds were blocked on prose, and the cause was structural: a
+  closed enumeration invites falsification, and each round a reviewer found one more item.
+  The module, `design.md`, the template and `task.md` now state rules — what the rejector
+  needs, what each gate owns, when placement declines — and no inventory of shapes. The
+  false completeness claims are gone: the two gates share the parser and nothing else, and
+  problems past `ERROR_LIMIT` are counted rather than listed.
+- Also: the refusal message no longer invites reshaping a link into a verdict; the skill's
+  code-span rule is scoped to non-`core-fit` lenses; the unreachable dedup branch is gone;
+  the stranded message's line prefix and excerpt now name the same line; the migration task
+  no longer says all nineteen records can host no receipt.
+- Blast radius measured, not assumed: 645 tracked Markdown files, both real receipts still
+  parse, three refusals (two the unfilled-template placeholder, one a section that is prose
+  with no revision field at all), and the action-gate total over
+  every task record is 18 at HEAD and 18 at `6d84769`. The backtracking probe stays under
+  six milliseconds on 200,000-character lines.
+- Three older evidence sections cited scripts that no longer run as written; each now pins
+  the revision it was taken at and says what changed, and the messages section carries its
+  source inline.
+- The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — twentieth panel: the bound, and tests that did not test (claude)
+
+- Panel 5: 2 block, 1 approve. The gate held every attack; both blocks were mine.
+- **The regression: widening the rejector also narrowed it.** Capping the run before the
+  slash at sixteen characters let seventeen or more non-letters through, dropping a block
+  verdict with no error. Worse than the count suggests — the zero-width variant renders
+  the same tuple from `normalized_action_tokens`, so a reader of the diff sees a rejection while
+  the gate reports an approve majority. Nothing in the rejector is bounded now: it locates
+  `core…fit` with a pattern and finds the slash by plain string search over the rest of
+  the line. **Correction, recorded at the twentieth panel:** the first version of this
+  entry, of `design.md` and of the commit message said that was *faster* than the bound it
+  replaces. It is not. Head to head on identical inputs the unbounded rejector is slower
+  on five of fourteen shapes, by up to 2.6x, and its peak is comparable rather than lower;
+  the 4.4 ms figure came from a probe set that omitted the dominating family. Coverage,
+  not cost, is why the bound is gone. The rule stands: bounding a rejector is a coverage
+  decision, and any future bound goes in the record with what it costs.
+- **The tests that claimed to pin the previous regression did not.** All four fixtures used
+  a decoy shifted by a character, so the token-boundary clause refused them on its own and
+  the two clauses under test never ran; the whole pre-`eeca7db` placement shape could be
+  restored with the suite green and my earlier regression back in full. Each clause now has
+  its own test with a decoy built so only that clause can refuse it, and each test asserts
+  the other clauses are reachable before exercising its own. Proved by `tmp/mutants.py`,
+  which applies each mutation, runs both owning files, and names the killer: six
+  mutations, six deaths, no survivors. Two of the six — the rejector bound and the raw
+  newline split — were survivors on the first run, which is how they were found.
+- **The line-count guard was itself a fail-open.** One bare CR desynchronised the raw scan,
+  the guard declined the whole scan, and a fenced verdict was dropped silently. The raw
+  lines now come from `commonmark_lines`, which is what `semantic_text` splits on, so the
+  two agree by construction and no guard is needed. Reachable only through the action
+  gate, which decodes without newline translation — so its test lives there.
+- Stated the rule the approving reviewer asked for: refusal-only is not the same as safe.
+  Declining to refuse is permission, so an early return, a clipped run, or a view that
+  dropped the line are all fail-open whichever way the pass points.
+- Also: the gate no longer says a receipt "is needed" when one was written and refused;
+  the problem list keeps the earliest five rather than whichever pass ran first; the
+  review skill no longer places a superseded transcript inside the section it would refuse;
+  and three false glosses in the records are corrected — one of the three blast-radius
+  refusals is not a placeholder case, the pinned script's wording is the nineteenth
+  panel's not the eighteenth's, and the superseded benchmark says so.
+- The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — twenty-first pass: records and tests only (claude)
+
+- The gate approved 3-0 at `4cec5be`. This pass changed no behaviour: `tmp/prove_comments_only.py`
+  compares each gate module's AST with docstrings stripped and reports all three identical.
+- **Four sentences were false and are corrected.** The benchmark claim was the worst: three
+  records and a commit message said the unbounded rejector is *faster* than the bound it
+  replaced. Measured head to head on identical inputs it is slower on five of fourteen
+  shapes, by up to 2.6x, with a comparable peak — the 4.4 ms figure came from a probe set
+  that omitted the dominating family, `("core" + "."*k)` repeated. Coverage, not cost, is
+  why the bound is gone, and the record now says that with the numbers beside it. The
+  commit message cannot be edited, so the correction is stated here and in `design.md`.
+- The other three: `reaches_for_verdict`'s docstring claimed nothing backtracks, which is
+  true of the slash search and false of the pattern that finds `core…fit` — now scoped,
+  with the linearity claim kept and measured at ~32 ns/char. "Renders byte-identically"
+  was a false technical claim in a repo where *rendered* names a view; the raw, rendered
+  and structural forms all differ, and only `normalized_action_tokens` agrees. And the
+  module docstring named `LOOSE_VERDICT_RE`, a symbol that no longer exists.
+- `_placement_index` justified itself with a claim about the two views numbering lines
+  alike, which fuzzing falsified on unterminated HTML comments. The code never relied on
+  it — the exact step requires character equality and the fallback is bounded — so the
+  docstring now says what the code does.
+- **Four coverage gaps closed, each an invisible edit that passed 235 tests.** Re-bounding
+  the run *inside* `core…fit` resurrected the fail-open one character position over; the
+  fallback's bound to the receipt range was masked by the line-number step; dropping the
+  slash requirement entirely flipped zero files; and the refused-receipt message branch had
+  no test. Eleven mutations now run, eleven die, no survivors — and the mutation table is
+  inlined in full, because the one inlined last pass was a placeholder that could not run.
+  An inlined script that cannot run is the same defect as a docstring that cannot be
+  checked, which is what this task keeps relearning.
+- The merge-edge known issue is unchanged and still needs the owner.
+
+## 2026-08-08 — gate panel approved and the task moved to review (claude)
+
+- Three independent reviewers approved `4cec5be`, then each re-bound its verdict to
+  `66c6e57` after a records-only pass. Executable code is byte-equivalent across that
+  pass, verified by syntax-tree comparison with docstrings removed and reproduced by two
+  reviewers, one of them also by bytecode.
+- `check_core_scope.py --require-review` now reports `independent review verified` on this
+  task's own receipt, which is the behaviour the task exists to provide.
+- The residue the panel named is recorded beside the receipt in
+  [verification.md](verification.md), including two items an earlier record wrongly
+  claimed were repaired.

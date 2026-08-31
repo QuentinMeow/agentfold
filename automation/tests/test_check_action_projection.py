@@ -19,6 +19,11 @@ SPEC = importlib.util.spec_from_file_location("check_action_projection", MODULE_
 PROJECTION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROJECTION)
 
+RECEIPT_PATH = Path(__file__).resolve().parents[1] / "review_receipt.py"
+RECEIPT_SPEC = importlib.util.spec_from_file_location("review_receipt", RECEIPT_PATH)
+RECEIPT = importlib.util.module_from_spec(RECEIPT_SPEC)
+RECEIPT_SPEC.loader.exec_module(RECEIPT)
+
 GIT_FIXTURE_IDENTITY = (
     ("user.name", "Test"),
     ("user.email", "test@example.invalid"),
@@ -2392,6 +2397,395 @@ class ActionProjectionTests(unittest.TestCase):
             )
             self.assertEqual(1, len(counts))
             self.assertEqual(2, sum(counts.values()))
+
+    def receipt(self, body, heading="## Review verdicts", revision="a" * 40):
+        """Build a verification record whose only content is one review receipt."""
+        return (
+            f"# Verification\n\n{heading}\n\n"
+            f"**Reviewed revision:** {revision}\n\n{body}"
+        )
+
+    def receipt_units(self, root, document):
+        return PROJECTION.task_action_unit_counts(
+            document,
+            "tasks/1_in-progress/2026-08-04-example/verification.md",
+            repo=root,
+        )
+
+    def test_task_action_units_accept_a_canonical_review_receipt(self):
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                self.receipt_units(root, self.receipt(
+                    "- core-fit / first: approve — the `automation/x.py` boundary holds\n"
+                    "- core-fit / second: block — 50% of the adapters break, see #81\n"
+                    "\n"
+                    "- core-fit / third: approve — the reviewer’s case — nested — parses\n"
+                )),
+            )
+
+    def test_receipt_neutralization_blanks_the_token_and_nothing_else(self):
+        """Only the structural token may lose its offsets; never the whole line."""
+        source = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(source)
+        blanked = PROJECTION.blank_receipt_verdict_tokens(source, path, rendered)
+        changed = [
+            index for index, (before, after) in enumerate(zip(rendered, blanked))
+            if before != after
+        ]
+
+        self.assertEqual(len(rendered), len(blanked))
+        self.assertEqual(len("approve"), len(changed))
+        self.assertEqual(list(range(changed[0], changed[0] + len(changed))), changed)
+        self.assertEqual("approve", rendered[changed[0]:changed[-1] + 1])
+        self.assertEqual(" " * len("approve"), blanked[changed[0]:changed[-1] + 1])
+        self.assertIn(
+            "- core-fit / first:         — the boundary holds", blanked
+        )
+
+    def test_task_action_units_report_an_ask_in_a_reviewer_or_a_finding(self):
+        cases = {
+            "reviewer": self.receipt(
+                "- core-fit / Quentin must approve the rollout: approve — "
+                "the boundary holds\n"
+            ),
+            "finding": self.receipt(
+                "- core-fit / first: approve — Quentin must approve the rollout\n"
+            ),
+        }
+        with self.repo() as root:
+            for position, document in cases.items():
+                with self.subTest(position=position):
+                    counts = self.receipt_units(root, document)
+                    self.assertEqual(1, sum(counts.values()), counts)
+                    self.assertIn(
+                        "Quentin must approve the rollout",
+                        next(iter(counts)),
+                    )
+
+    def test_task_action_units_report_an_ask_on_a_wrapped_finding_line(self):
+        with self.repo() as root:
+            counts = self.receipt_units(root, self.receipt(
+                "- core-fit / first: approve — the boundary holds but\n"
+                "  Quentin must decide the flag default\n"
+            ))
+            self.assertEqual(1, sum(counts.values()), counts)
+            self.assertIn("Quentin must decide the flag default", next(iter(counts)))
+
+    def test_task_action_units_give_receipt_near_misses_no_exemption(self):
+        cases = {
+            "hyphen delimiter": self.receipt(
+                "- core-fit / first: approve - the boundary holds\n"
+            ),
+            "decorated heading": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n",
+                heading="### Review verdicts",
+            ),
+            "abbreviated revision": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n",
+                revision="abc1234",
+            ),
+            "indented verdict": self.receipt(
+                "  - core-fit / first: approve — the boundary holds\n"
+            ),
+            "prose before the revision field": (
+                "# Verification\n\n## Review verdicts\n\nThe panel met on Tuesday.\n\n"
+                "**Reviewed revision:** " + "a" * 40 + "\n\n"
+                "- core-fit / first: approve — the boundary holds\n"
+            ),
+            "verdict stranded after the block": self.receipt(
+                "- core-fit / first: approve — the boundary holds\n\n"
+                "The panel adjourned.\n\n"
+                "- core-fit / second: approve — the boundary still holds\n"
+            ),
+        }
+        with self.repo() as root:
+            for name, document in cases.items():
+                with self.subTest(case=name):
+                    counts = self.receipt_units(root, document)
+                    self.assertGreaterEqual(sum(counts.values()), 1, counts)
+
+    def test_a_malformed_verdict_refuses_the_whole_receipt(self):
+        """A near-miss beside real verdicts neutralizes none of them."""
+        with self.repo() as root:
+            counts = self.receipt_units(root, self.receipt(
+                "- core-fit / first: approve — the boundary holds\n"
+                "- core-fit / second: blocks — not a canonical verdict token\n"
+                "- core-fit / third: approve — the boundary still holds\n"
+            ))
+            self.assertEqual(2, sum(counts.values()), counts)
+
+    def test_no_list_marker_or_dash_can_slip_a_verdict_past_the_receipt(self):
+        """The loose recognizer is the same one on both sides of the block end.
+
+        A near-miss refuses the receipt, so neither token is blanked. The unit count
+        varies — an unmarked line continues the list item above it — so what is pinned
+        is that both `approve` tokens survive into the scanned text.
+        """
+        cases = {
+            "ordered 1. marker": "1. core-fit / second: approve — sneaks in\n",
+            "ordered 1) marker": "1) core-fit / second: approve — sneaks in\n",
+            "no marker at all": "core-fit / second: approve — sneaks in\n",
+            "bullet glyph marker": "• core-fit / second: approve — sneaks in\n",
+            "ascii hyphen dash": "- core-fit / second: approve - sneaks in\n",
+            "en dash": "- core-fit / second: approve – sneaks in\n",
+        }
+        with self.repo() as root:
+            for name, line in cases.items():
+                for placement in ("inside the block", "stranded after it"):
+                    with self.subTest(case=name, placement=placement):
+                        tail = (
+                            line if placement == "inside the block"
+                            else "\nThe panel adjourned.\n\n" + line
+                        )
+                        counts = self.receipt_units(root, self.receipt(
+                            "- core-fit / first: approve — the boundary holds\n" + tail
+                        ))
+                        surviving = sum(
+                            excerpt.count("approve") * count
+                            for excerpt, count in counts.items()
+                        )
+                        self.assertEqual(2, surviving, counts)
+
+    def test_only_a_task_verification_record_may_claim_a_receipt(self):
+        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        exempt = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        refused = (
+            "tasks/1_in-progress/2026-08-04-example/worklog.md",
+            "tasks/1_in-progress/2026-08-04-example/design.md",
+            "tasks/1_in-progress/2026-08-04-example/task.md",
+            "tasks/1_in-progress/2026-08-04-example/plan.md",
+            "tasks/1_in-progress/2026-08-04-example/notes/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/Verification.md",
+            "docs/designs/verification.md",
+            "verification.md",
+        )
+        with self.repo() as root:
+            self.assertEqual(
+                {},
+                PROJECTION.task_action_unit_counts(document, exempt, repo=root),
+            )
+            for path in refused:
+                with self.subTest(path=path):
+                    counts = PROJECTION.task_action_unit_counts(
+                        document, path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_raw_html_cannot_render_a_receipt_no_gate_validated(self):
+        """`rendered_human_text` is never structural evidence for a receipt.
+
+        Raw HTML renders these three lines as a heading, a field and a verdict, while
+        `semantic_text` blanks them, so the core-scope gate would never see a receipt
+        here. The exemption follows the structural view, so it is not granted.
+        """
+        revision = "a" * 40
+        html = (
+            "<p>## Review verdicts</p>\n"
+            f"<p>**Reviewed revision:** {revision}</p>\n"
+            "<p>- core-fit / first: approve — the boundary holds</p>\n"
+        )
+        self.assertIn("## Review verdicts", PROJECTION.rendered_human_text(html))
+        with self.repo() as root:
+            counts = self.receipt_units(root, html)
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_a_finding_carrying_markup_is_still_neutralized(self):
+        """Acceptance criterion 1: the core gate counts these, so this gate must not
+        report them. The token is placed by the verdict's own prefix, so an entity,
+        autolink or inline tag later in the finding cannot move it.
+        """
+        findings = (
+            "see <https://example.com/adr> for the rule",
+            "the &amp; in the finding survives",
+            "boundary holds for <div> containers",
+        )
+        with self.repo() as root:
+            for finding in findings:
+                with self.subTest(finding=finding):
+                    counts = self.receipt_units(root, self.receipt(
+                        f"- core-fit / first: approve — {finding}\n"
+                    ))
+                    self.assertEqual({}, counts)
+
+    def test_a_verdict_prefix_the_rendered_view_lost_blanks_nothing(self):
+        """The one guard between a mismatched view and a blanking placed on a guess."""
+        document = self.receipt(
+            "- core-fit / first <span>a</span>: approve — the boundary holds\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        self.assertNotIn("<span>", rendered)
+        self.assertEqual(
+            rendered,
+            PROJECTION.blank_receipt_verdict_tokens(document, path, rendered),
+        )
+        with self.repo() as root:
+            counts = self.receipt_units(root, document)
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_the_receipt_path_is_matched_whole_and_never_by_suffix(self):
+        document = self.receipt("- core-fit / first: approve — the boundary holds\n")
+        refused = (
+            "services/x/tasks/1_in-progress/2026-08-04-example/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/verification.mdx",
+            "atasks/1_in-progress/2026-08-04-example/verification.md",
+            "tasks/1_in-progress/2026-08-04-example/verification.md.bak",
+        )
+        with self.repo() as root:
+            for path in refused:
+                with self.subTest(path=path):
+                    counts = PROJECTION.task_action_unit_counts(
+                        document, path, repo=root
+                    )
+                    self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_a_lookalike_above_the_receipt_cannot_steal_the_blanking(self):
+        """Placement follows the parser's line number, never a scan from line 0.
+
+        The decoy repeats the receipt verdict word for word, so nothing about the line
+        itself distinguishes the two: only the recorded line number does. A decoy that
+        differed by even one character would be refused by the token-boundary rule
+        instead, and this test would pass with the placement rule deleted.
+        """
+        document = (
+            "# Verification\n\n"
+            "## Panel round one\n\n"
+            "- core-fit / dana: approve — round one, superseded\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / dana: approve — the boundary holds\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        blanked = PROJECTION.blank_receipt_verdict_tokens(document, path, rendered)
+
+        self.assertIn("- core-fit / dana: approve — round one, superseded", blanked)
+        self.assertIn("- core-fit / dana:         — the boundary holds", blanked)
+        self.assertEqual(len(rendered), len(blanked))
+        with self.repo() as root:
+            counts = self.receipt_units(root, document)
+            # The decoy is outside the receipt, so it stays an ordinary action. What
+            # must never happen is the reverse: the receipt's own verdict reported while
+            # the decoy is quietly blanked in its place.
+            self.assertEqual(
+                ["- core-fit / dana: approve — round one, superseded"],
+                sorted(counts),
+                counts,
+            )
+
+    def test_placement_needs_the_whole_prefix_through_the_token(self):
+        """Truncating the anchor to the reviewer must not survive.
+
+        The decoy keeps every character before the token and differs only in the token,
+        so the anchor is the only thing that can refuse it: the token-boundary rule
+        passes here, because the character at the token's end offset is a space in both
+        lines.
+        """
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        decoy = "- core-fit / dana: block — a different verdict"
+
+        self.assertTrue(RECEIPT.carries_verdict_prefix(verdict.line, verdict))
+        self.assertTrue(
+            decoy.startswith(verdict.line[:verdict.token_start]),
+            "the decoy must share everything before the token",
+        )
+        self.assertFalse(
+            decoy[verdict.token_end:verdict.token_end + 1].isalnum(),
+            "the boundary rule must not be what refuses this decoy",
+        )
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
+
+    def test_placement_needs_the_prefix_at_the_start_of_the_line(self):
+        """Matching the prefix anywhere in the line must not survive.
+
+        The decoy carries the prefix verbatim but not at column zero, and its padding is
+        chosen so the character at the token's end offset is a space — otherwise the
+        token-boundary rule refuses it first and the start-of-line rule is never reached.
+        """
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        prefix = verdict.line[:verdict.token_end]
+        decoy = "> note: " + prefix + " — a quoted copy"
+
+        self.assertIn(prefix, decoy)
+        self.assertFalse(decoy.startswith(prefix))
+        self.assertFalse(
+            decoy[verdict.token_end:verdict.token_end + 1].isalnum(),
+            "the boundary rule must not be what refuses this decoy",
+        )
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
+
+    def test_the_fallback_search_never_leaves_the_receipt(self):
+        """The fallback's bound is load-bearing on its own, not only beside line numbers.
+
+        An HTML entity in the finding makes the rendered line differ from the parsed one,
+        so the line-number step declines and the fallback is what runs. Unbounded, it
+        would find the decoy above the receipt first and blank that instead.
+        """
+        document = (
+            "# Verification\n\n"
+            "## Panel round one\n\n"
+            "- core-fit / dana: approve — round one, superseded\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / dana: approve — the &amp; in the finding\n"
+        )
+        path = "tasks/1_in-progress/2026-08-04-example/verification.md"
+        rendered = PROJECTION.rendered_human_text(document)
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        self.assertNotEqual(
+            verdict.line,
+            rendered.split("\n")[verdict.number - 1],
+            "the line-number step must decline, or the fallback is not under test",
+        )
+
+        blanked = PROJECTION.blank_receipt_verdict_tokens(document, path, rendered)
+        self.assertIn("- core-fit / dana: approve — round one, superseded", blanked)
+        self.assertIn("- core-fit / dana:         — the & in the finding", blanked)
+
+    def test_a_bare_carriage_return_cannot_hide_a_verdict(self):
+        """The raw scan shares line numbering with the structural view by construction.
+
+        Splitting the source on newlines alone let one bare CR shift every later line,
+        and the guard that noticed the shift declined the whole scan, turning a stray
+        byte into permission to hide a verdict in a fence. This gate is where that is
+        reachable: it decodes the artifact without newline translation, while the
+        core-scope gate reads it through Git with universal newlines.
+        """
+        document = (
+            "# Verification\n\nA note with a bare \r carriage return.\n\n"
+            "## Review verdicts\n\n"
+            f"**Reviewed revision:** {'a' * 40}\n\n"
+            "- core-fit / first: approve — could not break it\n"
+            "```\n- core-fit / dissenter: block — a concrete bypass\n```\n"
+        )
+        problems = RECEIPT.formatted_errors(
+            RECEIPT.parse_review_receipt(document), "verification.md"
+        )
+        hidden = [
+            problem for problem in problems
+            if "structural view does not carry" in problem
+        ]
+
+        self.assertEqual(1, len(hidden), problems)
+        # The CR ends a CommonMark line, so the fenced verdict sits on line 12. A raw
+        # split on newlines alone puts it on 11 and names the wrong place.
+        self.assertIn("verification.md:12:", hidden[0])
+        with self.repo() as root:
+            counts = self.receipt_units(root, document)
+            self.assertEqual(1, sum(counts.values()), counts)
+
+    def test_placement_refuses_a_token_that_only_starts_the_same(self):
+        """The token-boundary rule, isolated from the other two."""
+        document = self.receipt("- core-fit / dana: approve — the boundary holds\n")
+        verdict = RECEIPT.parse_review_receipt(document).verdicts[0]
+        decoy = "- core-fit / dana: approved — a longer word"
+
+        self.assertTrue(decoy.startswith(verdict.line[:verdict.token_end]))
+        self.assertFalse(RECEIPT.carries_verdict_prefix(decoy, verdict))
 
     def test_absolute_link_cannot_hide_queue_path_below_extra_route(self):
         with self.repo() as root:
