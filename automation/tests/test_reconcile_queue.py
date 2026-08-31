@@ -20921,6 +20921,43 @@ class ReconcileQueueTests(unittest.TestCase):
                     with self.subTest(quote=quote, slash_count=slash_count, valid=False):
                         self.source_quote_fidelity_case(source, source.replace("  B", " B"), False)
 
+    def test_source_quote_fidelity_r5_accepts_new_visible_unicode_boundaries(self):
+        # These visible Unicode 14-16 symbols/punctuation are unassigned in 13.
+        for separator in ("\U0001fae0", "\U0001fae8", "\U0001fae9", "\U0001cc00", "\u2e53"):
+            source = "The option is " + separator + "LIMIT = 10."
+            for kind in ("decision", "clarification", "review"):
+                for quoted in ("LIMIT = 10.", source):
+                    with self.subTest(separator=repr(separator), kind=kind, quoted=quoted):
+                        self.source_quote_fidelity_case(source, quoted, True, kind=kind)
+            with self.subTest(separator=repr(separator), edge="end"):
+                self.source_quote_fidelity_case("LIMIT" + separator + " stays.", "LIMIT", True)
+
+    def test_source_quote_fidelity_r5_preserves_new_identifier_continuations(self):
+        # New letters, marks and numbers must not inherit the symbol exception.
+        for continuation in ("\u0870", "\u1c89", "\u1c8a", "\ua7f2", "\U0001e4ec",
+                             "\u0cf3", "\U00010d40", "\U0001d2c0"):
+            source = "e" + continuation + "LIMIT = 10"
+            for quoted, valid in (("LIMIT = 10", False), (source, True)):
+                with self.subTest(continuation=repr(continuation), edge="start", quoted=quoted):
+                    self.source_quote_fidelity_case(source, quoted, valid, suffix="py")
+            with self.subTest(continuation=repr(continuation), edge="end"):
+                self.source_quote_fidelity_case("LIMIT" + continuation + " = 10", "LIMIT", False, suffix="py")
+
+    def test_source_quote_fidelity_r5_preserves_unicode_decimal_number_boundaries(self):
+        # Include assigned non-ASCII digits as well as additions after Unicode 13.
+        for digit in ("\u0661", "\u0967", "\U00010d40", "\U0001ccf0"):
+            cases = (("10." + digit, "10"), ("10." + digit, digit),
+                     ("-." + digit, digit), ("1e-" + digit, digit),
+                     ("10.e+" + digit, "10."), ("1." + digit + "e+" + digit, "1." + digit),
+                     ("0x1.fp+" + digit, digit), (digit + "_" + digit + ".5", digit))
+            for literal, partial in cases:
+                source = "VALUE=" + literal
+                for quoted, valid in ((partial, False), (source, True), (literal, True)):
+                    with self.subTest(digit=repr(digit), source=source, quoted=quoted):
+                        self.source_quote_fidelity_case(source, quoted, valid, suffix="py")
+            with self.subTest(digit=repr(digit), prose_period=True):
+                self.source_quote_fidelity_case("Count " + digit + ".", digit, True)
+
     def test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review(self):
         for kind in ("decision", "review"):
             with self.subTest(kind=kind), self.repo() as root:
