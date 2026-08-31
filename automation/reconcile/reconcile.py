@@ -408,20 +408,19 @@ EXAMPLE_CONSEQUENCE_RE = re.compile(
     r"^\*Example consequence:\*\s*(.+)$", re.M
 )
 # The one shape a citation may take above the answer line: the source's own words,
-# then the exact heading they stand under. Dependabot inlines its changelog as a
+# then the exact heading or bounded source lines they stand under. Dependabot inlines its changelog as a
 # blockquote with a "Sourced from" attribution link and is the most-read
 # machine-written request in the world; the measured alternative — writing the
 # reader an argument they cannot cheaply check — raises agreement with wrong
 # recommendations as readily as with right ones. So this asks for bytes and never
 # for reasoning.
 QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)\s*")
-# Below this, a run of words is short enough to appear in an unrelated document by
-# coincidence, so a failed match is not evidence of fabrication and is not
-# reported. It is a floor on *verification*, never a floor on quote length: a
-# six-word sentence that decides the question is a better quote than twelve padded
-# ones, and a minimum length is an invitation to pad.
-# AR 25-50's device, and OpenVEX's: a claim that there is nothing to show must be
-# stated, because a blank slot is indistinguishable from a skipped one.
+# Keep quoted literal contents intact when allowing presentation whitespace.
+SOURCE_STRING_RE = re.compile(
+    r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""", re.S
+)
+SOURCE_LITERAL_RE = re.compile(SOURCE_STRING_RE.pattern + r"|`(?:\\.|[^`\\])*`", re.S)
+# A missing source must be stated explicitly, not inferred from an empty slot.
 NO_SOURCE_LITERAL = "No source document — everything you need is above."
 # A backticked token shaped like a repository *file*. Backticks render as code, so
 # it is not clickable on any surface a human reads an item on. A directory is
@@ -2047,7 +2046,7 @@ def anchored_section_source(target, fragment, raw=None):
     return "\n".join(raw_lines[start + 1:end])
 
 
-def quote_presentation_text(value):
+def quote_presentation_text(value, preserve_strings=False):
     """Normalize paired prose emphasis while preserving code's literal contents.
 
     This is deliberately a small presentation allowance, not a Markdown renderer.
@@ -2081,6 +2080,11 @@ def quote_presentation_text(value):
         elif index not in exposed:
             lines[index] = protect(line)
     value = "".join(lines)
+    if preserve_strings:
+        # The quotation of a code/text source may emphasize an identifier, but
+        # stars or backticks inside a quoted string still spell literal bytes.
+        for matched in reversed(list(SOURCE_STRING_RE.finditer(value))):
+            value = value[:matched.start()] + protect(matched.group()) + value[matched.end():]
     for start, end in reversed(inline_code_spans(value)):
         value = value[:start] + protect(render_inline_code(value[start:end])) + value[end:]
     # Whole delimiter runs with word boundaries: never erase the underscore in
@@ -2098,8 +2102,9 @@ def quote_presentation_text(value):
 
 
 def raw_quote_presentations(quoted):
-    """For code/text sources, permit only a wrapper around the entire excerpt."""
+    """Permit quote presentation without normalizing raw source strings."""
     yield quoted
+    yield quote_presentation_text(quoted, preserve_strings=True)
     stripped = quoted.strip()
     if inline_code_spans(stripped) == [(0, len(stripped))]:
         yield render_inline_code(stripped)
@@ -2113,10 +2118,27 @@ def raw_quote_presentations(quoted):
                 yield body
 
 
+def quote_whitespace(value):
+    """Collapse wrapping outside literals; spaces inside a string are its bytes."""
+    literals = []
+    prefix = "\ue000LITERAL"
+    while prefix in value:
+        prefix += "Q"
+
+    def protect(matched):
+        literals.append(matched.group())
+        return prefix + str(len(literals) - 1) + "\ue001"
+
+    value = " ".join(SOURCE_LITERAL_RE.sub(protect, value).split())
+    for index, literal in enumerate(literals):
+        value = value.replace(prefix + str(index) + "\ue001", literal)
+    return value
+
+
 def quote_is_verbatim(quoted, source, markdown=True):
     """Check every excerpt length, in order, without changing spelling or case."""
     def flatten(value):
-        return " ".join(value.split())
+        return quote_whitespace(value)
 
     def matches(needle, haystack):
         needle, haystack = flatten(needle), flatten(haystack)

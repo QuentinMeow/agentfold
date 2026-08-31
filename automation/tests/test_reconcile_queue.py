@@ -20177,6 +20177,7 @@ class ReconcileQueueTests(unittest.TestCase):
             ("The `MAX_LIMIT` stays **ten**.", "The MAX_LIMIT stays ten.", "md"),
             ("First sentence. Second sentence. Last sentence.", "First sentence. […] Last sentence.", "md"),
             ("VALUE = A*B", "`VALUE = A*B`", "py"),
+            ("MAX_LIMIT = 10", "**MAX_LIMIT** = 10", "py"),
             ('LABEL = "**Approved**"', 'LABEL = "**Approved**"', "py"),
             ("VALUE = ...", "VALUE = ...", "txt"),
         )
@@ -20202,6 +20203,21 @@ class ReconcileQueueTests(unittest.TestCase):
                                                  source="# Source\n\n## Limit\n\n" + source + "\n")
                 evidence, _ = self.source_evidence_findings(item)
                 self.assertTrue(any("not the words" in problem for problem in evidence), evidence)
+
+    def test_source_evidence_preserves_whitespace_inside_code_strings(self):
+        for suffix in ("py", "txt", "md"):
+            for quoted in ('LABEL = "A B"', 'LABEL = "A  B"'):
+                with self.subTest(suffix=suffix, quoted=quoted), self.repo() as root:
+                    target = "docs/source." + suffix
+                    source = 'LABEL = "A  B"\n'
+                    fragment = "#L1"
+                    if suffix == "md":
+                        source = "# Code\n\n```python\n" + source + "```\n"
+                        fragment = "#code"
+                    item = self.source_evidence_item(root, quoted, "../../../" + target + fragment,
+                                                     source=source, target=target)
+                    evidence, _ = self.source_evidence_findings(item)
+                    self.assertEqual(quoted == 'LABEL = "A B"', bool(evidence), evidence)
 
     def test_source_evidence_line_selectors_preserve_markdown_code_bytes(self):
         for quoted in ('LABEL = "Approved"', 'LABEL = "**Approved**"'):
