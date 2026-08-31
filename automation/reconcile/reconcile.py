@@ -205,9 +205,23 @@ REVIEW_OUTCOMES = {
     "rejected",
     "abandoned",
     "not-approved",  # legacy alias for changes-requested
+    # The fifth cell, and the only one that is a verdict on the *item* rather
+    # than on its subject: the reader could not tell from what they were given.
+    # Without it "I can't answer this" has to be recorded as one of four things
+    # it is not. It adds no new trust assumption — every outcome here is already
+    # an attested classification
+    # (`memory/known-issues/2026-07-31-review-outcome-classification-is-attested.md`)
+    # — and it authorizes nothing, because it is not terminal.
+    "unanswerable",
 }
 REVIEW_SUCCESSOR_OUTCOMES = {"changes-requested", "not-approved"}
 REVIEW_TERMINAL_OUTCOMES = {"approved", "rejected", "abandoned"}
+# Parallel to REVIEW_SUCCESSOR_OUTCOMES: an outcome that withdraws nothing and
+# decides nothing, so the question is still owed an answer. `check_stale_queue`
+# skips any answered item as "a record awaiting its fold", so without an
+# obligation at the deletion edge an unanswerable review would look resolved with
+# nobody holding the question — exactly the silent wait AGENTS.md forbids.
+REVIEW_REASK_OUTCOMES = {"unanswerable"}
 # The two review fields the folding agent supplies, never the human. Keeping them
 # out of the human's own commit is what lets a review be answered in one edit
 # (`handbook/human-action-guide.md`); `review_terminal_binding_write` bounds when
@@ -388,6 +402,35 @@ PLACEHOLDER_RE = re.compile(
 OPTION_RE = re.compile(r"^### Option(?:\s|$)", re.M)
 EXAMPLE_CONSEQUENCE_RE = re.compile(
     r"^\*Example consequence:\*\s*(.+)$", re.M
+)
+# The one shape a citation may take above the answer line: the source's own words,
+# then the exact heading they stand under. Dependabot inlines its changelog as a
+# blockquote with a "Sourced from" attribution link and is the most-read
+# machine-written request in the world; the measured alternative — writing the
+# reader an argument they cannot cheaply check — raises agreement with wrong
+# recommendations as readily as with right ones. So this asks for bytes and never
+# for reasoning.
+QUOTE_ATTRIBUTION_RE = re.compile(
+    r"^—[ \t]+\[(?P<label>[^\]]+)\]\((?P<dest>[^()\s]+)\)[ \t]*$"
+)
+# Quoting a long passage means eliding. Every remaining segment must still appear
+# in the source, in order: eliding is permitted, paraphrasing inside a blockquote
+# is not.
+QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)\s*")
+# Below this, a run of words is short enough to appear in an unrelated document by
+# coincidence, so a failed match is not evidence of fabrication and is not
+# reported. It is a floor on *verification*, never a floor on quote length: a
+# six-word sentence that decides the question is a better quote than twelve padded
+# ones, and a minimum length is an invitation to pad.
+QUOTE_VERIFY_MIN_WORDS = 8
+# AR 25-50's device, and OpenVEX's: a claim that there is nothing to show must be
+# stated, because a blank slot is indistinguishable from a skipped one.
+NO_SOURCE_LITERAL = "no source document — everything you need is above."
+# A backticked token shaped like a repository *file*. Backticks render as code, so
+# it is not clickable on any surface a human reads an item on. A directory is
+# exempt: it has no passage to quote, so a link is the honest form for it.
+QUEUE_FILE_TOKEN_RE = re.compile(
+    r"^[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*\.(?:md|py|txt|json|toml|ya?ml|sh)$"
 )
 # Everything that opens a new CommonMark block, so the line before it ended where a
 # per-line pattern thinks it ended. Anything else following a non-blank line is a
@@ -1865,6 +1908,263 @@ def choice_sections(body):
             else len(body)
         )
         yield " ".join(matched.group(1).split()), body[matched.end():end]
+
+
+def blockquote_runs(text):
+    """Return each contiguous run of blockquote lines, marker stripped."""
+    runs, current = [], []
+    for line in text.splitlines():
+        if re.match(r"^[ \t]{0,3}>", line):
+            current.append(re.sub(r"^[ \t]{0,3}>[ \t]?", "", line).rstrip())
+            continue
+        if current:
+            runs.append(current)
+        current = []
+    if current:
+        runs.append(current)
+    return runs
+
+
+def sourced_quotes(text):
+    """Return (label, destination, quoted body) for every attributed quote.
+
+    An unattributed blockquote is not a quote for this purpose: it is the author's
+    own words in quotation marks, and nothing can check those.
+    """
+    found = []
+    for run in blockquote_runs(text):
+        body = [line for line in run if line.strip()]
+        if len(body) < 2:
+            continue
+        attribution = QUOTE_ATTRIBUTION_RE.match(body[-1].strip())
+        if attribution:
+            found.append((
+                " ".join(attribution.group("label").split()),
+                attribution.group("dest"),
+                "\n".join(body[:-1]),
+            ))
+    return found
+
+
+def quote_link_target(item, destination):
+    """Resolve one link destination to a tracked repository file, or None.
+
+    `check_links` cannot serve here and this is the whole reason the check owns
+    its own resolution: `LINK_SKIP_PREFIXES` contains `"../"`, and the skip
+    returns before the anchor comparison, so every relative link a queue item
+    writes — the form `templates/queue/*.md` mandates — is accepted without its
+    anchor ever being read. Removing that prefix is not the cheaper repair: it
+    would newly evaluate every `../` destination in the repository, nearly all of
+    them in immutable handovers naming paths that have legitimately moved.
+    """
+    path = destination.partition("#")[0]
+    if not path or path.startswith(("http://", "https://", "mailto:")):
+        return None
+    for candidate in ((item.parent / path).resolve(), (REPO / path).resolve()):
+        try:
+            rel = candidate.relative_to(REPO.resolve()).as_posix()
+        except (ValueError, OSError):
+            continue
+        if repo_artifact_bytes(REPO / rel) is not None:
+            return REPO / rel
+    return None
+
+
+def anchored_section_source(target, fragment):
+    """Return the source one `#fragment` selects, or None when it selects none.
+
+    Headings are located in the semantic view, so a `#` inside a fenced code block
+    is not a heading; the span is then cut from the raw lines, so a quote may
+    legitimately include fenced code. `semantic_text` preserves line count, which
+    is what lets one index serve both views. The heading pattern is
+    `markdown_headings`' own, so this and `anchor_resolves` can never disagree
+    about which headings exist or how a repeated slug is numbered.
+    """
+    if target.suffix != ".md":
+        return None
+    try:
+        raw = repo_text(target)
+    except (GitSnapshotError, OSError, UnicodeDecodeError):
+        return None
+    raw_lines = raw.splitlines()
+    semantic_lines = semantic_text(raw).splitlines()
+    heads = [
+        (index, matched.group(1), matched.group(2))
+        for index, line in enumerate(semantic_lines)
+        for matched in [re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*$", line)]
+        if matched
+    ]
+    slugs = anchor_slugs([
+        re.sub(r"[ \t]+#+[ \t]*$", "", title) for _i, _h, title in heads
+    ])
+    if fragment not in slugs:
+        return None
+    position = slugs.index(fragment)
+    start, hashes, _title = heads[position]
+    end = next(
+        (i for i, other, _t in heads[position + 1:] if len(other) <= len(hashes)),
+        len(raw_lines),
+    )
+    return "\n".join(raw_lines[start + 1:end])
+
+
+def quote_is_verbatim(quoted, source):
+    """Whether every un-elided segment appears in the source, in order.
+
+    Collapses only what a faithful quoter legitimately changes — line wrapping and
+    added emphasis — and nothing else.
+    """
+    def flatten(value):
+        return " ".join(re.sub(r"[*_`]", "", value or "").split()).lower()
+
+    haystack = flatten(source)
+    cursor = 0
+    for segment in QUOTE_ELISION_RE.split(quoted or ""):
+        segment = flatten(segment)
+        if not segment:
+            continue
+        found = haystack.find(segment, cursor)
+        if found < 0:
+            return False
+        cursor = found + len(segment)
+    return True
+
+
+def evidence_problems(item, text):
+    """Return what a reader cannot check about one item's citations.
+
+    Nothing here asks the author whether the reader can answer — a field holding
+    that opinion is a wish, and a weak model writes `yes` in it every time. Every
+    rule asks whether the bytes the answer turns on are in the file, and compares
+    them against the bytes they claim to come from.
+    """
+    above = human_attention_above_fold(text)
+    got = text_fields(text)
+    problems = []
+
+    quotes = sourced_quotes(above)
+    shown, attributed = set(), set()
+    for label, destination, quoted in quotes:
+        attributed.add(destination)
+        target = quote_link_target(item, destination)
+        if target is None:
+            continue
+        shown.add(target.relative_to(REPO).as_posix())
+        path, _, fragment = destination.partition("#")
+        source = None
+        if not fragment:
+            problems.append(
+                f"quote `{label}` points at the whole of `{path}`; a reader sent "
+                "to a long document has not been pointed anywhere"
+            )
+        else:
+            source = anchored_section_source(target, fragment)
+            if source is None:
+                problems.append(
+                    f"quote `{label}` names `#{fragment}`, which is no heading "
+                    f"in `{path}`"
+                )
+        # A bad anchor must never switch the fabrication check off, so an
+        # unresolved fragment falls back to the whole document rather than
+        # skipping: otherwise a typo is the cheapest way to launder an invented
+        # quotation.
+        if source is None:
+            try:
+                source = repo_text(target)
+            except (GitSnapshotError, OSError, UnicodeDecodeError):
+                source = None
+        words = len(" ".join(quoted.split()).split())
+        if source is not None and words >= QUOTE_VERIFY_MIN_WORDS \
+                and not quote_is_verbatim(quoted, source):
+            problems.append(
+                f"quote `{label}` is not the words that stand at `{path}"
+                + (f"#{fragment}" if fragment else "")
+                + "`; quote the source's own bytes, or drop the quotation marks "
+                "and own the sentence yourself"
+            )
+
+    for label, destination in markdown_links(above):
+        if destination in attributed:
+            continue
+        if quote_link_target(item, destination) is None:
+            continue
+        problems.append(
+            f"link `{' '.join(label.split())}` sends the reader to a file the "
+            "item never quotes; show the passage or do not send them"
+        )
+
+    if item.parent.name == "reviews":
+        target = context_path_candidates(got.get("Review target", ""))
+        if len(target) == 1 and target[0] not in shown:
+            problems.append(
+                f"nothing from `{target[0]}` — the file this asks the reader to "
+                "review — is quoted in it"
+            )
+
+    stray = sorted({
+        token for token in CONTEXT_BACKTICK_RE.findall(above)
+        if QUEUE_FILE_TOKEN_RE.match(token)
+    })
+    if stray:
+        problems.append(
+            "path(s) above the answer line that no reader can click: "
+            + ", ".join(f"`{token}`" for token in stray[:3])
+            + (f", and {len(stray) - 3} more" if len(stray) > 3 else "")
+        )
+
+    if not quotes and NO_SOURCE_LITERAL not in " ".join(above.split()).lower():
+        problems.append(
+            "no quoted source and no `> " + NO_SOURCE_LITERAL + "` line; a blank "
+            "where evidence goes reads the same as evidence nobody looked for"
+        )
+    return problems
+
+
+def frozen_unanswerable_reason(item, text):
+    """Return the one most decisive reason a frozen item cannot be answered.
+
+    One reason, not a list, and never "this item is old": age is a fact about the
+    file's history and tells a reader nothing about whether they can answer it.
+    What they can act on is the missing thing itself. A renamed field is not
+    reported — `Why-you-might-care` carries what `Why this matters` carries, so
+    naming the spelling would be the nag this function exists to avoid.
+    """
+    got = text_fields(text)
+    above = human_attention_above_fold(text)
+    if item.parent.name == "reviews":
+        target = context_path_candidates(got.get("Review target", ""))
+        if len(target) == 1 and not sourced_quotes(above):
+            return (f"asks for a verdict on `{target[0]}` without showing one "
+                    "line of it")
+    clean = semantic_text(text)
+    if not list(choice_sections(human_choices_body(clean) or "")):
+        return "offers no `### ` choices to pick between"
+    if not any(field in got for field in HUMAN_VERDICT_FIELDS):
+        return "carries no recommendation and no case against one"
+    if not markdown_link_destinations(above):
+        return "has no clickable pointer above the answer line"
+    if not any(field in got for field in HUMAN_CONTEXT_FIELDS):
+        return "never says what happens today"
+    return None
+
+
+def queue_superseded_paths():
+    """Return every path a live queue item claims to supersede.
+
+    A frozen record whose successor already exists is not an open ask, so the
+    re-ask report goes quiet for it without anyone editing the record itself.
+    """
+    claimed = set()
+    for other in live_queue_items() or ():
+        if not readable_queue_item(other):
+            continue
+        value = text_fields(repo_text(other)).get("Supersedes", "")
+        for target in context_files(value):
+            try:
+                claimed.add(target.relative_to(REPO).as_posix())
+            except ValueError:
+                pass
+    return claimed
 
 
 def section_headings(text):
@@ -5352,6 +5652,49 @@ def review_successor_problem(path, text, prior_revision, revision):
     return None
 
 
+def review_reask_problem(path, text, prior_revision, revision):
+    """Gate the deletion of a review the reader could not answer.
+
+    `changes-requested` says the artifact was wrong and routes the repair to an
+    agent. `unanswerable` says the *item* was wrong: nothing about the subject
+    was decided, so the question survives its own file and is owed to a human
+    again. The successor is therefore `needs-human`, not `needs-agent` — the
+    artifact was never what was missing — and it keeps the same delivery prefix,
+    because a question does not become less urgent by being asked badly
+    (`message-queue/AGENTS.md`).
+
+    Deliberately absent: any requirement that the successor read well. Coupling a
+    blocking lifecycle edge to an advisory readability judgment could wedge two
+    files, neither of which may be edited
+    (`memory/decisions/2026-08-02-readability-enforcement-disposition.md`).
+    """
+    got = text_fields(text)
+    candidates = context_path_candidates(got.get("Successor action", ""))
+    if len(candidates) != 1:
+        return "unanswerable review needs exactly one **Successor action:**"
+    successor_path = candidates[0]
+    successor_parts = Path(successor_path).parts
+    if successor_path == path or not valid_queue_item_path(successor_path) \
+            or successor_parts[1] != "needs-human":
+        return "unanswerable review successor is not a distinct canonical needs-human action"
+    successor_bytes = candidate_artifact_bytes(successor_path, revision)
+    if successor_bytes is None:
+        return "unanswerable review successor is not live in the deletion candidate"
+    if git_artifact_bytes_at(prior_revision, successor_path) is not None:
+        # Otherwise any unrelated question already open would satisfy the edge.
+        return "unanswerable review successor was not introduced by the resolution edge"
+    successor = text_fields(decode_utf8_artifact(
+        successor_bytes, f"`{successor_path}` in the deletion candidate"
+    ))
+    if path not in context_path_candidates(successor.get("Supersedes", "")):
+        return "unanswerable review successor does not point back with **Supersedes:**"
+    if not has_concrete_value(successor.get("Action", "")):
+        return "unanswerable review successor has no concrete **Action:**"
+    if delivery_class(Path(successor_path).name) != delivery_class(Path(path).name):
+        return "unanswerable review successor changes the dependency timing"
+    return None
+
+
 def queue_deletion_problem(path, text, prior_revision, revision):
     got = text_fields(text)
     parts = Path(path).parts
@@ -5399,6 +5742,10 @@ def queue_deletion_problem(path, text, prior_revision, revision):
                 return target_problem
             if outcome in REVIEW_SUCCESSOR_OUTCOMES:
                 return review_successor_problem(
+                    path, text, prior_revision, revision
+                )
+            if outcome in REVIEW_REASK_OUTCOMES:
+                return review_reask_problem(
                     path, text, prior_revision, revision
                 )
             if outcome in REVIEW_TERMINAL_OUTCOMES \
@@ -6214,9 +6561,10 @@ def check_queue_schema():
                                 item.relative_to(REPO),
                                 "review response needs an explicit terminal "
                                 "**Review outcome:**",
-                                "use approved, changes-requested, rejected, or "
-                                "abandoned (legacy not-approved means "
-                                "changes-requested)",
+                                "use approved, changes-requested, rejected, "
+                                "abandoned, or unanswerable when the reader "
+                                "could not tell from what the item showed them "
+                                "(legacy not-approved means changes-requested)",
                             )
                         elif outcome in REVIEW_TERMINAL_OUTCOMES \
                                 and context_path_candidates(
@@ -6695,6 +7043,8 @@ def check_explanation_shape():
     tracked program that ever holds a pull-request body.
     """
     sections_by_leaf = {}
+    stuck = []
+    superseded = None  # built once, and only if a frozen item is actually found
     for item in live_queue_items() or ():
         if not readable_queue_item(item):
             continue  # queue-location owns unsafe or broken filesystem entries
@@ -6724,7 +7074,36 @@ def check_explanation_shape():
                 "items with each value on one physical line",
             )
         if not current_queue_template_governs(actor, text):
+            # The third path, and the one that was silence. A frozen record may
+            # not be edited, so its reason is collected for one aggregate re-ask
+            # report and never phrased as a repair. It goes quiet when the item
+            # is answered — a record awaiting its fold is not an ask — and when a
+            # live successor already names it.
+            if actor == "needs-human" and first_concrete_response(
+                human_response_fields(text)
+            ) is None:
+                if superseded is None:
+                    superseded = queue_superseded_paths()
+                if rel.as_posix() not in superseded:
+                    reason = frozen_unanswerable_reason(item, text)
+                    if reason:
+                        stuck.append((rel, reason))
             continue
+        if actor == "needs-human" \
+                and rel.as_posix() not in git_head_paths("message-queue"):
+            # Birth-time only, for the reason the source-link finding below
+            # already gives: on a committed item, quoting a source in changes the
+            # prose, which changes action identity, which `queue-resolution`
+            # refuses. A finding nobody may act on is a nag.
+            for problem in evidence_problems(item, text):
+                yield Finding(
+                    "explanation-shape",
+                    rel,
+                    problem,
+                    "quote the words the answer turns on, inline, under "
+                    "[<what this passage says>](<path>#<heading-anchor>); a "
+                    "reader who must open something to answer cannot answer",
+                )
         if actor == "needs-human" \
                 and rel.as_posix() not in git_head_paths("message-queue") \
                 and not markdown_link_destinations(
@@ -6794,6 +7173,23 @@ def check_explanation_shape():
                 "end the choice with one scenario of life after it is picked; a "
                 "cost nobody can picture is a cost nobody weighs",
             )
+
+    # One finding for the whole frozen set, not one per item. Acceptance of an
+    # advisory falls about 30% for every additional alert a reader is shown, so
+    # nine permanent lines arguing that advisories go unread would be the failure
+    # they describe. `aggregate_findings` keys on (check, subject), so this also
+    # projects into `--file-retries` as one repair item rather than nine.
+    if stuck:
+        yield Finding(
+            "explanation-shape",
+            Path(QUEUE.name) / "needs-human",
+            f"{len(stuck)} unanswered question(s) cannot be answered from their "
+            "own bytes:\n"
+            + "\n".join(f"    - `{rel}`: {reason}" for rel, reason in stuck),
+            "these are frozen records and no agent may edit one; re-ask each as "
+            "a new item that quotes what its answer turns on and names the old "
+            "path in **Supersedes:**, or leave it and answer it as it stands",
+        )
 
 
 def check_stale_queue():

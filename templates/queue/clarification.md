@@ -13,11 +13,12 @@ Before you file, check all nine. Lifecycle law lives in handbook/human-action-gu
 6. My working assumption repeats one shown reading's `### ` label text; its
    counter-case sits beside it. The check compares text, so paraphrasing fails.
 7. No machine field, hash, or token appears above the answer line.
-8. The source is linked once in the prose; For the record keeps the machine copies.
+8. Each source the answer turns on is quoted and linked at its heading; For the
+   record keeps the machine copies.
 9. Under 800 words before the answer, and you never have to guess where you are:
    `python3 automation/reconcile/reconcile.py --word-count <this file>` prints
    your count against the budget. Four choices cost about 700 on their own, so
-   cut background, never a choice or its example consequence.
+   cut background, never a choice, its example consequence, or a quoted source.
 
 Three shapes a checker enforces that nothing else shows you:
 - Every **Key:** value and every *Example consequence:* is read one physical line at
@@ -44,9 +45,16 @@ mouth. State what you will assume and do instead.
 **What this would change:** <the delta a different reading would produce>
 **What this does not decide:** <adjacent things a reader will assume are in scope>
 
-<One or two short value-neutral paragraphs from zero context. Link the source exactly
-once, here, as [<descriptive label>](<../../../ path to the file>). This must stand
-alone: the reader should be able to answer without opening anything.>
+<One or two short value-neutral paragraphs from zero context. This must stand alone: the
+reader should be able to answer without opening anything.>
+
+> <the source's own words — the sentence that decides this, copied, not paraphrased>
+>
+> — [<what this passage says>](<../../../ path to the file.md#heading-anchor>)
+
+<One quote block per document the answer turns on; a "does X still match Y" question has
+two. A review quotes its Review target. If the answer turns on no document at all, write
+the line `> No source document — everything you need is above.` and delete the attribution.>
 
 ## Your choices
 
@@ -66,9 +74,10 @@ alone: the reader should be able to answer without opening anything.>
 **Strongest case against this:** <the best argument for a different reading>
 **Confidence:** <high | medium | low> — <what you checked, and what you did not>
 
-Answer in plain words — one sentence is enough. You do not need to copy anything or use
-particular vocabulary; the agent that folds your answer does the bookkeeping and will
-show you how it read your words before acting.
+Answer in plain words — one sentence is enough. You never need to copy anything; the agent
+that folds it shows you how it read your words before acting. If this page did not give you
+enough to decide, say so and say what is missing — that is a complete answer, not a
+rejection.
 
 **Your answer:** ______
 

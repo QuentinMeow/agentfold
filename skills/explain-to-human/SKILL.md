@@ -35,9 +35,9 @@ Never invert this order. The order you worked in is not the order the reader nee
 - **State uncertainty as a number, or say you did not measure.** "Probably flaky (~40%,
   low confidence — failed once, passed on retry)" and "unknown — I did not measure this"
   are both honest. Inventing a number to satisfy the rule is not.
-- **Self-contained on the decision, linked on the evidence.** Anything whose difference
-  would change the reader's answer goes in the text. Every *evidence* link says what it
-  holds and why the reader need not open it.
+- **Show the bytes; do not narrate them.** Anything whose difference would change the
+  reader's answer goes in the text — and when that is another document's wording, quote
+  the sentence that decides it and link its heading, never the file alone.
 
 ## Before → after
 
@@ -66,5 +66,5 @@ Precedence: a scenario file wins on its own surface; `reference.md` wins over th
 - [ ] Every change line names an observable difference, or says there is none.
 - [ ] Every term local to this repository is glossed at first use.
 - [ ] Every pending human item is a link plus enough context to act from this text alone.
-- [ ] Nothing above the fold requires opening another file to understand.
+- [ ] Nothing above the fold needs another file opened — quote what it would have said.
 - [ ] No "just", "simply", "obviously", or "as discussed".

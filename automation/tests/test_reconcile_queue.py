@@ -15873,6 +15873,16 @@ class ReconcileQueueTests(unittest.TestCase):
 
     # ------------------------------------------------ human-attention format
 
+    # The document the review beside it quotes. Held here so the fixture, the
+    # quoted sentence, and the revision digest below can never drift apart.
+    HUMAN_ATTENTION_DESIGN_DOC = (
+        "# Design\n"
+        "\n"
+        "## The boundary\n"
+        "\n"
+        "The boundary decides who may skip the check, and a local hook is "
+        "skippable.\n"
+    )
     HUMAN_ATTENTION_REVIEW = (
         "# Should the admission boundary move to the server?\n"
         "\n"
@@ -15887,7 +15897,11 @@ class ReconcileQueueTests(unittest.TestCase):
         "**What this does not decide:** Which detector does the refusing.\n"
         "\n"
         "The boundary decides who can skip it, which is the whole question.\n"
-        "The source is [the design](../../../docs/design.md).\n"
+        "\n"
+        "> The boundary decides who may skip the check, and a local hook is skippable.\n"
+        ">\n"
+        "> — [what the design says the boundary is]"
+        "(../../../docs/design.md#the-boundary)\n"
         "\n"
         "## Your choices\n"
         "\n"
@@ -15936,7 +15950,10 @@ class ReconcileQueueTests(unittest.TestCase):
             "**Queue resolution schema:** v1\n"
             "**Human-attention format:** v1\n",
         )
-        self.write(root, "docs/design.md", "# Design\n")
+        # Carries a real heading and a real sentence under it: the item beside it
+        # quotes this passage and anchors that heading, so the fixture exercises
+        # the whole verification path rather than asserting around it.
+        self.write(root, "docs/design.md", self.HUMAN_ATTENTION_DESIGN_DOC)
         self.write(root, "docs/disposition.md", "# Disposition\n")
         return self.write(
             root,
@@ -17315,8 +17332,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 self.messages(RECONCILE.check_explanation_shape()),
             )
             self.explanation_shape_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
-                "The source is [the design](../../../docs/design.md).\n",
-                "The source is `docs/design.md`, which nobody can click.\n",
+                "> — [what the design says the boundary is]"
+                "(../../../docs/design.md#the-boundary)\n",
+                "> — the design, at `docs/design.md`, which nobody can click\n",
             ))
             self.assertIn(
                 self.NO_PROSE_LINK,
@@ -17327,8 +17345,9 @@ class ReconcileQueueTests(unittest.TestCase):
         """Adding the link would change action identity, which is refused."""
         with self.repo() as root:
             self.explanation_shape_repo(root, self.HUMAN_ATTENTION_REVIEW.replace(
-                "The source is [the design](../../../docs/design.md).\n",
-                "The source is `docs/design.md`, which nobody can click.\n",
+                "> — [what the design says the boundary is]"
+                "(../../../docs/design.md#the-boundary)\n",
+                "> — the design, at `docs/design.md`, which nobody can click\n",
             ))
             self.init_git(root)
             self.git(root, "add", "-A")
@@ -17381,7 +17400,9 @@ class ReconcileQueueTests(unittest.TestCase):
                 "**Your review:** ______",
                 "**Your review:** looks right, continue",
             )
-            digest = "sha256:" + hashlib.sha256(b"# Design\n").hexdigest()
+            digest = "sha256:" + hashlib.sha256(
+                self.HUMAN_ATTENTION_DESIGN_DOC.encode()
+            ).hexdigest()
             answered = answered.replace(
                 "**Review target:** pending", "**Review target:** `docs/design.md`"
             ).replace(
@@ -17612,10 +17633,29 @@ class ReconcileQueueTests(unittest.TestCase):
             self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
 
     def test_explanation_shape_leaves_an_earlier_generation_item_alone(self):
-        """A record is immutable, so it keeps the schema it was written under."""
+        """A record is immutable, so it keeps the schema it was written under.
+
+        It is named, because saying nothing about a question nobody can answer is
+        not the same as leaving it alone. What it is never given is a repair: no
+        finding takes the record as its subject, and the one that names it says
+        in its own fix that the record may not be edited.
+        """
         with self.repo() as root:
             self.explanation_shape_repo(root, self.LEGACY_HUMAN_ITEM)
-            self.assertEqual([], self.messages(RECONCILE.check_explanation_shape()))
+            findings = list(RECONCILE.check_explanation_shape())
+            self.assertEqual(
+                [], [
+                    f.message for f in findings
+                    if f.subject.as_posix() == self.HUMAN_ATTENTION_PATH
+                ]
+            )
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn(
+                "cannot be answered from their own bytes", findings[0].message
+            )
+            self.assertIn(self.HUMAN_ATTENTION_PATH, findings[0].message)
+            self.assertIn("no agent may edit one", findings[0].fix)
+            self.assertTrue(findings[0].advisory)
 
     AGENT_REQUEST_WITHOUT_SUMMARY = (
         "# Continue the queue-owned review\n\n"
@@ -18033,6 +18073,150 @@ class ReconcileQueueTests(unittest.TestCase):
             return self.messages(RECONCILE.check_queue_resolution())
         finally:
             RECONCILE.stop_git_snapshot_cache()
+
+    def stage_unanswerable_resolution(self, root, successor_path=None,
+                                      successor_timing=None, supersedes=None,
+                                      successor_predates_the_edge=False):
+        """Delete one unanswerable review, re-asking the question of a human.
+
+        `changes-requested` says the artifact was wrong. `unanswerable` says the
+        item was: nothing about the subject was decided, so the successor is a
+        fresh question for a person, not a repair for an agent.
+        """
+        self.init_git(root)
+        self.write(
+            root,
+            "message-queue/AGENTS.md",
+            "**Queue resolution schema:** v1\n"
+            "**Human-attention format:** v1\n",
+        )
+        target = self.write(root, "docs/source.md", "# Reviewed\n")
+        digest = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+        old_path = (
+            "message-queue/needs-human/reviews/future-blocking-review.md"
+        )
+        if successor_path is None:
+            successor_path = (
+                "message-queue/needs-human/reviews/"
+                "future-blocking-review-re-asked.md"
+            )
+        item = self.write(
+            root,
+            old_path,
+            "# Review\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-23\n"
+            "**Action:** review exact bytes\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** `docs/source.md`\n"
+            f"**Review revision:** {digest}\n"
+            f"**Reviewed revision:** {digest}\n"
+            "**Review outcome:** unanswerable\n"
+            f"**Successor action:** `{successor_path}`\n"
+            + self.MODERN_REVIEW_TIMING
+            + "**Your review:** I cannot tell from this what I am agreeing to\n",
+        )
+        self.write(root, "docs/disposition.md", "# Disposition\n")
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "record the unanswerable response")
+        item.write_text(
+            item.read_text(encoding="utf-8").replace(
+                "**Status:** waiting", "**Status:** folding"
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", old_path)
+        self.git(root, "commit", "-m", "claim review")
+        self.write(
+            root,
+            successor_path,
+            "# Should the admission boundary move to the server?\n\n"
+            "**Status:** waiting\n"
+            "**Filed:** 2026-07-24\n"
+            "**Action:** answer the re-asked admission question\n"
+            "**Full context:** `docs/source.md`\n"
+            "**Resolution evidence:** `docs/disposition.md`\n"
+            "**Review target:** pending\n"
+            "**Review revision:** pending\n"
+            "**Reviewed revision:** ______\n"
+            "**Review outcome:** pending\n"
+            f"**Supersedes:** `{old_path if supersedes is None else supersedes}`\n"
+            + (self.MODERN_REVIEW_TIMING
+               if successor_timing is None else successor_timing)
+            + "**Your review:** ______\n",
+        )
+        if successor_predates_the_edge:
+            self.git(root, "add", successor_path)
+            self.git(root, "commit", "-m", "file an unrelated question early")
+        item.unlink()
+        self.git(root, "add", "-A")
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            return self.messages(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_unanswerable_review_resolves_by_re_asking_a_human(self):
+        """The fifth outcome exists so "I can't tell" is recordable at all.
+
+        `REVIEW_OUTCOMES` had no cell for it, so a reader who could not answer
+        had to be written down as one of four things they did not say.
+        """
+        with self.repo() as root:
+            self.assertEqual([], self.stage_unanswerable_resolution(root))
+
+    def test_unanswerable_review_may_not_route_its_successor_to_an_agent(self):
+        """The artifact was never what was missing, so no agent can absorb it."""
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(
+                root,
+                successor_path=(
+                    "message-queue/needs-agent/requests/"
+                    "future-blocking-repair-the-question.md"
+                ),
+            )
+            self.assertTrue(any(
+                "successor is not a distinct canonical needs-human action"
+                in message for message in messages
+            ), messages)
+
+    def test_unanswerable_review_successor_keeps_the_same_timing(self):
+        """A question does not get less urgent by having been asked badly."""
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(
+                root,
+                successor_path=(
+                    "message-queue/needs-human/reviews/"
+                    "non-blocking-review-re-asked.md"
+                ),
+            )
+            self.assertTrue(any(
+                "successor changes the dependency timing" in message
+                for message in messages
+            ), messages)
+
+    def test_unanswerable_review_successor_must_point_back(self):
+        """Without Supersedes the old question is not visibly carried forward."""
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(
+                root, supersedes="docs/source.md"
+            )
+            self.assertTrue(any(
+                "successor does not point back with **Supersedes:**" in message
+                for message in messages
+            ), messages)
+
+    def test_unanswerable_review_cannot_point_at_a_pre_existing_item(self):
+        """Otherwise any question already open would clear the deletion edge."""
+        with self.repo() as root:
+            messages = self.stage_unanswerable_resolution(
+                root, successor_predates_the_edge=True
+            )
+            self.assertTrue(any(
+                "successor was not introduced by the resolution edge" in message
+                for message in messages
+            ), messages)
 
     def test_legacy_review_successor_is_still_compared_on_its_timing_prose(self):
         """The marker alone must not stop comparing a field the item still has.

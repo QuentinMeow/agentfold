@@ -223,6 +223,7 @@ A rejected or abandoned review never authorizes crossing its boundary.
 | `changes-requested` | Create two items. One same-timing `needs-agent` action solely owns the concrete repair, its context, and its resolution evidence. One distinct `needs-human` re-review awaits that artifact and depends on the repair action, so the boundary stays closed without duplicating the repair. |
 | `rejected` | End pursuit. Restore a rejected Git candidate path-for-path to its reviewed base; a rejected local target changes or disappears. A task-bound rejection stays live until that task is removed. |
 | `abandoned` | End pursuit, on the same terms as `rejected`. |
+| `unanswerable` | The reader could not tell from what the item showed them, so nothing about the subject was decided and the boundary does not move. Create one same-timing `needs-human` successor that carries what was missing — quoted, not linked — and names this path in **Supersedes:**. |
 
 Distinct cancellation evidence records the disposition without rewriting the reviewed
 bytes. The legacy value `not-approved` is the old spelling of `changes-requested` and
