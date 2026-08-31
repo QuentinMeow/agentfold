@@ -31,3 +31,10 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 
 - Final independent review reproduced a Python-version split: raw and encoded Egyptian format controls were editable on Python 3.9 but frozen on 3.14. The new Boolean detector now uses the complete Unicode 16 format-control ranges, checked against the published Unicode data, instead of the interpreter’s bundled category database. The older prose normalizer remains unchanged.
 - Two regression methods exercise Arabic and Egyptian format controls in real Git fixtures. They include raw and encoded spellings in retry diagnosis and human-item metadata, plus visible neighboring characters. The Python 3.9 baseline produced 24 failures across 2 methods. Both repaired interpreters passed those 2 methods without skips. The parent still owns the final combined verification.
+
+## 2026-08-31 — verified replacement publication and closing records (codex)
+
+- Five independent native lenses accepted the lower code revision. Parent worktree and full-history cold-clone runs passed all 16 test files on Python 3.14 and 3.9; the three true-Git corpus checks passed separately with no skips. `verification.md` preserves the actual commands and output, and `regression-evidence.json` preserves per-method failing controls.
+- Both replacement code candidates were published and GitHub reported them mergeable with clean checks before the original PRs were closed. The stack remains open, with the upper branch based on this lower task branch. Closing record changes still pass through ordinary hooks and refreshed hosted checks.
+- The original owner branch, 79 staged records, 718-entry index, unfinished merge metadata, probes and backups remain intact. No independent implementation was imported from discarded local experiments.
+- The separate external review did not run: execution security refused transmission before Claude started. Its canonical question withholds only that external operation. The plan records this limit rather than claiming an unavailable cross-vendor result.

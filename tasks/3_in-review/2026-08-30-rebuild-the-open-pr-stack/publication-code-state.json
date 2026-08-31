@@ -1,0 +1,91 @@
+{
+  "captured_at": "2026-08-31T09:28:30.832877+00:00",
+  "lower": {
+    "number": 90,
+    "url": "https://github.com/QuentinMeow/agentfold/pull/90",
+    "title": "Preserve queue metadata folds while allowing safe retry notes",
+    "state": "OPEN",
+    "draft": false,
+    "branch": "task/2026-08-30-rebuild-the-open-pr-stack",
+    "head": "5a9f044f84fbcc21597f7bf44466cab9b3694b42",
+    "base_branch": "main",
+    "base_head": "326d8ed5fa4f89eaa1402a54d8377dba5946be12",
+    "candidate": "67ea1e40c823a76cf798b9d6a3aad2883f636b1f",
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "latest_actual_checks": {
+      "reconcile-and-test": {
+        "stamp": "2026-08-31T09:26:33Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377678635/job/99442732016"
+      },
+      "Authoritative action projection from trusted workflow code": {
+        "stamp": "2026-08-31T09:26:33Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377678878/job/99442732266"
+      },
+      "External source release admission": {
+        "stamp": "2026-08-31T09:26:33Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377678878/job/99442732439"
+      },
+      "Current review-state action projection": {
+        "stamp": "2026-08-31T09:26:32Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377678635/job/99442731733"
+      }
+    },
+    "all_required_success": true,
+    "native_approvals": 5
+  },
+  "upper": {
+    "number": 91,
+    "url": "https://github.com/QuentinMeow/agentfold/pull/91",
+    "title": "Source citations preserve exact quotes and unanswered review obligations",
+    "state": "OPEN",
+    "draft": false,
+    "branch": "task/2026-08-30-repair-human-question-evidence",
+    "head": "4008f4984ad0e6fc26d7fd1c1e3d6ca28673cc41",
+    "base_branch": "task/2026-08-30-rebuild-the-open-pr-stack",
+    "base_head": "5a9f044f84fbcc21597f7bf44466cab9b3694b42",
+    "candidate": "13f80b6556594ca026abfc588499975e53cb9388",
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "latest_actual_checks": {
+      "reconcile-and-test": {
+        "stamp": "2026-08-31T09:26:34Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377679658/job/99442735501"
+      },
+      "Authoritative action projection from trusted workflow code": {
+        "stamp": "2026-08-31T09:26:33Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377679998/job/99442736245"
+      },
+      "External source release admission": {
+        "stamp": "2026-08-31T09:26:34Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377679998/job/99442736484"
+      },
+      "Current review-state action projection": {
+        "stamp": "2026-08-31T09:26:34Z",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/QuentinMeow/agentfold/actions/runs/33377679658/job/99442735319"
+      }
+    },
+    "all_required_success": true,
+    "native_approvals": 5
+  },
+  "superseded_states": {
+    "88": "CLOSED",
+    "89": "CLOSED"
+  }
+}

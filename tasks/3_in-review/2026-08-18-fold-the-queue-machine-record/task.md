@@ -33,7 +33,7 @@ identity and `message-queue/AGENTS.md` forbids rewriting a live ask.
       shapes and nothing else, and adds `parsed ⊆ rendered` visibility findings.
 - [x] `--fix-queue-fold` re-emits the canonical block idempotently, losing no field.
 - [x] `.gitattributes` opts the queue paths out of `blank-at-eol`.
-- [x] `python3 automation/run_tests.py` stays at 15/15 files, and
+- [x] `python3 automation/run_tests.py` passes all 16/16 currently registered files, and
       `python3 automation/reconcile/reconcile.py --check` stays at 0 blocking findings.
 - [x] The new predicates report zero findings when run unscoped over every tracked
       Markdown file in the repository.

@@ -1,0 +1,695 @@
+{
+  "description": "Actual independent lower regression results; localized rollback controls are not pristine historical-tree executions.",
+  "reviewer": "final_coverage",
+  "focused_green_revision": "e126316ce6fa724b19353501a817ab89a6f08af3",
+  "later_full_runner_revision": "5a9f044f84fbcc21597f7bf44466cab9b3694b42",
+  "focused_method_count": 29,
+  "all_focused_methods_observed_red": true,
+  "source_evidence_sha256": {
+    "final-coverage-lower-candidate.json": "b79a1e4237710ccf77934c3a8d0a41a388ead187848a731ae76a6038db44ef3a",
+    "final-coverage-lower-original-runtime.json": "6fa323824467a4c1297b36973ebd4b0f6739c7c434fe127ae98f850b1a5a7a2b",
+    "final-coverage-remaining-lower.json": "81f7a5c91391428d9457cd0dd833d8188a37bf8b8937d63380122ff0c12c3da9"
+  },
+  "methods": [
+    {
+      "test": "ReconcileQueueTests.test_fold_shape_rejects_a_close_before_its_open",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_fold_shape_rejects_a_close_before_its_open",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 2,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 2,
+          "subcase_failures": 2
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_entities_respect_escaped_code_delimiters",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_entities_respect_escaped_code_delimiters",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 8,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 8,
+          "subcase_failures": 4
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_entity_escapes_follow_backslash_parity",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_entity_escapes_follow_backslash_parity",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 51,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 27,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 51,
+          "subcase_failures": 27
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_first_response_cannot_hide_other_edits",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_first_response_cannot_hide_other_edits",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 2,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 2,
+          "subcase_failures": 2
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_first_response_preserves_other_line_endings",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_first_response_preserves_other_line_endings",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 6,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 3,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 6,
+          "subcase_failures": 3
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_freezes_invisible_values",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_freezes_invisible_values",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 6,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 6,
+          "subcase_failures": 6
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_freezes_outer_wrappers",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_freezes_outer_wrappers",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 7,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 5,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 7,
+          "subcase_failures": 4
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_keeps_exposed_values_editable",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_keeps_exposed_values_editable",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 8,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "freeze-all-mutable-values",
+        "observed_result": {
+          "run": 1,
+          "failures": 9,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 8,
+          "red_subcases": 8
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_later_metadata_stays_frozen",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_later_metadata_stays_frozen",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 0,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 0,
+          "subcase_failures": 0
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_literal_nonentities_remain_editable",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_literal_nonentities_remain_editable",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 7,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "freeze-all-mutable-values",
+        "observed_result": {
+          "run": 1,
+          "failures": 7,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 7,
+          "red_subcases": 7
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_never_neutralizes_agent_folds",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_never_neutralizes_agent_folds",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 0,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 0,
+          "subcase_failures": 0
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_only_exempts_a_valid_fold",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_only_exempts_a_valid_fold",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 7,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 7,
+          "subcase_failures": 6
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_preserves_first_response_compatibility",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_preserves_first_response_compatibility",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 27,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "freeze-all-mutable-values",
+        "observed_result": {
+          "run": 1,
+          "failures": 27,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 27,
+          "red_subcases": 27
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_mutable_field_source_context_response_cannot_escape_outer_markup",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_mutable_field_source_context_response_cannot_escape_outer_markup",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 4,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 4,
+          "subcase_failures": 2
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_accept_visible_unicode_without_compatibility_rewriting",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_accept_visible_unicode_without_compatibility_rewriting",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 12,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 12,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 12,
+          "subcase_failures": 12
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_allow_exposed_diagnosis_and_new_final_section",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_allow_exposed_diagnosis_and_new_final_section",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 10,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 10,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 10,
+          "subcase_failures": 10
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_do_not_hide_content_after_a_section_boundary",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_do_not_hide_content_after_a_section_boundary",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 4,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 3,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 4,
+          "red_subcases": 3
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_entities_respect_escaped_code_delimiters",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_entities_respect_escaped_code_delimiters",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 16,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 8,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 16,
+          "subcase_failures": 8
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_entity_escapes_follow_backslash_parity",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_entity_escapes_follow_backslash_parity",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 54,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 24,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 54,
+          "subcase_failures": 24
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_freeze_invisible_entities_but_allow_literal_spellings",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_freeze_invisible_entities_but_allow_literal_spellings",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 20,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 8,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 20,
+          "subcase_failures": 8
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_freeze_nested_and_multiline_reference_definitions",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_freeze_nested_and_multiline_reference_definitions",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 24,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 24,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 24,
+          "red_subcases": 24
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_keep_blank_lines_inside_hidden_blocks_frozen",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_keep_blank_lines_inside_hidden_blocks_frozen",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 20,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 20,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 20,
+          "red_subcases": 20
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_keep_existing_headings_and_fields_frozen",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_keep_existing_headings_and_fields_frozen",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 14,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 14,
+          "subcase_failures": 2
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_keep_multiline_inline_html_content_frozen",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_keep_multiline_inline_html_content_frozen",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 16,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 16,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 16,
+          "red_subcases": 16
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_literal_nonentities_remain_editable",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_literal_nonentities_remain_editable",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 14,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 14,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 14,
+          "subcase_failures": 14
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_preserve_unchanged_hidden_blocks_beside_diagnosis",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 10,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "original PR88 reconciler body, retaining candidate shared modules and templates",
+        "observed_result": {
+          "run": 1,
+          "failures": 10,
+          "errors": 0,
+          "skipped": 0,
+          "subcases": 10,
+          "subcase_failures": 10
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_refuse_fake_headings_inside_hidden_blocks",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_refuse_fake_headings_inside_hidden_blocks",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 12,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 12,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 12,
+          "red_subcases": 12
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_refuse_hidden_payloads_inside_real_notes",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_refuse_hidden_payloads_inside_real_notes",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 18,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 18,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 18,
+          "red_subcases": 18
+        }
+      }
+    },
+    {
+      "test": "ReconcileQueueTests.test_retry_notes_refuse_unsafe_new_sections",
+      "green_result": {
+        "test": "ReconcileQueueTests.test_retry_notes_refuse_unsafe_new_sections",
+        "run": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "subcases": 10,
+        "subcase_failures": 0
+      },
+      "negative_control": {
+        "fault": "omit-raw-byte-protection",
+        "observed_result": {
+          "run": 1,
+          "failures": 9,
+          "errors": 0,
+          "skips": 0,
+          "subcases": 10,
+          "red_subcases": 9
+        }
+      }
+    }
+  ],
+  "two_later_portability_methods": {
+    "names": [
+      "ReconcileQueueTests.test_retry_notes_freeze_format_controls_across_unicode_versions",
+      "ReconcileQueueTests.test_mutable_fields_freeze_format_controls_across_unicode_versions"
+    ],
+    "fault": "previous interpreter-dependent format-control predicate on Python 3.9",
+    "observed_red_methods": 2,
+    "failing_subcases": 24,
+    "execution_errors": 0,
+    "skips": 0,
+    "green_methods_per_interpreter": 2,
+    "evidence": "Exact parent commands and output are retained in verification.md."
+  }
+}
