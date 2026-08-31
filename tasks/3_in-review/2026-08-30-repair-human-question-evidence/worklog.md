@@ -23,3 +23,10 @@
 
 - Final independent review found that triple-quoted literals containing apostrophes or quotes could lose protected contents, and that a blanket unassigned-Unicode rule falsely joined newer symbols to identifiers on Python 3.9. The bounded runtime repairs are included at 1fe228eef2f9b3a4314af13f6d413003d6e532c2. Their focused regressions and actual outputs are recorded separately in verification.
 - An independent authoring probe confirmed that prefix-shaped prose such as an R possessive is lexically ambiguous with a valid raw string. The guidance now promises wrapping outside recognized literals and states the exact-excerpt fallback, rather than weakening source-string protection.
+
+## 2026-08-31 — final verification and replacement publication (codex)
+
+- The complete code candidate passed all 16 test files in the worktree and a full-history cold clone on both Python 3.14.6 and 3.9.6. The three Git-corpus checks and optional whole-suite record-free projection also ran separately on both versions. Actual command/output excerpts are in `verification.md`; platform-specific skip limits are explicit.
+- Five independent native lenses accepted the final code candidate. Their exact reports are in `review-evidence/`; the per-method regression map captures relevant observed-red controls without deleting original tests.
+- GitHub reported both replacement code candidates mergeable with clean hosted checks. The original PR89 was closed after that verification. This task remains in review on PR91, based on the lower recovery branch; main is unchanged. Closing-record commits still pass normal hooks and refreshed hosted checks.
+- Current-main completed-task moves, frozen questions, human responses, original commit history and the review retraction/publication sequence remain intact. The original owner checkout retains its unfinished staged merge. The parent task records the separate external-review limitation; no unapproved Claude execution occurred.

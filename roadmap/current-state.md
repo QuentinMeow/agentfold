@@ -372,3 +372,11 @@ What is true today, mapped to the desired-state lines.
   `2026-08-30-rebuild-the-open-pr-stack`. The external-vendor review has no result because
   execution security refused the proposed transmission; its sole authorization item
   withholds that external act, not Git publication or task completion.
+- **Captured source evidence and unanswered review obligations (2026-08-31)**: local
+  evidence uses captured regular-file bytes and supported heading/line citations. Exact
+  matching preserves whole identifiers, complete numeric tokens, literal spacing and
+  triple-quoted strings. Unicode 16 boundaries agree on Python 3.9 and 3.14. Source
+  quality remains advisory and does not establish truth or relevance; external content
+  is not fetched. Lexically ambiguous R-prefixed prose uses the documented exact-spacing
+  fallback. An unanswerable review keeps the same unmet obligation in a fresh unanswered
+  waiting review. The upper recovery task owns the verification and regression map.

@@ -49,3 +49,7 @@ This is why the new check resolves anchors itself. Removing `"../"` from
 `LINK_SKIP_PREFIXES` is not the cheaper repair: 816 `../` destinations exist
 repository-wide and none carries a fragment, so nearly all of them sit in
 immutable history naming paths that have legitimately moved.
+
+## 2026-08-31 — verified replacement publication
+
+The useful implementation and original commit history are retained and repaired in [PR91](https://github.com/QuentinMeow/agentfold/pull/91), stacked above PR90. The conflicting original PR89 is closed. Recovery child `2026-08-30-repair-human-question-evidence` owns the current checks; [its verification](../2026-08-30-repair-human-question-evidence/verification.md) records the actual output and review limits. Existing questions and human-authored responses are unchanged. Neither replacement is merged to main.

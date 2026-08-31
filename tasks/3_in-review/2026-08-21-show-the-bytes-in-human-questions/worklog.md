@@ -37,3 +37,7 @@ mechanism claim rests on the five adversarial probes, which test it directly.
 ## 2026-08-30 — resume the upper PR during stack recovery
 
 The owner authorized recovery of all useful local and open-PR changes. Codex resumes the inactive claim from 2026-08-21 as sole claimant; the original claim remains in Git history. The task and branch stay in progress. Recovery task `2026-08-30-rebuild-the-open-pr-stack` coordinates the two-layer stack. Existing code, human questions, review-rebinding transitions, and immutable records remain preserved. Reproduced defects in source verification and successor-review boundaries are being repaired before publication. No task was unstarted or started by this continuation.
+
+## 2026-08-31 — verified replacement publication
+
+The useful implementation and original commit history are retained and repaired in [PR91](https://github.com/QuentinMeow/agentfold/pull/91), stacked above PR90. The conflicting original PR89 is closed. Recovery child `2026-08-30-repair-human-question-evidence` owns the current checks; [its verification](../2026-08-30-repair-human-question-evidence/verification.md) records the actual output and review limits. Existing questions and human-authored responses are unchanged. Neither replacement is merged to main.

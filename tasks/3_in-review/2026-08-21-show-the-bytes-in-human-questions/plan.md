@@ -7,4 +7,4 @@
 - [x] Prove the five adversarial probes fire against the integrated check.
 - [x] Prove no finding demands an edit to a frozen record.
 - [x] Test whether a weak author can follow the rules.
-- [ ] Publish: push and open the stacked pull request.
+- [x] Publish: push and open the stacked pull request.
