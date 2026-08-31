@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import html
 import re
 import subprocess
 import sys
@@ -44,6 +45,7 @@ from markdown_semantics import (
     RAW_HTML_TOKEN_RE,
     commonmark_lines,
     contains_raw_html,
+    contains_default_ignorable_characters,
     inline_code_spans,
     markdown_link_destinations,
     markdown_links,
@@ -1500,6 +1502,8 @@ def fold_shape_problems(text):
         )
     bounds = fold_bounds(lines)
     if bounds is None:
+        if len(opens) == len(closes) == 1 and closes[0] < opens[0]:
+            problems.append("`</details>` must follow its `<details>` opener")
         return problems
     opening, closing = bounds
     if lines[opening] != "<details>":
@@ -3930,6 +3934,79 @@ def queue_frozen_skeleton(path, text):
     return "\n".join(frozen_skeleton_lines(path, text)).strip()
 
 
+def retry_reference_line_offsets(parsed_lines):
+    """Protect definition paragraphs, including container and multiline labels.
+
+    A definition's destination and optional title do not render as diagnosis.
+    Recognize its label before allowing any line of that source paragraph to
+    leave the frozen skeleton; seeing only its final `]:` line is too late.
+    Container removal is detection-only and never supplies structural evidence.
+    """
+    protected = set()
+    paragraph = []
+    definition = re.compile(r"(?m)^\[(?:\\[^\n]|[^\[\]\\]){1,999}\]:")
+
+    def flush():
+        content = "\n".join(line for _index, line in paragraph)
+        match = definition.search(content)
+        if match:
+            first = content.count("\n", 0, match.start())
+            protected.update(index for index, _line in paragraph[first:])
+        paragraph.clear()
+
+    for index, line in enumerate(parsed_lines):
+        content = re.sub(r"^" + RECORD_MARKER_PREFIX, "", line.rstrip("\r\n"))
+        if content.strip():
+            paragraph.append((index, content))
+        else:
+            flush()
+    flush()
+    return protected
+
+
+
+def contains_invisible_source_characters(value):
+    """Detect raw controls and active invisible entities, without rendering text.
+
+    This queue-only predicate recognizes escapes, closed code spans, and complete
+    CommonMark references solely to decide whether source can be omitted from a
+    frozen skeleton. It never supplies parsed values or changes original bytes.
+    Raw controls stay protected even in code or after a backslash.
+    """
+    if contains_default_ignorable_characters(value):
+        return True
+    source = value or ""
+    entity = re.compile(r"&(?:#[xX][0-9A-Fa-f]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]*);")
+    ticks = re.compile(r"`+")
+    index = 0
+    while index < len(source):
+        if source[index] == "\\":
+            # Consume a backslash pair outside code. An odd run escapes '&' or
+            # '`'; an even run leaves the following punctuation active.
+            index += 2
+            continue
+        opening = ticks.match(source, index)
+        if opening:
+            width = opening.end() - index
+            closing = next((match for match in ticks.finditer(source, opening.end())
+                            if match.end() - match.start() == width), None)
+            # Backslashes inside a code span do not escape its closing run.
+            index = closing.end() if closing else opening.end()
+            continue
+        matched = entity.match(source, index)
+        if matched:
+            reference = matched.group()
+            # html.unescape accepts legacy partial names and missing semicolons;
+            # only whole references recognized by CommonMark reach the decoder.
+            if reference.startswith("&#") or reference[1:] in html.entities.html5:
+                if contains_default_ignorable_characters(html.unescape(reference)):
+                    return True
+            index = matched.end()
+            continue
+        index += 1
+    return False
+
+
 def retry_notes_line_offsets(text):
     """Map real retry notes to source lines, without trusting a raw heading.
 
@@ -3943,26 +4020,19 @@ def retry_notes_line_offsets(text):
     exposed = semantic_line_offsets(text or "")
     headings, body, diagnostics = set(), set(), set()
     in_notes = False
-    reference_definition = False
+    references = retry_reference_line_offsets(parsed)
     for index, raw in enumerate(raw_lines):
         line = raw.rstrip()
         clean = parsed[index].rstrip() if index < len(parsed) else ""
         heading = re.match(r"^[ ]{0,3}(#{1,6})(?:[ \t]|$)", clean)
         if index in exposed and heading and len(heading.group(1)) <= 2:
             in_notes = clean == "## Agent notes" and line == clean
-            reference_definition = False
             if in_notes:
                 headings.add(index)
             continue
         if not in_notes:
             continue
         body.add(index)
-        # A link reference definition and its continuation can carry destinations
-        # or titles that no reader sees. Keep that source paragraph frozen too.
-        if re.match(r"^[ ]{0,3}\[[^\]\n]+\]:", clean):
-            reference_definition = True
-        if not line:
-            reference_definition = False
         # Setext headings introduce a new top-level section too. Freeze the
         # preceding title as well; a thematic break is conservatively a boundary.
         if index in exposed and re.fullmatch(r"[ ]{0,3}(?:=+|-+)[ \t]*", clean):
@@ -3973,12 +4043,93 @@ def retry_notes_line_offsets(text):
             in_notes = False
             continue
         if index in exposed and line == clean and not heading \
-                and not reference_definition \
-                and strip_default_ignorable_characters(line) == line \
+                and index not in references \
+                and not contains_invisible_source_characters(line) \
                 and not FIELD_RE.fullmatch(line) \
                 and not RAW_HTML_TOKEN_RE.search(line):
             diagnostics.add(index)
     return headings, body, diagnostics
+
+
+def exact_source_lines(text):
+    """Split CommonMark line endings without normalizing any source bytes."""
+    return [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
+
+
+def field_exposure_lines(path, text):
+    """Make only the validated human record fold transparent to exposure checks.
+
+    These lines never supply fields or frozen bytes. The original source still
+    owns both; this local view only proves which mutable field lines are outside
+    comments, code, and enclosing HTML. Outer/nested containers remain intact.
+    """
+    lines = exact_source_lines(text)
+    if Path(path).parts[1:2] != ("needs-human",):
+        return lines
+    bounds = fold_bounds(record_visible_lines(text))
+    if bounds is None or fold_shape_problems(text):
+        return lines
+    opening, closing = bounds
+    indices = (opening, opening + 1, closing)
+    forms = (FOLD_OPEN_RE, FOLD_SUMMARY_RE, FOLD_CLOSE_RE)
+    if any(index >= len(lines) or not form.fullmatch(lines[index].rstrip("\r\n"))
+           for index, form in zip(indices, forms)):
+        return lines
+    for index in indices:
+        lines[index] = lines[index][len(lines[index].rstrip("\r\n")):]
+    return lines
+
+
+def field_source_line_exposed(actor, index, matched, view_lines, offsets):
+    """Exempt a human response's own angle prose, never its outer context."""
+    if actor != "needs-human" or not HUMAN_RESPONSE_LINE_RE.match(matched.group()):
+        return index in offsets
+    neutral = list(view_lines)
+    start, end = matched.span(2)
+    line = neutral[index]
+    neutral[index] = line[:start] + "response" + line[end:]
+    return index in semantic_line_offsets("".join(neutral))
+
+
+def pure_first_human_response(source, before, destination, after):
+    """Allow reclassification caused solely by the first response's own bytes.
+
+    An unclosed angle phrase can hide later unchanged metadata from the exposure
+    map. This pairwise exception keeps that first reply legal only when every byte
+    outside its one value is identical, including CRLF/CR endings. It does not
+    neutralize response values for later metadata edits or change action identity.
+    """
+    if source != destination or Path(source).parts[1:2] != ("needs-human",):
+        return False
+    if first_concrete_response(human_response_fields(before)) is not None \
+            or first_concrete_response(human_response_fields(after)) is None:
+        return False
+    documents = []
+    for text in (before, after):
+        lines = exact_source_lines(text)
+        parsed = commonmark_lines(semantic_text(text))
+        responses = [
+            (index, matched)
+            for index, line in enumerate(lines)
+            for matched in [FIELD_RE.fullmatch(line.rstrip())]
+            if matched and HUMAN_RESPONSE_LINE_RE.match(matched.group())
+        ]
+        if len(responses) != 1:
+            return False
+        index, matched = responses[0]
+        if not exposed_field_value(matched, parsed[index] if index < len(parsed) else ""):
+            return False
+        view = field_exposure_lines(source, text)
+        if not field_source_line_exposed("needs-human", index, matched, view, set()):
+            return False
+        # A person's value is everything after the unchanged bold label on this
+        # one physical line, including their leading/trailing spaces. Keep the
+        # exact label and line terminator; neither belongs to the answer value.
+        start = HUMAN_RESPONSE_LINE_RE.match(lines[index]).end()
+        end = len(lines[index].rstrip("\r\n"))
+        lines[index] = lines[index][:start] + "response" + lines[index][end:]
+        documents.append("".join(lines))
+    return documents[0] == documents[1]
 
 
 def frozen_skeleton_lines(path, text):
@@ -3987,6 +4138,8 @@ def frozen_skeleton_lines(path, text):
     actor = parts[1] if len(parts) > 1 else ""
     leaf = parts[2] if len(parts) > 2 else ""
     mutable_fields = lifecycle_mutable_fields(actor, leaf)
+    view = field_exposure_lines(path, text)
+    offsets = semantic_line_offsets("".join(view))
     parsed = commonmark_lines(semantic_text(text or ""))
     _headings, notes_body, diagnostics = (
         retry_notes_line_offsets(text)
@@ -4000,7 +4153,9 @@ def frozen_skeleton_lines(path, text):
             continue
         matched = FIELD_RE.fullmatch(stripped)
         if index not in notes_body and matched \
-                and matched.group(1) in mutable_fields and exposed_field_value(
+                and matched.group(1) in mutable_fields \
+                and field_source_line_exposed(actor, index, matched, view, offsets) \
+                and exposed_field_value(
                     matched, parsed[index] if index < len(parsed) else ""
                 ):
             continue
@@ -4054,7 +4209,11 @@ def exposed_field_value(matched, parsed_line):
         return False
     if HUMAN_RESPONSE_LINE_RE.match(matched.group(0)):
         return True
-    return not RAW_HTML_TOKEN_RE.search(matched.group(2))
+    value = matched.group(2)
+    return not (
+        RAW_HTML_TOKEN_RE.search(value)
+        or contains_invisible_source_characters(value)
+    )
 
 
 def retry_action_identity(path, text):
@@ -6183,6 +6342,8 @@ def check_queue_frozen_skeleton():
                 == queue_frozen_skeleton(destination, after):
             continue
         if introduces_final_retry_notes(source, before, destination, after):
+            continue
+        if pure_first_human_response(source, before, destination, after):
             continue
         if destination in reported:
             continue
