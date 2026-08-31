@@ -83,7 +83,7 @@ Check the filled item against this authoring checklist:
 8. Link the source once in the prose; For the record keeps the machine copies.
 9. Under 800 words before the answer. Run
    `python3 automation/reconcile/reconcile.py --word-count <this file>` to see the count
-   and remaining budget. Cut background before removing a choice or its consequence.
+   and remaining budget. Keep every meaningful choice and its example consequence; shorten background instead.
 
 Keep every field value and every *Example consequence:* on one physical line as described
 above. Confidence is exactly `high`, `medium`, or `low`, then a space, an em dash (U+2014),
