@@ -5,12 +5,23 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**Nothing is stopping work.** 15 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
 To answer one, open it and write a sentence in its blank `**Your answer:**` or `**Your review:**`
 line. That is the whole protocol — one edit, and nothing else to fill in.
+
+### Stops work now — 1
+
+- [Choose whether to authorize sending the published recovery code and diffs to Claude for one read-only review, or accept the five native reviews without that additional check.](needs-human/decisions/blocking-authorize-the-external-recovery-review.md) — blocks operation:external-recovery-code-review · answer by 2026-11-29
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Sending repository code to another service adds a recipient, and that disclosure cannot be undone by deleting a local file.
+
+  **If you do nothing:** No code is sent to Claude; the two prepared PRs remain available with their native reviews and passing checks.
+
+  </details>
 
 ### Stops work at a named boundary — 3
 

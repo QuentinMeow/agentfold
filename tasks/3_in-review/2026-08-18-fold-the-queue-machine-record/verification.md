@@ -952,3 +952,7 @@ inherited pair should not be requoted.
   so all 15 live human items stay unfolded, and the three items filed this session are
   agent-written rather than a real authoring run. Two of them carry the fold; nobody has
   yet opened one on a phone.
+
+## 2026-08-31 — verified recovery publication
+
+The useful implementation and complete original commit history are retained and repaired in [PR90](https://github.com/QuentinMeow/agentfold/pull/90). The conflicting original PR88 is closed. The recovery task `2026-08-30-rebuild-the-open-pr-stack` records the current implementation checks; [its verification](../2026-08-30-rebuild-the-open-pr-stack/verification.md) preserves actual output. The test-file count in the original acceptance criterion now names all 16 current files; current main added a file after the original 15-file result, whose historical output remains preserved. Existing human questions and the original claimant remain unchanged. No product merge to main was performed.

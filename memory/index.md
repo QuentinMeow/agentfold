@@ -4,6 +4,7 @@
 ## facts
 - [Work that will not merge is preserved as an `archive/*` annotated tag, not a branch](facts/archived-refs-outside-core.md) — Work that will never land — refused by Core admission, superseded, or orphaned — is kept on annotated `archive/*` tags whose message carries the reasoning; list them with `git tag -l 'archive/*'` before rebuilding something that looks unprecedented
 - [Example services are Python-stdlib-only, on purpose](facts/example-services-stay-stdlib-only.md) — services/ examples must never gain dependencies — they exist to demo the harness, not to be good software
+- [The additional external recovery review remains unexecuted](facts/external-recovery-review-remains-unexecuted.md) — Execution security withheld the proposed external code review, so the published recovery has no Claude verdict or authorized code transmission
 
 ## decisions
 - [AgentFold core requires generality, portability, and repository-local state](decisions/2026-07-22-agentfold-core-requires-substitutability.md) **[superseded]** — Core must survive agent, provider, and adopted-repository substitution; personal setup and user-global writes stay external
@@ -51,6 +52,7 @@
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
 - [A new check and its first violation can arrive on separate green branches](lessons/automation/green-branches-can-merge-to-red.md) — Independent stack legs are only ever tested apart, so a check on one and violating text on the other produce a failure that existed on neither
+- [Pin the Unicode data used to protect source bytes](lessons/automation/invisible-byte-classification-must-not-drift-with-python.md) — Supported Python versions bundle different Unicode data, so a source-integrity predicate needs an explicit version and behavioral controls for newer assignments
 - [Never reuse a schema version number that was activated and withdrawn](lessons/automation/never-reuse-a-withdrawn-schema-version.md) — A version number that ever reached a commit is burned; reuse it and old records get judged by the new meaning.
 - [Consistency checks must exempt files whose job is describing broken state](lessons/automation/repair-records-cite-broken-state.md) — Link-checking the retry queue creates retries-about-retries — repair records legitimately cite dead paths
 - [Only bind a boundary every review outcome can still close](lessons/message-queue/a-boundary-must-be-closable-at-any-later-time.md) — A queue item may bind only a boundary all four review outcomes can satisfy with a commit an agent can make at any time after filing; a receipt Git cannot re-issue makes cleanup permanently unsatisfiable
