@@ -23,6 +23,7 @@ import html
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path, PurePosixPath
 
 AUTOMATION = Path(__file__).resolve().parents[1]
@@ -416,6 +417,15 @@ QUOTE_ELISION_RE = re.compile(r"\s*(?:\[[ \t]*(?:\.\.\.|…)[ \t]*\]|…|\.\.\.)
 # Keep quoted literal contents intact when allowing presentation whitespace.
 SOURCE_STRING_RE = re.compile(
     r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""", re.S
+)
+# Bounded source-number spellings, not an expression or language parser. A dot
+# belongs to a number when fractional digits or an exponent follow it; prose
+# "10." can still supply the complete number "10".
+SOURCE_NUMBER_RE = re.compile(
+    r"[+-]?(?:0[xX](?:_?[0-9a-fA-F](?:_?[0-9a-fA-F])*(?:\.[0-9a-fA-F](?:_?[0-9a-fA-F])*|\.(?=[pP][+-]?\d))?"
+    r"|\.[0-9a-fA-F](?:_?[0-9a-fA-F])*)(?:[pP][+-]?\d(?:_?\d)*)?"
+    r"|0[bB]_?[01](?:_?[01])*|0[oO]_?[0-7](?:_?[0-7])*"
+    r"|(?:\d(?:_?\d)*(?:\.\d(?:_?\d)*|\.(?=[eE][+-]?\d))?|\.\d(?:_?\d)*)(?:[eE][+-]?\d(?:_?\d)*)?)"
 )
 # A missing source must be stated explicitly, not inferred from an empty slot.
 NO_SOURCE_LITERAL = "No source document — everything you need is above."
@@ -2045,7 +2055,70 @@ def anchored_section_source(target, fragment, raw=None):
     return "\n".join(raw_lines[start + 1:end])
 
 
-def quote_presentation_text(value, preserve_strings=False, normalize_whitespace=False, literal_bounds=None):
+def quote_identifier_continue(character):
+    """Do not manufacture word boundaries inside Unicode identifier spellings."""
+    # Unknown characters remain conservative on older Unicode databases; known
+    # visible punctuation, symbols, and whitespace can still separate excerpts.
+    return character.isalnum() or unicodedata.category(character) in {
+        "Mn", "Mc", "Me", "Pc", "Cf", "Cn",
+    }
+
+
+def quote_string_spans(value):
+    """Find complete quoted literals without pairing ordinary prose apostrophes."""
+    spans, index = [], 0
+    prefixes = {"r", "u", "b", "f", "br", "rb", "fr", "rf", "l", "u8", "n", "x"}
+    while index < len(value):
+        if value[index] not in "\"'":
+            index += 1
+            continue
+        preceding = index - 1
+        while preceding >= 0 and value[preceding] == "\\":
+            preceding -= 1
+        if (index - 1 - preceding) % 2:
+            index += 1
+            continue
+        start = index
+        if index and quote_identifier_continue(value[index - 1]):
+            word = index - 1
+            while word and quote_identifier_continue(value[word - 1]):
+                word -= 1
+            if value[word:index].lower() in prefixes:
+                start = word
+            elif value[index] == "'":
+                # Neither an intraword contraction nor a word-final possessive
+                # starts a literal. Do not consume a later real quote opener.
+                index += 1
+                continue
+        matched = SOURCE_STRING_RE.match(value, index)
+        if matched and value[index] == "'" and matched.end() < len(value) \
+                and quote_identifier_continue(value[matched.end()]):
+            # The first unescaped closing candidate is inside/starts a word:
+            # 'tis ... we're, or 'tis ... 'A  B'. Reject this opener and resume
+            # without skipping the later apostrophe or genuine literal.
+            matched = None
+        if matched:
+            spans.append((start, matched.end()))
+            index = matched.end()
+        else:
+            index += 1
+    return spans
+
+
+def quote_number_spans(value):
+    """Keep adjacent signs and numeric components inside one excerpt boundary."""
+    spans = []
+    for matched in SOURCE_NUMBER_RE.finditer(value):
+        start = matched.start()
+        if value[start] in "+-" and start and (
+                quote_identifier_continue(value[start - 1]) or value[start - 1] in ")]}"):
+            # A touching range/subtraction separator is not a unary sign.
+            start += 1
+        spans.append((start, matched.end()))
+    return spans
+
+
+def quote_presentation_text(value, normalize_whitespace=False, literal_bounds=None):
     """Normalize paired prose emphasis while preserving code's literal contents.
 
     This is deliberately a small presentation allowance, not a Markdown renderer.
@@ -2079,11 +2152,10 @@ def quote_presentation_text(value, preserve_strings=False, normalize_whitespace=
         elif index not in exposed:
             lines[index] = protect(line)
     value = "".join(lines)
-    if preserve_strings:
-        # The quotation of a code/text source may emphasize an identifier, but
-        # stars or backticks inside a quoted string still spell literal bytes.
-        for matched in reversed(list(SOURCE_STRING_RE.finditer(value))):
-            value = value[:matched.start()] + protect(matched.group()) + value[matched.end():]
+    # The same complete literal spans govern whitespace, presentation and
+    # omissions. Code prefixes and symbols inside strings cannot be restyled.
+    for start, end in reversed(quote_string_spans(value)):
+        value = value[:start] + protect(value[start:end]) + value[end:]
     for start, end in reversed(inline_code_spans(value)):
         value = value[:start] + protect(render_inline_code(value[start:end])) + value[end:]
     # Whole delimiter runs with word boundaries: never erase the underscore in
@@ -2110,8 +2182,7 @@ def quote_presentation_text(value, preserve_strings=False, normalize_whitespace=
 def raw_quote_presentations(quoted, normalize_whitespace=False):
     """Permit quote presentation without normalizing raw source strings."""
     yield quote_whitespace(quoted) if normalize_whitespace else quoted
-    yield quote_presentation_text(quoted, preserve_strings=True,
-                                  normalize_whitespace=normalize_whitespace)
+    yield quote_presentation_text(quoted, normalize_whitespace=normalize_whitespace)
     stripped = quoted.strip()
     if inline_code_spans(stripped) == [(0, len(stripped))]:
         yield render_inline_code(stripped)
@@ -2127,7 +2198,7 @@ def raw_quote_presentations(quoted, normalize_whitespace=False):
 
 def quote_literal_spans(value):
     """Locate literal bytes for quote comparison, without changing parser policy."""
-    spans = [(match.start(), match.end()) for match in SOURCE_STRING_RE.finditer(value)]
+    spans = quote_string_spans(value)
     spans.extend(inline_code_spans(value))
     fence, start, offset = None, 0, 0
     exposed = semantic_line_offsets(value)
@@ -2207,22 +2278,26 @@ def quote_is_verbatim(quoted, source, markdown=True):
         pieces.append(value[cursor:])
         return "".join(pieces), spans
 
-    def occurrence(segment, haystack, spans, cursor=0, after_omission=False, before_omission=False):
-        pattern = re.escape(segment)
-        if re.match(r"\w", segment[0]):
-            pattern = r"(?<!\w)" + pattern
-        if re.match(r"\w", segment[-1]):
-            pattern += r"(?!\w)"
-        for found in re.compile(pattern).finditer(haystack, cursor):
-            if any((after_omission and start < found.start() < end)
-                   or (before_omission and start < found.end() < end) for start, end in spans):
+    def occurrence(segment, haystack, spans, numbers, cursor=0, after_omission=False, before_omission=False):
+        for found in re.finditer(re.escape(segment), haystack[cursor:]):
+            first, last = cursor + found.start(), cursor + found.end()
+            if (first and quote_identifier_continue(segment[0])
+                    and quote_identifier_continue(haystack[first - 1])) or (
+                    last < len(haystack) and quote_identifier_continue(segment[-1])
+                    and quote_identifier_continue(haystack[last])):
                 continue
-            return found.end()
+            if any(start < first < end or start < last < end for start, end in numbers):
+                continue
+            if any((after_omission and start < first < end)
+                   or (before_omission and start < last < end) for start, end in spans):
+                continue
+            return last
         return None
 
     def matches(needle, omissions, protected_source):
         haystack, spans = source_view(protected_source)
-        if needle.strip() and occurrence(needle, haystack, spans) is not None:
+        numbers = quote_number_spans(haystack)
+        if needle.strip() and occurrence(needle, haystack, spans, numbers) is not None:
             return True
         if marker not in omissions:
             return False
@@ -2232,7 +2307,7 @@ def quote_is_verbatim(quoted, source, markdown=True):
             return False
         cursor = 0
         for index, segment in segments:
-            cursor = occurrence(segment, haystack, spans, cursor,
+            cursor = occurrence(segment, haystack, spans, numbers, cursor,
                                 after_omission=index > 0, before_omission=index < len(parts) - 1)
             if cursor is None:
                 return False

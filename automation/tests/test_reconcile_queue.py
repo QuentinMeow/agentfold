@@ -20761,6 +20761,102 @@ class ReconcileQueueTests(unittest.TestCase):
             with self.subTest(source=source, quoted=quoted):
                 self.source_quote_fidelity_case(source, quoted, True, suffix=suffix)
 
+    def test_source_quote_fidelity_r2_preserves_numeric_tokens(self):
+        cases = (("10.e3", "10"), ("10.e3", "10."), ("0x1.fp3", "0x1"),
+                 ("0x1.fp3", "fp3"), ("0x.8p3", "0x"),
+                 ("10.5", "10"), ("10.5", "10."), ("10.5", "5"),
+                 ("-10", "10"), ("+10", "10"), ("-.5", ".5"),
+                 (".5", "5"), ("1e-3", "1e"), ("1e-3", "-3"),
+                 ("1.5E+10", "1.5"), ("0xF_F", "F_F"), ("-0xFF", "0xFF"),
+                 ("0b10_01", "10_01"), ("0o7_5", "7_5"), ("1_000.5", "1_000"))
+        for source, quoted in cases:
+            for wrapper in ("", "`"):
+                with self.subTest(source=source, quoted=quoted, wrapper=wrapper):
+                    self.source_quote_fidelity_case("MAX_LIMIT = " + source,
+                        wrapper + quoted + wrapper, False, suffix="py")
+        self.source_quote_fidelity_case("MAX_LIMIT = 10.5", "MAX_LIMIT = 10", False, suffix="py")
+        self.source_quote_fidelity_case("Before -10.5 then final.", "Before -10 [...] final.", False)
+
+    def test_source_quote_fidelity_r2_accepts_numeric_literals_and_prose_periods(self):
+        for literal in ("10.e3", "0x1.fp3", "0x.8p3", "-10", "+10", "10.5", "-.5", ".5", "1e-3", "1.5E+10",
+                        "0xF_F", "-0xFF", "0b10_01", "0o7_5", "1_000.5"):
+            with self.subTest(literal=literal):
+                self.source_quote_fidelity_case("MAX_LIMIT = " + literal + ";", literal, True, suffix="py")
+        for source, quoted in (("The limit is 10.", "10"), ("The limit is 10. Next paragraph.", "10."),
+                               ("First 10.5, later 10.", "10"), ("Use the range 10-20.", "20"),
+                               ("Count 10. Skip this sentence. Last.", "Count 10. [...] Last.")):
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, True)
+
+    def test_source_quote_fidelity_r2_preserves_unicode_identifier_continuations(self):
+        for continuation in ("\u0301", "\u093e", "\u20dd", "\u203f", "\u2054", "\u200d", "\U0001e4ec"):
+            with self.subTest(continuation=repr(continuation), edge="start"):
+                self.source_quote_fidelity_case("e" + continuation + "LIMIT = 10", "LIMIT = 10", False, suffix="py")
+            with self.subTest(continuation=repr(continuation), edge="end"):
+                self.source_quote_fidelity_case("LIMIT" + continuation + " = 10", "LIMIT", False, suffix="py")
+        self.source_quote_fidelity_case("e\u0301LIMIT first; final.", "LIMIT [...] final.", False)
+
+    def test_source_quote_fidelity_r2_accepts_unicode_words_and_visible_boundaries(self):
+        for identifier in ("e\u0301LIMIT", "LIMIT\u0301", "e\u203fLIMIT", "e\u2054LIMIT", "e\U0001e4ecLIMIT", "名LIMIT"):
+            with self.subTest(identifier=identifier):
+                self.source_quote_fidelity_case(identifier + " = 10", identifier + " = 10", True, suffix="py")
+        for source, quoted in (("Visible—LIMIT stays.", "LIMIT stays."),
+                               ("🙂LIMIT stays.", "LIMIT stays."),
+                               ("e\u0301LIMIT first; LIMIT last.", "LIMIT last.")):
+            with self.subTest(source=source):
+                self.source_quote_fidelity_case(source, quoted, True)
+
+    def test_source_quote_fidelity_r2_accepts_prose_apostrophes(self):
+        cases = (("'tis late but we're ready.", "'tis late\nbut we're ready."),
+                 ("We'll use 'safe' mode.", "We'll\nuse 'safe' mode."),
+                 ("Don't change the name; don't remove validation.", "Don't [...] don't remove validation."),
+                 ("Don't modify it when you don't have to.", "Don't modify it\nwhen you don't have to."),
+                 ("The user's first answer isn't required.", "The user's [...] isn't required."),
+                 ("The users' first answer isn't required.", "The users' [...] isn't required."),
+                 ("The user's policy requires review, except the owner's notes.", "The user's policy [...] owner's notes."),
+                 ("We can't change it today, but we don't need to.", "We can't […] don't need to."),
+                 ("We can’t change it today, but we don’t need to.", "We can’t […] don’t need to."))
+        for kind in ("decision", "clarification", "review"):
+            for source, quoted in cases:
+                with self.subTest(kind=kind, source=source, quoted=quoted):
+                    self.source_quote_fidelity_case(source, quoted, True, kind=kind)
+
+    def test_source_quote_fidelity_r2_keeps_actual_quoted_strings_literal(self):
+        cases = (("LABEL = 'A  B'", "LABEL = 'A B'"),
+                 ("LABEL = 'A secret B'", "LABEL = 'A...B'"),
+                 ("LABEL = r'A  B'", "LABEL = r'A B'"),
+                 ("LABEL = b'A secret B'", "LABEL = b'A...B'"),
+                 ("LABEL = rf'A secret B'", "LABEL = rf'A[…]B'"),
+                 ("LABEL = 'Don\\'t  change'", "LABEL = 'Don\\'t change'"),
+                 ('LABEL = "Don\'t  change"', 'LABEL = "Don\'t change"'),
+                 ("LABEL = '''A  B'''", "LABEL = '''A B'''"))
+        for source, changed in cases:
+            for quoted, valid in ((source, True), (changed, False)):
+                with self.subTest(source=source, quoted=quoted):
+                    self.source_quote_fidelity_case(source, quoted, valid, suffix="py")
+        self.source_quote_fidelity_case("The ``LABEL = 'A  B'`` stays.", "The ``LABEL = 'A B'`` stays.", False)
+        for source, quoted in (("We'll use 'A  B' now.", "We'll use 'A B' now."),
+                               ("'tis late; 'A  B' remains.", "'tis late; 'A B' remains."),
+                               ("We don't change r'A  B' now.", "We don't change r'A B' now.")):
+            with self.subTest(source=source, quoted=quoted):
+                self.source_quote_fidelity_case(source, quoted, False)
+        self.source_quote_fidelity_case("Don't rename 'A  B' when you don't need to.",
+            "Don't rename 'A B' when you don't need to.", False)
+        self.source_quote_fidelity_case("Don't rename 'A  B' when you don't need to.",
+            "Don't rename 'A  B' [...] don't need to.", True)
+
+    def test_source_quote_fidelity_r2_preserves_complete_literal_prefixes(self):
+        for prefix in ("r", "u8", "rf"):
+            for suffix in ("py", "md"):
+                source = "First " + prefix + '"A  B" middle. Last.'
+                for quoted, valid in (('First […] "A  B" middle. Last.', False),
+                                      ("First " + prefix + '"A  B" […] Last.', True),
+                                      ("First […] " + prefix + '"A  B" middle. Last.', True),
+                                      ("First […] Last.", True)):
+                    with self.subTest(prefix=prefix, suffix=suffix, quoted=quoted):
+                        self.source_quote_fidelity_case(source, quoted, valid, suffix=suffix)
+        self.source_quote_fidelity_case('First r"**A**" last.', 'First r"A" last.', False)
+
     def test_source_evidence_external_links_are_unfetched_and_do_not_cover_local_review(self):
         for kind in ("decision", "review"):
             with self.subTest(kind=kind), self.repo() as root:
