@@ -58,15 +58,18 @@ and give the quotation its own attribution link.
 >
 > — [what the design says an exception must be](../../../docs/designs/risk-tiered-agent-guardrails.md#make-escape-hatches-narrower-than-the-rule)
 
-Link a Markdown passage at its heading, or select text or code with `#Lx` or `#Lx-Ly`.
+Link a Markdown passage at a heading written with `#`, or select text, code, or an
+underlined heading with `#Lx` or `#Lx-Ly`.
 Line numbers start at one, stay within the file, and run forwards. An attribution may use
 an ordinary destination or CommonMark angle brackets, such as
 `[selected lines](<../../../docs/source notes.txt#L2-L4>)`. A backticked path alone is not
 a clickable citation. Quote the decisive passage without repeating it in a summary.
 
-Preserve wording, identifier spelling, and case, however short the quotation. Wrapping,
-Markdown emphasis, and marked omissions are allowed; the remaining passages keep their
-source order. When the question is "does X still match Y", quote both sides.
+Preserve wording, identifier spelling, and case, however short the quotation. Paired
+emphasis and wrapping outside code literals may change; literal spaces and symbols stay
+exact. `templates/README.md` names the supported forms. Marked omissions keep the
+remaining passages in source order. When the question is "does X still match Y", quote
+both sides.
 
 If no source wording determines the answer, replace the source block with
 `> No source document — everything you need is above.` A local-file review must still

@@ -17,9 +17,10 @@ reader should be able to answer without opening anything.>
 >
 > — [<what this passage says>](<../../../ path to the file.md#heading-anchor>)
 
-<Quote each decisive source; a comparison quotes both sides. Link a Markdown heading,
-or bounded lines with #Lx or #Lx-Ly for text or code. Preserve wording and case; wrapping,
-emphasis, and marked omissions in source order are allowed. If no source wording decides
+<Quote each decisive source; a comparison quotes both sides. Link a Markdown heading
+written with #, or bounded lines with #Lx or #Lx-Ly for text or code. Preserve wording,
+case, and code literals; paired emphasis and wrapping outside literals may change.
+Keep marked omissions in source order. If no source wording decides
 the answer, replace this whole source block with a blockquote containing exactly
 `No source document — everything you need is above.` A local-file review still quotes
 its target. Put optional background below the answer, inside the fold.>

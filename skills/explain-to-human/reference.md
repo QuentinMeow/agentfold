@@ -195,22 +195,22 @@ There are three rungs, and most writing stops one too early.
 - Quoted — the rung to use whenever the reader's answer turns on what that document
   actually says:
 
-  > The gate proves *the deletion commit also touched the named file*. It has never proved
-  > that the work happened, and it cannot.
+  > The gate proves *the deletion commit also touched the named file*.
   >
   > — [what the evidence gate actually proves](../../docs/designs/queue-resolution-order-independence.md#finding-1--the-gate-is-already-empty)
 
 Annotated is right for evidence the reader may safely skip. Quoted is required when the
 sentence decides the question, because a summary of it is the one thing they cannot check.
 
-Link a decisive Markdown passage at its heading, not at the whole file. For text or code,
-select the lines with `#Lx` or `#Lx-Ly`, using positive line numbers within that file. Quote
+Link a decisive Markdown passage at a heading written with `#`, not at the whole file.
+For text, code, or an underlined heading, select the lines with `#Lx` or `#Lx-Ly`, using positive line numbers within that file. Quote
 only the passage that decides the question, and do not repeat it in a summary.
 
 Keep the wording, identifier spelling, and case unchanged, even in a short quotation.
-Wrapping and Markdown emphasis may change presentation; marked omissions may remove words
-only while keeping the remaining passages in their original order. A citation proves no
-more than the source actually says.
+Paired emphasis and wrapping outside code literals may change presentation; literal
+spaces and symbols stay exact. The supported forms are listed in `templates/README.md`;
+an exact excerpt avoids unsupported formatting. Marked omissions keep the remaining
+passages in their original order. A citation proves no more than the source actually says.
 
 Annotated background remains useful when the reader can safely skip it. In a human queue
 item, put that background below the answer inside the existing record fold; local source

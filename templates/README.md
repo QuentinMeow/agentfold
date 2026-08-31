@@ -151,12 +151,15 @@ The three human templates show the quotation and attribution together. Copy the 
 passage, then name its location with `> — [what this passage says](destination#anchor)`.
 CommonMark angle destinations, such as
 `> — [selected lines](<../../../docs/source notes.txt#L2-L4>)`, are also accepted. Resolve
-local paths from the queue item's folder or the repository root. Select a Markdown heading
-or bounded text/code lines with `#Lx` or `#Lx-Ly`: line numbers start at one, run forwards,
-and cannot exceed the file. A bare file link does not select a passage.
+local paths from the queue item's folder first, then the repository root. Select a
+Markdown heading written with one to six `#` characters, or bounded text/code lines with
+`#Lx` or `#Lx-Ly`: line numbers start at one, run forwards, and cannot exceed the file.
+Underlined headings use line selections. A bare file link does not select a passage.
 
 Preserve the source's wording, identifier spelling, and case, including in short quotes.
-Wrapping and Markdown emphasis may change presentation. Mark omissions with `…`, `...`,
+Paired emphasis and wrapping outside code literals may change presentation; spaces and
+symbols inside literals stay exact. This is a narrow presentation allowance, not a full
+Markdown renderer; an exact excerpt avoids unsupported formatting. Mark omissions with `…`, `...`,
 `[…]`, or `[...]`, keeping the remaining passages in source order. Quote both sides of a
 comparison. Optional annotated background belongs below the answer inside the record fold
 and needs no quotation; the reader must be able to decide without opening it.
@@ -166,8 +169,8 @@ When no source wording decides the answer, replace the whole source block with e
 A review of a local file still quotes its target; the no-source sentence cannot replace
 that evidence.
 
-Source findings are advisory. Local comparisons use the captured candidate's regular-file
-bytes; missing, outside-repository, nonregular, binary, and invalidly selected sources do
+Source-evidence findings are advisory; ordinary link existence and heading checks still
+apply. Local comparisons use the captured candidate's regular-file bytes; missing, outside-repository, nonregular, binary, and invalidly selected sources do
 not count as verified evidence. External content is not fetched or machine-verified.
 Matching text establishes neither its relevance nor its truth; the author still checks
 whether the selected passage supports the judgment.
