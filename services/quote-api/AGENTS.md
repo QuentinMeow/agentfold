@@ -26,7 +26,7 @@ it) — file a decision per `handbook/collaboration-modes.md`.
 
 - Owns `quotes.json` and its format; may change both freely (the JSON *stdout*
   contract above is what's frozen, not the storage).
-- No dependencies beyond the Python standard library; no network.
+- No network access.
 
 ## Endpoints (subfolders)
 

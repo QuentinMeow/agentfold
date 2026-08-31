@@ -210,7 +210,10 @@ INPUT_TEST_OWNERS = (
     ),
     (
         b"automation/install.py",
-        ("automation/tests/test_check_core_scope.py",),
+        (
+            "automation/tests/test_check_core_scope.py",
+            "automation/tests/test_install.py",
+        ),
     ),
     (
         b"automation/mine_cochange.py",

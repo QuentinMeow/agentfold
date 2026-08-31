@@ -29,6 +29,7 @@ from markdown_semantics import (
     strip_inline_code,
     visible_markdown_link_source,
 )
+from review_receipt import blank_receipt_verdict_tokens
 
 REPO = Path(__file__).resolve().parents[1]
 # Every Git read in this gate goes through this prefix, so a `refs/replace/*` entry
@@ -1500,7 +1501,12 @@ def _task_projection_stripped_text(
                 "Invalid human-action projection: " + label.strip()
             )
 
-    rendered = rendered_human_text(source)
+    # The receipt is parsed from the structural view of the source, so raw HTML that only
+    # renders as a heading cannot claim one, and each token is placed by the line number
+    # the parser recorded — literal search only as a fallback, bounded to the receipt.
+    rendered = blank_receipt_verdict_tokens(
+        source, source_path, rendered_human_text(source)
+    )
     for projection_source in valid_sources:
         offset = rendered.find(projection_source)
         if offset < 0:
