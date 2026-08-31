@@ -1,11 +1,11 @@
 # Preserve exact evidence and unanswered review obligations
 
-**Claimed-by:** unclaimed
+**Claimed-by:** codex, 2026-08-30
 **Mode:** autonomous
 **Filed:** 2026-08-30, by codex, from the owner's open-PR recovery request
 **Parent:** 2026-08-30-rebuild-the-open-pr-stack
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-repair-human-question-evidence.md`
+**Queue actions:** none
 
 ## Goal
 
