@@ -805,3 +805,162 @@ same-repository/fork/conflicted-fork canaries. A missing credential or fixture r
 unverified coverage rather than a fabricated pass. Core classification can proceed in its
 own non-overlapping implementation unit only after the corrected design review; adapter
 completion cannot be claimed until all transport and canary evidence exists.
+
+## 2026-09-01 correction amendment 2 — intrinsic ancestry and edge-scoped adapters
+
+The fresh review of `30c9cc0f9a71a3ae5f82cefb7928a818c383f421` stopped after
+three independent blocks. This section supersedes the graph command, historical-helper,
+deadline, GitHub call-shape, coverage, required-check, evaluator-binding, canary-manifest,
+push-tuple, and branch-lifecycle text above. Production remains unopened.
+
+### Intrinsic graph command
+
+The intrinsic set is
+`(Desc(C) ∩ Anc(O)) ∪ (Desc(C) ∩ Anc(N))`, plus the `C` snapshot. Its exact production
+enumeration is one streamed child:
+
+```sh
+git --no-replace-objects rev-list \
+  --parents --topo-order --reverse --ancestry-path O N ^C
+```
+
+Raw parent OIDs stay on each emitted record, so an immediate outside parent can be read
+once as a boundary snapshot. That parent is not intrinsic and its ancestors are neither
+emitted nor charged to the intrinsic graph budget. Mirrored old- and new-arm gates extend
+a neutral outside lineage beyond 4,096 ancestors and prove byte-identical classification,
+result, intrinsic counters, and one boundary snapshot. Removing `--ancestry-path`, opening
+the outside ancestor, or charging it is an observed-red damage control.
+
+### Historical evaluator registry and deadlines
+
+Generated-retry support uses a separate explicit
+`HISTORICAL_RETRY_EVALUATORS: check-id → bounded evaluator` registry. Generic dispatch
+through `CHECKS` is forbidden. Every check ID for which `generated_retry_collectable()` is
+true has one named historical evaluator or is explicitly unsupported. An unsupported ID
+makes the provenance result incomplete; it is not treated as cleared or invalid. Admission
+requires semantic parity at the same immutable tree for every collectable check ID, plus
+exact/+1 input, output, record, object, path, helper, and obligation-replay tests. The
+`queue-resolution` ID remains non-collectable and cannot authorize its own deletion.
+
+Every child belongs to one process group and has a monotonic deadline as well as byte and
+record budgets: 30 seconds per one-shot Git child, 10 seconds per request/response exchange
+with a long-lived batch child, and 120 seconds aggregate classification time. Timeout,
+EOF, malformed output, and budget refusal terminate the process group, reap every child,
+discard partial caches/results, emit one stable incomplete diagnostic, preserve every
+writer byte, and exit 2. Injected-clock tests stall `rev-list`, `merge-base`, `cat-file
+--batch`, and one historical evaluator before and after partial output; exact-deadline
+completion succeeds and the first monotonic tick beyond it refuses.
+
+### Two core entrypoints, one classifier
+
+One provider-independent library owns the O/N classifier and accepts only immutable O/N,
+a bounded committed-object source, repository queue policy from those objects, and a
+budget/deadline profile. It has no worktree, index, current HEAD, provider, writer, or
+ordinary-range dependency.
+
+`automation/reconcile/reconcile.py --ref-update O N --range B...N` is the integrated local
+and push entrypoint. It runs the library preflight, then the existing ordinary checks and
+optional writers under the checkout rules already specified.
+
+`automation/reconcile/ref_update.py --git-dir <isolated-git-dir> --old O --new N` is a
+dedicated read-only historical entrypoint. It rejects every writer, range, worktree, index,
+provider, and compatibility option; emits only the canonical continuity result; and never
+imports Python or executable content from the object source. The trusted GitHub lane runs
+this entrypoint from one pinned trusted-code checkout while the candidate object source is
+a different isolated Git directory. Library-parity tests require byte-identical results
+and counters between both entrypoints for the same O/N/object database.
+
+Ordinary `B...N`, index, and worktree checks for a pull request remain in the unprivileged
+`pull_request` lane. They are separate results and execute candidate repository code only
+with the lane's unprivileged token. The trusted historical lane never tries to make its
+base-code checkout equal N or a synthetic candidate.
+
+### Honest remote scope and coverage debt
+
+Each remote result classifies exactly one immutable edge O→N. It never asserts cumulative
+branch continuity. An unavailable O→N remains an unresolved edge forever unless that exact
+pair is rerun successfully or an equally authoritative immutable receipt for that exact
+pair is introduced by a separately approved design. A later N→N' result cannot discharge,
+replace, summarize, or turn the earlier edge green. Restoring O and performing a new O→N
+update creates a new auditable edge but does not rewrite the old event record.
+
+This task introduces no durable provider debt store and no trusted status publisher.
+Consequently GitHub continuity output is advisory and edge-scoped, especially for forks;
+it is not a required-check context on N and no branch-level green claim exists. A later
+task may design a least-privilege publisher plus durable per-ref/per-PR debt, but it must
+consume revision-bound authenticated receipts, prevent candidate-controlled context
+forgery, and carry every unresolved original edge. The production and canary gates include
+the laundering sequence `O→N unavailable; N→N' locally valid` and require two independent
+records: the first stays unavailable and the second says only that its own edge is valid.
+
+The same-repository push job naturally runs on N and may expose its edge result to branch
+policy, but it still cannot claim cumulative continuity or erase a prior unavailable edge.
+The trusted fork lane cannot publish a required check to N with read-only permissions, and
+the design makes no such claim.
+
+### Trusted evaluator identity and job isolation
+
+The trusted data-inspection job binds the workflow repository ID, base repository ID,
+`github.workflow_ref`, and immutable `github.workflow_sha`, then checks out and verifies
+that exact evaluator SHA. A PR targeting another base branch remains acceptable only when
+those identities agree and that branch's exact workflow SHA supplies the evaluator. All
+third-party actions are pinned by full commit OID.
+
+The parser job alone has `contents: read`, `persist-credentials: false`, no secrets, no PR
+write/API step, no shared cache or workspace, a sanitized Git config, disabled replacement
+refs and lazy fetch, and an allowlist of required Git protocols. Candidate O/N objects enter
+only the isolated object directory. The job neither checks out their tree nor places it on
+Python, shell, action, hook, filter, pager, editor, credential-helper, or executable search
+paths. Evidence binds evaluator repository/SHA separately from candidate repository/O/N.
+
+### Executable canary manifest
+
+The canary CLI uses a locally generated closed-grammar `scenario-id`; provider run IDs are
+a list discovered after events fire. Provisioning installs and records the already-reviewed
+fixture workflow/evaluator SHA on the fixture default branch before scenario refs exist.
+Every ref and PR is created atomically only if absent. A name collision refuses without a
+force update.
+
+The manifest is canonical JSON with a SHA-256 digest, not a signed artifact. It binds base
+and fork repository numeric IDs, scenario nonce, exact created ref names/OIDs, exact PR
+numbers/node IDs, evaluator SHA, workflow ID, expected event/ref/N tuples, discovered run
+IDs, artifact digests, and cleanup state. Capture discovers each run by the complete
+repository/workflow/event/ref/N tuple rather than by time or name alone. Raw event fields
+are copied into immutable run artifacts by the pinned trusted workflow before assertions.
+
+Cleanup is compare-and-delete: repository IDs, scenario nonce, PR IDs, and each current ref
+OID must still match the manifest. Drift refuses deletion and is recorded. Canary tests
+cover collision, digest forgery, replay, drifted ref, partial provisioning, multiple runs,
+missing artifacts, assertion failure followed by cleanup, and idempotent cleanup of already
+absent exact identities. There is no broad pattern deletion.
+
+### Complete push and branch lifecycle tuples
+
+The push adapter admits only these mutually exclusive branch tuples derived from
+`event.ref`:
+
+| Shape | Required payload |
+|---|---|
+| creation | `refs/heads/*`, `created=true`, `deleted=false`, zero `before`, non-zero `after` |
+| deletion | `refs/heads/*`, `created=false`, `deleted=true`, non-zero `before`, zero `after` |
+| update | `refs/heads/*`, both flags false, both endpoints non-zero |
+
+Every contradiction is coverage-unavailable. `ref_name`, `github.sha`, and `forced` are
+cross-check observations only. Creation runs ordinary checks at `after` without continuity;
+deletion runs no deleted-branch candidate check; an update runs ordinary and O/N checks.
+
+Human documentation covers first publication, fast-forward work, restack, lease rejection,
+repair publication, CI-unavailable diagnosis, and branch retirement. It describes the
+observed O and exact expected-O lease but leaves automatic publisher/pre-push enforcement,
+multi-ref atomicity, initial create-if-absent publication, and compare-and-delete retirement
+to backlog task `2026-08-03-bind-task-branch-pushes-to-observed-tips`. This task does not
+claim or absorb that task's acceptance criteria.
+
+### Revised gate order
+
+The next immutable design review covers all five lenses from scratch. After it passes, the
+core library and its two local entrypoints may enter isolated implementation units. The
+GitHub adapter still waits for the bounded-fetch POC, installed fixture workflow, and all
+live canaries; absent provider credentials keep that adapter unverified rather than
+weakening its contract. No remote required-check, cumulative-continuity, fork-authority, or
+automatic-publisher completion claim exists in this task.

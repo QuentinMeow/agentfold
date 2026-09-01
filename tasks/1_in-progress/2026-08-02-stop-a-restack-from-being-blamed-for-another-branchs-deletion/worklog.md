@@ -95,3 +95,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Production remains unopened pending a new five-lens review of the corrected immutable
   revision. GitHub adapter work also remains gated on a bounded-transport POC and live
   same-repository/fork/conflicted-fork canaries.
+
+## 2026-09-01 — Second failed design panel and edge-scoped correction (codex)
+
+- Stopped the fresh panel after three independent blocks. The exact graph command had
+  omitted `--ancestry-path`; historical retry validation could still dispatch an arbitrary
+  unbounded checker; stalled children had no deadline; and a trusted-base GitHub job could
+  not safely call the checkout-bound integrated CLI.
+- The workflow review also demonstrated that an unavailable O→N loss can be laundered by
+  a later clean N→N' edge, that a read-only `pull_request_target` job cannot publish a
+  required check on N, and that the canary manifest and evaluator revision were not yet
+  bound tightly enough for safe automation.
+- Appended a second correction with the POC-equivalent ancestry command, an explicit
+  bounded historical-evaluator registry, monotonic child deadlines, a provider-independent
+  library plus separate read-only historical CLI, honest edge-only remote semantics,
+  immutable trusted-code binding, collision-safe canary manifests, complete push tuples,
+  and an explicit boundary with the existing publication/retirement backlog task.
+- Production remains unopened pending another full five-lens immutable-revision review.

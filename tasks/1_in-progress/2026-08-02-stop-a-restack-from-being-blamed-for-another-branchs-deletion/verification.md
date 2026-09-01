@@ -16,3 +16,14 @@ their immutable revision and remain explicitly superseded when a later correctio
 - CLI/contracts/testability / integration-receipt: `block` — standalone and duplicate argument shapes, writer checkout binding, retired-option tests, and executable live canaries were not closed.
 
 The four-to-one panel rejected the revision. No production implementation began from it.
+
+## Superseded corrected-design review
+
+**Reviewed revision:** `30c9cc0f9a71a3ae5f82cefb7928a818c383f421`
+
+- semantic/DAG / r18-semantic-design: `block` — the graph command omitted `--ancestry-path`, reopened neutral outside ancestry, and could spend the intrinsic budget on irrelevant history.
+- budgets/transaction/composition / receipt-contract: `block` — outside ancestry, arbitrary historical checker dispatch, and stalled children remained unbounded.
+- workflow/adapter/human / r18-workflow-design: `block` — the trusted lane lacked a separate historical entrypoint, coverage could be laundered, required-check and evaluator binding claims were unsound, and canary/push lifecycle identities were incomplete.
+
+The panel stopped after three independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
