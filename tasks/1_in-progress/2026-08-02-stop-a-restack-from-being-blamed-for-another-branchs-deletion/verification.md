@@ -49,6 +49,17 @@ and no production implementation began from this revision.
 The panel stopped after two independent blocks. The three remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded pre-output-memory and literal-transport design review
+
+**Reviewed revision:** `8ef4cf2b5bf7c99376edb9232315905cb5201e19`
+
+- semantic/DAG + hostile-config / r19-semantic-design: `block` — literal URL bypassed remote fields but the original local config still executed credential helpers and applied HTTP transport policy.
+- budgets/transaction/composition / r17-production-seam-audit: `block` — macOS could not install the promised 512 MiB address-space ceiling, byte-level OOM controls were invalid for page-granular limits, and original local Git config remained visible.
+- workflow/adapter/human / r20-workflow-design: `block` — hostile local credential helpers ran before askpass and inherited TLS/proxy environment could redirect or weaken the validated HTTPS transport.
+
+The panel stopped after three independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded split-transaction design review
 
 **Reviewed revision:** `927a48825962d0b3923751f0e3ce152f3806b697`

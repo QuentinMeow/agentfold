@@ -2054,3 +2054,88 @@ leased destination may move.
 
 Production remains unopened. A fresh five-lens immutable review must accept this complete
 superseding design before implementation ownership is added to the orchestration run.
+
+## 2026-09-01 correction amendment 12 — enforceable platform and sealed publisher
+
+The review of `8ef4cf2b5bf7c99376edb9232315905cb5201e19` proved that the
+chosen address-space limit cannot be lowered on the current macOS launcher and that a
+literal URL still reads credential and HTTP policy from the original repository's local
+Git configuration. This section supersedes amendment 11's platform, memory-test, and
+publisher-configuration clauses. It deliberately narrows availability instead of claiming
+an unenforceable safety property.
+
+### Linux-enforced classifier memory
+
+The production Strategy A classifier is available only on a Linux execution host where a
+startup probe installs and reads back an exact 512 MiB `RLIMIT_AS` for a disposable child,
+then demonstrates that the child cannot map beyond it. The pre-exec limit applies to every
+policy, continuity, historical, and ordinary Git child as amendment 11 requires. If the
+probe, limit installation, readback, or allocation control fails, the classifier returns
+coverage-unavailable before opening repository history.
+
+Native macOS is not an execution baseline for this classifier. The current macOS launcher
+cannot lower `RLIMIT_AS` to the specified ceiling, and its data/address-space limits were
+not demonstrated to constrain allocation. A macOS developer uses a separately isolated
+Linux runner/container or the trusted Linux CI lane for continuity classification; absent
+that adapter, local paired diagnosis returns exit 2 and ordinary checks remain separately
+available. POC replay and pure unit tests may still run on macOS, but cannot claim the
+production resource gate passed.
+
+OS memory enforcement is page-granular and includes runtime mappings, so there is no
+`+1 byte` address-space admission claim. Tests separate:
+
+1. exact installation/readback of the numeric 512 MiB limit before exec;
+2. a bounded supported Git traversal below the ceiling;
+3. a small allocation helper that maps whole pages until the next page is refused without
+   ever exceeding the configured address space;
+4. child behavior at resource failure and failed limit installation; and
+5. bounded diagnostics, zero Findings/writers, descriptor closure, and full process-group
+   termination/reaping in every failure case.
+
+All logical row, token, payload, arena, result, and serialization budgets retain their
+exact/+1 gates. The OS ceiling is a separate coarse containment boundary, not another
+logical byte counter.
+
+### Sealed Git directory for publication
+
+The trusted publisher never runs `git push` with the candidate worktree or common Git
+directory as `GIT_DIR`. After validating the source repository identity, object format,
+exact O/N objects, destination repository/ref, and literal HTTPS URL, it creates a
+random-capability, mode-0700 temporary bare Git directory outside the candidate tree. The
+temporary repository has the same object format, no refs, remotes, hooks, includes,
+credential helpers, or HTTP configuration. Its empty writable object directory reads the
+prevalidated source object directory only through an exact read-only alternate binding;
+the publisher verifies O and N again through this sealed object view before push. It then
+uses the literal URL, full O/N OIDs, exact lease, and explicit receive-pack contract from
+amendment 11.
+
+The launcher constructs the subprocess environment from an allowlist rather than deleting
+named variables from the ambient environment. It supplies only the sealed `GIT_DIR`, the
+read-only object alternate, trusted absolute Git executable and exec path, fixed locale,
+terminal-prompt disablement, system/global-config disablement, and a one-use authenticated
+askpass capability carried outside the repository. Candidate `HOME`, XDG, `GIT_CONFIG_*`,
+`GIT_DIR`, worktree/index/namespace, object-replacement, alternate-object, SSH, credential,
+proxy, curl, certificate, TLS-disable, trace, pager, editor, and prompt variables are not
+inherited. The sealed local config is hashed before launch and checked again after the
+process exits; unexpected mutation makes the publication result invalid and the temporary
+repository is preserved for bounded forensic inspection.
+
+Authentication canaries use that exact sealed launcher for create, exact-lease update,
+lease rejection, repair, and exact-lease deletion. Hostile tests put executable
+`credential.helper`, extra-header, proxy, CA/certificate, SSL-disable, include, remote-vcs,
+receive-pack, hook, and alternate-object settings in the original local config and ambient
+environment. Each writes a distinct sentinel if observed; none may run or affect the sealed
+child. The canary also proves the ephemeral askpass capability is invoked exactly for the
+validated GitHub host, cannot be read by a candidate helper, and is destroyed after one
+attempt. Only the exact destination ref may move.
+
+The sealed temporary repository is a runtime adapter boundary, not a new source of truth.
+It owns no durable task, queue, verification, or credential state. Success removes it;
+failure retains only bounded nonsensitive metadata and never writes secrets into the task
+repository.
+
+### Gate boundary
+
+Production remains unopened. A fresh immutable five-lens panel must accept the Linux-only
+resource boundary, sealed publisher, and all previous semantic contracts before any
+production unit starts.

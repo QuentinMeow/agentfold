@@ -113,6 +113,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Enforceable-platform and sealed-publisher correction (codex)
+
+- Read-only probes proved macOS could not lower the declared `RLIMIT_AS`, so the claimed
+  512 MiB boundary would make Strategy A unavailable on its stated native baseline; a
+  byte-level OOM +1 was also incompatible with page-granular address-space enforcement.
+- Three lenses independently proved that literal URL publication still reads original
+  repository-local credential/HTTP config and inherited TLS/proxy environment, allowing a
+  helper to execute before the intended one-use askpass capability.
+- Narrowed production classification to a startup-probed Linux `RLIMIT_AS` boundary and
+  made native macOS explicitly unavailable without an isolated Linux adapter. Replaced
+  candidate-repository publication with a temporary sealed bare Git directory, read-only
+  object view, environment allowlist, one-use auth capability, and hostile local-config,
+  HTTP, TLS, alternate-object, helper, and environment controls.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Pre-output-memory and literal-transport correction (codex)
 
 - Semantic review accepted the executable prefix enumeration and POC-equivalent role
