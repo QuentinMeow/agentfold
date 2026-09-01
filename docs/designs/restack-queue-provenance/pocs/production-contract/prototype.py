@@ -47,6 +47,17 @@ class Unreadable(RuntimeError):
     """Required immutable Git evidence could not be read."""
 
 
+class BudgetExceeded(RuntimeError):
+    """A measured operation was refused before its work began."""
+
+    def __init__(self, counter: str, value: int, limit: int):
+        super().__init__(f"{counter}={value}>{limit}")
+        self.counter = counter
+        self.value = value
+        self.limit = limit
+        self.C: str | None = None
+
+
 @dataclasses.dataclass
 class Metrics:
     git_processes: int = 0
@@ -68,9 +79,44 @@ class Metrics:
     per_action_history_walks: int = 0
     carry_proof_nodes: int = 0
     carry_proof_edges: int = 0
+    _budget_limit: int | None = dataclasses.field(
+        default=None, repr=False
+    )
+    _posthoc_budget_accounting: bool = dataclasses.field(
+        default=False, repr=False
+    )
+
+    def configure_budget(
+        self,
+        limit: int | None,
+        *,
+        posthoc_budget_accounting: bool = False,
+    ):
+        self._budget_limit = limit
+        self._posthoc_budget_accounting = posthoc_budget_accounting
+
+    def charge(self, counter: str, amount: int = 1):
+        """Charge before work; record only limit+1 when refusing a batch."""
+        if amount < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric charge {counter}={amount}")
+        current = getattr(self, counter)
+        attempted = current + amount
+        if (
+            self._budget_limit is not None
+            and not self._posthoc_budget_accounting
+            and attempted > self._budget_limit
+        ):
+            refused = self._budget_limit + 1
+            setattr(self, counter, refused)
+            raise BudgetExceeded(counter, refused, self._budget_limit)
+        setattr(self, counter, attempted)
 
     def as_dict(self):
-        return dataclasses.asdict(self)
+        return {
+            field.name: getattr(self, field.name)
+            for field in dataclasses.fields(self)
+            if not field.name.startswith("_")
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -122,6 +168,7 @@ class Damage:
     first_parent_carry_only: bool = False
     skip_carry_compatibility: bool = False
     unmetered_cone_work: bool = False
+    posthoc_budget_accounting: bool = False
     reopen_outside_c_boundary_ancestry: bool = False
 
 
@@ -156,7 +203,7 @@ def count_production_git(metrics: Metrics):
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
-            metrics.git_processes += 1
+            metrics.charge("git_processes")
         return REAL_POPEN(command, *args, **kwargs)
 
     original_popen = subprocess.Popen
@@ -339,6 +386,8 @@ class ObjectDatabase:
     def __init__(self, root: Path, metrics: Metrics):
         self.root = root
         self.metrics = metrics
+        metrics.charge("git_processes")
+        metrics.charge("batch_processes")
         self.process = REAL_POPEN(
             ["git", "--no-replace-objects", "cat-file", "--batch"],
             cwd=root,
@@ -346,8 +395,6 @@ class ObjectDatabase:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        metrics.git_processes += 1
-        metrics.batch_processes += 1
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
         self.flat_trees: dict[str, dict[str, tuple[str, str]]] = {}
@@ -364,9 +411,9 @@ class ObjectDatabase:
 
     def read(self, oid: str) -> tuple[str, bytes]:
         if oid in self.objects:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.objects[oid]
-        self.metrics.object_reads += 1
+        self.metrics.charge("object_reads")
         assert self.process.stdin is not None
         assert self.process.stdout is not None
         self.process.stdin.write(oid.encode("ascii") + b"\n")
@@ -410,7 +457,7 @@ class ObjectDatabase:
 
     def tree_entries(self, oid: str) -> dict[str, tuple[str, str]]:
         if oid in self.trees:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.trees[oid]
         kind, payload = self.read(oid)
         if kind != "tree":
@@ -437,7 +484,7 @@ class ObjectDatabase:
         """Return every leaf path with its exact mode and object OID."""
         root = self.commit_tree(commit)
         if root in self.flat_trees:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.flat_trees[root]
         flattened: dict[str, tuple[str, str]] = {}
 
@@ -485,12 +532,12 @@ class ObjectDatabase:
         return oid
 
     def snapshot(self, commit: str):
-        self.metrics.queue_snapshots_requested += 1
+        self.metrics.charge("queue_snapshots_requested")
         queue_tree = self.queue_tree(commit)
         if queue_tree in self.snapshots:
-            self.metrics.snapshot_cache_hits += 1
+            self.metrics.charge("snapshot_cache_hits")
             return self.snapshots[queue_tree]
-        self.metrics.queue_subtree_reads += 1
+        self.metrics.charge("queue_subtree_reads")
         by_identity: dict[tuple, list[ActionState]] = {}
 
         def walk(tree_oid: str, prefix: str):
@@ -518,7 +565,7 @@ class ObjectDatabase:
                     raise Unreadable(
                         f"queue item {path} is not UTF-8"
                     ) from error
-                self.metrics.identity_calls += 1
+                self.metrics.charge("identity_calls")
                 identity = RECONCILE.queue_action_identity(path, text)
                 by_identity.setdefault(identity, []).append(
                     ActionState(path, text, child)
@@ -586,7 +633,6 @@ class Graph:
             objects.commit_tree(self.C)
         except Unreadable as error:
             raise Unreadable(f"derived C: {error}") from error
-        metrics.graph_enumerations += 1
         listing_arguments = [
             "--no-replace-objects",
             "rev-list",
@@ -596,23 +642,30 @@ class Graph:
         ]
         if not reopen_outside_c_boundary_ancestry:
             listing_arguments.append("--ancestry-path")
+        metrics.charge("graph_enumerations")
         listing = run_git(
             root, metrics, *listing_arguments, O, N, f"^{self.C}"
         )
         self.order = [self.C]
         self.parents: dict[str, tuple[str, ...]] = {self.C: ()}
-        for line in listing.stdout.splitlines():
-            fields = line.split()
-            if not fields:
-                continue
-            commit, raw_parents = fields[0], tuple(fields[1:])
-            self.order.append(commit)
-            self.parents[commit] = raw_parents
-        self.order = list(dict.fromkeys(self.order))
-        metrics.graph_commits = len(self.order)
-        metrics.graph_parent_edges = sum(
-            len(value) for value in self.parents.values()
-        )
+        seen = {self.C}
+        try:
+            metrics.charge("graph_commits")
+            for line in listing.stdout.splitlines():
+                fields = line.split()
+                if not fields:
+                    continue
+                commit, raw_parents = fields[0], tuple(fields[1:])
+                if commit in seen:
+                    continue
+                metrics.charge("graph_commits")
+                metrics.charge("graph_parent_edges", len(raw_parents))
+                seen.add(commit)
+                self.order.append(commit)
+                self.parents[commit] = raw_parents
+        except BudgetExceeded as error:
+            error.C = self.C
+            raise
         self.children: dict[str, list[str]] = {
             commit: [] for commit in self.order
         }
@@ -688,6 +741,12 @@ class Classifier:
         self.fixture = fixture
         self.damage = damage or Damage()
         self.metrics = Metrics()
+        self.metrics.configure_budget(
+            None if self.damage.unmetered_cone_work else fixture.budget_limit,
+            posthoc_budget_accounting=(
+                self.damage.posthoc_budget_accounting
+            ),
+        )
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
         self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
@@ -797,8 +856,8 @@ class Classifier:
                 return fail(f"C-rooted carry graph cycles at {child}")
             if child not in self.graph.c_descendants:
                 return fail(f"carrying node {child} is outside the C-rooted cone")
+            self.metrics.charge("carry_proof_nodes")
             visiting.add(child)
-            self.metrics.carry_proof_nodes += 1
             child_states = self.states(child, identity)
             if len(child_states) != 1:
                 problem = fail(
@@ -823,7 +882,7 @@ class Classifier:
             else:
                 parents = sorted(self.graph.parents.get(child, ()))
             for parent in parents:
-                self.metrics.carry_proof_edges += 1
+                self.metrics.charge("carry_proof_edges")
                 states = self.states(parent, identity)
                 if parent in self.graph.c_descendants:
                     if len(states) == 1:
@@ -1088,7 +1147,7 @@ class Classifier:
     ) -> dict:
         """Bind one real authority root to its complete support projection."""
         assert self.objects is not None
-        self.metrics.support_certificate_calls += 1
+        self.metrics.charge("support_certificate_calls")
         before = self.objects.flat_tree(parent)
         after = self.objects.flat_tree(child)
         changed = sorted(
@@ -1168,7 +1227,7 @@ class Classifier:
                 ),
             }
         state = states[0]
-        self.metrics.authority_calls += 1
+        self.metrics.charge("authority_calls")
         try:
             problem = RECONCILE.queue_deletion_problem(
                 state.path, state.text, parent, child
@@ -1676,7 +1735,7 @@ class Classifier:
         ]
         if len(states) != 1:
             return "authority root action bytes are not uniquely readable"
-        self.metrics.support_adoption_checks += 1
+        self.metrics.charge("support_adoption_checks")
         try:
             return RECONCILE.queue_deletion_problem(
                 states[0].path,
@@ -1880,6 +1939,10 @@ class Classifier:
                     )
                 )
             )
+            self.metrics.charge(
+                "support_paths_checked",
+                len(support_paths) * (len(source_parents) + 1),
+            )
             source_projections = [
                 {
                     "parent": parent,
@@ -1900,9 +1963,6 @@ class Classifier:
                 }
                 for path in support_paths
             ]
-            self.metrics.support_paths_checked += len(support_paths) * (
-                len(source_parents) + 1
-            )
             agreed = bool(source_projections) and all(
                 projection["entries"] == source_projections[0]["entries"]
                 for projection in source_projections[1:]
@@ -2030,7 +2090,7 @@ class Classifier:
         after: ActionState,
     ) -> dict:
         """Call both production mutation authorities for a real Git edge."""
-        self.metrics.mutation_calls += 1
+        self.metrics.charge("mutation_calls")
         try:
             production_problem = RECONCILE.queue_mutation_problem(
                 before.path,
@@ -3352,6 +3412,19 @@ class Classifier:
                 if budget_result is not None:
                     return budget_result
                 return result
+        except BudgetExceeded as error:
+            if error.C is not None:
+                base["C"] = error.C
+                if fixture.expected_C:
+                    base["derived_C_matches_fixture"] = (
+                        error.C == fixture.expected_C
+                    )
+            result = self.budget_result(base)
+            if result is None:
+                raise AssertionError(
+                    "pre-charge budget exception lost its overflow"
+                ) from error
+            return result
         except (
             Unreadable,
             RECONCILE.GitSnapshotError,
@@ -7590,6 +7663,64 @@ def pcx18_many_actions(root: Path) -> Fixture:
     )
 
 
+def r17_precharge_many_actions_budget(root: Path) -> Fixture:
+    """Refuse P22's first over-budget operation before later work starts."""
+    fixture = pcx18_many_actions(root)
+    fixture.scenario = "R17-precharge-P22-budget"
+    fixture.expected = "blocking-finding"
+    fixture.budget_limit = 133
+    fixture.details.update(
+        {
+            "budget_counter_policy": "charge before measured work",
+            "budget_limit": 133,
+            "precharge_expected_metrics": {
+                "authority_calls": 0,
+                "batch_processes": 1,
+                "carry_proof_edges": 1,
+                "carry_proof_nodes": 2,
+                "git_processes": 4,
+                "graph_commits": 133,
+                "graph_enumerations": 1,
+                "graph_parent_edges": 132,
+                "identity_calls": 32,
+                "mutation_calls": 1,
+                "object_cache_hits": 25,
+                "object_reads": 134,
+                "per_action_history_walks": 0,
+                "queue_snapshots_requested": 59,
+                "queue_subtree_reads": 3,
+                "snapshot_cache_hits": 55,
+                "support_adoption_checks": 0,
+                "support_certificate_calls": 0,
+                "support_paths_checked": 0,
+            },
+            "posthoc_reference_metrics": {
+                "authority_calls": 32,
+                "batch_processes": 1,
+                "carry_proof_edges": 2080,
+                "carry_proof_nodes": 2112,
+                "git_processes": 135,
+                "graph_commits": 133,
+                "graph_enumerations": 1,
+                "graph_parent_edges": 132,
+                "identity_calls": 32,
+                "mutation_calls": 2080,
+                "object_cache_hits": 24736,
+                "object_reads": 300,
+                "per_action_history_walks": 0,
+                "queue_snapshots_requested": 10973,
+                "queue_subtree_reads": 3,
+                "snapshot_cache_hits": 10970,
+                "support_adoption_checks": 0,
+                "support_certificate_calls": 16,
+                "support_paths_checked": 0,
+            },
+            "transactional_zero_results": True,
+        }
+    )
+    return fixture
+
+
 def p18_missing_tip(root: Path) -> Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18a-missing-tip", valid=True
@@ -7829,6 +7960,7 @@ def scenario_builders():
         p20_lifecycle_types,
         lambda root: pcx17_cherry_pick(root, "squash"),
         pcx18_many_actions,
+        r17_precharge_many_actions_budget,
         lambda root: direct_merge_fixture(
             root,
             "PCX-01-neutral-parent",
@@ -8135,6 +8267,7 @@ CONTROL_NAMES = (
     "first-parent-carry-proof",
     "skip-carry-compatibility",
     "unmetered-cone-work",
+    "posthoc-budget-accounting",
     "reopen-outside-C-boundary-ancestry",
     "ignore-invalid-N-root",
     "missing-all-parent-direct-validation",
@@ -10020,6 +10153,31 @@ def validate_result(result: dict):
             errors.append("many-action graph is shorter than 128 commits")
         if metrics["snapshot_cache_hits"] < 128:
             errors.append("many-action case did not reuse snapshots")
+    if scenario == "R17-precharge-P22-budget":
+        metrics = result["metrics"]
+        limit = result["details"]["budget_limit"]
+        overflows = sorted(
+            (key, value)
+            for key, value in metrics.items()
+            if value > limit
+        )
+        if (
+            result["audit_exit"] != 2
+            or result["classification"] != "blocking-finding"
+            or status != "ambiguous"
+            or len(overflows) != 1
+            or overflows[0][1] != limit + 1
+            or metrics != result["details"]["precharge_expected_metrics"]
+            or metrics["git_processes"] > 4
+            or actions
+            or authority
+            or result["carry_proofs"]
+            or result["mutation_edges"]
+            or result["propagation_edges"]
+            or result["support_checks"]
+            or overflows[0][0] not in result["evidence_verdict"]["reason"]
+        ):
+            errors.append("P22 budget did not refuse the first excess work")
     if scenario == "PCX-19-missing-claim-blob-recovery":
         recovery = result.get("recovery", {})
         if (
@@ -10037,10 +10195,18 @@ def validate_result(result: dict):
         ):
             errors.append("PCX-19 missing object recovery failed")
     if scenario == "PCX-20b-budget-overflow":
+        limit = result["details"]["demonstration_limit"]
+        overflows = sorted(
+            (key, value)
+            for key, value in result["metrics"].items()
+            if value > limit
+        )
         if (
             actions
             or status != "ambiguous"
             or result["audit_exit"] != 2
+            or len(overflows) != 1
+            or overflows[0][1] != limit + 1
             or result["authority_edges"]
             or result["propagation_edges"]
             or result["mutation_edges"]
@@ -10105,6 +10271,12 @@ def control_builder(name: str, root: Path):
             r17_boundary_budget_fixture(root),
             Damage(unmetered_cone_work=True),
             "no-finding",
+        )
+    if name == "posthoc-budget-accounting":
+        return (
+            r17_precharge_many_actions_budget(root),
+            Damage(posthoc_budget_accounting=True),
+            "blocking-finding",
         )
     if name == "reopen-outside-C-boundary-ancestry":
         return (
@@ -10250,12 +10422,51 @@ def run_control(name: str, root: Path):
     fixture, damage, damaged_expected = control_builder(name, root)
     baseline = Classifier(fixture).run()
     damaged = Classifier(fixture, damage).run()
-    observed = bool(
-        baseline["classification"] == fixture.expected
-        and damaged["classification"] == damaged_expected
-        and damaged["classification"] != fixture.expected
-    )
-    return {
+    budget_observation = None
+    if name == "posthoc-budget-accounting":
+        limit = fixture.budget_limit
+        baseline_overflows = sorted(
+            (key, value)
+            for key, value in baseline["metrics"].items()
+            if value > limit
+        )
+        reference = fixture.details["posthoc_reference_metrics"]
+        budget_observation = {
+            "baseline_metrics": baseline["metrics"],
+            "baseline_overflows": baseline_overflows,
+            "damaged_metrics": damaged["metrics"],
+            "limit": limit,
+            "posthoc_reference_metrics": reference,
+        }
+        observed = bool(
+            baseline["classification"] == fixture.expected
+            and damaged["classification"] == damaged_expected
+            and baseline["audit_exit"] == 2
+            and damaged["audit_exit"] == 2
+            and len(baseline_overflows) == 1
+            and baseline_overflows[0][1] == limit + 1
+            and baseline["metrics"]
+            == fixture.details["precharge_expected_metrics"]
+            and damaged["metrics"] == reference
+            and not any(
+                baseline[key]
+                for key in (
+                    "actions",
+                    "authority_edges",
+                    "carry_proofs",
+                    "mutation_edges",
+                    "propagation_edges",
+                    "support_checks",
+                )
+            )
+        )
+    else:
+        observed = bool(
+            baseline["classification"] == fixture.expected
+            and damaged["classification"] == damaged_expected
+            and damaged["classification"] != fixture.expected
+        )
+    result = {
         "control": name,
         "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
         "C": baseline["C"],
@@ -10267,6 +10478,9 @@ def run_control(name: str, root: Path):
         "authority_edges": damaged["authority_edges"],
         "propagation_edges": damaged["propagation_edges"],
     }
+    if budget_observation is not None:
+        result["budget_observation"] = budget_observation
+    return result
 
 
 def prepare_root(path: Path):
