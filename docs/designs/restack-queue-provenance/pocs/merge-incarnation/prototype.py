@@ -387,6 +387,63 @@ def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
     edge.problem = "lifecycle and deletion-edge evidence are valid"
 
 
+def old_lineage_continuity_problem(
+    repo: GitRepo,
+    boundary: str,
+    old_tip: str,
+    incarnation: str,
+    action_id: str,
+    expected_raw: str,
+) -> str | None:
+    """Prove the exact incarnation stayed continuously live from boundary to O.
+
+    Final-tree equality is insufficient: delete/recreate can restore byte-identical
+    content while changing the action incarnation.  Inspect every old-only parent
+    edge and require one exact, byte-stable copy on both sides.  A unique path move
+    is allowed because the incarnation remains present on the same edge.
+    """
+
+    for child in repo.revisions("--topo-order", old_tip, "--not", boundary):
+        child_snapshot = repo.snapshot(child)
+        child_matches = occurrences(child_snapshot, incarnation)
+        child_same_id = same_id(child_snapshot, action_id)
+        if len(child_matches) != 1:
+            if len(child_same_id) == 1:
+                return f"old lineage changed action identity at {child}"
+            if len(child_same_id) > 1:
+                return (
+                    f"old lineage duplicated action identity at {child}"
+                )
+            return f"old lineage deleted the action incarnation at {child}"
+        if len(child_same_id) != 1 or child_matches[0].raw != expected_raw:
+            return f"old lineage mutated the action incarnation at {child}"
+        for parent in repo.parents(child):
+            parent_snapshot = repo.snapshot(parent)
+            parent_matches = occurrences(parent_snapshot, incarnation)
+            parent_same_id = same_id(parent_snapshot, action_id)
+            if len(parent_matches) != 1:
+                if len(parent_same_id) == 1:
+                    return (
+                        "old lineage changed action identity on edge "
+                        f"{parent}->{child}"
+                    )
+                if len(parent_same_id) > 1:
+                    return (
+                        "old lineage duplicated action identity on edge "
+                        f"{parent}->{child}"
+                    )
+                return (
+                    "old lineage deleted or recreated the action on edge "
+                    f"{parent}->{child}"
+                )
+            if len(parent_same_id) != 1 or parent_matches[0].raw != expected_raw:
+                return (
+                    "old lineage mutated the action on edge "
+                    f"{parent}->{child}"
+                )
+    return None
+
+
 def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdict:
     repo.reset_metrics()
     try:
@@ -430,6 +487,25 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
                 "The old task lineage introduced, moved, claimed, or changed this action "
                 "after the common boundary; candidate-side evidence cannot resolve that "
                 "distinct old-tip state.",
+            )
+            return with_metrics(repo, verdict)
+
+        old_problem = old_lineage_continuity_problem(
+            repo,
+            boundary,
+            old_tip,
+            incarnation,
+            old_action.action_id,
+            old_action.raw,
+        )
+        if old_problem is not None:
+            verdict = Verdict(
+                "finding",
+                "old-side discontinuous incarnation",
+                "not-applicable",
+                0,
+                "The old tip has the same final bytes as the common action, but its "
+                f"history does not prove continuous identity: {old_problem}.",
             )
             return with_metrics(repo, verdict)
 
@@ -1044,6 +1120,72 @@ def scenario_recreated_incarnation(root: Path) -> dict[str, object]:
     )
 
 
+def scenario_old_recreated_same_bytes(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    repo.commit("old deletes action", {DEFAULT_PATH: None})
+    repo.commit("old recreates identical action", {DEFAULT_PATH: action_text()})
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    repo.commit("candidate claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "candidate resolution",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    return make_record(
+        "A6-old-delete-recreate-identical",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
+def scenario_old_mutates_then_reverts(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    repo.commit(
+        "old mutates identity",
+        {DEFAULT_PATH: action_text(payload="temporary replacement")},
+    )
+    repo.commit("old restores bytes", {DEFAULT_PATH: action_text()})
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    repo.commit("candidate claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "candidate resolution",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    return make_record(
+        "A7-old-identity-mutation-reverted",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
+def scenario_old_duplicate_then_collapses(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    repo.commit("old duplicates during rename", {RENAMED_PATH: action_text()})
+    repo.commit("old removes duplicate", {RENAMED_PATH: None})
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    repo.commit("candidate claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "candidate resolution",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    return make_record(
+        "A8-old-ambiguous-rename-collapsed",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -1172,6 +1314,9 @@ INITIAL_SCENARIOS = (
     scenario_merge_only_deletion,
     scenario_competing_edges,
     scenario_recreated_incarnation,
+    scenario_old_recreated_same_bytes,
+    scenario_old_mutates_then_reverts,
+    scenario_old_duplicate_then_collapses,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
