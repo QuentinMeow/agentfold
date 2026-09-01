@@ -133,9 +133,11 @@ These are **ASSERTED external results** relayed from isolated neighboring worktr
 worker did not rerun them, so the fresh verification panel must reproduce them from their
 raw diffs and commands.
 
-- Replay-oracle milestone `81c8593` passed 4/4 and showed that S1 and S2 both replay to the
-  expected candidate queue tree. That is the intended negative control: replay proves branch
-  delta preservation, but it cannot authorize the base deletion.
+- Replay-oracle milestone `3639267` passed 7/7, extending the earlier 4/4 control at
+  `81c8593`. It showed that S1 and S2 both replay to the expected candidate queue tree,
+  while conflict adjustment loses patch identity, independent equal patches collide, and
+  merge-only action loss is invisible to no-merge replay. That is the intended negative
+  control: replay can explain branch-delta preservation but cannot authorize a deletion.
 - Merge/incarnation milestone `4e7009e` passed 8/8 attacks covering merge parents and action
   incarnation. Those results complement this linear prototype; they do not make the merge
   claim verified here.
