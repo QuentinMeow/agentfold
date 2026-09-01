@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v4"
+SCHEMA = "agentfold-production-contract-evidence/v5"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -38,60 +38,238 @@ SUPERSEDED_EVIDENCE = {
             ),
             "schema": "agentfold-production-contract-evidence/v3",
         },
+        {
+            "commit": "cce76a037f1584ff7d37048cb4411bdf0f5aa907",
+            "disposition": (
+                "superseded and burned after the true execution-bound "
+                "composition blocker; history is preserved and v4 is "
+                "never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v4",
+        },
     ],
     "replacement_schema": SCHEMA,
 }
 METRIC_KEYS = (
-    "authority_calls", "batch_processes", "git_processes", "graph_commits",
-    "graph_enumerations", "graph_parent_edges", "identity_calls",
-    "carry_proof_edges", "carry_proof_nodes",
-    "mutation_calls", "object_cache_hits", "object_reads",
-    "per_action_history_walks", "queue_snapshots_requested",
-    "queue_subtree_reads", "snapshot_cache_hits",
-    "support_adoption_checks", "support_certificate_calls",
-    "support_paths_checked",
+    "git_processes", "graph_enumerations", "graph_commits",
+    "graph_parent_edges", "graph_output_bytes", "graph_line_bytes",
+    "graph_line_peak_bytes", "graph_lines", "graph_commit_tokens",
+    "graph_parent_tokens", "graph_process_terminations",
+    "graph_process_reaps", "graph_process_cleanup_checks",
+    "graph_buffered_bytes", "graph_stream_chunks",
+    "graph_stream_peak_chunk_bytes", "merge_base_output_bytes",
+    "merge_base_line_bytes", "merge_base_line_peak_bytes",
+    "merge_base_lines", "merge_base_tokens",
+    "merge_base_process_terminations", "merge_base_process_reaps",
+    "shallow_output_bytes", "shallow_line_bytes",
+    "shallow_line_peak_bytes", "shallow_lines", "shallow_tokens",
+    "shallow_process_terminations", "shallow_process_reaps",
+    "batch_processes", "object_reads", "object_cache_hits",
+    "object_header_bytes", "object_payload_bytes",
+    "object_payload_peak_bytes", "object_process_terminations",
+    "object_process_reaps", "tree_entries", "tree_entry_name_bytes",
+    "flattened_paths", "flattened_path_bytes", "flat_tree_peak_paths",
+    "queue_snapshots_requested", "queue_subtree_reads",
+    "snapshot_cache_hits", "queue_paths", "queue_path_bytes",
+    "queue_blob_bytes", "identity_calls", "authority_calls",
+    "support_certificate_calls", "support_adoption_checks",
+    "support_paths_checked", "support_delta_candidates",
+    "support_delta_rows", "support_referenced_paths",
+    "support_anchor_rows", "support_obligations",
+    "support_serialized_bytes", "dynamic_support_paths_traversed",
+    "dynamic_support_paths_discovered", "dynamic_support_path_bytes",
+    "mutation_calls", "per_action_history_walks", "carry_proof_nodes",
+    "carry_proof_edges", "production_helper_calls",
+    "production_helper_input_bytes", "production_parent_queries",
+    "git_stderr_bytes",
+)
+RUNTIME_MILESTONE_COMMITS = (
+    "c32f470977735a63feaf377ca9290353d1520e0e",
+    "850d02587f7f812b7dde9667a39da80b4ce48764",
+)
+EXECUTION_BOUND_CASES = (
+    (
+        "graph_parent_tokens", "graph_parent_tokens", 68,
+        "R17-graph-parent-tokens-exact",
+        "R17-graph-parent-tokens-plus-one-refused",
+    ),
+    (
+        "graph_output_bytes", "graph_output_bytes", 2952,
+        "R17-graph-output-bytes-exact",
+        "R17-graph-output-bytes-plus-one-refused",
+    ),
+    (
+        "graph_line_peak_bytes", "graph_line_peak_bytes", 2705,
+        "R17-graph-line-peak-bytes-exact",
+        "R17-graph-line-peak-bytes-plus-one-refused",
+    ),
+    (
+        "object_payload_peak_bytes", "object_payload_peak_bytes", 1_000_000,
+        "R17-object-payload-peak-exact",
+        "R17-object-payload-peak-plus-one-refused",
+    ),
+    (
+        "flat_tree_peak_paths", "flat_tree_peak_paths", 1004,
+        "R17-flat-tree-peak-exact",
+        "R17-flat-tree-peak-plus-one-refused",
+    ),
+    (
+        "dynamic_support_paths_traversed",
+        "dynamic_support_paths_traversed", 12,
+        "R17-dynamic-support-traversal-exact",
+        "R17-dynamic-support-traversal-plus-one-refused",
+    ),
+    (
+        "support_serialized_bytes", "support_serialized_bytes", 2920,
+        "R17-support-serialized-exact",
+        "R17-support-serialized-plus-one-refused",
+    ),
 )
 PRECHARGE_P22_METRICS = {
     "authority_calls": 0,
     "batch_processes": 1,
     "carry_proof_edges": 1,
     "carry_proof_nodes": 2,
+    "dynamic_support_path_bytes": 0,
+    "dynamic_support_paths_discovered": 0,
+    "dynamic_support_paths_traversed": 0,
+    "flat_tree_peak_paths": 0,
+    "flattened_path_bytes": 0,
+    "flattened_paths": 0,
     "git_processes": 4,
+    "git_stderr_bytes": 0,
+    "graph_buffered_bytes": 0,
+    "graph_commit_tokens": 132,
     "graph_commits": 133,
     "graph_enumerations": 1,
+    "graph_line_bytes": 10692,
+    "graph_line_peak_bytes": 81,
+    "graph_lines": 132,
+    "graph_output_bytes": 10824,
     "graph_parent_edges": 132,
+    "graph_parent_tokens": 132,
+    "graph_process_cleanup_checks": 3,
+    "graph_process_reaps": 1,
+    "graph_process_terminations": 0,
+    "graph_stream_chunks": 132,
+    "graph_stream_peak_chunk_bytes": 82,
     "identity_calls": 32,
+    "merge_base_line_bytes": 40,
+    "merge_base_line_peak_bytes": 40,
+    "merge_base_lines": 1,
+    "merge_base_output_bytes": 41,
+    "merge_base_process_reaps": 1,
+    "merge_base_process_terminations": 0,
+    "merge_base_tokens": 1,
     "mutation_calls": 1,
     "object_cache_hits": 25,
+    "object_header_bytes": 6747,
+    "object_payload_bytes": 29421,
+    "object_payload_peak_bytes": 816,
+    "object_process_reaps": 0,
+    "object_process_terminations": 0,
     "object_reads": 134,
     "per_action_history_walks": 0,
+    "production_helper_calls": 0,
+    "production_helper_input_bytes": 0,
+    "production_parent_queries": 0,
+    "queue_blob_bytes": 7208,
+    "queue_path_bytes": 2043,
+    "queue_paths": 39,
     "queue_snapshots_requested": 59,
     "queue_subtree_reads": 3,
+    "shallow_line_bytes": 5,
+    "shallow_line_peak_bytes": 5,
+    "shallow_lines": 1,
+    "shallow_output_bytes": 6,
+    "shallow_process_reaps": 1,
+    "shallow_process_terminations": 0,
+    "shallow_tokens": 1,
     "snapshot_cache_hits": 55,
     "support_adoption_checks": 0,
+    "support_anchor_rows": 0,
     "support_certificate_calls": 0,
+    "support_delta_candidates": 0,
+    "support_delta_rows": 0,
+    "support_obligations": 0,
     "support_paths_checked": 0,
+    "support_referenced_paths": 0,
+    "support_serialized_bytes": 0,
+    "tree_entries": 242,
+    "tree_entry_name_bytes": 2575,
 }
 POSTHOC_P22_METRICS = {
     "authority_calls": 32,
     "batch_processes": 1,
     "carry_proof_edges": 2080,
     "carry_proof_nodes": 2112,
+    "dynamic_support_path_bytes": 0,
+    "dynamic_support_paths_discovered": 0,
+    "dynamic_support_paths_traversed": 0,
+    "flat_tree_peak_paths": 162,
+    "flattened_path_bytes": 6223,
+    "flattened_paths": 316,
     "git_processes": 135,
+    "git_stderr_bytes": 0,
+    "graph_buffered_bytes": 0,
+    "graph_commit_tokens": 132,
     "graph_commits": 133,
     "graph_enumerations": 1,
+    "graph_line_bytes": 10692,
+    "graph_line_peak_bytes": 81,
+    "graph_lines": 132,
+    "graph_output_bytes": 10824,
     "graph_parent_edges": 132,
+    "graph_parent_tokens": 132,
+    "graph_process_cleanup_checks": 3,
+    "graph_process_reaps": 1,
+    "graph_process_terminations": 0,
+    "graph_stream_chunks": 132,
+    "graph_stream_peak_chunk_bytes": 82,
     "identity_calls": 32,
+    "merge_base_line_bytes": 40,
+    "merge_base_line_peak_bytes": 40,
+    "merge_base_lines": 1,
+    "merge_base_output_bytes": 41,
+    "merge_base_process_reaps": 1,
+    "merge_base_process_terminations": 0,
+    "merge_base_tokens": 1,
     "mutation_calls": 2080,
     "object_cache_hits": 24736,
+    "object_header_bytes": 15262,
+    "object_payload_bytes": 71081,
+    "object_payload_peak_bytes": 4480,
+    "object_process_reaps": 0,
+    "object_process_terminations": 0,
     "object_reads": 300,
     "per_action_history_walks": 0,
+    "production_helper_calls": 163,
+    "production_helper_input_bytes": 18111,
+    "production_parent_queries": 129,
+    "queue_blob_bytes": 7208,
+    "queue_path_bytes": 2043,
+    "queue_paths": 39,
     "queue_snapshots_requested": 10973,
     "queue_subtree_reads": 3,
+    "shallow_line_bytes": 5,
+    "shallow_line_peak_bytes": 5,
+    "shallow_lines": 1,
+    "shallow_output_bytes": 6,
+    "shallow_process_reaps": 1,
+    "shallow_process_terminations": 0,
+    "shallow_tokens": 1,
     "snapshot_cache_hits": 10970,
     "support_adoption_checks": 0,
+    "support_anchor_rows": 496,
     "support_certificate_calls": 16,
+    "support_delta_candidates": 2592,
+    "support_delta_rows": 496,
+    "support_obligations": 48,
     "support_paths_checked": 0,
+    "support_referenced_paths": 32,
+    "support_serialized_bytes": 204000,
+    "tree_entries": 730,
+    "tree_entry_name_bytes": 6949,
 }
 SCENARIO_IDS = tuple(sorted((
     "P1-direct-linear-valid",
@@ -226,6 +404,16 @@ SCENARIO_IDS = tuple(sorted((
     "R17-carry-incompatible",
     "R17-carry-outside-duplicate",
     "R17-carry-outside-single",
+    "R17-dynamic-support-traversal-exact",
+    "R17-dynamic-support-traversal-plus-one-refused",
+    "R17-flat-tree-peak-exact",
+    "R17-flat-tree-peak-plus-one-refused",
+    "R17-graph-line-peak-bytes-exact",
+    "R17-graph-line-peak-bytes-plus-one-refused",
+    "R17-graph-output-bytes-exact",
+    "R17-graph-output-bytes-plus-one-refused",
+    "R17-object-payload-peak-exact",
+    "R17-object-payload-peak-plus-one-refused",
     "R17-outside-C-neutral-parent-valid-restack",
     "R17-precharge-P22-budget",
     "R17-persisted-outside-duplicate",
@@ -238,7 +426,11 @@ SCENARIO_IDS = tuple(sorted((
     "R17-persisted-valid-absent-arm-reversed",
     "R17-unreadable-outside-C-ancestor-stays-unopened",
     "R17-unreadable-outside-C-boundary",
+    "R17-support-serialized-exact",
+    "R17-support-serialized-plus-one-refused",
     "R17-wide-outside-C-boundary-budget",
+    "R17-graph-parent-tokens-exact",
+    "R17-graph-parent-tokens-plus-one-refused",
     "W0-fast-forward-return",
     "W1-pre-PR-push-exact-endpoints",
     "W2-base-advance-retarget-invariant",
@@ -249,6 +441,7 @@ SCENARIO_IDS = tuple(sorted((
     "W7-PR-synchronize-top-level-endpoints",
 )))
 CONTROL_IDS = tuple(sorted((
+    "buffered-graph-output",
     "broad-review-pending-normalization",
     "first-parent-carry-proof",
     "ignore-absent-C-arm",
@@ -276,7 +469,12 @@ CONTROL_IDS = tuple(sorted((
     "skip-supplier-support-certificate",
     "sole-valid-ignores-invalid-root",
     "supplier-authority-borrowing",
+    "stream-malformed-truncated-final-line",
     "unmetered-cone-work",
+    "unmetered-dynamic-support",
+    "unmetered-object-payload",
+    "unmetered-support-construction",
+    "unmetered-tree-paths",
 )))
 ALIAS_IDS = ("S1", "S12", "S2", "S3")
 PERSISTED_VARIANTS = (
@@ -367,196 +565,222 @@ FIXTURE_CLAIMS = (
     ("r10-malformed-bound-revision", "R10-supplier-review-revision-generic-placeholder-rejected", ("details", "candidate_value")),
 )
 
-# Generated once from the closed v4 catalog after the semantic implementation
-# was committed.  Each digest binds the complete recursive object-key, list,
-# and scalar-type shape of one raw JSONL row.  Values remain observations; the
-# grammar cannot learn new fields from the stream it is auditing.
-RAW_SHAPE_SHA256 = {
-    "aliases": "sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3",
-    "control:broad-review-pending-normalization": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
-    "control:first-parent-carry-proof": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:identity-multiplicity-collapsed-to-set": "sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190",
-    "control:ignore-absent-C-arm": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:ignore-invalid-N-root": "sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab",
-    "control:ignore-outside-C-carrier": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:ignore-persisted-absent-C-arm": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:ignore-persisted-outside-C-collision": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:literal-review-pending-treated-concrete": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
-    "control:locale-git-error-stream-equality": "sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4",
-    "control:missing-all-parent-direct-validation": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:missing-post-event-continuity": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:omit-old-tip-human-binding": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
-    "control:omit-supplier-carrier-human-binding": "sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb",
-    "control:omit-unanswered-published-review-binding": "sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb",
-    "control:posthoc-budget-accounting": "sha256:d6614abe8fe0948afc2d92eee3ad3589110a23d9e90d919df0add5a5b42f8e19",
-    "control:reopen-outside-C-boundary-ancestry": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:reopen-pre-C-genealogy": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:restore-universal-ancestor-carry-scan": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:skip-carry-compatibility": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:skip-old-side-continuity": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:skip-persisted-candidate-continuity": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:skip-persisted-frozen-skeleton": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:skip-preserved-state-validation": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "control:skip-supplier-support-certificate": "sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab",
-    "control:sole-valid-ignores-invalid-root": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
-    "control:supplier-authority-borrowing": "sha256:889c75da0848d6f89f4d98b22ac05d36d45c3a1d4888d64ae67d9316869049f4",
-    "control:unmetered-cone-work": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
-    "parent-permutation": "sha256:ff2c5187a2f005aefb4e390ee296b9fb51f90077a07b7e52b90e26a54bcc27d6",
-    "scenario:P1-direct-linear-valid": "sha256:4f57c411153ac91e0f28e3cc64dac2f23410bb94fc1c840713da76b0a93fa218",
-    "scenario:P10-direct-invalid-parent": "sha256:01e6260085ff5eb2334602eb098ff771dc09269a8cb63a6200145ca4eef4a57e",
-    "scenario:P11-direct-three-parent-valid": "sha256:1ee423dc5b8305ffccc4722d757c6371b0b19a7f1b5217e7aeb724367efe94f3",
-    "scenario:P12-merge-supplier-valid": "sha256:00565c9d4a4a7d25da4e80f148302fef53f4c259ef64349144faf419eec02364",
-    "scenario:P13-merge-supplier-invalid": "sha256:62da7d196d8bad9c166bfa2eafad724e1584b07e8d4a4e8eb7c40e2e4cb949b9",
-    "scenario:P14-supplier-reintroduced": "sha256:310db656a21015f6567a328a7c64b2c3419e275b6d6774dc1fb40ed4f302ce27",
-    "scenario:P15-competing-suppliers": "sha256:09c89a51aa5e43c70b659c1659cfe28b2e9a5ec47703a54e8087c135ef204bd1",
-    "scenario:P16-PCX-08-invalid-supplier-claimed-carrier": "sha256:4488cd3c1a2c4d5994c6bb46cb824d6c68e6d58a2aa3abfd6eed76f68aaef5ce",
-    "scenario:P17-post-event-reintroduction": "sha256:cda7200a0d7e880d074374340589fbe9d2997b6fc47b6ad737cbda83c6c51f14",
-    "scenario:P18a-missing-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
-    "scenario:P18b-noncommit-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
-    "scenario:P18c-unrelated-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
-    "scenario:P18d-shallow-required-region": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
-    "scenario:P18e-missing-queue-blob": "sha256:419b4356e1f0d1678126caf65937db1bd48e6a58ad64c664f42e378b44a1bdeb",
-    "scenario:P18f-missing-queue-tree": "sha256:1806ccf6466ed9b923dde9fa4d8d3b137514c17184cb80ff24aaa438b4fe7d6e",
-    "scenario:P18g-multiple-merge-bases": "sha256:26d72e01367fbc7cb11697d189ba4b627be68ca9441fc8b7c117c872ccaf78e6",
-    "scenario:P19-production-identities": "sha256:3b8c74a04de8f6aa19ad2b1df9f36300ef1cfc5d896253cd26b67649a23e0895",
-    "scenario:P2-direct-linear-invalid": "sha256:5e07c2f06a7385d29bfc4cd95d9452d283d6a9cab08e542f1b66d2a529b72ffd",
-    "scenario:P20-lifecycle-types": "sha256:790b95cca795de94037a8733edbd66394e7bdc35e4bdefac71aeaecadf08a741",
-    "scenario:P21-PCX-17c-squash-erasure": "sha256:93c8b68b97875346777b7b84de1224dd540b7c77d2ee3362e1291bd48aa7c8c2",
-    "scenario:P22-PCX-18-one-pass-many-actions": "sha256:3eb7a914f658d0c7fd8d69bca1bbe6067d1a43df36e06016a7dbf6ebf87bb5ce",
-    "scenario:P3-genuine-old-loss": "sha256:a097a6969d953ee800774c16742065afcf8a7e0076f37f4d04c4c43a9416c85a",
-    "scenario:P4-pre-C-identical-origins": "sha256:f4e23b44a040c258896440326857f7725a87c4146f55d0575841fccedfe5a57a",
-    "scenario:P5-duplicate-at-C": "sha256:95cc7ab17d7aca33d21dc7c590b899afb8edab5bf76c338662e9ae6ba02f7dd3",
-    "scenario:P6a-old-delete-recreate": "sha256:9b77d06b33492cf733db6be995c8d2d6d190695154d469fad9686c9d15b202ed",
-    "scenario:P6b-candidate-delete-recreate": "sha256:2f0ea2af2d4a5f4dcf4a9aa51b6a3f5bf0c9743f18f5d2730fc35905c3d3e2bb",
-    "scenario:P7-immutable-payload-change": "sha256:6c68e56ba7b340e4e2b00e7cd2e6313411762a44c56044025aaf2ce0d34737fa",
-    "scenario:P8-path-timing-move": "sha256:c6c94e4d9e9e39903bbc992112d4e9c05f25933fa9f2b56010023368337fc9f9",
-    "scenario:P9-direct-two-parent-valid": "sha256:1122c4dcafa80445178261be2e8aae86edf3200d65598d0bca1a0c875a765922",
-    "scenario:PCX-01-neutral-parent": "sha256:fe2e59559b9be8c45637262fd5208f402a9e7d8a3d21808f881981ba9a43e143",
-    "scenario:PCX-02-neutral-plus-invalid-carrier": "sha256:b19bbd151828efe888d10aafabe4f2e4e29a7454f9b954bc038ebaf40b87d44e",
-    "scenario:PCX-03-foreign-exact-identity": "sha256:9853e0ce9f9ac92b90c93c732f074fa2b97e7e0e51f268a2d0ac9045eeae3a28",
-    "scenario:PCX-04-several-absent-one-supplier": "sha256:197755aff25d09a8ea136cc8ec93ecb853a176764fce34fc0cf450f4dd731a74",
-    "scenario:PCX-05-competing-later-supplier": "sha256:85298e9b8db840e57d058dcf7e7539122ac790bbd87c1921134d2932cc50a0ef",
-    "scenario:PCX-06-nested-supplier-over-direct": "sha256:d0d9b0eafcfca30ef00bd59475ef485f0475fab33dc56d145d6fffc62593619e",
-    "scenario:PCX-07-overqualified-propagation": "sha256:e128695a0477b946986adcda4961cc1becb92fe0093d6020db51e79831a222a6",
-    "scenario:PCX-09-recreated-claimed-bytes": "sha256:8c51b761094c1b31602eb7c12b4f70b920216b4e7891a28025206d944dbfd29b",
-    "scenario:PCX-10-transient-multiplicity": "sha256:cf935303af710635a962719a21ac46a27192aa77b44e979d41a9dd40a0b079d6",
-    "scenario:PCX-11-different-payload-same-path": "sha256:7682c4c604b83b9d03ef378a2115fc0da8863d6efcc69cfbe6208406a4b63523",
-    "scenario:PCX-12-timing-rename-supplier": "sha256:ac9480dc82b0b2d963c2ba2a1aca74ba5860774274ba380f9369aef70f2aac84",
-    "scenario:PCX-13-conflicting-human-response": "sha256:341d1d6491c2aceeddcbca08545b8e4946b81dc4d2d98d5e9ddda17e40076cf0",
-    "scenario:PCX-14-valid-human-supplier": "sha256:d6c4cf6e8e0412edc029a17dcc079126191a51a8a87d725b5ae21fadf67dcc30",
-    "scenario:PCX-15-generated-retry-supplier": "sha256:1d82c960d0ae56079ca0f67ee6a502a3059b6e62b0d82b5794257c0f9961d73d",
-    "scenario:PCX-16-task-pickup-supplier": "sha256:ae56073e6626fa418b0eaa3dfdc47f5df86cfa12e8c1fd250c93a4f391051e8f",
-    "scenario:PCX-17-complete-cherry-pick": "sha256:0f0fa982a491381f67eaba898f5a3a5040efacbe696de8e3a20e4c740bb65322",
-    "scenario:PCX-17-deletion-only-cherry-pick": "sha256:93c8b68b97875346777b7b84de1224dd540b7c77d2ee3362e1291bd48aa7c8c2",
-    "scenario:PCX-19-missing-claim-blob-recovery": "sha256:dcb05057ea8f97dc971659734c1523121d21ff5067a892aeed07e479342b4de8",
-    "scenario:PCX-20a-budget-below-limit": "sha256:749fc3aa6ff630c31dc0660afb7529847bff9c004b3f45f9233376fafe660325",
-    "scenario:PCX-20b-budget-overflow": "sha256:eecfab76b9cb1eb756c4ce5b185090b28ef3ff32636e2f05daefabdada64e20a",
-    "scenario:R10-direct-review-target-backtick-dotless-rejected": "sha256:eaee6ac70be223bc9c06f1e6c60d3db0507fe7ae97c33e1badbcf2e7835f6280",
-    "scenario:R10-supplier-review-revision-generic-placeholder-rejected": "sha256:003105c4970f78686dbbf6b8d8156609e6c04f3ea0434587d36e20f67afcfa40",
-    "scenario:R13-direct-review-binding-identical": "sha256:02c4fbb02e15cc114e07af0c8fe7d6127426af458ff2a993cbb7c4ca8e11c0e1",
-    "scenario:R13-direct-review-binding-revision": "sha256:2423eeae5e3c75f2a378dfd0f4c6fd8b60597df6508728614f60543c6218fcc6",
-    "scenario:R13-direct-review-binding-target": "sha256:e0d718638a9333744e5a01da72747bc38f4706a89c05a4fa399da7ba64029073",
-    "scenario:R13-direct-review-binding-terminal": "sha256:104db72d76b254600903259c6c7c528dec5e881d84bb1e8e40ea848373654117",
-    "scenario:R13-persisted-claim-loss": "sha256:d1acd512cf5d33e1201fa9d3013799264a7efc04bd936985e13923447f246b0f",
-    "scenario:R13-persisted-pending-fill": "sha256:b4ca4de60fbd3cf3a1c6bedbfb41a07d3383a7bdc06418273b6d227634cd78e2",
-    "scenario:R13-persisted-response-change": "sha256:cd1fadee6fb0b335319a7b248058039500885d7b4e3e53fd8c4b118b13fd9083",
-    "scenario:R13-persisted-response-removal": "sha256:af55228232f3fd868fdb24ecdb7db33c4ae3a2ecaa776788b536552e263b1b73",
-    "scenario:R13-persisted-review-outcome-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
-    "scenario:R13-persisted-review-revision-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
-    "scenario:R13-persisted-review-target-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
-    "scenario:R13-persisted-same-state": "sha256:5789876e350a0b65dea7d7f1d32b3cdb774720c163913b848187fbcd6639d099",
-    "scenario:R13-persisted-terminal-fill": "sha256:0cb17b65d0a617f1d65035996835ebb05e8ee3ba2de88cd07c52432ff832d5fe",
-    "scenario:R13-supplier-review-binding-identical": "sha256:595e4d1fc5132756fdfdb57fc68f816bd54df3edbe5c6246e6e647bfe5f8f299",
-    "scenario:R13-supplier-review-binding-revision": "sha256:bd502a2056f7af102fdfefb846f8f0bdc7fd5ccd5ef4bc362c4ce6c0d6616d6d",
-    "scenario:R13-supplier-review-binding-target": "sha256:bd502a2056f7af102fdfefb846f8f0bdc7fd5ccd5ef4bc362c4ce6c0d6616d6d",
-    "scenario:R13-supplier-review-binding-terminal": "sha256:d52d0ed325a22d955a0935cb120decf090d66ffbd0891ba1d76b5e5ab9e2df64",
-    "scenario:R14-direct-old-unanswered-carrier-same": "sha256:51300b0922cdd5f2a96cfb2f4d817de7ff8f0fe4d422d7f4abacd663d1792825",
-    "scenario:R14-direct-old-unanswered-carrier-target": "sha256:51300b0922cdd5f2a96cfb2f4d817de7ff8f0fe4d422d7f4abacd663d1792825",
-    "scenario:R14-persisted-delete-recreate": "sha256:67bdeb1a089804f5250d8783f5d54828ea96d407e2569905ecc33dfc2b909b54",
-    "scenario:R14-persisted-hidden-bytes-low-similarity": "sha256:2c1e1263df499554656e50b0982695179e4a42c0374fe8c1ef22e60180d7dde7",
-    "scenario:R14-persisted-intermediate-claim-regression": "sha256:87e4b6dbde420a89905893ab03c43cfcfe2f9ce457127ef76d63b87e64d3942b",
-    "scenario:R14-persisted-intermediate-review-regression": "sha256:67f47c44ed293296af1aaa69e2d86d62f3bb9adbd79c3684636dd486581542dc",
-    "scenario:R14-persisted-merge-carrier-conflict": "sha256:e0b93f8a10cad2a02fec9334c53a067064984a0ad278c52940e43df6d10af5ce",
-    "scenario:R14-persisted-merge-carrier-pending": "sha256:2ddd38d288e6c4b4530136d6335d6c4ad502363af270c117a39d266ec4eb812b",
-    "scenario:R14-persisted-valid-first-response-low-similarity": "sha256:687af1371e90781fa0e39a6aa3aed534e1e87a63d5b09526060f5f830d865857",
-    "scenario:R14-persisted-valid-review-retraction": "sha256:b6c65b358e94d1eb65bda1a91eb4bf0a4ea0eba808a22ce7fcb295014a532b64",
-    "scenario:R14-supplier-old-answered-carrier-pending": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
-    "scenario:R14-supplier-old-answered-carrier-revision": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
-    "scenario:R14-supplier-old-answered-carrier-same": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
-    "scenario:R14-supplier-old-answered-carrier-target": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
-    "scenario:R14-supplier-old-unanswered-carrier-same": "sha256:0bec2193b838acdae28891d496208d05aacb5fbe1fc056a2a085e73f73956c18",
-    "scenario:R14-supplier-old-unanswered-carrier-target": "sha256:0bec2193b838acdae28891d496208d05aacb5fbe1fc056a2a085e73f73956c18",
-    "scenario:R15-old-continuous-preserved": "sha256:bae77b8a677a42073e15ae5658725e4fada94ab54e2bcb233ce30555afcf3134",
-    "scenario:R15-old-hidden-bytes-restore": "sha256:86d14691b56c11bce08a523b6a0e6e32d35d288058b2cd4c0f86ce0590977b49",
-    "scenario:R15-old-human-binding-restore": "sha256:d7ac26397564d28615a0d41ae0b68ca1ea96d8cc53871941dc53eb7adaf59cb8",
-    "scenario:R15-old-invalid-delete-recreate": "sha256:eb90596b6ad0a878496032692dc5c3c189e7215049f3a10cba12732d15586068",
-    "scenario:R15-old-valid-delete-recreate": "sha256:2d32f225c59dfa1b8de4355958c65e0686b127c0f9bbbee2e41b509f17aadab6",
-    "scenario:R16-earlier-landed-evidence-reversal": "sha256:077b449fb3e8d73dcbd714f6c0188607b5796754f48b2cb9df5a1a5f1540778d",
-    "scenario:R16-pickup-evolution-0-backlog": "sha256:1d950653f0896f02fea932383fdd8a8c4dabc0a3fcf1ae9b3bbc3ba097903912",
-    "scenario:R16-pickup-evolution-2-blocked": "sha256:35c3ce120c33f21dcceb9ef41f29e584e4f77cd7de93af1f91e1b1d4bc951d2d",
-    "scenario:R16-pickup-evolution-3-in-review": "sha256:d26737780d5ebb99a3ae0afc552af97c282e1605bbd23df3341ee9acd5c3730e",
-    "scenario:R16-pickup-evolution-3-in-review-drop-artifact": "sha256:197a861f07746080595245007c358da0d1613c19d0f8a72fea91c085b9a3f872",
-    "scenario:R16-pickup-evolution-4-done": "sha256:d26737780d5ebb99a3ae0afc552af97c282e1605bbd23df3341ee9acd5c3730e",
-    "scenario:R16-support-adoption-drift": "sha256:33ef07dbb366437494a1247bce0444626aee60395a11df59d4fa73146fce4308",
-    "scenario:R16-support-forward": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
-    "scenario:R16-support-invalid-source": "sha256:ea29f88cfe864594d08adadc3c1d17406d2fe55f28af7fb767ae8f889e9c696d",
-    "scenario:R16-support-nested-drop": "sha256:db17f56780ee0f42b76d0fd73732921b3153e7bba24a08b67459f85ea094a286",
-    "scenario:R16-support-permutation-diamond": "sha256:51575a5d034d4971b8a4b0b63c7ffd315dfac66b8a259f3838206899a763adbc",
-    "scenario:R16-support-reverse-drop": "sha256:9c9fb80a9a5bc32bd24461119a74fe3df417c6b996985962ec65972e1883ee60",
-    "scenario:R16-support-reverse-preserved": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
-    "scenario:R16-support-source-evolution": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
-    "scenario:R17-carry-absent-arm": "sha256:2b36235d404f2e30de846c5ef434afe73bc7ce27b430dc48cd93062bc59c9403",
-    "scenario:R17-carry-compatible": "sha256:4a0f93dc5e1fe684db1e62f38d5aea709a1eb086e5d36a0c1f57fb9faec10866",
-    "scenario:R17-carry-compatible-reversed": "sha256:4a0f93dc5e1fe684db1e62f38d5aea709a1eb086e5d36a0c1f57fb9faec10866",
-    "scenario:R17-carry-incompatible": "sha256:3d8bad52383985f3babc7220c73037474e80b36ea5333c15847024f9401202e0",
-    "scenario:R17-carry-outside-duplicate": "sha256:46483c584c34860d9338b833bdc86937c67a4e2e8e01b9175f8c4b2316f5d230",
-    "scenario:R17-carry-outside-single": "sha256:81c18794fb4209b8ae6cb2102eec4fb4f2b8b1e2ae8d61d1ef062f4cfd4dbc8b",
-    "scenario:R17-outside-C-neutral-parent-valid-restack": "sha256:bda3673abdccea83e0a8ca4d22a4a3c1edc3c9e130a6bd7cfbf5250465806abb",
-    "scenario:R17-persisted-outside-duplicate": "sha256:ff58edd51c5b1c689fee6f6221de0022adc49829287173d5ea58d04d9091fa35",
-    "scenario:R17-persisted-outside-duplicate-reversed": "sha256:ff58edd51c5b1c689fee6f6221de0022adc49829287173d5ea58d04d9091fa35",
-    "scenario:R17-persisted-outside-single": "sha256:d5a5cd78fc590781a325257a722e162c184046f7cb1266bb00a823d99a759501",
-    "scenario:R17-persisted-outside-single-reversed": "sha256:d5a5cd78fc590781a325257a722e162c184046f7cb1266bb00a823d99a759501",
-    "scenario:R17-persisted-unauthorized-absent-arm": "sha256:f4d241be4323e6dce40925b832f61714b2ac2153f6eaba225820c8a4218990cd",
-    "scenario:R17-persisted-unauthorized-absent-arm-reversed": "sha256:f4d241be4323e6dce40925b832f61714b2ac2153f6eaba225820c8a4218990cd",
-    "scenario:R17-persisted-valid-absent-arm": "sha256:e41aa6c81a7fa7e3c02c96e112c7d2e6fd01ed2918134676999b56d1df564241",
-    "scenario:R17-persisted-valid-absent-arm-reversed": "sha256:e41aa6c81a7fa7e3c02c96e112c7d2e6fd01ed2918134676999b56d1df564241",
-    "scenario:R17-precharge-P22-budget": "sha256:9c7bd9ae7aa964f30a7c4d0e577b6d57635feaaaaa71fb127f36e06215707b92",
-    "scenario:R17-unreadable-outside-C-ancestor-stays-unopened": "sha256:17f6fd8afc206ca4e2b3964befab6447313e3770ecc5363974aa64dff65a3588",
-    "scenario:R17-unreadable-outside-C-boundary": "sha256:e673018ad139d1a7f8ed888cc6c16f3c2e84e316fd4b059a68f3f29fabdff237",
-    "scenario:R17-wide-outside-C-boundary-budget": "sha256:2867bc57efb2b0221bca74aafeaf358afc7a4d883b43c9bd073c476be3a904f9",
-    "scenario:R3-01-two-invalid-causal-sources": "sha256:7c378db43468cac30ea7fce66d72d9de851c0f32b1d5c05bf24b1a8f93564d27",
-    "scenario:R3-02-invalid-valid-causal-competition": "sha256:3b930f9cfb4fa87405f8ce377aa564122c3191280d9df81005e87fae4d4d5814",
-    "scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks": "sha256:e3acfdb297fb6ce6c9d9a7d3c0baaa924cd6cac13bf459b55b488c0f43774ad6",
-    "scenario:R4-01-same-root-valid-diamond": "sha256:891a1f2c942a00a5753b1d9d26147294e4ee5733ca1b7f3eadad38b27018f325",
-    "scenario:R4-02-distinct-valid-root-diamond": "sha256:cb7fde6b9985018f94e8413ed82b19967247b87bbd7e13fc03072c6892acd208",
-    "scenario:R4-03-equal-root-plus-invalid-diamond": "sha256:9c3a634056f76695bc84a64af33420a8b102899b7d6c29ffe2d3add9d000e55d",
-    "scenario:R5-01-invalid-redelete-after-supplier-reintroduction": "sha256:da16e53f0f9ae04416789ee89801ec4a84edbb8a3655e92ea7a5795309f06fec",
-    "scenario:R5-02-valid-redelete-after-supplier-reintroduction": "sha256:1acf1c491fd554e63c8d60a8b16dd2f82a22da4e7286f24b13c7042246f9f1b4",
-    "scenario:R6-01-valid-plus-invalid-all-absent": "sha256:c429b988ca123c5143c4b2cbdaa146a01a4109cbf725157caa57bcd1d8310cdf",
-    "scenario:R6-02-valid-plus-ambiguous-all-absent": "sha256:dd79df51b4a874bb0ded5274030b377219c00cd8ce2fd5e67cb0a0400ca6e731",
-    "scenario:R6-03-two-invalid-all-absent": "sha256:5d9698b080641a9099a1866a566a72a523839ed6a99d5321e154d4c35a159d18",
-    "scenario:R6-04-same-valid-root-all-absent-wrappers": "sha256:72ea57333c828a357c0a98edfd5ffc54efac83ca74c845e764f1a2c2593dc0a9",
-    "scenario:R8-direct-human-response-conflict": "sha256:4bd8010dbf13661aa4d59be70c723e610674cd72764ba1d4b6ef6810a8b14f90",
-    "scenario:R8-direct-human-response-identical": "sha256:4bd8010dbf13661aa4d59be70c723e610674cd72764ba1d4b6ef6810a8b14f90",
-    "scenario:R8-review-binding-divergent": "sha256:96c0541d4d19623284d5dfddbe84a3c07712fd3ff697b3133bcf190661f45e07",
-    "scenario:R8-review-binding-identical": "sha256:d5e167d6454eead0aa2a088556b0b86e996819181ccf79464b03f850822b01d7",
-    "scenario:R8-review-binding-terminal-conflict": "sha256:e984e1d561ccdcf64edbaec1a63682f7caf0c2d8c6295b466163f28bb4ae89e4",
-    "scenario:R8-supplier-human-response-conflict": "sha256:d8b11bd684f85a55b66ca1e6b140442d7c42c0dd131079a582957d92eb0b752a",
-    "scenario:R8-supplier-human-response-identical": "sha256:ec79fc727033970fcf46b1fc8c58155967c630152b2efbe5e6db142bb52fe713",
-    "scenario:R9-direct-review-revision-pending-fill": "sha256:c33593ea512f318b1ab2245804f0d06dcfae4761e14c6b619ffd37cc768af74e",
-    "scenario:R9-direct-review-target-pending-fill": "sha256:c33593ea512f318b1ab2245804f0d06dcfae4761e14c6b619ffd37cc768af74e",
-    "scenario:R9-supplier-review-revision-pending-fill": "sha256:d917492aa1b894b51e47ecce7aa3cc0757c60c8de1851328242aeddd11e97dde",
-    "scenario:R9-supplier-review-target-pending-fill": "sha256:d917492aa1b894b51e47ecce7aa3cc0757c60c8de1851328242aeddd11e97dde",
-    "scenario:W0-fast-forward-return": "sha256:edc44c732d297925125d6452e8bf153ed77fc230e40d502615297e011788f671",
-    "scenario:W1-pre-PR-push-exact-endpoints": "sha256:942ab6af246282eabbbfe25bba5bec68790db7a1809dbf5a6f97e3c695b90574",
-    "scenario:W2-base-advance-retarget-invariant": "sha256:461aecac9b5e2c60cd7230d2c88e6921e17c0963b8a0e21cce6ecabf847a8a91",
-    "scenario:W3-multiple-PR-API-zero-calls": "sha256:a408175b54af46684a7ef5bf452f18597223c8ec93715b25b5dfcd51313b2572",
-    "scenario:W4-stale-rerun-exact-inputs": "sha256:bc502957024f6c6be437996e2a4885a627fef4f0702963cb16e849117ff86c46",
-    "scenario:W5-missing-O-coverage-unavailable": "sha256:0636fb6f185403300874dbe5800c7c32c1a91f5547d8c0fbfaf4652936993305",
-    "scenario:W6-created-deleted-zero-endpoints": "sha256:19cbca9efc9f9260ed57f369cd02425dff1db1e4db458bde21b7f8ebb72a9396",
-    "scenario:W7-PR-synchronize-top-level-endpoints": "sha256:cbdc63d66cdd0476712d63d55f891ed3f182bd71fb5eb795be1b62edd2e21cb4",
-    "summary": "sha256:74a7f9e3ab72663556d8c067e825e9ac744fd232524bfcbd337a2e8fd7fce00b",
-}
+
+# Generated once from both byte-identical fresh v5 streams after runtime commits
+# c32f470977735a63feaf377ca9290353d1520e0e and
+# 850d02587f7f812b7dde9667a39da80b4ce48764.  Every row kind has one
+# exact recursive shape digest, checked before any projection.
+RAW_SHAPE_CATALOG_V5 = """
+aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
+control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
+control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
+control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
+control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:ignore-invalid-N-root sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab
+control:ignore-outside-C-carrier sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:ignore-persisted-absent-C-arm sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:ignore-persisted-outside-C-collision sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:literal-review-pending-treated-concrete sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
+control:locale-git-error-stream-equality sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4
+control:missing-all-parent-direct-validation sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:missing-post-event-continuity sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:omit-old-tip-human-binding sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
+control:omit-supplier-carrier-human-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
+control:omit-unanswered-published-review-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
+control:posthoc-budget-accounting sha256:7bcaf5e278473e8ac6ac3a3968001fd52cfccf97005b51dbbbae8ff2189d9a7d
+control:reopen-outside-C-boundary-ancestry sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:reopen-pre-C-genealogy sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:restore-universal-ancestor-carry-scan sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:skip-carry-compatibility sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:skip-old-side-continuity sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-persisted-candidate-continuity sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-persisted-frozen-skeleton sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-preserved-state-validation sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-supplier-support-certificate sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab
+control:sole-valid-ignores-invalid-root sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:stream-malformed-truncated-final-line sha256:cae48a249e054657a20bde2e2d8f3010169570bb307263fee4f1f7c7adfb4f48
+control:supplier-authority-borrowing sha256:889c75da0848d6f89f4d98b22ac05d36d45c3a1d4888d64ae67d9316869049f4
+control:unmetered-cone-work sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:unmetered-dynamic-support sha256:247979e72c21e06ce04516c2b72a803d84b46428a0b274ce922a32c60821c96a
+control:unmetered-object-payload sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:unmetered-support-construction sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+control:unmetered-tree-paths sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
+parent-permutation sha256:ff2c5187a2f005aefb4e390ee296b9fb51f90077a07b7e52b90e26a54bcc27d6
+scenario:P1-direct-linear-valid sha256:4c33f5d3242af6e21b6cd10cfa38c814d852afe62e88105aafa861afc65c428d
+scenario:P10-direct-invalid-parent sha256:4ab8178a32e9442bea7d45567d2faeefbe4581806154507e260919856479da02
+scenario:P11-direct-three-parent-valid sha256:f238ab9c5fa4767b6188b113a38f92946121ae1e97a06b82ba5b3281d36f69ab
+scenario:P12-merge-supplier-valid sha256:74e5dece1ca1ed4aa928f4738ab5e1e891eb1527e4919c2b2459e27cfc5f6d0a
+scenario:P13-merge-supplier-invalid sha256:f3d3af68be6b7f29828923e3a798d3c195ab88a6791c749a7014370a95a63788
+scenario:P14-supplier-reintroduced sha256:74fef2526e0336c1988560a682eb7cde85bce9c26e75e9b6525914569127e15f
+scenario:P15-competing-suppliers sha256:82c564265fb903f01cc80169313095c30f0fcbcebb95bf7e076a5cd123910447
+scenario:P16-PCX-08-invalid-supplier-claimed-carrier sha256:78fa5408e6681c1c4974eaf955df19485d3413fdc2091efe7a954f5644fd0571
+scenario:P17-post-event-reintroduction sha256:06e7e2cac59217fdeac748abd5c400db289b156323ad2b28de6341618d595bcc
+scenario:P18a-missing-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
+scenario:P18b-noncommit-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
+scenario:P18c-unrelated-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
+scenario:P18d-shallow-required-region sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
+scenario:P18e-missing-queue-blob sha256:0cea7e00f363eaa29b0e139cf4d04f1c504437bf3cefe99c3d0405ad21e660a5
+scenario:P18f-missing-queue-tree sha256:f97e8d42c44b3002eceed0b6f4ba2c5087944d7d7901e5904ceaaa0b08ee0edd
+scenario:P18g-multiple-merge-bases sha256:596fff1132b2e97914e385a58524499674c8b10965d7514f2a33398418ec7077
+scenario:P19-production-identities sha256:c1a954ab7b5da32c5242bd452728eae046056844a76002a60e658cd6e1ebf1d4
+scenario:P2-direct-linear-invalid sha256:f0c8e5bd95470227d429658eb7c4d9317f31817d129e4d1a0511a878ec8c0d9e
+scenario:P20-lifecycle-types sha256:076ced0c964e2ca3e5eccb947b29c8a481ccfa64c9eeecd92fd27f1c0c7679b9
+scenario:P21-PCX-17c-squash-erasure sha256:f59ab60e938b4ed01343762e33d3e48c28d74c4a80c61ed4be4d386066a93ad8
+scenario:P22-PCX-18-one-pass-many-actions sha256:eb57ffad401fb37889906e4a6996f69aa46c50e2ed0f1b3e600ca920fa5f7cb2
+scenario:P3-genuine-old-loss sha256:08884a7b66dd4858183d0fdb2b0ebb34daed57ad33fde7606963d723a581686b
+scenario:P4-pre-C-identical-origins sha256:dc6d830026cfca449cb2b5784f5399d6d9c3259c5ebde45749d2bd9ef5a84535
+scenario:P5-duplicate-at-C sha256:739abf63e89be455172a5a2ed1b56419d395d0f98aaf652af34c540ce6674611
+scenario:P6a-old-delete-recreate sha256:3b889f79641d54ac9af069637bf8d9083d57bb42b54e7bcae475f87a640956ef
+scenario:P6b-candidate-delete-recreate sha256:407c21fc3f2aa76a11abe28625744d01ef132ce2d6af8a5ecc8235e15189e1e6
+scenario:P7-immutable-payload-change sha256:0d488725608626ae386c46d5c6bd1713e725428108f1413062250e295c5d78b4
+scenario:P8-path-timing-move sha256:845ec8bcb99bb323553fb11b9bf3c6fd981e5402b8e9edb25c17128a63ab9b04
+scenario:P9-direct-two-parent-valid sha256:f696566cef9dd09dd7e9e9d6de45e76f4fe674dbaf75765ea934acbc10fa2084
+scenario:PCX-01-neutral-parent sha256:a9751c3fca804974dd37c2f1fb12b8870604a6ba2711644261813b9f15cc26a8
+scenario:PCX-02-neutral-plus-invalid-carrier sha256:6b45a26c3cb2d193e7ddab5c86e0dd5c8667772a72790d512616fca14328dbd0
+scenario:PCX-03-foreign-exact-identity sha256:6e3cfe16dc586784b359e1ab9722863868d210bae3490283e2519a05acfc00f2
+scenario:PCX-04-several-absent-one-supplier sha256:8d9c6aea83d71615334d8a4fc7024fad1b4a1a4b0b19b7fe8572456655744770
+scenario:PCX-05-competing-later-supplier sha256:ed216702648fffe54b60b9a73757c448cc49c147840a70c8e29a2e63bf2e470b
+scenario:PCX-06-nested-supplier-over-direct sha256:bdb83b6a691e43d8e4b3b5e03ba24633a58a5b235905403741e2da2beb2a688b
+scenario:PCX-07-overqualified-propagation sha256:bed885b0e1f7bd2489daa7e59a072768d7c768e47cab770a63a44c521af350c5
+scenario:PCX-09-recreated-claimed-bytes sha256:942fc71c9f16fd9cc008925da67cc65f5f1971e31f3d7a1fdfab643e36ff4409
+scenario:PCX-10-transient-multiplicity sha256:3c52e2e05077bc7b017c26b3b981bed9891afd40bb137f7cf3e731d5f2117edf
+scenario:PCX-11-different-payload-same-path sha256:3b1b51660586e86a581c1a223bf254cc7f9dad51142477eff06b91ff67920fee
+scenario:PCX-12-timing-rename-supplier sha256:aa1c877dc0f7b8b71b7f0a1e623a954a89cfeb43fd4f87816259e5958ca9435e
+scenario:PCX-13-conflicting-human-response sha256:737a0d3ce9018db9765d69d9590f94fe5b6081548a95c15face8d8fc2bcea802
+scenario:PCX-14-valid-human-supplier sha256:33c72a7b22a5e80d641bb8489e04f76edbb5887fa740e4bb9da1f30692e2bab5
+scenario:PCX-15-generated-retry-supplier sha256:56dc30bf018b588b278f82b2222dd030476392aff7db869d677fdb83178a8894
+scenario:PCX-16-task-pickup-supplier sha256:143388e2a630084b96a4e0b4eb85d208fa18228b9ca1c9c33823fdbe3012de96
+scenario:PCX-17-complete-cherry-pick sha256:4cec14353ade0a710de581f0f9628f30a7720624a6a65fe86d2dad44ed780c10
+scenario:PCX-17-deletion-only-cherry-pick sha256:f59ab60e938b4ed01343762e33d3e48c28d74c4a80c61ed4be4d386066a93ad8
+scenario:PCX-19-missing-claim-blob-recovery sha256:129f309e070e0a81b0e6c37a1ae81be7f1a0cc9c1b18262d7e010b0fae75162c
+scenario:PCX-20a-budget-below-limit sha256:0f815b51de9227cb6408d56587e8e6ce2575fcfa0b973fd665d649f127651eae
+scenario:PCX-20b-budget-overflow sha256:3c01d9a534f635d15afe37744b92ca48c71173955617e600377d7ed5ca12ea17
+scenario:R10-direct-review-target-backtick-dotless-rejected sha256:37febd376cf79f90f88e993e5ce0981251ec8b2e5378fc12fb8e9175dbda3404
+scenario:R10-supplier-review-revision-generic-placeholder-rejected sha256:a004f6504fe4ef6114853bae0a9b4a368549ac561c1e2b0a9b99140e17e051a2
+scenario:R13-direct-review-binding-identical sha256:e592f189a7b8f6722079c9692db21a34a61cd7f97f94dd773544c4500f198290
+scenario:R13-direct-review-binding-revision sha256:6f677e3e1ff447c599f7da38213e1c1a45173c963c2918ad0a820c366cf355cc
+scenario:R13-direct-review-binding-target sha256:733f41dbf6377a865835eb55ce6c022ccd88c96e8e0997b85dad7ec7e4ddb399
+scenario:R13-direct-review-binding-terminal sha256:dc6d5a95db791d45a43f26363bee4fb7c6d56940025d6aa7c926bcbeda9cb5cb
+scenario:R13-persisted-claim-loss sha256:ca8eac25f0dce5c04e34e2bdd00207a01a24b19ba89ef0804727bf991cc37289
+scenario:R13-persisted-pending-fill sha256:a343c1b24e34bb5ee580ea5a03269d514dfe243be67c2d490089171aae73e939
+scenario:R13-persisted-response-change sha256:6067c932dcf3ce4649223242a45c3425c7678469d802dbe59d8135ddf8d3e05c
+scenario:R13-persisted-response-removal sha256:76268ef573b5ad4f6ce6a70abacf6626dd9b24d7d2b82a50b7484ad0fd406c66
+scenario:R13-persisted-review-outcome-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
+scenario:R13-persisted-review-revision-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
+scenario:R13-persisted-review-target-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
+scenario:R13-persisted-same-state sha256:4260557612f68c1156b79e43d919a085591095a812ea5e95e2030eb27dd3b27c
+scenario:R13-persisted-terminal-fill sha256:0c152df7faa58c3490b237cc0efcd0a9a24238ab8a127903eae546527bdb5b16
+scenario:R13-supplier-review-binding-identical sha256:07c9a4fb8872de5ba41e205b9ebfbfea0d4217ddfe5a09d9e95b687a240b0b11
+scenario:R13-supplier-review-binding-revision sha256:2485e7948a29253a801283695695e2d8e83a61e7f6463539dac3b578959ac813
+scenario:R13-supplier-review-binding-target sha256:2485e7948a29253a801283695695e2d8e83a61e7f6463539dac3b578959ac813
+scenario:R13-supplier-review-binding-terminal sha256:a8e999360a87fc76d41bbc7206ef1820c2f1086adb976ffe26ff28cd260662de
+scenario:R14-direct-old-unanswered-carrier-same sha256:f1971ec63a2a4aabb3183e603b85a6a195cfa8c2eaa6f0dcce2e6604189ff981
+scenario:R14-direct-old-unanswered-carrier-target sha256:f1971ec63a2a4aabb3183e603b85a6a195cfa8c2eaa6f0dcce2e6604189ff981
+scenario:R14-persisted-delete-recreate sha256:0899d2c7965d477568400ff1da18fb539079c5094f25da5abd721ec48574219c
+scenario:R14-persisted-hidden-bytes-low-similarity sha256:b6dfa410dc5a1a66185f18c0b6cdf19f257d4ab0bb50abeb0c6a39c678491ac4
+scenario:R14-persisted-intermediate-claim-regression sha256:6c171d221307821466717a04ae8740e88447bae9d67f96bc8486fd3823a6369f
+scenario:R14-persisted-intermediate-review-regression sha256:b0c2ba5c97ff8ea4a2ffc5e7003b5fa85f73ce96cb2bb4d16fb09275c887c10b
+scenario:R14-persisted-merge-carrier-conflict sha256:969f70695d906112281fdcb05e606d5a9da4f8bb932ff3b3b10fcd3ceffc8a18
+scenario:R14-persisted-merge-carrier-pending sha256:3bf28372712ef266906503f5a853456f235273fd3c6e73e7949a24b827f9a8e6
+scenario:R14-persisted-valid-first-response-low-similarity sha256:c023efb63e51b35a0fb1ce39a56ff2ab920ad232e9c24603bfacf69de9eb503e
+scenario:R14-persisted-valid-review-retraction sha256:8958c100d5c2fd0727757caca1cf027d64fe44fd5d7dd815191ac9bb169df244
+scenario:R14-supplier-old-answered-carrier-pending sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
+scenario:R14-supplier-old-answered-carrier-revision sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
+scenario:R14-supplier-old-answered-carrier-same sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
+scenario:R14-supplier-old-answered-carrier-target sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
+scenario:R14-supplier-old-unanswered-carrier-same sha256:b246f62954d78df745c437ea77b01ab55f82022f05f9172a05977e1da1b5d0d0
+scenario:R14-supplier-old-unanswered-carrier-target sha256:b246f62954d78df745c437ea77b01ab55f82022f05f9172a05977e1da1b5d0d0
+scenario:R15-old-continuous-preserved sha256:433bc809971dfd4f8bcc2c555a9c6c00d37999bc981aec537a785f6ca58d2c36
+scenario:R15-old-hidden-bytes-restore sha256:efda2c716f2482bf4618b1568eea0c8e6b8c23db5d31c6fcf920f035e1afc872
+scenario:R15-old-human-binding-restore sha256:650b562bc81176c26e941b8fb08cadd162643c99a5c0a6cd78072e4821a60775
+scenario:R15-old-invalid-delete-recreate sha256:19a975770df1601deeffc96bf47523931ac96f147f6730f277b806a0877bb3b6
+scenario:R15-old-valid-delete-recreate sha256:c740b89979f12ae3cd20210ff5865c1679987e0966d7a53b9ea897aee7e339ff
+scenario:R16-earlier-landed-evidence-reversal sha256:7ff53b4e5f5d5261b15274561d416cfb0ef07dfc33716508ae0318da15dfcd04
+scenario:R16-pickup-evolution-0-backlog sha256:9c862c2f23aaf4032f137011a18b7dc041f488da788084c00ddcd4ded2a52fff
+scenario:R16-pickup-evolution-2-blocked sha256:35f4c94b1dc0dad12a0355f61f53a45420e38fe187ce924ab257748665cc24b5
+scenario:R16-pickup-evolution-3-in-review sha256:27bdc420e35c9db3ac75605a153d36fa17a147fb916c9c123b93301579d6e28f
+scenario:R16-pickup-evolution-3-in-review-drop-artifact sha256:b2ae60a59bdbced287811d37d0710e529eda1c744d00ba35a37c77380c9a523a
+scenario:R16-pickup-evolution-4-done sha256:27bdc420e35c9db3ac75605a153d36fa17a147fb916c9c123b93301579d6e28f
+scenario:R16-support-adoption-drift sha256:e85053853088bb6bda4b969192e5b147f77d68392c7caae9cee1c89ac5ac1a81
+scenario:R16-support-forward sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
+scenario:R16-support-invalid-source sha256:c50cc32b3f0491fb7a8ae00fc2729fcc95ddad2910a318dafb2d4d301a1988d5
+scenario:R16-support-nested-drop sha256:0d958da37cfbaa783eed433cbaae32d1b1961a7bfbc6c9ea6a1553f81f5103e2
+scenario:R16-support-permutation-diamond sha256:5032fa4d0b6a1dd0dcbd3dfeb338051bea2eae17ee4b21e9f41aa27d474042e3
+scenario:R16-support-reverse-drop sha256:4f920588787aea0a3376e11421f5d29c580f02b593ce5c890c5476ddcffe5802
+scenario:R16-support-reverse-preserved sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
+scenario:R16-support-source-evolution sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
+scenario:R17-carry-absent-arm sha256:7b9425750527dd92a3cd6271546564bf8573fd50d0997bd7a18617c18cf06f0c
+scenario:R17-carry-compatible sha256:b33fc74978aa0236bdfd0c8ce59ea27f869cc8467570e40821b95102127a0067
+scenario:R17-carry-compatible-reversed sha256:b33fc74978aa0236bdfd0c8ce59ea27f869cc8467570e40821b95102127a0067
+scenario:R17-carry-incompatible sha256:022ccb9a30113ef442826e2c1ed5652b10b72d1db778e653a8a4261f8a2b7dee
+scenario:R17-carry-outside-duplicate sha256:ae0bcb614239f0f3719a47aa7fd1778748fa8efb2abdffa14a164135d5a65e27
+scenario:R17-carry-outside-single sha256:837732f6b827d46706313b13660ef039cc79e13a79dadc97e444e9d5c44c3b5a
+scenario:R17-dynamic-support-traversal-exact sha256:0de4dfcd8beef66200231630600becfb70d73518dd527aff0221060c58536f20
+scenario:R17-dynamic-support-traversal-plus-one-refused sha256:d49fb869a26e3c3867d24a79b0a34ed4f67c9fff14b0662e578124a4099fd87a
+scenario:R17-flat-tree-peak-exact sha256:e606dc84af59b478121374efe63263cd164468dc75a14905bdae5850662a2976
+scenario:R17-flat-tree-peak-plus-one-refused sha256:d4a95635554890fe846a1265c1c7fc65b1e2cf42bb830b9bab785018e6cf27d7
+scenario:R17-graph-line-peak-bytes-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
+scenario:R17-graph-line-peak-bytes-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
+scenario:R17-graph-output-bytes-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
+scenario:R17-graph-output-bytes-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
+scenario:R17-graph-parent-tokens-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
+scenario:R17-graph-parent-tokens-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
+scenario:R17-object-payload-peak-exact sha256:028988f232b02e34ebcd93c4883da2cb83ca4703c8e562035c6f27aa0cdd2acd
+scenario:R17-object-payload-peak-plus-one-refused sha256:9402e6f329401b56739a773a7142c9411629f6411854f636f9cf9d332a0c4611
+scenario:R17-outside-C-neutral-parent-valid-restack sha256:7efe001e3c7b246ab395d4897d4e3b978cb5ef2cd2e880e77f075782fddef0ce
+scenario:R17-persisted-outside-duplicate sha256:4a2d2d7e23e4798340a752e4708e85992bd6713a01cfe6979895345953fa9e37
+scenario:R17-persisted-outside-duplicate-reversed sha256:4a2d2d7e23e4798340a752e4708e85992bd6713a01cfe6979895345953fa9e37
+scenario:R17-persisted-outside-single sha256:641588d58a38957047cd98d2463bc9877700196ea38288972ff67d9ea37152fe
+scenario:R17-persisted-outside-single-reversed sha256:641588d58a38957047cd98d2463bc9877700196ea38288972ff67d9ea37152fe
+scenario:R17-persisted-unauthorized-absent-arm sha256:81dc63fe3b7e52b66bec9dbb5d6074cd20c605599fa9f0538e67e6704a1684c4
+scenario:R17-persisted-unauthorized-absent-arm-reversed sha256:81dc63fe3b7e52b66bec9dbb5d6074cd20c605599fa9f0538e67e6704a1684c4
+scenario:R17-persisted-valid-absent-arm sha256:fc2ebf334280a31bf395aa1df0720709f64e5d5703680b0f403b8a9222a0368b
+scenario:R17-persisted-valid-absent-arm-reversed sha256:fc2ebf334280a31bf395aa1df0720709f64e5d5703680b0f403b8a9222a0368b
+scenario:R17-precharge-P22-budget sha256:3cd8d7c46e548416920999e7fcf21fc47f23636b5c71481fc4f24cb20f7b8135
+scenario:R17-support-serialized-exact sha256:181ba0d0170b0f61cab3034cb97a826122be1063643eea93b85155dade68de39
+scenario:R17-support-serialized-plus-one-refused sha256:58d48a0d4c80fbb019c7607e3363e9b1e2869ef2b1195530e696f124afbf5f38
+scenario:R17-unreadable-outside-C-ancestor-stays-unopened sha256:9485768cd536a68596fd0b9b01237a116d88401a50e19733412f81821e1d003f
+scenario:R17-unreadable-outside-C-boundary sha256:599eced072e2f19d2078d01241fc5a599d87898a3b57f4ca9ad733cda5e1ce11
+scenario:R17-wide-outside-C-boundary-budget sha256:19bea2720bce2722accc7ce1ccccd34ff10c277db487fd3cb136a775b1f80bef
+scenario:R3-01-two-invalid-causal-sources sha256:1b4b5774a1bd551021a8891633f5d974d1330ad36101c8b9edf972605704f79f
+scenario:R3-02-invalid-valid-causal-competition sha256:3a56adced0b47c217679b3e66fe118c8e9fb6a40e52807b0314d5af00ec5bcc4
+scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks sha256:4c88a11cc1bd3f265fc2e0f811a8048eb95578cc62beba5c247b1fff40995caf
+scenario:R4-01-same-root-valid-diamond sha256:4f377fb34ff2ccd977457fa828c076828597d6ba30d8127eca749065413fc3ea
+scenario:R4-02-distinct-valid-root-diamond sha256:7e2ba91e253d23b760a15fca45e83f15b9413a3461db475880aa23a4eaeba8d6
+scenario:R4-03-equal-root-plus-invalid-diamond sha256:7cd9bedf89776ea5ac98e8dff87f9407421f4e016d1cd55189b2cc6d37d47104
+scenario:R5-01-invalid-redelete-after-supplier-reintroduction sha256:487a1c84014e36892c19027dc3575952921bf06b1bc29c394dde3dbe627d34cf
+scenario:R5-02-valid-redelete-after-supplier-reintroduction sha256:d5c3936f0f32e0446677432e333a33a3699e251c840d689bc49f1822cd778d71
+scenario:R6-01-valid-plus-invalid-all-absent sha256:d88f0f503a72fe038a645088fb47f49fb2621de0358f5054271fa596282318cf
+scenario:R6-02-valid-plus-ambiguous-all-absent sha256:eeaccb31b66ef1bdb92916c7eedf12906f71e66d0630a3399a613521e879c08c
+scenario:R6-03-two-invalid-all-absent sha256:9a3fce5b58c75d37838f42d98c26dd93ad2db81fcda1f1b52628ca2df36defdd
+scenario:R6-04-same-valid-root-all-absent-wrappers sha256:9660ae1d8ccf79a99e8407a7123c9bdbc1e5612a38d0139827a1055d5e8d1b94
+scenario:R8-direct-human-response-conflict sha256:ede74125c9adb379268febd01ebc1ca16d6f54c587aeb881297592564b4e9dfc
+scenario:R8-direct-human-response-identical sha256:ede74125c9adb379268febd01ebc1ca16d6f54c587aeb881297592564b4e9dfc
+scenario:R8-review-binding-divergent sha256:a7e76821fdd1e0642071d45b6d239d1e99cd07e6f641aa577c80c9278269cae3
+scenario:R8-review-binding-identical sha256:b36d4c923d1041edb2141b069c0656db0d605cb8e226a36d91e0685f06df898b
+scenario:R8-review-binding-terminal-conflict sha256:d327426e2a12ba2c08d12fc01bad2f86d4eca0d12a5c42830cbbc935d140bafd
+scenario:R8-supplier-human-response-conflict sha256:a7a88e387c8ae0beea99c98d679fa137463c0136886a462cedfb9980e93cea43
+scenario:R8-supplier-human-response-identical sha256:7c1db6f2084fc6ab17bb59b796ade8f1721e9f4d87bbd07f637d6011a37b2477
+scenario:R9-direct-review-revision-pending-fill sha256:76eeb95f024390200d2b30a16581975f6b56396436d255d89e71de24d451e3bb
+scenario:R9-direct-review-target-pending-fill sha256:76eeb95f024390200d2b30a16581975f6b56396436d255d89e71de24d451e3bb
+scenario:R9-supplier-review-revision-pending-fill sha256:eed70bb61607d49a48e42a018cdd926e62c7231ea74d9a29884f6a3713929d38
+scenario:R9-supplier-review-target-pending-fill sha256:eed70bb61607d49a48e42a018cdd926e62c7231ea74d9a29884f6a3713929d38
+scenario:W0-fast-forward-return sha256:f842e5ef0b147b9005d1834b5a67d3b742f6fc45e584094cc839d3da9520c761
+scenario:W1-pre-PR-push-exact-endpoints sha256:715801d19e7b22038c2c09b805c3c13d856c58b12261225f80614fe50f319a22
+scenario:W2-base-advance-retarget-invariant sha256:34d6200aa75b7e483cd9f223876451beedc3c4cfddd85d2b4a92ee9bcfec8211
+scenario:W3-multiple-PR-API-zero-calls sha256:335aaaf5250846599ba647a056a906d84733b19c8a8f3706c0252da17705c02e
+scenario:W4-stale-rerun-exact-inputs sha256:b81af0987f98c9e5c6e6107d634b2371050f39651449988430bf43c002137c2f
+scenario:W5-missing-O-coverage-unavailable sha256:0cc6cd8a6445c686471ba197dbb1c2c6b9f09b36812460ac9028bc1060d48406
+scenario:W6-created-deleted-zero-endpoints sha256:110c4f48a71cf41b70cdeda64e057224092a4e443a9a1d98be6afae72c1bf94c
+scenario:W7-PR-synchronize-top-level-endpoints sha256:a6c4c9dffcc53b1b997f90cdac676c7af4facd9d089a8e5db119c003816ce2a3
+summary sha256:74a7f9e3ab72663556d8c067e825e9ac744fd232524bfcbd337a2e8fd7fce00b
+"""
+RAW_SHAPE_SHA256 = dict(
+    line.split(" ", 1)
+    for line in RAW_SHAPE_CATALOG_V5.splitlines()
+    if " " in line
+)
 
 
 class EvidenceError(ValueError):
@@ -942,7 +1166,17 @@ def scenario_projection(row, failed):
 
 def control_projection(row):
     observation = None
-    if row["control"] == "posthoc-budget-accounting":
+    if row["control"] == "buffered-graph-output":
+        observation = {
+            **row["budget_observation"],
+            "kind": "buffered-graph-output",
+        }
+    elif row["control"] == "stream-malformed-truncated-final-line":
+        observation = {
+            "kind": "stream-grammar-cleanup",
+            "variants": row["stream_observation"],
+        }
+    elif row["control"] == "posthoc-budget-accounting":
         observation = {
             "baseline_metrics": row["budget_observation"][
                 "baseline_metrics"
@@ -1061,11 +1295,76 @@ def precharge_budget_projection(row):
         "posthoc_reference_metrics": row["details"][
             "posthoc_reference_metrics"
         ],
-        "precharge_expected_metrics": row["details"][
-            "precharge_expected_metrics"
-        ],
+        "precharge_expected_metrics": row["metrics"],
         "record_sha256": record_digest(normalized_record(row)),
         "transactional_zero_results": zero_partial_result(row),
+    }
+
+
+def execution_bound_side_projection(row, counter):
+    return {
+        "audit_exit": row["audit_exit"],
+        "classification": row["classification"],
+        "counter_value": row["metrics"][counter],
+        "evidence_status": row["evidence_verdict"]["status"],
+        "limit": row["details"]["typed_budget_limit"],
+        "metrics": {
+            key: row["metrics"][key]
+            for key in (
+                "git_processes", "graph_buffered_bytes",
+                "graph_process_cleanup_checks", "graph_process_reaps",
+                "graph_process_terminations",
+                "graph_stream_peak_chunk_bytes", "object_process_reaps",
+                "object_process_terminations", "queue_snapshots_requested",
+                "support_certificate_calls",
+            )
+        },
+        "overflow_by_one": row["details"]["overflow_by_one"],
+        "record_sha256": record_digest(normalized_record(row)),
+        "transactional_zero_results": zero_partial_result(row),
+    }
+
+
+def execution_bounds_projection(stream):
+    pairs = {}
+    for label, counter, _value, exact_id, overflow_id in EXECUTION_BOUND_CASES:
+        pairs[label] = {
+            "counter": counter,
+            "exact": execution_bound_side_projection(
+                stream.scenarios[exact_id], counter
+            ),
+            "limit_plus_one": execution_bound_side_projection(
+                stream.scenarios[overflow_id], counter
+            ),
+            "scenario_ids": {
+                "exact": exact_id,
+                "limit_plus_one": overflow_id,
+            },
+        }
+    p22 = stream.scenarios["P22-PCX-18-one-pass-many-actions"]
+    graph = stream.scenarios["R17-graph-parent-tokens-exact"]
+    return {
+        "composition_observation": {
+            "git_processes": p22["metrics"]["git_processes"],
+            "production_parent_queries": p22["metrics"][
+                "production_parent_queries"
+            ],
+            "record_sha256": record_digest(normalized_record(p22)),
+        },
+        "pairs": pairs,
+        "runtime_milestone_commits": list(RUNTIME_MILESTONE_COMMITS),
+        "streaming_graph_contract": {
+            "bounded_chunk_bytes": 256,
+            "raw_graph_bytes": graph["details"]["budget_contract"][
+                "raw_graph_bytes"
+            ],
+            "raw_graph_fields": graph["details"]["budget_contract"][
+                "raw_graph_fields"
+            ],
+            "raw_graph_lines": graph["details"]["budget_contract"][
+                "raw_graph_lines"
+            ],
+        },
     }
 
 
@@ -1129,6 +1428,7 @@ def core_claim_projection(stream):
             "schema": "restack-provenance-input/v2",
         },
         "evidence_supersession": SUPERSEDED_EVIDENCE,
+        "execution_bounds": execution_bounds_projection(stream),
         "measured_budget": {
             "exact": budget_case_projection(exact_budget),
             "limit_plus_one": budget_case_projection(overflow_budget),
@@ -1144,7 +1444,14 @@ def core_claim_projection(stream):
                     key: wide_budget["metrics"][key]
                     for key in (
                         "graph_commits",
+                        "graph_lines",
+                        "graph_output_bytes",
                         "graph_parent_edges",
+                        "graph_parent_tokens",
+                        "graph_process_cleanup_checks",
+                        "graph_process_reaps",
+                        "graph_process_terminations",
+                        "graph_stream_peak_chunk_bytes",
                         "object_reads",
                         "queue_snapshots_requested",
                     )
@@ -1475,13 +1782,77 @@ def validate_manifest(manifest):
             raise EvidenceError(f"{context} baseline differs")
         if (
             row["id"] not in {
+                "buffered-graph-output",
                 "locale-git-error-stream-equality",
                 "posthoc-budget-accounting",
             }
             and row["damaged_classification"] == row["expected_baseline"]
         ):
             raise EvidenceError(f"{context} damage did not change verdict")
-        if row["id"] == "posthoc-budget-accounting":
+        if row["id"] == "buffered-graph-output":
+            observation = row["observation"]
+            require_keys(
+                observation,
+                (
+                    "baseline_graph_metrics", "damaged_graph_metrics",
+                    "kind", "raw_graph_bytes",
+                ),
+                f"{context}.observation",
+            )
+            if (
+                observation["kind"] != "buffered-graph-output"
+                or observation["raw_graph_bytes"] != 2952
+                or observation["baseline_graph_metrics"][
+                    "graph_output_bytes"
+                ] >= 2952
+                or observation["damaged_graph_metrics"][
+                    "graph_buffered_bytes"
+                ] != 2952
+                or observation["baseline_graph_metrics"][
+                    "graph_process_reaps"
+                ] != 1
+                or observation["damaged_graph_metrics"][
+                    "graph_process_reaps"
+                ] != 1
+            ):
+                raise EvidenceError(
+                    f"{context} buffered graph observation changed"
+                )
+        elif row["id"] == "stream-malformed-truncated-final-line":
+            observation = row["observation"]
+            require_keys(
+                observation, ("kind", "variants"),
+                f"{context}.observation",
+            )
+            require_keys(
+                observation["variants"], ("malformed", "truncated"),
+                f"{context}.observation.variants",
+            )
+            for variant, item in observation["variants"].items():
+                require_keys(
+                    item,
+                    (
+                        "local_rows_before_failure", "metrics",
+                        "published_rows", "reason",
+                    ),
+                    f"{context}.observation.variants.{variant}",
+                )
+                require_keys(
+                    item["metrics"], METRIC_KEYS,
+                    f"{context}.observation.variants.{variant}.metrics",
+                )
+                if (
+                    observation["kind"] != "stream-grammar-cleanup"
+                    or item["reason"] != f"{variant} graph line"
+                    or item["local_rows_before_failure"] != 1
+                    or item["published_rows"] != 0
+                    or item["metrics"]["graph_process_reaps"] != 1
+                    or item["metrics"]["graph_process_cleanup_checks"] != 1
+                ):
+                    raise EvidenceError(
+                        f"{context} stream cleanup observation changed"
+                    )
+        elif row["id"] == "posthoc-budget-accounting":
             observation = row["observation"]
             require_keys(
                 observation,
@@ -1591,7 +1962,8 @@ def validate_manifest(manifest):
     core = manifest["core_claims"]
     require_keys(core, (
         "boundary_ancestry", "endpoint_contract", "evidence_supersession",
-        "measured_budget", "parent_permutation", "persisted_carry",
+        "execution_bounds", "measured_budget", "parent_permutation",
+        "persisted_carry",
         "raw_grammar",
         "r3_full_frontier", "r6_outside_boundary_disposition",
         "retired_catalog", "reviewer_dag", "stable_git_diagnostics",
@@ -1672,6 +2044,129 @@ def validate_manifest(manifest):
             artifact["commit"],
             f"evidence_supersession.artifacts[{index}].commit",
         )
+    bounds = core["execution_bounds"]
+    require_keys(
+        bounds,
+        (
+            "composition_observation", "pairs", "runtime_milestone_commits",
+            "streaming_graph_contract",
+        ),
+        "execution_bounds",
+    )
+    if bounds["runtime_milestone_commits"] != list(
+        RUNTIME_MILESTONE_COMMITS
+    ):
+        raise EvidenceError("execution-bound runtime commits changed")
+    for index, commit in enumerate(bounds["runtime_milestone_commits"]):
+        require_oid(commit, f"execution_bounds.runtime_milestone_commits[{index}]")
+    require_keys(
+        bounds["streaming_graph_contract"],
+        (
+            "bounded_chunk_bytes", "raw_graph_bytes", "raw_graph_fields",
+            "raw_graph_lines",
+        ),
+        "execution_bounds.streaming_graph_contract",
+    )
+    if bounds["streaming_graph_contract"] != {
+        "bounded_chunk_bytes": 256,
+        "raw_graph_bytes": 2952,
+        "raw_graph_fields": [2, 2, 66, 2],
+        "raw_graph_lines": 4,
+    }:
+        raise EvidenceError("streaming graph contract changed")
+    require_keys(
+        bounds["composition_observation"],
+        ("git_processes", "production_parent_queries", "record_sha256"),
+        "execution_bounds.composition_observation",
+    )
+    p22_row = by_id["P22-PCX-18-one-pass-many-actions"]
+    if bounds["composition_observation"] != {
+        "git_processes": 135,
+        "production_parent_queries": 129,
+        "record_sha256": p22_row["record_sha256"],
+    }:
+        raise EvidenceError("P22 production-helper composition changed")
+    require_digest(
+        bounds["composition_observation"]["record_sha256"],
+        "execution_bounds.composition_observation.record_sha256",
+    )
+    if set(bounds["pairs"]) != {case[0] for case in EXECUTION_BOUND_CASES}:
+        raise EvidenceError("execution-bound pair inventory changed")
+    side_keys = (
+        "audit_exit", "classification", "counter_value", "evidence_status",
+        "limit", "metrics", "overflow_by_one", "record_sha256",
+        "transactional_zero_results",
+    )
+    selected_metric_keys = (
+        "git_processes", "graph_buffered_bytes",
+        "graph_process_cleanup_checks", "graph_process_reaps",
+        "graph_process_terminations", "graph_stream_peak_chunk_bytes",
+        "object_process_reaps", "object_process_terminations",
+        "queue_snapshots_requested", "support_certificate_calls",
+    )
+    for label, counter, value, exact_id, overflow_id in EXECUTION_BOUND_CASES:
+        pair = bounds["pairs"][label]
+        context = f"execution_bounds.pairs.{label}"
+        require_keys(
+            pair, ("counter", "exact", "limit_plus_one", "scenario_ids"),
+            context,
+        )
+        if pair["counter"] != counter or pair["scenario_ids"] != {
+            "exact": exact_id,
+            "limit_plus_one": overflow_id,
+        }:
+            raise EvidenceError(f"{context} identity changed")
+        require_keys(
+            pair["scenario_ids"], ("exact", "limit_plus_one"),
+            f"{context}.scenario_ids",
+        )
+        for side_name, scenario_id in (
+            ("exact", exact_id), ("limit_plus_one", overflow_id)
+        ):
+            side = pair[side_name]
+            side_context = f"{context}.{side_name}"
+            require_keys(side, side_keys, side_context)
+            require_keys(side["metrics"], selected_metric_keys, f"{side_context}.metrics")
+            row = by_id[scenario_id]
+            if side["record_sha256"] != row["record_sha256"]:
+                raise EvidenceError(f"{side_context} record changed")
+            if side["metrics"] != {
+                key: row["metrics"][key] for key in selected_metric_keys
+            }:
+                raise EvidenceError(f"{side_context} selected metrics changed")
+            require_digest(side["record_sha256"], f"{side_context}.record_sha256")
+        exact = pair["exact"]
+        overflow = pair["limit_plus_one"]
+        if (
+            exact["audit_exit"] != 0
+            or exact["classification"] != "no-finding"
+            or exact["counter_value"] != value
+            or exact["limit"] != value
+            or exact["overflow_by_one"] is not False
+            or exact["transactional_zero_results"] is not False
+            or overflow["audit_exit"] != 2
+            or overflow["classification"] != "blocking-finding"
+            or overflow["evidence_status"] != "ambiguous"
+            or overflow["counter_value"] != value
+            or overflow["limit"] != value - 1
+            or overflow["overflow_by_one"] is not True
+            or overflow["transactional_zero_results"] is not True
+        ):
+            raise EvidenceError(f"{context} exact/+1 contract changed")
+        if label.startswith("graph_") and (
+            exact["metrics"]["graph_buffered_bytes"] != 0
+            or overflow["metrics"]["graph_buffered_bytes"] != 0
+            or exact["metrics"]["graph_process_reaps"] != 1
+            or overflow["metrics"]["graph_process_reaps"] != 1
+            or exact["metrics"]["graph_stream_peak_chunk_bytes"] > 256
+            or overflow["metrics"]["graph_stream_peak_chunk_bytes"] > 256
+        ):
+            raise EvidenceError(f"{context} streaming cleanup bound changed")
+        if label == "object_payload_peak_bytes" and (
+            overflow["metrics"]["object_process_terminations"] != 1
+            or overflow["metrics"]["object_process_reaps"] != 1
+        ):
+            raise EvidenceError(f"{context} object cleanup bound changed")
     permutation = core["parent_permutation"]
     validate_permutation_record(
         permutation, "core_claims.parent_permutation"
@@ -1872,8 +2367,11 @@ def validate_manifest(manifest):
     require_keys(
         wide["metrics"],
         (
-            "graph_commits", "graph_parent_edges", "object_reads",
-            "queue_snapshots_requested",
+            "graph_commits", "graph_lines", "graph_output_bytes",
+            "graph_parent_edges", "graph_parent_tokens",
+            "graph_process_cleanup_checks", "graph_process_reaps",
+            "graph_process_terminations", "graph_stream_peak_chunk_bytes",
+            "object_reads", "queue_snapshots_requested",
         ),
         "measured_budget.wide_boundary.metrics",
     )
@@ -1888,13 +2386,24 @@ def validate_manifest(manifest):
         or wide["evidence_status"] != "ambiguous"
         or wide["outside_parent_count"] != 64
         or wide["budget_contract"] != {
+            "counter": "graph_parent_tokens",
             "limit": 7,
             "overflow_classification": "budget-exceeded",
+            "raw_graph_bytes": 2952,
+            "raw_graph_fields": [2, 2, 66, 2],
+            "raw_graph_lines": 4,
             "transactional_zero_results": True,
         }
         or wide["metrics"] != {
-            "graph_commits": 4,
-            "graph_parent_edges": 8,
+            "graph_commits": 3,
+            "graph_lines": 3,
+            "graph_output_bytes": 2870,
+            "graph_parent_edges": 2,
+            "graph_parent_tokens": 8,
+            "graph_process_cleanup_checks": 3,
+            "graph_process_reaps": 1,
+            "graph_process_terminations": 0,
+            "graph_stream_peak_chunk_bytes": 256,
             "object_reads": 3,
             "queue_snapshots_requested": 0,
         }
@@ -2107,6 +2616,7 @@ def render_readme(manifest):
     evidence_sha = digest_bytes(canonical_bytes(manifest))
     summary = manifest["summary"]
     core = manifest["core_claims"]
+    bounds = core["execution_bounds"]
     by_id = {x["id"]: x for x in manifest["scenarios"]}
     p22, p19 = by_id["P22-PCX-18-one-pass-many-actions"], by_id["PCX-19-missing-claim-blob-recovery"]
     lines = [
@@ -2120,7 +2630,8 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}` and v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}` are superseded and burned by their later semantic/evidence blockers; both histories are preserved, neither identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.", "",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, and v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
         "`N`, and derives the unique merge base `C`. It enumerates the full C-rooted",
@@ -2165,8 +2676,9 @@ def render_readme(manifest):
         f"The hidden-G attacker is clean at exit 0 and record-bound by `{core['boundary_ancestry']['record_sha256']}`: F is the neutral boundary, G carries the same identity in a unique missing blob, and G ancestry remains unopened.",
         f"R6-02 is explicitly dispositioned clean and record-bound by `{core['r6_outside_boundary_disposition']['record_sha256']}` because its outside-C boundary is absent; the ambiguous ancestor behind it is not reopened.",
         "All eight persisted-state attacker cases block in both parent orders: outside-C exact carriers retain multiplicity 1 or 2 as collisions, while valid and unauthorized absent C-descendant arms both remain deletion/reintroduction competitors.",
-        f"The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `{core['measured_budget']['wide_boundary']['record_sha256']}`; no action, edge, support, or carry-proof result leaks past the exceeded parent-edge budget.",
+        f"The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `{core['measured_budget']['wide_boundary']['record_sha256']}`; no action, edge, support, or carry-proof result leaks past the exceeded parent-token budget.",
         f"The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at {core['measured_budget']['precharge_P22']['precharge_expected_metrics']['git_processes']}, freezes later counters, and is record-bound by `{core['measured_budget']['precharge_P22']['record_sha256']}`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.",
+        f"Seven runtime exact/+1 pairs bind streaming graph bytes/lines/tokens, object payloads, flattened trees, dynamic support traversal, and certificate serialization. Every +1 refusal exits 2 with zero partial results; graph reads peak at {bounds['streaming_graph_contract']['bounded_chunk_bytes']} bytes per chunk and publish nothing on refusal. P22 separately observes exactly {bounds['composition_observation']['production_parent_queries']} imported production parent queries and {bounds['composition_observation']['git_processes']} Git processes.",
         f"Unreadable Git objects use the stable typed reason `{core['stable_git_diagnostics']['stable_reasons']['C']}`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.",
         f"Before any projection or digest, all {core['raw_grammar']['record_kinds']} raw rows must match the static recursive key/list/type grammar catalog `{core['raw_grammar']['catalog_sha256']}`; an unknown top-level or nested field exits {core['raw_grammar']['unknown_field_exit']}.",
         "The parent-order pair has identical verdicts and the same role multiset:",
@@ -2235,14 +2747,15 @@ def render_readme(manifest):
               "The process count includes imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. The POC's single budget consistently caps every emitted work counter.",
               f"PCX-20a passes at its exact measured maximum {exact_budget['measured_max_work']} with limit {exact_budget['limit']}; PCX-20b exits 2 with zero partial results when measured maximum {overflow_budget['measured_max_work']} exceeds limit {overflow_budget['limit']} by one.",
               f"R17-precharge-P22-budget charges before work and aborts on `{precharge_budget['evidence_reason']}` with exact bounded counters; the post-hoc reference vector is retained only as a damaged control.",
-              f"The 64-parent boundary case measures {wide_budget['metrics']['graph_commits']} intrinsic graph commits and {wide_budget['metrics']['graph_parent_edges']} parent edges against limit {wide_budget['budget_contract']['limit']}; parent-edge work is therefore metered even while graph commits remain below the limit.", "",
+              f"The 64-parent boundary case stops at parent token {wide_budget['metrics']['graph_parent_tokens']} against limit {wide_budget['budget_contract']['limit']} after {wide_budget['metrics']['graph_output_bytes']} of {wide_budget['budget_contract']['raw_graph_bytes']} raw bytes; the graph child is reaped and no graph is published.",
+              "The closed runtime matrix additionally admits/refuses exact/+1 values for total graph bytes, peak graph-line bytes, a 1,000,000-byte object, 1,004 flattened paths, 12 dynamic support paths, and 2,920 serialized certificate bytes.", "",
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed1 > /tmp/production-contract-r17-v4-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed777 > /tmp/production-contract-r17-v4-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --compare /tmp/production-contract-r17-v4-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --damage-test",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v5-seed1 > /tmp/production-contract-r17-v5-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v5-seed777 > /tmp/production-contract-r17-v5-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v5-seed1.jsonl --compare /tmp/production-contract-r17-v5-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v5-seed1.jsonl --damage-test",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
@@ -2252,7 +2765,7 @@ def render_readme(manifest):
               "manifest byte-for-byte, and regenerates this README in full. Its damage",
               "matrix covers invented/duplicate/missing rows, same-region OID swaps, tuple",
               "relabels, false verdicts/counters, contradictory transcripts/digests,",
-              "unknown raw fields/cost rows, locale error drift, post-hoc budget work,",
+              "unknown raw fields/cost rows, locale error drift, post-hoc or unmetered runtime work,",
               "noncanonical ordering, BOM, CRLF, and missing newline.", "",
               "## Nonclaims and integration gates", "",
               "- This POC changes no production reconciler, restack adapter, workflow input, schema, task, or run record.",
@@ -2514,6 +3027,39 @@ def damage_matrix(expected, stream):
         ),
         "pre-charge P22 budget claim changed",
     )
+    for label, _counter, _value, _exact_id, _overflow_id in (
+        EXECUTION_BOUND_CASES
+    ):
+        manifest_case(
+            f"execution-bound-{label}-leaks-partial-result",
+            lambda d, label=label: d["core_claims"]["execution_bounds"][
+                "pairs"
+            ][label]["limit_plus_one"].update(
+                transactional_zero_results=False
+            ),
+            "exact/+1 contract changed",
+        )
+    manifest_case(
+        "execution-bound-stream-chunk-expanded",
+        lambda d: d["core_claims"]["execution_bounds"][
+            "streaming_graph_contract"
+        ].update(bounded_chunk_bytes=257),
+        "streaming graph contract changed",
+    )
+    manifest_case(
+        "execution-bound-composition-query-erased",
+        lambda d: d["core_claims"]["execution_bounds"][
+            "composition_observation"
+        ].update(production_parent_queries=128),
+        "P22 production-helper composition changed",
+    )
+    manifest_case(
+        "execution-bound-runtime-milestone-erased",
+        lambda d: d["core_claims"]["execution_bounds"][
+            "runtime_milestone_commits"
+        ].__setitem__(1, "0" * 40),
+        "execution-bound runtime commits changed",
+    )
     manifest_case(
         "superseded-v2-reused",
         lambda d: d["core_claims"]["evidence_supersession"].update(
@@ -2533,6 +3079,13 @@ def damage_matrix(expected, stream):
         lambda d: d["core_claims"]["evidence_supersession"][
             "artifacts"
         ][1].update(commit="0" * 40),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
+        "superseded-v4-commit-erased",
+        lambda d: d["core_claims"]["evidence_supersession"][
+            "artifacts"
+        ][2].update(commit="0" * 40),
         "evidence schema supersession changed",
     )
     manifest_case(
