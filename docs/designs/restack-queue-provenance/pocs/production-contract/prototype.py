@@ -84,13 +84,18 @@ class ActionState:
 class Fixture:
     scenario: str
     repo: "GitRepository"
-    C: str
+    expected_C: str
     O: str
-    M: str
+    candidate_landmark: str
     N: str
     expected: str
     details: dict = dataclasses.field(default_factory=dict)
     budget_limit: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class RepositoryView:
+    root: Path
 
 
 @dataclasses.dataclass
@@ -116,6 +121,7 @@ class Damage:
     ignore_absent_c_arm: bool = False
     first_parent_carry_only: bool = False
     skip_carry_compatibility: bool = False
+    unmetered_cone_work: bool = False
 
 
 @dataclasses.dataclass
@@ -533,14 +539,12 @@ class Graph:
     def __init__(
         self,
         root: Path,
-        C: str,
         O: str,
         N: str,
         objects: ObjectDatabase,
         metrics: Metrics,
     ):
         self.root = root
-        self.C = C
         self.O = O
         self.N = N
         self.objects = objects
@@ -550,7 +554,7 @@ class Graph:
         ).stdout.strip()
         if shallow == "true":
             raise Unreadable("required post-C history is shallow")
-        for label, oid in (("C", C), ("O", O), ("N", N)):
+        for label, oid in (("O", O), ("N", N)):
             try:
                 objects.commit_tree(oid)
             except Unreadable as error:
@@ -574,10 +578,11 @@ class Graph:
             raise Unreadable(
                 f"expected exactly one merge base C; found {len(merge_bases)}"
             )
-        if merge_bases[0] != C:
-            raise Unreadable(
-                f"declared C {C} is not the unique merge base {merge_bases[0]}"
-            )
+        self.C = merge_bases[0]
+        try:
+            objects.commit_tree(self.C)
+        except Unreadable as error:
+            raise Unreadable(f"derived C: {error}") from error
         metrics.graph_enumerations += 1
         listing = run_git(
             root,
@@ -589,10 +594,10 @@ class Graph:
             "--reverse",
             O,
             N,
-            f"^{C}",
+            f"^{self.C}",
         )
-        self.order = [C]
-        self.parents: dict[str, tuple[str, ...]] = {C: ()}
+        self.order = [self.C]
+        self.parents: dict[str, tuple[str, ...]] = {self.C: ()}
         for line in listing.stdout.splitlines():
             fields = line.split()
             if not fields:
@@ -614,10 +619,19 @@ class Graph:
                     self.children.setdefault(parent, []).append(child)
         self.old_nodes = self.ancestors(O)
         self.new_nodes = self.ancestors(N)
-        if C not in self.old_nodes or C not in self.new_nodes:
+        if self.C not in self.old_nodes or self.C not in self.new_nodes:
             raise Unreadable("both tips must descend from C")
         self.c_descendants = self.descendants(self.C)
-        self.candidate_nodes = self.new_nodes - self.old_nodes
+        candidate_core = self.new_nodes.intersection(
+            self.c_descendants
+        )
+        boundary_parents = {
+            parent
+            for child in candidate_core
+            for parent in self.parents.get(child, ())
+            if parent not in self.c_descendants
+        }
+        self.candidate_nodes = candidate_core.union(boundary_parents)
 
     def ancestors(self, tip: str) -> set[str]:
         seen = set()
@@ -684,24 +698,6 @@ class Classifier:
             "production_tuple": values,
             "production_tuple_sha256": hashlib.sha256(payload).hexdigest(),
         }
-
-    def selected_base_problem(self) -> str | None:
-        """Validate declared M before any identity or authority work."""
-        assert self.objects is not None
-        assert self.graph is not None
-        M = self.fixture.M
-        try:
-            tree = self.objects.commit_tree(M)
-            self.objects.tree_entries(tree)
-        except Unreadable as error:
-            raise Unreadable(f"M {M}: {error}") from error
-        if M not in self.graph.new_nodes:
-            return (
-                f"declared M {M} is outside the required C-rooted candidate "
-                f"region: M must descend from or equal C {self.fixture.C} "
-                f"and be an ancestor of or equal N {self.fixture.N}"
-            )
-        return None
 
     def carry_proof(self, identity: tuple, tip: str) -> dict:
         """Prove one live occurrence by C-rooted edges, not all ancestors."""
@@ -772,9 +768,10 @@ class Classifier:
             local_absent: list[str] = []
             local_collisions: list[dict] = []
             local_neutral: list[str] = []
-            parents = sorted(self.graph.parents.get(child, ()))
             if self.damage.first_parent_carry_only:
-                parents = parents[:1]
+                parents = list(self.graph.parents.get(child, ()))[:1]
+            else:
+                parents = sorted(self.graph.parents.get(child, ()))
             for parent in parents:
                 self.metrics.carry_proof_edges += 1
                 states = self.states(parent, identity)
@@ -2088,7 +2085,7 @@ class Classifier:
         """Trace the admitted occurrence from each implicated tip to C."""
         assert self.graph is not None
 
-        C_states = self.states(self.fixture.C, identity)
+        C_states = self.states(self.graph.C, identity)
         if len(C_states) != 1:
             return (
                 f"C carries exact identity multiplicity {len(C_states)}",
@@ -2096,7 +2093,7 @@ class Classifier:
                 [],
             )
 
-        memo: dict[str, bool] = {self.fixture.C: True}
+        memo: dict[str, bool] = {self.graph.C: True}
         visiting: set[str] = set()
         edges: list[dict] = []
         failures: list[tuple[str, str]] = []
@@ -2727,16 +2724,9 @@ class Classifier:
     def final_absence_participants(
         self, identity: tuple, events: list[Event]
     ) -> list[Event]:
-        """Find the event frontier at M, extended after reintroduction."""
+        """Find every causal event that reaches the fixed N frontier."""
         assert self.graph is not None
-        boundary = (
-            self.fixture.M
-            if self.absence_problem(
-                identity, self.fixture.M, self.fixture.N
-            )
-            is None
-            else self.fixture.N
-        )
+        boundary = self.fixture.N
         continuous = [
             event
             for event in events
@@ -2988,7 +2978,8 @@ class Classifier:
         identity: tuple,
         old_states: tuple[ActionState, ...],
     ) -> dict:
-        C_states = self.states(self.fixture.C, identity)
+        assert self.graph is not None
+        C_states = self.states(self.graph.C, identity)
         N_states = self.states(self.fixture.N, identity)
         return {
             "identity": self.identity_view(identity),
@@ -3026,7 +3017,7 @@ class Classifier:
     ) -> dict:
         assert self.graph is not None
         base = self.action_base(identity, old_states)
-        C_states = self.states(self.fixture.C, identity)
+        C_states = self.states(self.graph.C, identity)
         N_states = self.states(self.fixture.N, identity)
         if N_states:
             if len(N_states) != len(old_states) or len(N_states) != 1:
@@ -3158,7 +3149,7 @@ class Classifier:
             }
         if self.damage.reopen_pre_c_genealogy:
             assert self.objects is not None
-            parents = self.objects.commit_parents(self.fixture.C)
+            parents = self.objects.commit_parents(self.graph.C)
             carrying = [
                 parent for parent in parents if self.states(parent, identity)
             ]
@@ -3257,15 +3248,13 @@ class Classifier:
         fixture = self.fixture
         base = {
             "scenario": fixture.scenario,
-            "C": fixture.C,
+            "C": None,
             "O": fixture.O,
-            "M": fixture.M,
             "N": fixture.N,
             "expected_result": fixture.expected,
-            "range_base_validation": {
-                "status": "unchecked",
-                "M": fixture.M,
-                "reason": "M validation has not run",
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
             },
         }
         objects = None
@@ -3277,54 +3266,51 @@ class Classifier:
                 self.objects = objects
                 self.graph = Graph(
                     fixture.repo.root,
-                    fixture.C,
                     fixture.O,
                     fixture.N,
                     objects,
                     self.metrics,
                 )
-                M_problem = self.selected_base_problem()
-                if M_problem:
+                base["C"] = self.graph.C
+                if fixture.expected_C:
+                    base["derived_C_matches_fixture"] = (
+                        self.graph.C == fixture.expected_C
+                    )
+                if self.graph.C == fixture.O:
                     return {
                         **base,
-                        "range_base_validation": {
-                            "status": "ambiguous",
-                            "M": fixture.M,
-                            "reason": M_problem,
-                        },
-                        "classification": "blocking-finding",
+                        "audit_exit": 0,
+                        "classification": "no-finding",
                         "evidence_verdict": {
-                            "status": "ambiguous",
-                            "reason": M_problem,
+                            "status": "none",
+                            "reason": (
+                                "O is the unique merge base of O and N; "
+                                "the update is a fast-forward, not a restack"
+                            ),
                         },
                         "event_mode": "none",
                         "authority_edges": [],
                         "propagation_edges": [],
                         "mutation_edges": [],
                         "support_checks": [],
+                        "carry_proofs": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
                     }
-                base["range_base_validation"] = {
-                    "status": "valid",
-                    "M": fixture.M,
-                    "reason": (
-                        f"M {fixture.M} is a readable commit in the "
-                        f"C-rooted candidate ancestry through N {fixture.N}"
-                    ),
-                }
                 if (
                     fixture.budget_limit is not None
                     and self.metrics.graph_commits > fixture.budget_limit
+                    and not self.damage.unmetered_cone_work
                 ):
                     return {
                         **base,
+                        "audit_exit": 2,
                         "classification": "blocking-finding",
                         "evidence_verdict": {
                             "status": "ambiguous",
                             "reason": (
-                                "measured fixture budget exceeded: "
+                                "measured graph budget exceeded: "
                                 f"{self.metrics.graph_commits}>"
                                 f"{fixture.budget_limit}"
                             ),
@@ -3334,6 +3320,7 @@ class Classifier:
                         "propagation_edges": [],
                         "mutation_edges": [],
                         "support_checks": [],
+                        "carry_proofs": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -3383,6 +3370,7 @@ class Classifier:
                 )
                 result = {
                     **base,
+                    "audit_exit": 1 if findings else 0,
                     "classification": classification,
                     "evidence_verdict": {
                         "status": evidence_status,
@@ -3435,11 +3423,7 @@ class Classifier:
         ) as error:
             return {
                 **base,
-                "range_base_validation": {
-                    "status": "unreadable",
-                    "M": fixture.M,
-                    "reason": str(error),
-                },
+                "audit_exit": 2,
                 "classification": "unreadable",
                 "evidence_verdict": {
                     "status": "unreadable",
@@ -3450,6 +3434,7 @@ class Classifier:
                 "propagation_edges": [],
                 "mutation_edges": [],
                 "support_checks": [],
+                "carry_proofs": [],
                 "actions": [],
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
@@ -3744,17 +3729,17 @@ def ordinary_linear_fixture(
     repo.branch("candidate", C)
     if valid:
         claim(repo, (path,))
-        M = delete_with_evidence(repo, ((label, path),))
+        candidate_landmark = delete_with_evidence(repo, ((label, path),))
     else:
         repo.remove(path)
-        M = repo.commit("delete without authority")
+        candidate_landmark = repo.commit("delete without authority")
     N = feature(repo, f"{label}-old")
     return Fixture(
         scenario,
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding" if valid else "blocking-finding",
     )
@@ -3768,14 +3753,14 @@ def p3_old_loss(root: Path) -> Fixture:
     path = add_agent(repo, "p3")
     O = feature(repo, "p3-task")
     repo.branch("candidate", C)
-    M = feature(repo, "p3-base")
+    candidate_landmark = feature(repo, "p3-base")
     N = feature(repo, "p3-task")
     return Fixture(
         "P3-genuine-old-loss",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"lost_path": path},
@@ -3800,14 +3785,14 @@ def p4_pre_c_origins(root: Path) -> Fixture:
     O = feature(repo, "p4-old")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p4", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p4", path),))
     N = feature(repo, "p4-old")
     return Fixture(
         "P4-pre-C-identical-origins",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"pre_C_origins": [A, B], "pre_C_root": R},
@@ -3829,14 +3814,14 @@ def p5_duplicate_at_c(root: Path) -> Fixture:
     repo.write(evidence_path("p5"), "# Evidence p5: resolved\n")
     repo.remove(first)
     repo.remove(second)
-    M = repo.commit("delete both duplicate paths")
+    candidate_landmark = repo.commit("delete both duplicate paths")
     N = feature(repo, "p5-old")
     return Fixture(
         "P5-duplicate-at-C",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3856,14 +3841,14 @@ def p6_old_recreate(root: Path) -> Fixture:
     O = feature(repo, "p6-old-task")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p6-old", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p6-old", path),))
     N = feature(repo, "p6-old-task")
     return Fixture(
         "P6a-old-delete-recreate",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3883,7 +3868,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
     repo.write(path, original)
     repo.commit("recreate byte-identical p6")
     claim(repo, (path,), "fresh claim after recreation")
-    M = delete_with_evidence(
+    candidate_landmark = delete_with_evidence(
         repo, (("p6-candidate", path),), "second deletion"
     )
     N = feature(repo, "p6-candidate-old")
@@ -3892,7 +3877,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3910,14 +3895,14 @@ def p7_payload_change(root: Path) -> Fixture:
     O = feature(repo, "p7-old")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p7", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p7", path),))
     N = feature(repo, "p7-old")
     return Fixture(
         "P7-immutable-payload-change",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -3944,7 +3929,7 @@ def p8_timing_move(root: Path) -> Fixture:
     O = feature(repo, "p8-old")
     repo.branch("candidate", C)
     repo.move(old_path, new_path)
-    M = repo.commit("perform one-to-one timing path move")
+    candidate_landmark = repo.commit("perform one-to-one timing path move")
     N = feature(repo, "p8-old")
     before = agent_text("p8")
     details = {
@@ -3965,7 +3950,7 @@ def p8_timing_move(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         details,
@@ -3999,7 +3984,7 @@ def direct_merge_fixture(
         repo.branch("neutral", R)
         neutral = feature(repo, f"{label}-neutral")
         parents.append(neutral)
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         parents,
         f"direct merge deletion for {label}",
         writes={evidence_path(label): f"# Evidence {label}: resolved\n"},
@@ -4016,7 +4001,7 @@ def direct_merge_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         {
@@ -4048,7 +4033,7 @@ def pcx03_foreign_identity(root: Path) -> Fixture:
     add_agent(repo, "pcx03", path=path, text=text)
     claim(repo, (path,), "claim independent occurrence")
     foreign_parent = feature(repo, "pcx03-foreign")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (valid_parent, foreign_parent),
         "delete disconnected exact identities",
         writes={evidence_path("pcx03"): "# Evidence pcx03: resolved\n"},
@@ -4060,7 +4045,7 @@ def pcx03_foreign_identity(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -4104,7 +4089,7 @@ def supplier_fixture(
         if merge_changes_evidence
         else {}
     )
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt supplier absence",
         writes=writes,
@@ -4116,7 +4101,7 @@ def supplier_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding" if supplier_valid else "blocking-finding",
         {
@@ -4148,7 +4133,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
     )
     repo.branch("carrier", C)
     carrier = feature(repo, "p14-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (second, carrier),
         "merge after supplier reintroduction",
         removes=(path,),
@@ -4159,7 +4144,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"first_deletion": first, "second_deletion": second},
@@ -4186,7 +4171,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
         )
     repo.branch("carrier", C)
     carrier = feature(repo, "p15-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (*suppliers, carrier),
         "merge competing suppliers",
         removes=(path,),
@@ -4197,7 +4182,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"supplier_events": suppliers},
@@ -4220,14 +4205,14 @@ def p17_post_event_reintroduction(root: Path) -> Fixture:
     repo.write(path, original)
     repo.commit("reintroduce p17 after valid event")
     repo.remove(path)
-    M = repo.commit("delete recreated p17 without claim")
+    candidate_landmark = repo.commit("delete recreated p17 without claim")
     N = feature(repo, "p17-old")
     return Fixture(
         "P17-post-event-reintroduction",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"early_authority_event": first},
@@ -4252,7 +4237,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
         absent.append(feature(repo, f"pcx04-absent-{index}"))
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx04-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (*absent, carrier),
         "adopt one supplier through two absent parents",
         removes=(path,),
@@ -4263,7 +4248,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -4301,7 +4286,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
     second = repo.commit("supplier D2")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx05-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (absent_one, second, carrier),
         "merge competing D1 and D2",
         removes=(path,),
@@ -4312,7 +4297,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"D1": first, "D2": second},
@@ -4352,7 +4337,7 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
     carrier_two = feature(repo, "pcx06-carrier-two")
     repo.branch("neutral-two", R)
     neutral_two = feature(repo, "pcx06-neutral-two")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (adoption_one, carrier_two, neutral_two),
         "second supplier adoption",
         removes=(path,),
@@ -4363,12 +4348,12 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
             "direct_event": deletion,
-            "adoptions": [adoption_one, M],
+            "adoptions": [adoption_one, candidate_landmark],
             "carriers": [carrier_one, carrier_two],
             "neutral_parents": [neutral_one, neutral_two],
             "absent_sources": [deletion, adoption_one],
@@ -4395,7 +4380,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
     second = repo.commit("delete recreated bytes without fresh claim")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx09-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (second, carrier),
         "adopt recreated deletion",
         removes=(path,),
@@ -4406,7 +4391,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"D1": first, "D2": second},
@@ -4428,14 +4413,14 @@ def pcx10_transient_multiplicity(root: Path) -> Fixture:
     duplicate = repo.commit("transiently duplicate exact identity")
     repo.remove(second)
     repo.commit("collapse transient duplicate")
-    M = delete_with_evidence(repo, (("pcx10", first),))
+    candidate_landmark = delete_with_evidence(repo, (("pcx10", first),))
     N = feature(repo, "pcx10-old")
     return Fixture(
         "PCX-10-transient-multiplicity",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"duplicate_commit": duplicate, "duplicate_path": second},
@@ -4469,7 +4454,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
         ),
     )
     foreign = feature(repo, "pcx11-foreign-b")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier, foreign),
         "merge absent Q-A and delete unresolved Q-B",
         removes=(path,),
@@ -4480,7 +4465,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -4510,7 +4495,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
     repo.branch("carrier", C)
     repo.move(old_path, moved)
     carrier = feature(repo, "pcx12-moved-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt supplier after identity-preserving move",
         removes=(old_path, moved),
@@ -4521,7 +4506,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"moved_path": moved, "carrier": carrier},
@@ -4577,7 +4562,7 @@ def human_supplier_fixture(
         carrier_three = feature(repo, f"{label}-carrier-three")
         repo.branch("human-neutral-three", R)
         neutral_three = feature(repo, f"{label}-neutral-three")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (outer_invalid, carrier_three, neutral_three),
             "continue third-level invalid human supplier ancestry",
             removes=(path,),
@@ -4586,7 +4571,7 @@ def human_supplier_fixture(
             {
                 "inner_invalid": inner_invalid,
                 "outer_invalid": outer_invalid,
-                "adoptions": [inner_invalid, outer_invalid, M],
+                "adoptions": [inner_invalid, outer_invalid, candidate_landmark],
                 "carriers": [carrier, carrier_two, carrier_three],
                 "neutral_parents": [
                     neutral_one,
@@ -4601,7 +4586,7 @@ def human_supplier_fixture(
             }
         )
     else:
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (supplier, carrier),
             "adopt human supplier absence",
             removes=(path,),
@@ -4612,7 +4597,7 @@ def human_supplier_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         (
             "blocking-finding"
@@ -4650,20 +4635,20 @@ def r8_human_response_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt human response supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     return Fixture(
         f"R8-{mode}-human-response-{disposition}",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -4714,14 +4699,14 @@ def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
         ((label, path),),
         "resolve candidate human review",
     )
-    M = deletion
+    candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     return Fixture(
         f"R8-review-binding-{disposition}",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if divergent else "no-finding",
         {
@@ -4834,13 +4819,13 @@ def r9_review_pending_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             f"adopt review {field_slug} supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     old_pending_value = "pending"
     candidate_value = (
@@ -4853,7 +4838,7 @@ def r9_review_pending_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -4918,13 +4903,13 @@ def r10_malformed_review_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             f"adopt malformed {field_slug} review supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     candidate_value = (
         f"`{target}`" if field == "Review target" else revision
@@ -4934,7 +4919,7 @@ def r10_malformed_review_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5013,7 +4998,7 @@ def r13_review_parent_binding(
         carrier = feature(repo, f"{label}-live-carrier")
 
     if mode == "direct":
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (authority_parent, carrier),
             "directly delete review from both carrying parents",
             writes={
@@ -5022,7 +5007,7 @@ def r13_review_parent_binding(
             removes=(path,),
         )
     else:
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt review supplier absence with carrying parent",
             removes=(path,),
@@ -5040,7 +5025,7 @@ def r13_review_parent_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -5070,9 +5055,9 @@ def r13_review_parent_binding(
                 ),
             ],
             "authority_parent": authority_parent,
-            "authority_child": M if mode == "direct" else deletion,
+            "authority_child": candidate_landmark if mode == "direct" else deletion,
             "carrier": carrier,
-            "merge": M,
+            "merge": candidate_landmark,
         },
     )
 
@@ -5182,7 +5167,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         Path(path).with_name(f"non-blocking-{label}-moved.md")
     )
     repo.move(path, moved)
-    M = repo.commit(f"move low-similarity persisted-state {variant}")
+    candidate_landmark = repo.commit(f"move low-similarity persisted-state {variant}")
     N = feature(repo, f"{label}-new-tip")
 
     old_text = repo.run("show", f"{O}:{path}").stdout
@@ -5206,7 +5191,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if expected_problem else "no-finding",
         {
@@ -5307,13 +5292,13 @@ def r14_review_carrier_binding(
                 repo, path, carrier_target, carrier_revision
             )
             carrier_binding = [carrier_target, carrier_revision]
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt absence with an unanswered published review carrier",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
         carrier_binding = [authority_target, authority_revision]
     N = feature(repo, f"{label}-new")
 
@@ -5323,7 +5308,7 @@ def r14_review_carrier_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -5360,7 +5345,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.move(path, moved)
     repo.write(moved, original.replace(hidden_A, hidden_B))
-    M = repo.commit("move action while replacing protected hidden bytes")
+    candidate_landmark = repo.commit("move action while replacing protected hidden bytes")
     N = feature(repo, f"{label}-new")
     before = repo.run("show", f"{O}:{path}").stdout
     after = repo.run("show", f"{N}:{moved}").stdout
@@ -5372,7 +5357,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5412,14 +5397,14 @@ def r14_persisted_intermediate_claim(root: Path) -> Fixture:
     )
     bad = repo.commit("regress candidate claim in intermediate commit")
     repo.write(path, before_bad)
-    M = repo.commit("restore candidate claim before endpoint")
+    candidate_landmark = repo.commit("restore candidate claim before endpoint")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-intermediate-claim-regression",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"bad": bad, "expected_problem": "committed in-repair"},
@@ -5461,14 +5446,14 @@ def r14_persisted_intermediate_review(root: Path) -> Fixture:
     )
     bad = repo.commit("mutate review binding in intermediate commit")
     repo.write(path, original)
-    M = repo.commit("restore review binding before endpoint")
+    candidate_landmark = repo.commit("restore review binding before endpoint")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-intermediate-review-regression",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"bad": bad, "expected_problem": "immutable review binding"},
@@ -5489,14 +5474,14 @@ def r14_persisted_delete_recreate(root: Path) -> Fixture:
     gap = repo.commit("temporarily delete exact persisted identity")
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.write(moved, original)
-    M = repo.commit("recreate exact persisted identity")
+    candidate_landmark = repo.commit("recreate exact persisted identity")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-delete-recreate",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"gap": gap, "old_path": path, "new_path": moved},
@@ -5534,14 +5519,14 @@ def r14_persisted_review_retraction(root: Path) -> Fixture:
     repo.write(path, text)
     retracted = repo.commit("retract unanswered review publication")
     published_B = publish_review(repo, path, target_B, revision_B)
-    M = published_B
+    candidate_landmark = published_B
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-valid-review-retraction",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -5564,7 +5549,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
     answer_commit = answer(repo, path, "first-response-" * 4096)
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.move(path, moved)
-    M = repo.commit("move decision after valid first response")
+    candidate_landmark = repo.commit("move decision after valid first response")
     N = feature(repo, f"{label}-new")
     name_status = repo.run(
         "diff", "--name-status", "-M", O, N, "--", path, moved
@@ -5574,7 +5559,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -5623,7 +5608,7 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         carrier = publish_review(repo, path, target_B, revision_B)
     else:
         carrier = feature(repo, f"{label}-pending")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (source, carrier),
         "merge persisted source with compatible or conflicting carrier",
         writes={path: source_text},
@@ -5634,10 +5619,10 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
-        {"source": source, "carrier": carrier, "merge": M, "conflict": conflict},
+        {"source": source, "carrier": carrier, "merge": candidate_landmark, "conflict": conflict},
     )
 
 
@@ -5706,24 +5691,278 @@ def r17_outside_c_neutral_parent(root: Path) -> Fixture:
     )
 
 
-def r8_adapter_M_variants(root: Path) -> Fixture:
+def r17_carry_merge_fixture(
+    root: Path, *, variant: str, reverse_parents: bool = False
+) -> Fixture:
+    """Exercise one retained live occurrence across a post-C merge."""
+    if variant not in {
+        "compatible",
+        "incompatible",
+        "absent-arm",
+        "outside-single",
+        "outside-duplicate",
+    }:
+        raise ValueError(variant)
     repo = GitRepository(root)
     initialize(repo)
-    label = "r8-adapter-M-input"
+    R = repo.commit(f"create {variant} carry root")
+    label = f"r17-carry-{variant}"
     path = add_agent(repo, label)
-    C = repo.commit("create adapter-input action at C")
+    text = repo.read(path)
+    C = repo.commit(f"create {variant} carried action at C")
     repo.branch("old", C)
-    O = feature(repo, f"{label}-old")
-    repo.branch("candidate", C)
-    claim(repo, (path,), "claim adapter-input action")
+    O = feature(repo, f"{label}-task-patch")
+
+    repo.branch("primary-carrier", C)
+    primary = feature(repo, f"{label}-primary")
+    repo.branch("second-carrier", R if variant.startswith("outside-") else C)
+    if variant == "incompatible":
+        claim(repo, (path,), "claim incompatible carry arm")
+        second = feature(repo, f"{label}-incompatible")
+    elif variant == "absent-arm":
+        repo.remove(path)
+        second = repo.commit("remove action on competing C-descendant arm")
+    elif variant == "outside-single":
+        add_agent(repo, label, path=path, text=text)
+        second = feature(repo, f"{label}-outside-single")
+    elif variant == "outside-duplicate":
+        add_agent(repo, label, path=path, text=text)
+        duplicate_path = queue_path(f"{label}-duplicate")
+        add_agent(repo, label, path=duplicate_path, text=text)
+        second = feature(repo, f"{label}-outside-duplicate")
+    else:
+        second = feature(repo, f"{label}-compatible")
+    parents = (second, primary) if reverse_parents else (primary, second)
+    merge = repo.merge_commit(
+        parents,
+        f"retain action across {variant} carry merge",
+        writes={path: text},
+        removes=(
+            (queue_path(f"{label}-duplicate"),)
+            if variant == "outside-duplicate"
+            else ()
+        ),
+    )
+    repo.branch("candidate", merge)
+    authority_parent = claim(repo, (path,), "claim retained carried action")
     deletion = delete_with_evidence(
         repo,
         ((label, path),),
-        "resolve adapter-input action",
+        "resolve retained carried action",
     )
-    N = feature(repo, f"{label}-old")
+    N = feature(repo, f"{label}-task-patch")
+    expected = "no-finding" if variant == "compatible" else "blocking-finding"
+    suffix = "-reversed" if reverse_parents else ""
     return Fixture(
-        "R8-adapter-M-input-variants",
+        f"R17-carry-{variant}{suffix}",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        expected,
+        {
+            "variant": variant,
+            "merge": merge,
+            "primary": primary,
+            "second": second,
+            "merge_parents": list(parents),
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "reverse_parents": reverse_parents,
+        },
+    )
+
+
+def r17_workflow_input_case(root: Path, case: str) -> Fixture:
+    """Bind non-core transport claims to the exact O,N-only API."""
+    cases = {
+        "fast-forward",
+        "pre-pr-push",
+        "base-advance-retarget",
+        "multiple-pr-api-race",
+        "stale-rerun",
+        "missing-old",
+        "zero-endpoints",
+        "pr-synchronize",
+    }
+    if case not in cases:
+        raise ValueError(case)
+    if case == "fast-forward":
+        repo = GitRepository(root)
+        initialize(repo)
+        path = add_agent(repo, "r17-workflow-fast-forward")
+        C = repo.commit("create fast-forward input action")
+        O = feature(repo, "r17-workflow-fast-forward-old")
+        N = feature(repo, "r17-workflow-fast-forward-new")
+        fixture = Fixture(
+            "W0-fast-forward-return",
+            repo,
+            O,
+            O,
+            N,
+            N,
+            "no-finding",
+            {"preserved_path": path},
+        )
+    else:
+        fixture = ordinary_linear_fixture(
+            root,
+            f"W-{case}",
+            valid=True,
+        )
+        fixture.scenario = {
+            "pre-pr-push": "W1-pre-PR-push-exact-endpoints",
+            "base-advance-retarget": "W2-base-advance-retarget-invariant",
+            "multiple-pr-api-race": "W3-multiple-PR-API-zero-calls",
+            "stale-rerun": "W4-stale-rerun-exact-inputs",
+            "missing-old": "W5-missing-O-coverage-unavailable",
+            "zero-endpoints": "W6-created-deleted-zero-endpoints",
+            "pr-synchronize": "W7-PR-synchronize-top-level-endpoints",
+        }[case]
+    O = fixture.O
+    N = fixture.N
+    contract = {
+        "authoritative_inputs": {"O": O, "N": N},
+        "classifier_parameters": ["O", "N"],
+        "provider_api_calls": 0,
+        "fallback": None,
+    }
+    if case == "pre-pr-push":
+        fixture.repo.branch("workflow-default-tip", fixture.expected_C)
+        default_tip = feature(fixture.repo, "workflow-default-tip")
+        contract.update(
+            {
+                "transport": "push",
+                "O_source": "immutable event.before",
+                "N_source": "immutable event.after",
+                "event_before": O,
+                "event_after": N,
+                "github_sha": default_tip,
+                "github_sha_is_authoritative": False,
+                "pre_PR": True,
+            }
+        )
+    elif case == "base-advance-retarget":
+        contract["provider_state_variants"] = [
+            "base-advanced",
+            "retargeted",
+            "base-equals-new-tip",
+        ]
+        contract["variants_keep_exact_O_N"] = True
+    elif case == "multiple-pr-api-race":
+        contract.update(
+            {
+                "provider_states": [
+                    "pre-PR",
+                    "closed-PR",
+                    "multiple-PRs",
+                    "fork",
+                    "API-race",
+                ],
+                "PR_lookup": False,
+            }
+        )
+    elif case == "stale-rerun":
+        contract.update(
+            {
+                "repeat_exact_inputs": True,
+                "stale_rerun_policy": "reuse immutable O,N",
+            }
+        )
+    elif case == "missing-old":
+        missing = "f" * len(O)
+        fixture.O = missing
+        fixture.expected = "unreadable"
+        contract["authoritative_inputs"]["O"] = missing
+        contract.update(
+            {
+                "coverage_classification": "coverage-unavailable",
+                "old_object_fetch_exit": 2,
+                "fallback": None,
+            }
+        )
+    elif case == "zero-endpoints":
+        zero = "0" * len(O)
+        contract["event_classifications"] = [
+            {
+                "event": "created",
+                "before": zero,
+                "classification": "coverage-unavailable",
+            },
+            {
+                "event": "deleted",
+                "after": zero,
+                "classification": "coverage-unavailable",
+            },
+        ]
+    elif case == "pr-synchronize":
+        contract.update(
+            {
+                "transport": "pull_request.synchronize",
+                "O_source": "top-level before",
+                "N_source": "top-level after",
+                "top_level_before": O,
+                "top_level_after": N,
+                "pull_request_head_sha": N,
+                "after_matches_head": True,
+                "mismatch_classification": "coverage-unavailable",
+                "PR_lookup": False,
+            }
+        )
+    elif case == "fast-forward":
+        contract["fast_forward_return"] = True
+    fixture.details["workflow_contract"] = contract
+    return fixture
+
+
+def r17_unreadable_boundary(root: Path) -> Fixture:
+    fixture = r17_outside_c_neutral_parent(root)
+    boundary = fixture.details["F"]
+    hidden, _target = fixture.repo.hide_loose_object(boundary)
+    fixture.scenario = "R17-unreadable-outside-C-boundary"
+    fixture.expected = "unreadable"
+    fixture.details.update(
+        {
+            "unreadable_boundary": boundary,
+            "hidden_boundary_object": hidden.relative_to(
+                fixture.repo.root
+            ).as_posix(),
+        }
+    )
+    return fixture
+
+
+def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    transient = "outside-only/transient.txt"
+    repo.write(transient, "must not be opened through a neutral boundary\n")
+    G = repo.commit("create outside-C ancestor with transient blob")
+    transient_blob = repo.tree_entry_oid(G, transient)
+    label = "r17-unopened-outside-c-ancestor"
+    repo.branch("reviewed", G)
+    repo.remove(transient)
+    path = add_agent(repo, label)
+    C = repo.commit("create reviewed action after dropping transient blob")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+    repo.branch("outside", G)
+    repo.remove(transient)
+    F = feature(repo, f"{label}-outside-parent")
+    merge = repo.merge_commit(
+        (C, F),
+        "retain action across neutral outside-C boundary",
+    )
+    repo.branch("candidate", merge)
+    claim(repo, (path,), "claim action after neutral boundary")
+    deletion = delete_with_evidence(
+        repo, ((label, path),), "resolve action after neutral boundary"
+    )
+    N = feature(repo, f"{label}-task-patch")
+    hidden, _target = repo.hide_loose_object(transient_blob)
+    return Fixture(
+        "R17-unreadable-outside-C-ancestor-stays-unopened",
         repo,
         C,
         O,
@@ -5731,12 +5970,10 @@ def r8_adapter_M_variants(root: Path) -> Fixture:
         N,
         "no-finding",
         {
-            "adapter_M_variants": {
-                "workflow_M_equals_O": O,
-                "explicit_candidate_M": deletion,
-                "endpoint_M_equals_N": N,
-            },
-            "poc_changes_adapter": False,
+            "G": G,
+            "F": F,
+            "transient_blob": transient_blob,
+            "hidden_ancestor_blob": hidden.relative_to(repo.root).as_posix(),
         },
     )
 
@@ -5807,7 +6044,7 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
     O = feature(repo, f"{label}-old-tip")
 
     repo.branch("candidate", C)
-    M = feature(repo, f"{label}-candidate-base")
+    candidate_landmark = feature(repo, f"{label}-candidate-base")
     N = feature(repo, f"{label}-candidate-tip")
     expected = "no-finding" if variant == "continuous-preserved" else "blocking-finding"
     details["old_text_equals_C"] = (
@@ -5833,28 +6070,10 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         details,
-    )
-
-
-def r8_adapter_M_endpoint_counterexample(root: Path) -> Fixture:
-    base = r3_unrelated_invalid_does_not_poison(root)
-    details = {
-        **base.details,
-        "adapter_M_variants": {
-            "explicit_candidate_M": base.M,
-            "endpoint_M_equals_N": base.N,
-        },
-        "poc_changes_adapter": False,
-        "automatic_M_equals_N_safe": False,
-    }
-    return dataclasses.replace(
-        base,
-        scenario="R8-adapter-M-N-frontier-counterexample",
-        details=details,
     )
 
 
@@ -5923,7 +6142,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
     final_carrier = feature(repo, "r3-two-invalid-final-carrier")
     repo.branch("r3-two-invalid-final-neutral", R)
     final_neutral = feature(repo, "r3-two-invalid-final-neutral")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (
             first["adoption"],
             second["adoption"],
@@ -5939,7 +6158,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5953,7 +6172,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
                 second["carrier"],
                 final_carrier,
             ],
-            "adoptions": [first["adoption"], second["adoption"], M],
+            "adoptions": [first["adoption"], second["adoption"], candidate_landmark],
             "neutral_parents": [
                 first["neutral"],
                 second["neutral"],
@@ -5998,7 +6217,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
     final_carrier = feature(repo, "r3-mixed-final-carrier")
     repo.branch("r3-mixed-final-neutral", R)
     final_neutral = feature(repo, "r3-mixed-final-neutral")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (
             invalid["adoption"],
             valid_deletion,
@@ -6014,7 +6233,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6024,7 +6243,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
             ],
             "source_children": [invalid["adoption"], valid_deletion],
             "carriers": [invalid["carrier"], final_carrier],
-            "adoptions": [invalid["adoption"], M],
+            "adoptions": [invalid["adoption"], candidate_landmark],
             "neutral_parents": [invalid["neutral"], final_neutral],
             "absent_sources": [
                 invalid["authority_event"],
@@ -6035,7 +6254,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
     )
 
 
-def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
+def r3_valid_plus_invalid_at_N(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r3-unrelated-invalid"
@@ -6055,13 +6274,13 @@ def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
     )
     repo.branch("r3-positive-carrier", C)
     carrier = feature(repo, "r3-positive-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt only the causally relevant valid supplier",
         removes=(path,),
     )
     N = repo.merge_commit(
-        (M, unrelated_invalid),
+        (candidate_landmark, unrelated_invalid),
         "retain unrelated invalid source in candidate graph",
         writes={
             "features/r3-unrelated-invalid-old.md": (
@@ -6091,13 +6310,13 @@ def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
         == 0
     )
     return Fixture(
-        "R3-03-unrelated-invalid-does-not-poison",
+        "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
-        "no-finding",
+        "blocking-finding",
         {
             "unrelated_invalid": unrelated_invalid,
             "supplier": supplier,
@@ -6198,14 +6417,14 @@ def r4_same_root_diamond(root: Path) -> Fixture:
         absent_parents=(first["adoption"], second["adoption"]),
         suffix="r4-same-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-same-root-diamond-old")
     return Fixture(
         "R4-01-same-root-valid-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6219,7 +6438,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
             "adoptions": [
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 first["neutral"],
@@ -6235,7 +6454,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
                 valid_root,
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -6281,14 +6500,14 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
         ),
         suffix="r4-distinct-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-distinct-root-diamond-old")
     return Fixture(
         "R4-02-distinct-valid-root-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6302,7 +6521,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
             "adoptions": [
                 wrappers[0]["adoption"],
                 wrappers[1]["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 wrappers[0]["neutral"],
@@ -6320,7 +6539,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
                 wrappers[0]["adoption"],
                 valid_roots[1],
                 wrappers[1]["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -6369,14 +6588,14 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
         absent_parents=(first["adoption"], second["adoption"]),
         suffix="r4-equal-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-equal-root-plus-invalid-old")
     return Fixture(
         "R4-03-equal-root-plus-invalid-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6390,7 +6609,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
             "adoptions": [
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 first["neutral"],
@@ -6408,7 +6627,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
                 first["adoption"],
                 invalid_root,
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -6435,7 +6654,7 @@ def r5_reintroduced_supplier_history(
     )
     repo.branch(f"{label}-carrier", C)
     carrier = feature(repo, f"{label}-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (valid_root, carrier),
         "adopt initial supplier absence",
         removes=(path,),
@@ -6469,20 +6688,20 @@ def r5_reintroduced_supplier_history(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
             "initial_authority_parent": root_parent,
             "initial_authority_child": valid_root,
             "carrier": carrier,
-            "supplier_adoption": M,
+            "supplier_adoption": candidate_landmark,
             "initial_absent_parent": valid_root,
             "reintroduction": reintroduction,
             "later_authority_parent": later_parent,
             "later_authority_child": redeletion,
             "later_authority_valid": later_valid,
-            "reason_children": [valid_root, M, redeletion],
+            "reason_children": [valid_root, candidate_landmark, redeletion],
         },
     )
 
@@ -6530,7 +6749,7 @@ def r6_all_absent_roots(
                 )
         roots.append(deletion)
         statuses.append(kind)
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         tuple(roots),
         "join all-absent causal roots",
         removes=(path,),
@@ -6546,7 +6765,7 @@ def r6_all_absent_roots(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6587,7 +6806,7 @@ def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
         )
         for index in (1, 2)
     ]
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         tuple(wrapper["adoption"] for wrapper in wrappers),
         "join equal-root all-absent wrappers",
         removes=(path,),
@@ -6598,7 +6817,7 @@ def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6647,7 +6866,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
     supplier = repo.commit("fix finding and clear generated retry")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx15-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt generated retry clearance",
         removes=(retry,),
@@ -6666,7 +6885,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6728,7 +6947,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
     supplier = repo.commit("atomically claim task and delete pickup")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx16-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt task-pickup supplier",
         removes=(pickup,),
@@ -6739,7 +6958,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"pickup_path": pickup, "active_task": active},
@@ -6789,12 +7008,12 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
     resolved = f"# Evidence {label}: resolved\n"
     if variant == "forward":
         parents = (authority_child, carrier)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents, "forward supplier support adoption", removes=(path,)
         )
     elif variant == "reverse-preserved":
         parents = (carrier, authority_child)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "reverse supplier support adoption with projection",
             writes={evidence: resolved},
@@ -6802,7 +7021,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     elif variant == "source-evolution":
         parents = (carrier, source_parent)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "copy evolved source support at adoption",
             writes={
@@ -6812,7 +7031,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     elif variant == "adoption-drift":
         parents = (authority_child, carrier)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "invent support state in adoption commit",
             writes={evidence: f"# Evidence {label}: adoption-drift\n"},
@@ -6826,7 +7045,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
         repo.branch("second-support-carrier", C)
         second_carrier = claim(repo, (path,), "second support carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (second_carrier, first),
             "nested adoption drops source support",
             removes=(path,),
@@ -6853,7 +7072,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
             repo, (path,), "final diamond support carrier"
         )
         parents = (second, final_carrier, first)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "join equal support roots through both parent orders",
             writes={evidence: resolved},
@@ -6861,7 +7080,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     else:
         parents = (carrier, authority_child)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "reverse supplier support adoption",
             removes=(path,),
@@ -6879,7 +7098,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         variants[variant],
         {
@@ -6933,7 +7152,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
     authority_child = repo.commit("delete using admitted earlier evidence")
     repo.branch("earlier-evidence-carrier", C)
     carrier = claim(repo, (path,), "claim stale evidence carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (carrier, authority_child),
         "reverse adoption reverts earlier evidence",
         removes=(path,),
@@ -6950,14 +7169,14 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
             authority_child,
         )
         replay_problem = RECONCILE.queue_deletion_problem(
-            path, authority_text, authority_parent, M
+            path, authority_text, authority_parent, candidate_landmark
         )
     return Fixture(
         "R16-earlier-landed-evidence-reversal",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6968,7 +7187,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
             "expected_evidence": repo.tree_entry_oid(
                 authority_child, evidence
             ),
-            "reverted_evidence": repo.tree_entry_oid(M, evidence),
+            "reverted_evidence": repo.tree_entry_oid(candidate_landmark, evidence),
         },
     )
 
@@ -7015,7 +7234,7 @@ def r16_pickup_evolution(
         )
     repo.branch("pickup-carrier", C)
     carrier = feature(repo, f"r16-pickup-{slug}-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (carrier, source_parent),
         "copy current pickup support projection",
         writes=adoption_writes,
@@ -7028,7 +7247,7 @@ def r16_pickup_evolution(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         (
             "blocking-finding"
@@ -7063,7 +7282,7 @@ def p19_identities(root: Path) -> Fixture:
     repo.branch("old", C)
     O = feature(repo, "p19-old")
     repo.branch("candidate", C)
-    M = feature(repo, "p19-base")
+    candidate_landmark = feature(repo, "p19-base")
     N = feature(repo, "p19-old")
     ordinary_first = RECONCILE.queue_action_identity(first, text)
     ordinary_second = RECONCILE.queue_action_identity(second, text)
@@ -7078,7 +7297,7 @@ def p19_identities(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -7127,14 +7346,14 @@ def p20_lifecycle_types(root: Path) -> Fixture:
     repo.remove(agent)
     repo.remove(human)
     repo.remove(retry)
-    M = repo.commit("resolve every lifecycle type")
+    candidate_landmark = repo.commit("resolve every lifecycle type")
     N = feature(repo, "p20-old")
     return Fixture(
         "P20-lifecycle-types",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -7166,7 +7385,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
         repo.run(
             "cherry-pick", K, D, env=repo._commit_environment()
         )
-        M = repo.oid("HEAD")
+        candidate_landmark = repo.oid("HEAD")
         expected = "no-finding"
     elif mode == "deletion-only":
         conflicted = repo.run("cherry-pick", D, check=False)
@@ -7180,14 +7399,14 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
             "--continue",
             env=repo._commit_environment(),
         )
-        M = repo.oid("HEAD")
+        candidate_landmark = repo.oid("HEAD")
         expected = "blocking-finding"
     elif mode == "squash":
         final_tree = repo.oid(f"{D}^{{tree}}")
-        M = repo.commit_tree(
+        candidate_landmark = repo.commit_tree(
             final_tree, "squash claim and deletion", C
         )
-        repo.branch("candidate-squash", M)
+        repo.branch("candidate-squash", candidate_landmark)
         expected = "blocking-finding"
     else:
         raise ValueError(mode)
@@ -7201,7 +7420,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         {"source_K": K, "source_D": D, "mode": mode},
@@ -7234,14 +7453,14 @@ def pcx18_many_actions(root: Path) -> Fixture:
             evidence_path(label), f"# Evidence {label}: resolved\n"
         )
         repo.remove(path)
-    M = repo.commit("delete all sixteen actions")
+    candidate_landmark = repo.commit("delete all sixteen actions")
     N = feature(repo, "many-old")
     return Fixture(
         "P22-PCX-18-one-pass-many-actions",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -7282,7 +7501,7 @@ def p18_unrelated_tip(root: Path) -> Fixture:
     fixture.N = fixture.repo.commit_tree(
         empty, "unrelated child", unrelated
     )
-    fixture.M = unrelated
+    fixture.candidate_landmark = unrelated
     fixture.expected = "unreadable"
     return fixture
 
@@ -7292,7 +7511,7 @@ def p18_shallow(root: Path) -> Fixture:
         root, "P18d-shallow-required-region", valid=True
     )
     (fixture.repo.root / ".git/shallow").write_text(
-        fixture.C + "\n", encoding="ascii"
+        fixture.expected_C + "\n", encoding="ascii"
     )
     fixture.expected = "unreadable"
     return fixture
@@ -7303,7 +7522,7 @@ def p18_missing_blob(root: Path) -> Fixture:
         root, "P18e-missing-queue-blob", valid=True
     )
     path = queue_path(fixture.scenario.lower())
-    blob = fixture.repo.tree_entry_oid(fixture.C, path)
+    blob = fixture.repo.tree_entry_oid(fixture.expected_C, path)
     fixture.repo.hide_loose_object(blob)
     fixture.expected = "unreadable"
     fixture.details["missing_blob_oid"] = blob
@@ -7314,7 +7533,9 @@ def p18_missing_tree(root: Path) -> Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18f-missing-queue-tree", valid=True
     )
-    tree = fixture.repo.tree_entry_oid(fixture.C, "message-queue")
+    tree = fixture.repo.tree_entry_oid(
+        fixture.expected_C, "message-queue"
+    )
     fixture.repo.hide_loose_object(tree)
     fixture.expected = "unreadable"
     fixture.details["missing_tree_oid"] = tree
@@ -7339,110 +7560,17 @@ def p18_multiple_bases(root: Path) -> Fixture:
     repo.branch("old", X)
     O = feature(repo, "p18g-old")
     repo.branch("candidate", Y)
-    M = feature(repo, "p18g-base")
+    candidate_landmark = feature(repo, "p18g-base")
     N = feature(repo, "p18g-old")
     return Fixture(
         "P18g-multiple-merge-bases",
         repo,
         R,
         O,
-        M,
+        candidate_landmark,
         N,
         "unreadable",
         {"expected_merge_bases": [A, B]},
-    )
-
-
-def p18_missing_M(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18h-missing-M", valid=True
-    )
-    fixture.M = "f" * len(fixture.M)
-    fixture.expected = "unreadable"
-    fixture.details["M_failure"] = "missing-object"
-    return fixture
-
-
-def p18_noncommit_M(root: Path, kind: str) -> Fixture:
-    letter = {"blob": "i", "tree": "j", "tag": "k"}[kind]
-    fixture = ordinary_linear_fixture(
-        root, f"P18{letter}-noncommit-M-{kind}", valid=True
-    )
-    if kind == "blob":
-        M = fixture.repo.run(
-            "hash-object", "-w", "--stdin", input_text="not M\n"
-        ).stdout.strip()
-    elif kind == "tree":
-        M = fixture.repo.run("mktree", input_text="").stdout.strip()
-    elif kind == "tag":
-        blob = fixture.repo.run(
-            "hash-object", "-w", "--stdin", input_text="tag target\n"
-        ).stdout.strip()
-        M = fixture.repo.run(
-            "mktag",
-            input_text=(
-                f"object {blob}\n"
-                "type blob\n"
-                "tag selected-base\n"
-                "tagger Production Contract POC "
-                "<production-contract@example.invalid> "
-                "1800000000 +0000\n\n"
-                "non-commit selected base\n"
-            ),
-        ).stdout.strip()
-    else:
-        raise ValueError(kind)
-    fixture.M = M
-    fixture.expected = "unreadable"
-    fixture.details.update({"M_failure": "non-commit", "M_kind": kind})
-    return fixture
-
-
-def p18_unrelated_M(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18l-unrelated-M", valid=True
-    )
-    empty = fixture.repo.run("mktree", input_text="").stdout.strip()
-    fixture.M = fixture.repo.commit_tree(empty, "unrelated M root")
-    fixture.expected = "blocking-finding"
-    fixture.details["M_failure"] = "unrelated-readable-commit"
-    return fixture
-
-
-def p18_M_after_N(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18m-M-after-N", valid=True
-    )
-    fixture.repo.branch("after-N", fixture.N)
-    fixture.M = feature(fixture.repo, "p18m-after-N")
-    fixture.expected = "blocking-finding"
-    fixture.details["M_failure"] = "C-descendant-after-N"
-    return fixture
-
-
-def p18_M_endpoint(root: Path, endpoint: str) -> Fixture:
-    scenario = f"P18{'n' if endpoint == 'C' else 'o'}-M-equals-{endpoint}"
-    repo = GitRepository(root)
-    initialize(repo)
-    path = add_agent(repo, scenario.lower())
-    C = repo.commit("create endpoint-equality action at C")
-    repo.branch("old", C)
-    O = feature(repo, f"{scenario.lower()}-old")
-    repo.branch("candidate", C)
-    N = feature(repo, f"{scenario.lower()}-candidate")
-    M = C if endpoint == "C" else N
-    return Fixture(
-        scenario,
-        repo,
-        C,
-        O,
-        M,
-        N,
-        "no-finding",
-        {
-            "M_endpoint": endpoint,
-            "preserved_path": path,
-        },
     )
 
 
@@ -7453,7 +7581,7 @@ def pcx19_missing_claim_blob(root: Path) -> Fixture:
     label = fixture.scenario.lower()
     path = queue_path(label)
     parents = fixture.repo.run(
-        "rev-list", "--parents", "-n", "1", fixture.M
+        "rev-list", "--parents", "-n", "1", fixture.candidate_landmark
     ).stdout.split()
     claim_commit = parents[1]
     blob = fixture.repo.tree_entry_oid(claim_commit, path)
@@ -7490,7 +7618,7 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
     claim(repo, (path,))
     for index in range(5 + int(overflow)):
         feature(repo, f"budget-unrelated-{index}")
-    M = delete_with_evidence(
+    candidate_landmark = delete_with_evidence(
         repo, ((scenario.lower(), path),), "budget fixture deletion"
     )
     N = feature(repo, "budget-old")
@@ -7503,7 +7631,7 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if overflow else "no-finding",
         {
@@ -7573,14 +7701,6 @@ def scenario_builders():
         p18_missing_blob,
         p18_missing_tree,
         p18_multiple_bases,
-        p18_missing_M,
-        lambda root: p18_noncommit_M(root, "blob"),
-        lambda root: p18_noncommit_M(root, "tree"),
-        lambda root: p18_noncommit_M(root, "tag"),
-        p18_unrelated_M,
-        p18_M_after_N,
-        lambda root: p18_M_endpoint(root, "C"),
-        lambda root: p18_M_endpoint(root, "N"),
         p19_identities,
         p20_lifecycle_types,
         lambda root: pcx17_cherry_pick(root, "squash"),
@@ -7663,7 +7783,7 @@ def scenario_builders():
         lambda root: budget_fixture(root, overflow=True),
         r3_two_invalid_sources,
         r3_invalid_valid_competition,
-        r3_unrelated_invalid_does_not_poison,
+        r3_valid_plus_invalid_at_N,
         r4_same_root_diamond,
         r4_distinct_root_diamond,
         r4_equal_root_plus_invalid,
@@ -7812,6 +7932,42 @@ def scenario_builders():
             root, conflict=True
         ),
         r17_outside_c_neutral_parent,
+        lambda root: r17_carry_merge_fixture(
+            root, variant="compatible"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="compatible", reverse_parents=True
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="incompatible"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="absent-arm"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="outside-single"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="outside-duplicate"
+        ),
+        *[
+            (
+                lambda root, case=case:
+                r17_workflow_input_case(root, case)
+            )
+            for case in (
+                "fast-forward",
+                "pre-pr-push",
+                "base-advance-retarget",
+                "multiple-pr-api-race",
+                "stale-rerun",
+                "missing-old",
+                "zero-endpoints",
+                "pr-synchronize",
+            )
+        ],
+        r17_unreadable_boundary,
+        r17_unopened_outside_c_ancestor,
         *[
             (
                 lambda root, variant=variant:
@@ -7825,13 +7981,17 @@ def scenario_builders():
                 "continuous-preserved",
             )
         ],
-        r8_adapter_M_variants,
-        r8_adapter_M_endpoint_counterexample,
     ]
 
 
 CONTROL_NAMES = (
     "restore-universal-ancestor-carry-scan",
+    "ignore-outside-C-carrier",
+    "ignore-absent-C-arm",
+    "first-parent-carry-proof",
+    "skip-carry-compatibility",
+    "unmetered-cone-work",
+    "ignore-invalid-N-root",
     "missing-all-parent-direct-validation",
     "supplier-authority-borrowing",
     "identity-multiplicity-collapsed-to-set",
@@ -7896,34 +8056,16 @@ SCENARIO_ALIASES = {
 
 
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
-    if "adapter_M_variants" in fixture.details:
-        if damage is not None:
-            raise ValueError("adapter-input fixture does not accept damage mode")
-        results = {}
-        for name, M in fixture.details["adapter_M_variants"].items():
-            variant = dataclasses.replace(fixture, M=M)
-            results[name] = Classifier(variant).run()
-        primary = results["explicit_candidate_M"]
-        primary["adapter_input_evidence"] = {
-            name: {
-                "C": result["C"],
-                "O": result["O"],
-                "M": result["M"],
-                "N": result["N"],
-                "classification": result["classification"],
-                "evidence_status": result["evidence_verdict"]["status"],
-                "event_mode": result["event_mode"],
-                "range_base_validation": result["range_base_validation"],
-                "authority_edges": result["authority_edges"],
-                "propagation_edges": result["propagation_edges"],
-                "support_checks": result["support_checks"],
-                "metrics": result["metrics"],
-            }
-            for name, result in results.items()
-        }
-        return primary
     if "restore_hidden" not in fixture.details:
-        return Classifier(fixture, damage).run()
+        result = Classifier(fixture, damage).run()
+        workflow = fixture.details.get("workflow_contract", {})
+        if workflow.get("repeat_exact_inputs") and damage is None:
+            repeated = Classifier(fixture).run()
+            result["workflow_input_evidence"] = {
+                "exact_O_N_repeated": [fixture.O, fixture.N],
+                "raw_results_equal": result == repeated,
+            }
+        return result
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
     missing_oid = fixture.details["missing_claim_blob_oid"]
@@ -7984,12 +8126,17 @@ def validate_result(result: dict):
     status = result["evidence_verdict"]["status"]
     if status not in {"valid", "invalid", "none", "ambiguous", "unreadable"}:
         errors.append(f"unstructured evidence status {status}")
-    for name in ("C", "O", "M", "N"):
+    for name in ("O", "N"):
         oid = result[name]
         if len(oid) not in {40, 64} or any(
             char not in "0123456789abcdef" for char in oid
         ):
             errors.append(f"{name} is not a full OID")
+    if result["C"] is not None and (
+        len(result["C"]) not in {40, 64}
+        or any(char not in "0123456789abcdef" for char in result["C"])
+    ):
+        errors.append("derived C is not a full OID")
     authority = {
         (edge["parent"], edge["child"])
         for edge in result["authority_edges"]
@@ -8020,6 +8167,147 @@ def validate_result(result: dict):
             errors.append(
                 "R17 legal outside-C neutral-parent restack did not stay clean"
             )
+    if scenario.startswith("R17-carry-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        proofs = action["carry_proofs"] if action is not None else []
+        merge_edges = [
+            edge
+            for proof in proofs
+            for edge in proof["edges"]
+            if edge["child"] == details["merge"]
+        ]
+        collisions = [
+            collision
+            for proof in proofs
+            for collision in proof["outside_collisions"]
+        ]
+        absent = {
+            parent
+            for proof in proofs
+            for parent in proof["absent_c_parents"]
+        }
+        if details["variant"] == "compatible":
+            if (
+                status != "valid"
+                or len(merge_edges) != 2
+                or sorted(edge["role"] for edge in merge_edges)
+                != ["compatible-carrier", "source"]
+                or any(edge["problem"] for edge in merge_edges)
+            ):
+                errors.append(
+                    "R17 compatible carry merge lost canonical edge roles"
+                )
+        elif details["variant"] == "incompatible":
+            if (
+                status != "ambiguous"
+                or len(merge_edges) != 2
+                or sum(edge["problem"] is not None for edge in merge_edges)
+                != 1
+            ):
+                errors.append("R17 incompatible carry merge false-greened")
+        elif details["variant"] == "absent-arm":
+            if status != "ambiguous" or details["second"] not in absent:
+                errors.append("R17 absent C-descendant arm false-greened")
+        else:
+            expected_multiplicity = (
+                2 if details["variant"] == "outside-duplicate" else 1
+            )
+            if (
+                status != "ambiguous"
+                or len(collisions) != 1
+                or collisions[0]["parent"] != details["second"]
+                or collisions[0]["multiplicity"] != expected_multiplicity
+            ):
+                errors.append("R17 outside-C collision false-greened")
+    if scenario.startswith("W"):
+        contract = result["details"]["workflow_contract"]
+        if (
+            result["input_contract"]["authoritative_endpoints"]
+            != ["O", "N"]
+            or contract["classifier_parameters"] != ["O", "N"]
+            or contract["provider_api_calls"] != 0
+            or contract["authoritative_inputs"]
+            != {"O": result["O"], "N": result["N"]}
+        ):
+            errors.append("workflow case escaped the exact O,N input API")
+        if scenario == "W0-fast-forward-return" and (
+            result["C"] != result["O"]
+            or status != "none"
+            or actions
+            or result["metrics"]["identity_calls"] != 0
+        ):
+            errors.append("W0 did not return before provenance attribution")
+        if scenario == "W1-pre-PR-push-exact-endpoints" and (
+            contract["event_before"] != result["O"]
+            or contract["event_after"] != result["N"]
+            or contract["github_sha"] == result["N"]
+            or contract["github_sha_is_authoritative"]
+            or not contract["pre_PR"]
+        ):
+            errors.append("W1 push transport selected a mutable endpoint")
+        if scenario == "W2-base-advance-retarget-invariant" and (
+            not contract["variants_keep_exact_O_N"]
+            or len(contract["provider_state_variants"]) != 3
+        ):
+            errors.append("W2 provider state changed classifier endpoints")
+        if scenario == "W3-multiple-PR-API-zero-calls" and (
+            contract["PR_lookup"]
+            or len(contract["provider_states"]) != 5
+        ):
+            errors.append("W3 retained provider lookup authority")
+        if scenario == "W4-stale-rerun-exact-inputs":
+            repeat = result.get("workflow_input_evidence", {})
+            if (
+                not repeat.get("raw_results_equal")
+                or repeat.get("exact_O_N_repeated")
+                != [result["O"], result["N"]]
+            ):
+                errors.append("W4 stale rerun did not reuse exact O,N")
+        if scenario == "W5-missing-O-coverage-unavailable" and (
+            status != "unreadable"
+            or contract["coverage_classification"]
+            != "coverage-unavailable"
+            or contract["old_object_fetch_exit"] != 2
+            or contract["fallback"] is not None
+            or actions
+        ):
+            errors.append("W5 missing O guessed a fallback endpoint")
+        if scenario == "W6-created-deleted-zero-endpoints" and any(
+            item["classification"] != "coverage-unavailable"
+            for item in contract["event_classifications"]
+        ):
+            errors.append("W6 zero endpoint was not coverage-unavailable")
+        if scenario == "W7-PR-synchronize-top-level-endpoints" and (
+            contract["top_level_before"] != result["O"]
+            or contract["top_level_after"] != result["N"]
+            or contract["top_level_after"]
+            != contract["pull_request_head_sha"]
+            or not contract["after_matches_head"]
+            or contract["PR_lookup"]
+            or contract["mismatch_classification"]
+            != "coverage-unavailable"
+        ):
+            errors.append("W7 synchronize endpoints are not self-contained")
+    if scenario == "R17-unreadable-outside-C-boundary" and (
+        status != "unreadable"
+        or result["audit_exit"] != 2
+        or actions
+        or authority
+        or propagation
+        or result["metrics"]["identity_calls"] != 0
+        or result["metrics"]["authority_calls"] != 0
+    ):
+        errors.append("R17 unreadable boundary returned partial results")
+    if scenario == "R17-unreadable-outside-C-ancestor-stays-unopened":
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            status != "valid"
+            or result["audit_exit"] != 0
+            or action is None
+            or result["details"]["F"] not in action["neutral_parents"]
+        ):
+            errors.append("R17 reopened an outside-C neutral ancestor")
     if scenario == "P2-direct-linear-invalid" and status != "invalid":
         errors.append("P2 did not name invalid production authority")
     if scenario == "P3-genuine-old-loss" and status != "none":
@@ -8096,57 +8384,8 @@ def validate_result(result: dict):
             result["evidence_verdict"]["reason"]
         ):
             errors.append("P17 did not fail on post-event reintroduction")
-    M_unreadable = {
-        "P18h-missing-M",
-        "P18i-noncommit-M-blob",
-        "P18j-noncommit-M-tree",
-        "P18k-noncommit-M-tag",
-    }
-    M_ambiguous = {
-        "P18l-unrelated-M",
-        "P18m-M-after-N",
-    }
-    M_endpoints = {
-        "P18n-M-equals-C",
-        "P18o-M-equals-N",
-    }
-    if (
-        scenario.startswith("P18")
-        and scenario not in M_ambiguous | M_endpoints
-        and status != "unreadable"
-    ):
+    if scenario.startswith("P18") and status != "unreadable":
         errors.append("P18 did not return structured unreadable")
-    if scenario in M_unreadable | M_ambiguous:
-        expected_M_status = (
-            "unreadable" if scenario in M_unreadable else "ambiguous"
-        )
-        range_verdict = result["range_base_validation"]
-        if (
-            status != expected_M_status
-            or range_verdict["status"] != expected_M_status
-            or range_verdict["M"] != result["M"]
-            or result["M"] not in range_verdict["reason"]
-            or result["M"] not in result["evidence_verdict"]["reason"]
-            or actions
-            or result["event_mode"] != "none"
-            or authority
-            or propagation
-            or result["metrics"]["identity_calls"] != 0
-            or result["metrics"]["authority_calls"] != 0
-        ):
-            errors.append("P18 M gate did not fail before classification")
-    if scenario in M_endpoints:
-        endpoint = result["details"]["M_endpoint"]
-        expected_M = result[endpoint]
-        if (
-            result["range_base_validation"]["status"] != "valid"
-            or result["M"] != expected_M
-            or result["classification"] != "no-finding"
-            or status != "none"
-            or authority
-            or propagation
-        ):
-            errors.append("P18 rejected a permitted M endpoint equality")
     if scenario == "P19-production-identities":
         details = result["details"]
         for key in (
@@ -8455,7 +8694,7 @@ def validate_result(result: dict):
             for oid in all_oids
         ):
             errors.append("R3-02 emitted a non-full causal OID")
-    if scenario == "R3-03-unrelated-invalid-does-not-poison":
+    if scenario == "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks":
         details = result["details"]
         action = actions[0] if len(actions) == 1 else None
         serialized_evidence = json.dumps(
@@ -8471,17 +8710,25 @@ def validate_result(result: dict):
         )
         if (
             action is None
-            or status != "valid"
-            or result["event_mode"] != "supplier"
-            or len(authority) != 1
+            or status != "ambiguous"
+            or result["event_mode"] != "ambiguous"
+            or action["reason_code"] != "competing-final-absence-roots"
+            or len(authority) != 2
             or len(propagation) != 1
-            or result["authority_edges"][0]["child"]
-            != details["supplier"]
+            or {
+                edge["child"] for edge in result["authority_edges"]
+            }
+            != {details["supplier"], details["unrelated_invalid"]}
+            or sum(
+                edge["problem"] is not None
+                for edge in result["authority_edges"]
+            )
+            != 1
             or result["metrics"]["authority_calls"] < 4
         ):
-            errors.append("R3-03 did not select the unique valid supplier")
-        if details["unrelated_invalid"] in serialized_evidence:
-            errors.append("R3-03 was poisoned by an unrelated invalid source")
+            errors.append("R3-03 did not retain valid and invalid N roots")
+        if details["unrelated_invalid"] not in serialized_evidence:
+            errors.append("R3-03 hid the invalid root that reaches N")
         if (
             not details["unrelated_reachable_from_N"]
             or details["unrelated_ancestor_of_supplier"]
@@ -9488,61 +9735,6 @@ def validate_result(result: dict):
                 )
             ):
                 errors.append("R16 pickup receipt projection is incomplete")
-    if scenario == "R8-adapter-M-input-variants":
-        details = result["details"]
-        variants = result.get("adapter_input_evidence", {})
-        workflow = variants.get("workflow_M_equals_O", {})
-        explicit = variants.get("explicit_candidate_M", {})
-        endpoint = variants.get("endpoint_M_equals_N", {})
-        same_graph = all(
-            variant.get(name) == result[name]
-            for variant in variants.values()
-            for name in ("C", "O", "N")
-        )
-        if (
-            details["poc_changes_adapter"]
-            or not same_graph
-            or workflow.get("M") != result["O"]
-            or workflow.get("classification") != "blocking-finding"
-            or workflow.get("evidence_status") != "ambiguous"
-            or workflow.get("event_mode") != "none"
-            or workflow.get("range_base_validation", {}).get("status")
-            != "ambiguous"
-            or workflow.get("authority_edges")
-            or workflow.get("propagation_edges")
-            or workflow.get("metrics", {}).get("identity_calls") != 0
-            or workflow.get("metrics", {}).get("authority_calls") != 0
-            or explicit.get("M")
-            != details["adapter_M_variants"]["explicit_candidate_M"]
-            or explicit.get("classification") != "no-finding"
-            or explicit.get("evidence_status") != "valid"
-            or explicit.get("event_mode") != "direct"
-            or len(explicit.get("authority_edges", [])) != 1
-            or endpoint.get("M") != result["N"]
-            or endpoint.get("classification") != "no-finding"
-            or endpoint.get("evidence_status") != "valid"
-            or endpoint.get("event_mode") != "direct"
-            or len(endpoint.get("authority_edges", [])) != 1
-        ):
-            errors.append("R8 adapter M-input evidence is incomplete")
-    if scenario == "R8-adapter-M-N-frontier-counterexample":
-        details = result["details"]
-        variants = result.get("adapter_input_evidence", {})
-        explicit = variants.get("explicit_candidate_M", {})
-        endpoint = variants.get("endpoint_M_equals_N", {})
-        if (
-            details["poc_changes_adapter"]
-            or details["automatic_M_equals_N_safe"]
-            or explicit.get("M") != result["M"]
-            or explicit.get("classification") != "no-finding"
-            or explicit.get("evidence_status") != "valid"
-            or endpoint.get("M") != result["N"]
-            or endpoint.get("range_base_validation", {}).get("status")
-            != "valid"
-            or endpoint.get("classification") != "blocking-finding"
-            or endpoint.get("evidence_status") != "ambiguous"
-        ):
-            errors.append("R8 automatic M=N frontier widening was not blocked")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
@@ -9600,6 +9792,7 @@ def validate_result(result: dict):
         if (
             actions
             or status != "ambiguous"
+            or result["audit_exit"] != 2
             or result["metrics"]["authority_calls"] != 0
         ):
             errors.append("budget overflow selected an event")
@@ -9615,6 +9808,42 @@ def control_builder(name: str, root: Path):
             r17_outside_c_neutral_parent(root),
             Damage(universal_ancestor_carry_scan=True),
             "blocking-finding",
+        )
+    if name == "ignore-outside-C-carrier":
+        return (
+            r17_carry_merge_fixture(root, variant="outside-single"),
+            Damage(ignore_outside_c_collision=True),
+            "no-finding",
+        )
+    if name == "ignore-absent-C-arm":
+        return (
+            r17_carry_merge_fixture(root, variant="absent-arm"),
+            Damage(ignore_absent_c_arm=True),
+            "no-finding",
+        )
+    if name == "first-parent-carry-proof":
+        return (
+            r17_carry_merge_fixture(root, variant="incompatible"),
+            Damage(first_parent_carry_only=True),
+            "no-finding",
+        )
+    if name == "skip-carry-compatibility":
+        return (
+            r17_carry_merge_fixture(root, variant="incompatible"),
+            Damage(skip_carry_compatibility=True),
+            "no-finding",
+        )
+    if name == "unmetered-cone-work":
+        return (
+            budget_fixture(root, overflow=True),
+            Damage(unmetered_cone_work=True),
+            "no-finding",
+        )
+    if name == "ignore-invalid-N-root":
+        return (
+            r3_valid_plus_invalid_at_N(root),
+            Damage(sole_valid_ignores_competitors=True),
+            "no-finding",
         )
     if name == "missing-all-parent-direct-validation":
         return (
@@ -9756,9 +9985,8 @@ def run_control(name: str, root: Path):
     return {
         "control": name,
         "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
-        "C": fixture.C,
+        "C": baseline["C"],
         "O": fixture.O,
-        "M": fixture.M,
         "N": fixture.N,
         "baseline_classification": baseline["classification"],
         "damaged_classification": damaged["classification"],
@@ -9832,6 +10060,58 @@ def run_suite(root: Path):
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+    by_scenario = {result["scenario"]: result for result in results}
+    permutation_results = [
+        by_scenario.get("R17-carry-compatible"),
+        by_scenario.get("R17-carry-compatible-reversed"),
+    ]
+    permutation_signatures = []
+    for result in permutation_results:
+        if result is None:
+            continue
+        merge = result["details"]["merge"]
+        permutation_signatures.append(
+            {
+                "classification": result["classification"],
+                "evidence_status": result["evidence_verdict"]["status"],
+                "event_mode": result["event_mode"],
+                "merge_role_multiset": sorted(
+                    edge["role"]
+                    for proof in result["carry_proofs"]
+                    for edge in proof["edges"]
+                    if edge["child"] == merge
+                ),
+                "outside_collision_multiplicities": sorted(
+                    collision["multiplicity"]
+                    for proof in result["carry_proofs"]
+                    for collision in proof["outside_collisions"]
+                ),
+                "absent_arm_count": sum(
+                    len(proof["absent_c_parents"])
+                    for proof in result["carry_proofs"]
+                ),
+            }
+        )
+    permutation_ok = (
+        len(permutation_signatures) == 2
+        and permutation_signatures[0] == permutation_signatures[1]
+    )
+    if not permutation_ok:
+        failures.append(
+            {
+                "scenario": "R17-parent-permutation-invariance",
+                "errors": ["verdict or carry role multiset changed"],
+            }
+        )
+    print(
+        json.dumps(
+            {
+                "r17_parent_permutation": permutation_signatures,
+                "status": "PASS" if permutation_ok else "FAIL",
+            },
+            sort_keys=True,
+        )
+    )
     alias_inventory, alias_failures = validate_scenario_aliases(results)
     failures.extend(alias_failures)
     print(
@@ -9863,6 +10143,7 @@ def run_suite(root: Path):
             item["status"] == "PASS" for item in alias_inventory
         ),
         "aliases_total": len(alias_inventory),
+        "r17_parent_permutation": "PASS" if permutation_ok else "FAIL",
         "python": sys.version.split()[0],
         "git": REAL_RUN(
             ["git", "--version"],
@@ -9876,14 +10157,89 @@ def run_suite(root: Path):
     return 0 if not failures else 1
 
 
+def ordinary_audit(
+    root: Path, O: str, N: str, budget_limit: int | None
+) -> dict:
+    """Audit exactly two immutable O,N commit IDs in an existing repository."""
+    valid_oid = lambda value: (
+        len(value) in {40, 64}
+        and all(char in "0123456789abcdef" for char in value)
+    )
+    if not valid_oid(O) or not valid_oid(N) or (
+        budget_limit is not None and budget_limit <= 0
+    ):
+        reason = (
+            "O and N must be full lowercase hexadecimal object IDs"
+            if not valid_oid(O) or not valid_oid(N)
+            else "budget must be a positive integer"
+        )
+        return {
+            "scenario": "ordinary-audit",
+            "C": None,
+            "O": O,
+            "N": N,
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
+            },
+            "audit_exit": 2,
+            "classification": "unreadable",
+            "evidence_verdict": {"status": "unreadable", "reason": reason},
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+            "metrics": Metrics().as_dict(),
+        }
+    fixture = Fixture(
+        "ordinary-audit",
+        RepositoryView(root),
+        "",
+        O,
+        "",
+        N,
+        "",
+        budget_limit=budget_limit,
+    )
+    result = Classifier(fixture).run()
+    result.pop("expected_result", None)
+    result.pop("details", None)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--control", choices=CONTROL_NAMES)
     parser.add_argument("--fixtures-dir", type=Path)
+    parser.add_argument("--repo", type=Path)
+    parser.add_argument("--old", metavar="O")
+    parser.add_argument("--new", metavar="N")
+    parser.add_argument("--budget", type=int)
     arguments = parser.parse_args(argv)
-    if not arguments.self_test and not arguments.control:
-        parser.error("choose --self-test or --control")
+    ordinary = any(
+        value is not None
+        for value in (arguments.repo, arguments.old, arguments.new)
+    )
+    selected = int(arguments.self_test) + int(arguments.control is not None) + int(
+        ordinary
+    )
+    if selected != 1:
+        parser.error("choose exactly one of --self-test, --control, or --repo/--old/--new")
+    if ordinary and None in (arguments.repo, arguments.old, arguments.new):
+        parser.error("ordinary audit requires --repo, --old O, and --new N")
+    if ordinary:
+        result = ordinary_audit(
+            arguments.repo.resolve(),
+            arguments.old,
+            arguments.new,
+            arguments.budget,
+        )
+        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        return result["audit_exit"]
 
     if arguments.fixtures_dir is not None:
         prepare_root(arguments.fixtures_dir)
