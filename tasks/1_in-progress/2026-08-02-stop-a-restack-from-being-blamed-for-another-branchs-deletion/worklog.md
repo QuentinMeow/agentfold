@@ -50,3 +50,30 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   candidate-base/adaptor rules, transactional incomplete behavior, stable identity
   Findings, support certificates, and deterministic resource budgets. Production
   implementation remains pending a fresh review of this amended design.
+
+## 2026-09-01 — O/N-only POC and bounded-design amendment (codex)
+
+- A fresh one-way-door review blocked the r16 `M`/current-PR design: live provider state
+  could race or be unavailable, `M` could hide an invalid root that still reached `N`, and
+  universal ancestor scanning falsely rejected an identity-free outside-`C` merge parent.
+- Reopened the POC gate repeatedly rather than starting production. Fresh attackers then
+  found and reproduced four more classes of defect: outside-boundary ancestry reopened by
+  event enumeration, persisted identities ignoring outside collisions and absent arms,
+  budgets checked only after expensive work, and buffered/unmetered graph/object/tree/
+  support work. Evidence review separately found localized Git stderr and an open raw
+  grammar. Each repair first preserved a failing reproduction and an observed-red damage
+  control; superseded evidence schemas v2, v3, and v4 remain burned in history.
+- Closed r17 only at immutable POC `d12b799a2fa27b05a5ee2af1b422131856296b41`
+  (tree `0f5b8f3c840055bf66f7c59e2493a72e948d5163`, evidence
+  `sha256:dce421f2a526ffdb023a24ab57ffee48b545ac3f5f7270b080e6dd2e84f71058`).
+  Two fresh cross-locale roots matched byte-for-byte across 204 rows; 167/167 scenarios,
+  34/34 semantic controls, 4/4 aliases, and 68/68 evidence damages passed.
+- Three independent final verifiers unanimously accepted semantic/DAG behavior, closed
+  evidence/replay mechanics, and bounded execution plus ordinary-range composition. The
+  execution verifier demonstrated streaming exact/+1 refusal, child termination/reaping,
+  object/tree/support/certificate bounds, and all five ordinary production seams.
+- Merged r17 into the integration branch as `0da7b0a` without touching production. Appended
+  a durable design amendment that removes `M`, PR/API attribution, and the old standalone
+  continuity CLI; separates ordinary `B...N` checks from paired `O,N`; specifies common
+  push/PR/fork/human cycles; and makes full classification a pre-writer transaction.
+- Production implementation remains gated on a fresh five-lens review of the amendment.

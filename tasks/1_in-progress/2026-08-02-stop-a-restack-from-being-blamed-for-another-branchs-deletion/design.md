@@ -310,3 +310,302 @@ production call site, GitHub adapter, staged behavior, or full suite already wor
 **Thin adapter:** GitHub may resolve and stabilize one exact same-repository PR base SHA,
 fetch exact event objects, and derive local `M`; it owns no identity, lifecycle, authority,
 or fallback decision
+
+---
+
+## 2026-09-01 amendment — O/N-only bounded provenance
+
+**Amendment status:** supersedes every `M`, `--candidate-base`, current-PR/API, `M...N`
+provenance, four-endpoint result, adapter, workflow, budget, verification, non-goal, and
+core-fit statement above. The earlier text is preserved as rejected design history. The
+direct/supplier authority, production identity, support-certificate, and full-root rules
+remain only where this amendment does not replace them.
+
+### Why the prior decision was reopened
+
+One-way-door review found two concrete failures. A live PR base can advance or be retargeted,
+and pre-PR pushes, closed/reopened or multiple PRs, forks, API lag, and reruns do not provide
+one stable current PR. More importantly, a supplied `M` can hide an invalid deletion root
+that still reaches `N`. Provider state cannot authorize a historical ref replacement.
+
+The review also supplied a correct restack whose carrying merge had an outside-`C` parent
+already free of the identity. The prior universal ancestor scan reopened that parent's old
+history and falsely blocked. Later fresh attackers found the same boundary leak in event
+enumeration, outside collisions and absent arms ignored for persisted identities, post-hoc
+rather than pre-work budgets, buffered graph output, locale-dependent evidence, and open raw
+grammar. Each defect was reproduced red before repair; evidence schemas v2, v3, and v4 are
+preserved and permanently burned.
+
+### Selected contract
+
+The selected classifier accepts only immutable old/new ref endpoints `O,N`, returns early
+for a fast-forward, derives exactly one `C = merge-base --all(O,N)`, enumerates the bounded
+intrinsic `C..N` graph once, and validates real parent edges with existing queue authority.
+It suppresses continuity only when one canonical valid causal resolution, with no valid,
+invalid, ambiguous, duplicate, foreign, or reintroduced competitor, reaches `N`.
+
+This proves “one valid `C`-rooted causal resolution reaches `N`.” It does not claim whether
+the task branch or a newly selected base authored it.
+
+### Orthogonal CLI inputs
+
+1. `--range B...N` binds the ordinary candidate range and retains every existing queue
+   mutation, deletion, schema, staged/index, and retry check.
+2. `--ref-update O N` atomically binds one exact ref replacement and activates continuity
+   provenance.
+
+When both are present, the range head must equal `N`. `B` never enters provenance and `O`
+never replaces the ordinary range base. Remove the old standalone `--displaced-tip`
+continuity shape. Add no `--candidate-base`, compatibility alias, live-ref, reflog, HEAD,
+default-branch, or provider fallback; backward compatibility is intentionally not required.
+
+Both endpoints are non-zero full OIDs for the repository's object format and name readable
+commits. A fast-forward `O <= N` returns clean before graph or action work. Only divergence
+requires unique `C`. Zero endpoints mean ref creation/deletion, so adapters run ordinary
+checks only and do not invent continuity inputs.
+
+Missing/non-commit/unrelated endpoints, zero or multiple merge bases, shallow/partial
+required history, malformed or unreadable commit/tree/blob data, disabled-object lookup
+failure, or budget overflow returns one structured incomplete result, exit 2, and zero
+Finding or mutation. Lazy fetch and replace refs remain disabled. Staged/index checks retain
+their authority; an unmerged index may not be read as committed absence.
+
+### Transaction boundary
+
+Continuity classification is an immutable read-only preflight:
+
+1. parse and cross-check the paired endpoints;
+2. resolve exact `O,N` and derive `C` when required;
+3. classify the complete bounded graph into one immutable result;
+4. only then allow ordinary checks and writers to project output.
+
+The preflight runs before `run_checks()` yields any Finding and before `--file-retries`,
+`--fix-index`, `--fix-open-actions`, `--fix-queue-fold`, or another writer changes bytes.
+Incomplete behavior emits bounded diagnostics only: no Finding summary, no retry
+filing/clearing, and byte-identical worktree, index, memory index, open-actions, and queue
+fold. `check_queue_resolution` consumes the finished result; it does not traverse history.
+
+### Intrinsic graph and outside boundary
+
+Enumerate `Desc(C) ∩ Anc(N)` once with parent records in topological/reverse order. Stream
+and pre-charge stdout bytes, peak line bytes, commit tokens, and parent tokens; on overflow,
+malformed/truncated output, or child failure, terminate and reap the process and publish no
+partial graph.
+
+An immediate non-`C`-rooted parent is a boundary snapshot only:
+
+- zero exact occurrences is neutral;
+- one matching occurrence is an outside collision;
+- more than one is a duplicate collision;
+- unreadable state is incomplete.
+
+A neutral boundary parent's ancestors are outside the proof and remain unread. Only
+intrinsic commits are event children. One parent map seeds every production parent consumer,
+so production performs zero additional graph-parent subprocess queries. The POC's
+133-commit fixture records 129 imported production queries specifically to expose this
+integration gap.
+
+### Shared edge-aware occurrence proof
+
+Continue using `queue_action_identity` and an `identity → [(path, bytes/state)]` multimap.
+Both disappeared and still-live `N` identities use the same proof from `C`: every intrinsic
+carrying edge passes production mutation/frozen-state rules; a merge has exactly one valid
+source plus compatible carriers. An outside carrier, duplicate, intrinsic absent arm followed
+by a live child, deletion/recreation, immutable mutation, or conflicting human/review
+binding breaks continuity. Parent order cannot change the verdict or evidence roles.
+
+The earlier direct and supplier definitions remain. Direct authority belongs to every real
+carrying parent→absent child edge and every such edge validates independently. Supplier
+wrappers propagate one earlier canonical real deletion root and may not borrow authority.
+Support certificates continue to bind real authority edges, exact support projection, and
+typed obligations; adoption-authored drift, rollback, conflict, incomplete obligation, or a
+later restoration after an invalid wrapper blocks.
+
+### Full `N` frontier
+
+The final frontier is fixed at `N`, never `M`. An all-absent merge unions every intrinsic
+parent's complete causal-root set. Authorization requires exactly one canonical valid root
+and no other valid, invalid, or ambiguous competitor. A valid root plus an unauthorized root
+is blocking even when the valid deletion happened first.
+
+Reintroduction followed by valid or invalid redeletion retains every earlier and later root
+and blocks. A live `N` occurrence reached across an intrinsic absent arm is a
+delete/recreate break. The classifier never chooses only the latest event.
+
+### Result and ordinary-check composition
+
+Return `valid`, `invalid`, `none`, `ambiguous`, or `unreadable` with `C/O/N`, endpoint roles,
+identity/multiplicity, carry proofs, direct/supplier mode, causal roots, event children,
+authority/propagation evidence, support certificates/checks, neutral/absent parents, typed
+reason codes, resource counters, full OIDs, and bounded diagnostics. Exclude provider state,
+`B`, `M`, PR number, moving refs, and localized stderr.
+
+After complete traversal, emit one stable Finding per disappeared identity lacking a unique
+valid explanation. Keep the domain-separated identity digest, collision fail-closed rule,
+bounded representative path, no action-text dump, and frozen legacy retry coexistence from
+the prior design.
+
+Ordinary `B...N` checks remain enabled. The POC intentionally leaves two shapes clean—a
+candidate duplicate/live survivor and a regression restored before later valid deletion—
+because ordinary production checks report the real invalid mutation edges. Removing or
+narrowing those checks reopens proven gaps.
+
+### Exact production budget profile
+
+Charge before the protected read, allocation, traversal, subprocess, or serialization.
+Exactly-at-limit succeeds; limit-plus-one raises one budget exception before more work,
+terminates/reaps a live child, discards local caches/results, and returns incomplete.
+
+| Dimension | Limit |
+|---|---:|
+| Graph commits | 4,096 |
+| Graph parent tokens/edges | 8,192 |
+| Graph stdout bytes | 16 MiB |
+| Peak graph line bytes | 1 MiB |
+| Git child processes | 512 |
+| Batch-reader restarts/fallbacks | 8 |
+| Distinct object reads | 65,536 |
+| Unique object payload bytes | 32 MiB |
+| Peak object payload bytes | 4 MiB |
+| Distinct queue subtree OIDs | 4,096 |
+| Queue snapshot entries | 65,536 |
+| Queue path bytes | 4 MiB |
+| Queue blob bytes | 32 MiB |
+| Flattened tree entries | 131,072 |
+| Flattened path bytes | 8 MiB |
+| Production identities | 2,048 |
+| Occurrences per identity | 16 |
+| Identity-edge/carry transitions | 262,144 |
+| Causal roots | 65,536 total / 512 per identity |
+| Authority validations | 512 |
+| Support certificates | 512 |
+| Dynamic support traversal paths | 65,536 |
+| Discovered support paths | 8,192 |
+| Support path bytes | 1 MiB |
+| Certificate delta/projection rows | 65,536 |
+| Certificate anchors/obligations | 8,192 each |
+| Certificate serialized bytes | 32 MiB total / 4 MiB peak |
+| Diagnostic bytes | 256 KiB |
+
+The implementation may lower a limit after measurement but may not raise or omit one
+without amending this design and its exact/limit-plus-one evidence. Object size is admitted
+from the batch header before payload read; tree entry/name/path counters precede decode and
+cache insertion; dynamic support traversal precedes matching/discovery; certificate
+candidates, rows, anchors, obligations, and encoded size precede construction and hashing.
+The preflight size calculation is itself bounded.
+
+### GitHub adapter and common cycles
+
+GitHub transports immutable endpoints and never authorizes provenance or queries the PR API.
+
+The adapter behavior by development cycle is:
+
+- A new branch push has zero `before`, so only ordinary checks run and no `O` is invented.
+- A fast-forward push supplies `O=event.before` and `N=event.after`; core returns early.
+- A force-push supplies the same exact pair before, during, or after a PR; PR state is
+  irrelevant.
+- A branch deletion has `deleted=true` and zero `after`, so continuity is absent and
+  `github.sha` is not interpreted as `N`.
+- Non-branch ref updates remain outside continuity until a tag policy exists.
+- PR open, edit, and reopen events have no old/new head pair, so only ordinary `B...N`
+  checks run.
+- PR synchronize supplies top-level `before/after`; consistency requires
+  `after == pull_request.head.sha`.
+- Base advance or retarget affects ordinary checks only and never supplies O/N/C.
+- Multiple PRs may repeat the identical O/N audit while retaining separate ordinary ranges.
+- A stale rerun retains the original event pair rather than reading a current ref.
+- Missing exact objects are fetched by their event OID; failure is coverage-unavailable
+  exit 2.
+- Fork synchronize remains unprivileged and uses exact head-repository objects when
+  available; otherwise it is coverage-unavailable.
+- A force-push performed while a fork PR is closed and later reopened has no trustworthy
+  displaced pair at the base repository and remains an explicit coverage gap.
+- Provider API outage or race does not affect provenance because no API call participates.
+
+For push, `N` is `github.event.after`; `github.sha` is only a non-deletion consistency
+observation because branch deletion assigns it the default-branch tip. PR synchronize
+fails incomplete on missing top-level endpoints, `after != head.sha`, checkout `HEAD != N`,
+or exact fetch failure. Never use `pull_request_target` to execute fork code or gain
+credentials. Canary real same-repository and fork payloads before release.
+
+Remote checks remain post-push advisory. They say classification failed, not that the ref
+update was prevented.
+
+### Human workflow
+
+For a normal restack: fetch the current base, rewrite the task branch, inspect commits, push
+with an exact lease, and let the push event classify its immutable O/N. A valid inherited
+resolution is silent. A completed invalid/ambiguous result is repaired by dropping/rebasing
+invalid history, restoring the action, or completing its lifecycle—not by pushing again.
+Incomplete asks for exact objects/history or a simpler rewrite and files no retry.
+
+Local diagnosis uses the same paired contract:
+
+```sh
+python3 automation/reconcile/reconcile.py --check \
+  --at-transition merge \
+  --branch task/<task-id> \
+  --range <B>...<N> \
+  --ref-update <O> <N>
+```
+
+A repository pre-push prevention hook is outside this task. The existing exact-lease backlog
+task owns arbitrary/multiple-ref atomic handling and binding
+`--force-with-lease=<ref>:<O>`; observing O without the lease cannot prevent a later remote
+advance.
+
+### Implementation ownership
+
+1. Core runtime owns `automation/reconcile/reconcile.py` and, if needed, one module under
+   `automation/reconcile/`: preflight, graph, multimap, authority, budgets, immutable result.
+2. Core tests own `automation/tests/test_reconcile_queue.py`, including its current workflow
+   source assertion and every DAG/transaction/budget/damaged-control case.
+3. GitHub adapter owns `.github/workflows/harness.yml` and
+   `automation/tests/test_github_action_projection_workflow.py`.
+4. Human contract owns `handbook/git-workflow.md`, `message-queue/AGENTS.md`, and
+   `automation/AGENTS.md` if its CLI contract changes.
+
+Task records retain one integration owner. Local pre-push/lease work is a separate task/PR.
+
+### Accepted POC and production gates
+
+The accepted POC is `d12b799a2fa27b05a5ee2af1b422131856296b41`, tree
+`0f5b8f3c840055bf66f7c59e2493a72e948d5163`, evidence
+`sha256:dce421f2a526ffdb023a24ab57ffee48b545ac3f5f7270b080e6dd2e84f71058`.
+Two fresh roots with different hash seeds, an installed French locale, and different time
+zones produced byte-identical 204-row streams: 167/167 scenarios, 34/34 damaged-mode
+controls, and 4/4 aliases. The auditor rejected 68/68 grammar, association, locale,
+history, byte, and regeneration attacks. Three final independent verifiers unanimously
+accepted semantic/DAG behavior, evidence mechanics, and execution-budget/ordinary-check
+composition.
+
+Production completion requires all mapped semantic families; the exact neutral-boundary,
+persisted-collision/absent-arm, mixed-root, reintroduction, supplier, binding, retry/pickup,
+move and squash/cherry-pick cases; fast-forward/zero/no-or-multiple-base/object-fault cases;
+every exact/limit-plus-one budget; child terminate/reap and zero partial cache/result;
+writer combinations with earlier Findings and byte-identical state on incomplete preflight;
+one graph enumeration, zero extra parent queries, and bounded 128+ commit performance; all
+five ordinary-range seams; push/PR endpoint matrices and real same-repository/fork canaries;
+PCX-21/22 staged behavior; targeted/full/reconciler/cold-clone tests; core-fit review; and a
+fresh immutable-revision adversarial panel.
+
+### Amended non-goals
+
+- no new queue identity field, schema migration, dependency, service, or provider state;
+- no traversal before `C` or behind a neutral outside boundary;
+- no replay, range-diff, patch-id, path similarity, synthetic authority, or squash receipt;
+- no selected base `M`, PR API, current-ref fallback, or base-vs-task authorship claim;
+- no automatic closed-fork coverage, tag policy, or local pre-push hook;
+- no claim that an advisory check prevented a push;
+- no self-evolving agent authority over evaluator, credential, evidence, or admission;
+- no supplier review successor/reask/boundary support before typed obligations and budgets
+  have observed-red coverage.
+
+### Amended core fit
+
+**Agent substitution:** pass — the rule consumes committed Git objects and repository queue authority, so another agent runtime preserves it
+**Provider substitution:** pass — any CI/provider or local caller that supplies immutable O/N preserves the core result; provider state is not authority
+**Repository substitution:** pass — any adopted repository using AgentFold's queue and rewritten-history gate needs the same false-accusation and real-loss protection
+**User-global writes:** none
+**Why AgentFold core:** rewritten-history continuity and queue lifecycle authority are reconciler invariants, not local configuration, a service, private overlay, or separate plugin
+**Thin adapter:** canonical=.github/workflows/harness.yml; optional=yes; policy=none; writes=repo-only
