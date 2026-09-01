@@ -26,7 +26,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 49, "python": "3.14.7", "summary": "PASS", "total": 49}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 49, "python": "3.14.7", "summary": "PASS", "total": 49}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -72,6 +72,27 @@ N  8dc6dbc10535cb058ee49c63a979d75966b7f248
 authority   34af1523579ea4589da0f84550d509d34271129c -> 64a032aa6cab8206bedfaefb1dbee32ebe867942 (valid)
 propagation bacb6b431fc91e0c51137a1f5d16f789f5ddecde -> 5f5714f1c3661031e2200b1e1a346f236055b90f
 ```
+
+## S1/S2/S3/S12 executable aliases
+
+The adjudication's S-labels are aliases for four existing P fixtures, not extra
+scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
+every observed field below with the literal expectations in
+`SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
+scenario total remains 49.
+
+| Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
+|---|---|---|---|---|---|
+| S1 | `P1-direct-linear-valid` | `no-finding` | `valid` | `direct` | 1 valid / 0 |
+| S2 | `P2-direct-linear-invalid` | `blocking-finding` | `invalid` | `direct` | 1 invalid / 0 |
+| S3 | `P3-genuine-old-loss` | `blocking-finding` | `none` | `none` | 0 / 0 |
+| S12 | `P12-merge-supplier-valid` | `no-finding` | `valid` | `supplier` | 1 valid / 1 |
+
+The executable comparisons include the per-action finding boolean and the count
+of invalid authority edges. S1 and S2 therefore prove opposite verdicts over
+the same direct-event shape. S3 proves that absence with no candidate event
+cannot be authorized. S12 proves the opposite supplier outcome: one valid
+earlier authority edge plus a separate propagation edge returns no finding.
 
 ## P1-P22 coverage
 
@@ -229,11 +250,11 @@ python3 automation/reconcile/reconcile.py --check
 ```
 
 The installer and bytecode compilation exited `0`. The self-test passed 49/49
-scenarios and 5/5 controls. Each standalone control exited `0` with
-`OBSERVED_RED`. The reconciler exited `0` with zero blocking findings and six
-pre-existing advisories about frozen human-action records. The commit hook
-selected no repository test files because this directory is a design record
-path.
+scenarios, 4/4 executable aliases, and 5/5 controls. Each standalone control
+exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
+findings and six pre-existing advisories about frozen human-action records. The
+commit hook selected no repository test files because this directory is a design
+record path.
 
 ## Nonclaims and tests not run
 

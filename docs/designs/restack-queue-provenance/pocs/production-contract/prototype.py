@@ -3069,6 +3069,50 @@ CONTROL_NAMES = (
 )
 
 
+SCENARIO_ALIASES = {
+    "S1": {
+        "scenario": "P1-direct-linear-valid",
+        "classification": "no-finding",
+        "evidence_status": "valid",
+        "event_mode": "direct",
+        "finding": False,
+        "authority_edges": 1,
+        "invalid_authority_edges": 0,
+        "propagation_edges": 0,
+    },
+    "S2": {
+        "scenario": "P2-direct-linear-invalid",
+        "classification": "blocking-finding",
+        "evidence_status": "invalid",
+        "event_mode": "direct",
+        "finding": True,
+        "authority_edges": 1,
+        "invalid_authority_edges": 1,
+        "propagation_edges": 0,
+    },
+    "S3": {
+        "scenario": "P3-genuine-old-loss",
+        "classification": "blocking-finding",
+        "evidence_status": "none",
+        "event_mode": "none",
+        "finding": True,
+        "authority_edges": 0,
+        "invalid_authority_edges": 0,
+        "propagation_edges": 0,
+    },
+    "S12": {
+        "scenario": "P12-merge-supplier-valid",
+        "classification": "no-finding",
+        "evidence_status": "valid",
+        "event_mode": "supplier",
+        "finding": False,
+        "authority_edges": 1,
+        "invalid_authority_edges": 0,
+        "propagation_edges": 1,
+    },
+}
+
+
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
     if "restore_hidden" not in fixture.details:
         return Classifier(fixture, damage).run()
@@ -3452,6 +3496,52 @@ def prepare_root(path: Path):
     path.mkdir(parents=True, exist_ok=True)
 
 
+def validate_scenario_aliases(results: list[dict]):
+    """Verify named adjudication scenarios without duplicating fixtures."""
+    by_scenario = {result["scenario"]: result for result in results}
+    inventory = []
+    failures = []
+    for alias, expected in SCENARIO_ALIASES.items():
+        result = by_scenario.get(expected["scenario"])
+        if result is None:
+            observed = {"scenario": None}
+            errors = [f"missing mapped scenario {expected['scenario']}"]
+        else:
+            observed = {
+                "scenario": result["scenario"],
+                "classification": result["classification"],
+                "evidence_status": result["evidence_verdict"]["status"],
+                "event_mode": result["event_mode"],
+                "finding": any(
+                    action["finding"] for action in result["actions"]
+                ),
+                "authority_edges": len(result["authority_edges"]),
+                "invalid_authority_edges": sum(
+                    edge["problem"] is not None
+                    for edge in result["authority_edges"]
+                ),
+                "propagation_edges": len(result["propagation_edges"]),
+            }
+            errors = [
+                f"{field}: observed {observed.get(field)!r}, "
+                f"expected {value!r}"
+                for field, value in expected.items()
+                if observed.get(field) != value
+            ]
+        entry = {
+            "alias": alias,
+            "maps_to": expected["scenario"],
+            "expected": expected,
+            "observed": observed,
+            "status": "PASS" if not errors else "FAIL",
+        }
+        if errors:
+            entry["errors"] = errors
+            failures.append({"alias": alias, "errors": errors})
+        inventory.append(entry)
+    return inventory, failures
+
+
 def run_suite(root: Path):
     failures = []
     results = []
@@ -3464,6 +3554,18 @@ def run_suite(root: Path):
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+    alias_inventory, alias_failures = validate_scenario_aliases(results)
+    failures.extend(alias_failures)
+    print(
+        json.dumps(
+            {
+                "scenario_alias_inventory": alias_inventory,
+                "status": "PASS" if not alias_failures else "FAIL",
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+    )
     controls = []
     for index, name in enumerate(CONTROL_NAMES, start=1):
         result = run_control(name, root / f"control-{index:02d}")
@@ -3479,6 +3581,10 @@ def run_suite(root: Path):
             item["status"] == "OBSERVED_RED" for item in controls
         ),
         "controls_total": len(controls),
+        "aliases_passed": sum(
+            item["status"] == "PASS" for item in alias_inventory
+        ),
+        "aliases_total": len(alias_inventory),
         "python": sys.version.split()[0],
         "git": REAL_RUN(
             ["git", "--version"],
