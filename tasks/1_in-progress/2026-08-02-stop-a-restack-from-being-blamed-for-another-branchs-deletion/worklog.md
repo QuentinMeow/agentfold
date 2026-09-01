@@ -113,6 +113,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Role-specific ordinary projection correction (codex)
+
+- Review rejected one generic ordinary history map because current consumers need distinct
+  candidate, task-message, symmetric, root, activation, handover-incarnation, and synthetic
+  projections. It also found unreachable graph counters, unbounded root/activation/result
+  work, approval-pending fork attempts, and Git follow-tags/multiple-pushurl side effects.
+- Appended literal root/direct/symmetric commands with role markers; bounded root,
+  activation ancestry, and handover path histories; derived graph counters; a fully
+  immutable bounded ordinary result before output/writers; pending approval semantics; and
+  configuration-closed push commands with hostile-config tests.
+- Production remains unopened pending another full five-lens immutable-revision review.
+
 ## 2026-09-01 — Derived-counter and bounded ordinary-history correction (codex)
 
 - Semantic review accepted again. The other lenses found unreachable independent +1

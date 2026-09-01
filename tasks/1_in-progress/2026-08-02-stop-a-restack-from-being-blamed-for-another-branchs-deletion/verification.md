@@ -39,6 +39,17 @@ and no production implementation began from this revision.
 The panel stopped after two independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded bounded-ordinary design review
+
+**Reviewed revision:** `d075666935d1e9cabf28cc40321584137f0b1828`
+
+- semantic/DAG / r18-semantic-design: `block` — one untyped ordinary map could not preserve distinct queue, task-message, symmetric-diff, root, activation, handover, and synthetic-candidate revision projections.
+- budgets/transaction/composition / receipt-contract: `block` — several graph limits were unreachable, activation/root work remained open, and ordinary result/output/helper work was not transactional or bounded.
+- workflow/adapter/human / r18-workflow-design: `block` — approval-pending fork runs and follow-tags/multiple-pushurl publication effects were missing.
+
+The panel stopped after three independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded observable-provider design review
 
 **Reviewed revision:** `10e2d6a1cf2e7983301cdb10dd9ba1dbd976de81`

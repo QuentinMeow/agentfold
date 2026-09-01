@@ -1589,3 +1589,163 @@ The complete five-lens immutable review remains unopened for implementation unti
 revision accepts the ordinary historical preflight, source-distinct trust binding, and all
 prior semantic/transaction contracts. Adapter evidence remains optional and separately
 gated by live provider behavior.
+
+## 2026-09-01 correction amendment 8 — role-specific ordinary projections
+
+The review of `d075666935d1e9cabf28cc40321584137f0b1828` blocked an
+over-generalized ordinary history map, hidden activation/root/result work, fork approval
+states, and Git publication configuration leakage. This section supersedes ordinary
+preflight structure/counters and the affected provider/manual details above. The accepted
+continuity classifier is unchanged.
+
+### Closed ordinary history snapshot
+
+The ordinary preflight produces one immutable `OrdinaryHistorySnapshot` with distinct
+named projections; consumers cannot iterate an untyped union.
+
+For `root:N`, one streamed command supplies candidate history:
+
+```sh
+git --no-replace-objects rev-list \
+  --parents --topo-order --reverse N
+```
+
+Every record has roles `candidate`, `task-message`, and `root-range`. For `B...N`, preflight
+first requires exactly one `C = merge-base --all B N`, then streams these literal views:
+
+```sh
+git --no-replace-objects rev-list \
+  --parents --topo-order --reverse C..N
+git --no-replace-objects rev-list \
+  --left-right --parents --topo-order --reverse B...N
+```
+
+The first view owns queue `C..N` edges and task-message `B..N` membership. The second owns
+base-only/candidate-only side markers and final-tree symmetric-diff consumers. Records are
+deduplicated by OID while retaining every role and raw parent OID. A base-only commit can
+never enter candidate or task-message projections.
+
+When checked HEAD is a validated exact two-parent synthetic candidate `H != N`, its one raw
+record and real parent edges are appended with only `synthetic-candidate` and the exact
+current consumer roles that already govern H; H is never relabeled as N or inserted into
+task-message `B..N`. Direct checkout has no synthetic row. Zero or multiple merge bases,
+side-marker ambiguity, truncated/malformed records, or an unvalidated H is incomplete.
+
+The projections preserve these separate semantics:
+
+- queue and task admission edges: candidate `C..N` plus the validated synthetic candidate;
+- commit task tokens/messages: candidate-only `B..N`;
+- final-tree/new-handover discovery: exact side-marked `B...N` diff and N tree;
+- root task admission: separately discovered repository roots;
+- schema governance: separately recorded activation history and ancestry state;
+- handover incarnation: separately recorded path history with Git's existing full-history,
+  no-rename, ordering, and diff-filter semantics.
+
+Parity damage cases cover base-only deletion/token, candidate-only deletion/token, a
+pre-C handover incarnation, merged outside lineage, multiple merge bases, and synthetic H
+mutation. Removing a role or feeding an untyped union to a consumer is observed red.
+
+### Reachable graph accounting
+
+With 64-byte object IDs, 4,096 revision tokens and 8,192 parent tokens imply exact derived
+maxima of 798,720 stdout bytes and 532,545 peak line bytes. Rev-list stdout, line bytes,
+stream chunks, and historical edge-delta count are derived informational counters, not
+independent exact/+1 gates. Structural revision/parent limits and fixed 64 KiB reads own
+their production refusal; injected observed-minus-one damage tests prove derived
+accounting. Malformed raw lines still refuse under grammar before retention.
+
+### Root, activation, and handover inputs
+
+Root discovery is its own bounded child:
+
+```sh
+git --no-replace-objects rev-list --max-parents=0 N
+```
+
+It admits at most 64 full-OID rows, 4,160 stdout bytes, and a 65-byte peak line. The child
+has the common 30-second deadline, 512 MiB address-space limit, process-group cleanup, and
+256 KiB stderr cap; exact/+1 output and stalled/OOM controls apply. Root discovery does not
+charge its internal full-history traversal as range revisions, so a mature repository with
+a small change is not rejected merely for age. Resource-limit or timeout is incomplete.
+
+Schema activation requests come from one closed registry of current `(head, path, field,
+version)` consumers. Each preserves the existing literal path-history command shape:
+`git log --full-history --reverse --format=%H <head> -- <path>`. The snapshot caps 64
+registered requests, 8,192 activation rows, 1 MiB stdout, 65-byte lines, 8 MiB referenced
+policy blobs, and 64 children. Activation-versus-revision governance uses the bounded object
+parent reader and a memoized ancestry-state graph, not thousands of merge-base children:
+262,144 ancestry nodes/transitions, 32 MiB object payload, and the common deadline.
+
+Handover path-history requests are admitted only for bounded paths discovered by the range
+delta: 2,048 paths, 65,536 history rows, 8 MiB stdout, 8 MiB path bytes, and 512 children.
+Each request retains its current literal options (`--full-history` where the current
+consumer uses it, `--no-renames`, `--reverse`, and `--diff-filter=A`), its exact scope
+(`N`, `B...N`, or current-incarnation head), and ordered result. Aggregate deadline,
+address-space, stdout, stderr, process-group, and object budgets apply. Unsupported or
+over-limit path history is incomplete, never simplified to a different Git history.
+
+All ordinary Git children now share a 1,024-process aggregate maximum, 512 MiB per-child
+address-space limit, 30-second per-child deadline, 120-second aggregate deadline, and the
+previous byte/record caps. Successful as well as failed paths close and reap long-lived
+object readers.
+
+### Immutable ordinary result transaction
+
+After history preflight and global snapshot capture, all registered ordinary checkers run
+into a transaction-local immutable result before output or writers. The result caps are:
+
+| Ordinary result dimension | Limit |
+|---|---:|
+| Checker invocations | 64 |
+| Helper calls | 262,144 |
+| Finding rows | 65,536 |
+| Result rows / references | 131,072 / 262,144 |
+| Retained result bytes / peak row | 16 MiB / 64 KiB |
+| Serialized bytes / peak chunk | 16 MiB / 1 MiB |
+| Diagnostic bytes | 256 KiB |
+
+Finding identity, aggregation, severity, and ordering remain unchanged. Every row,
+reference, helper, retained byte, and serialization chunk is pre-charged. Any later helper,
+checker, result, serialization, deadline, or object failure discards all ordinary Findings,
+closes readers, emits one bounded exit-2 diagnostic, and leaves every writer byte
+unchanged. Only a complete result is printed and then supplied to retry/index/fold writers.
+Exact/+1 and writer-matrix tests include a maximum delta map producing maximum Findings and
+a later failing checker, proving zero partial stdout and byte-identical state.
+
+### Approval-pending fork observations
+
+Fork `pull_request` ordinary runs may remain queued, waiting, `action_required`, or approval
+required. Those states are pending no-observation, not completed unavailable, failure, or
+success. The bounded canary window may later bind one approved completed `(run_id,
+run_attempt)`; pending and completed attempt artifacts are never combined. When the window
+expires without a completed approved attempt, ordinary coverage remains externally
+unavailable. The mergeable-fork matrix row is conditional on approval and completion.
+
+### Configuration-closed publication
+
+Create, update, repair, and deletion commands add `--no-follow-tags` and
+`--recurse-submodules=no`. Immediately before publication, the workflow verifies exactly
+one expected push URL from `git remote get-url --push --all origin`, `remote.origin.mirror`
+is false, and no applicable `url.*.insteadOf` or `url.*.pushInsteadOf` rule can rewrite it.
+Any duplicate pushurl, unexpected URL, mirror, or rewrite rule stops before push.
+
+The exact update/repair command is:
+
+```sh
+git push --no-follow-tags --recurse-submodules=no \
+  --force-with-lease=refs/heads/<branch>:<O> \
+  origin <N>:refs/heads/<branch>
+```
+
+Creation uses the same flags with the empty expected-value lease; deletion uses the same
+flags with the exact expected-tip lease and empty source. Explicit refspecs continue to
+override `push.default` and `remote.*.push`. Hostile tests cover annotated reachable tags,
+push.followTags, recurse-submodules, multiple pushurls, mirror, URL rewrites, upstream, and
+multi-ref remote push configuration; only one validated repository/ref may move.
+
+### Gate boundary
+
+A fresh full five-lens immutable review remains the implementation gate. The ordinary
+snapshot and result transaction are now part of core scope because they replace existing
+unbounded production history used by Strategy A composition. Optional provider work still
+waits on transport/canary evidence.
