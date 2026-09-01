@@ -66,6 +66,8 @@ class Metrics:
     support_paths_checked: int = 0
     mutation_calls: int = 0
     per_action_history_walks: int = 0
+    carry_proof_nodes: int = 0
+    carry_proof_edges: int = 0
 
     def as_dict(self):
         return dataclasses.asdict(self)
@@ -109,6 +111,11 @@ class Damage:
     skip_persisted_candidate_continuity: bool = False
     skip_old_side_continuity: bool = False
     skip_supplier_support_certificate: bool = False
+    universal_ancestor_carry_scan: bool = False
+    ignore_outside_c_collision: bool = False
+    ignore_absent_c_arm: bool = False
+    first_parent_carry_only: bool = False
+    skip_carry_compatibility: bool = False
 
 
 @dataclasses.dataclass
@@ -125,6 +132,7 @@ class Event:
     causal_roots: list[dict] = dataclasses.field(default_factory=list)
     reason_records: list[dict] = dataclasses.field(default_factory=list)
     support_checks: list[dict] = dataclasses.field(default_factory=list)
+    carry_proofs: list[dict] = dataclasses.field(default_factory=list)
 
 
 def is_git_command(command) -> bool:
@@ -608,6 +616,7 @@ class Graph:
         self.new_nodes = self.ancestors(N)
         if C not in self.old_nodes or C not in self.new_nodes:
             raise Unreadable("both tips must descend from C")
+        self.c_descendants = self.descendants(self.C)
         self.candidate_nodes = self.new_nodes - self.old_nodes
 
     def ancestors(self, tip: str) -> set[str]:
@@ -654,6 +663,7 @@ class Classifier:
         self.metrics = Metrics()
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
+        self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
 
     def states(
         self, revision: str, identity: tuple
@@ -693,24 +703,203 @@ class Classifier:
             )
         return None
 
-    def unique_carry_problem(
-        self, identity: tuple, tip: str
-    ) -> str | None:
+    def carry_proof(self, identity: tuple, tip: str) -> dict:
+        """Prove one live occurrence by C-rooted edges, not all ancestors."""
         assert self.graph is not None
-        region = self.graph.ancestors(tip)
-        if self.graph.C not in region:
-            return f"carrying parent {tip} is not rooted at C"
-        for commit in self.graph.ordered(region):
-            multiplicity = len(self.states(commit, identity))
-            if multiplicity != 1:
-                paths = [
-                    state.path for state in self.states(commit, identity)
-                ]
-                return (
-                    f"C-rooted carrying history is discontinuous at {commit}: "
-                    f"multiplicity {multiplicity}, paths {paths}"
+        key = (identity, tip)
+        if key in self.carry_proof_cache:
+            return self.carry_proof_cache[key]
+
+        if self.damage.universal_ancestor_carry_scan:
+            region = self.graph.ancestors(tip)
+            problem = None
+            for commit in self.graph.ordered(region):
+                multiplicity = len(self.states(commit, identity))
+                if multiplicity != 1:
+                    paths = [state.path for state in self.states(commit, identity)]
+                    problem = (
+                        "DAMAGED universal ancestor scan rejected "
+                        f"{commit}: multiplicity {multiplicity}, paths {paths}"
+                    )
+                    break
+            result = {
+                "tip": tip,
+                "status": "valid" if problem is None else "ambiguous",
+                "reason": problem,
+                "edges": [],
+                "outside_neutral": [],
+                "outside_collisions": [],
+                "absent_c_parents": [],
+            }
+            self.carry_proof_cache[key] = result
+            return result
+
+        visiting: set[str] = set()
+        memo: dict[str, str | None] = {}
+        edges: list[dict] = []
+        outside_neutral: list[str] = []
+        outside_collisions: list[dict] = []
+        absent_c_parents: list[str] = []
+
+        def fail(message: str) -> str:
+            return message
+
+        def trace(child: str) -> str | None:
+            if child in memo:
+                return memo[child]
+            if child in visiting:
+                return fail(f"C-rooted carry graph cycles at {child}")
+            if child not in self.graph.c_descendants:
+                return fail(f"carrying node {child} is outside the C-rooted cone")
+            visiting.add(child)
+            self.metrics.carry_proof_nodes += 1
+            child_states = self.states(child, identity)
+            if len(child_states) != 1:
+                problem = fail(
+                    f"C-rooted carrying node {child} has multiplicity "
+                    f"{len(child_states)}"
                 )
-        return None
+                visiting.remove(child)
+                memo[child] = problem
+                return problem
+            if child == self.graph.C:
+                visiting.remove(child)
+                memo[child] = None
+                return None
+
+            after = child_states[0]
+            carrying: list[tuple[str, ActionState]] = []
+            local_absent: list[str] = []
+            local_collisions: list[dict] = []
+            local_neutral: list[str] = []
+            parents = sorted(self.graph.parents.get(child, ()))
+            if self.damage.first_parent_carry_only:
+                parents = parents[:1]
+            for parent in parents:
+                self.metrics.carry_proof_edges += 1
+                states = self.states(parent, identity)
+                if parent in self.graph.c_descendants:
+                    if len(states) == 1:
+                        carrying.append((parent, states[0]))
+                    elif len(states) == 0:
+                        local_absent.append(parent)
+                    else:
+                        local_collisions.append(
+                            {
+                                "parent": parent,
+                                "multiplicity": len(states),
+                                "paths": [state.path for state in states],
+                                "scope": "C-descendant",
+                            }
+                        )
+                elif len(states) == 0:
+                    local_neutral.append(parent)
+                elif not self.damage.ignore_outside_c_collision:
+                    local_collisions.append(
+                        {
+                            "parent": parent,
+                            "multiplicity": len(states),
+                            "paths": [state.path for state in states],
+                            "scope": "outside-C",
+                        }
+                    )
+            outside_neutral.extend(local_neutral)
+            outside_collisions.extend(
+                item for item in local_collisions if item["scope"] == "outside-C"
+            )
+            absent_c_parents.extend(local_absent)
+            if local_collisions:
+                problem = fail(
+                    f"carrying node {child} has identity collision(s): "
+                    + "; ".join(
+                        f"{item['scope']} parent {item['parent']} "
+                        f"multiplicity {item['multiplicity']}, "
+                        f"paths {item['paths']}"
+                        for item in local_collisions
+                    )
+                )
+            elif local_absent and not self.damage.ignore_absent_c_arm:
+                problem = fail(
+                    f"carrying node {child} has absent C-descendant arm(s) "
+                    f"{sorted(local_absent)}; deletion/reintroduction competes"
+                )
+            elif not carrying:
+                problem = fail(
+                    f"carrying node {child} has no C-rooted carrying parent"
+                )
+            else:
+                upstream = [trace(parent) for parent, _ in carrying]
+                problem = next((item for item in upstream if item), None)
+                candidate_edges = [
+                    self.mutation_edge(identity, parent, child, before, after)
+                    for parent, before in carrying
+                ]
+                edges.extend(candidate_edges)
+                if problem is None and not self.damage.skip_carry_compatibility:
+                    sources = [
+                        index for index, edge in enumerate(candidate_edges)
+                        if edge["problem"] is None
+                    ]
+                    if not sources:
+                        problem = (
+                            f"no carrying edge into {child} passes production "
+                            "mutation and frozen-byte authority: "
+                            + "; ".join(
+                                f"{edge['parent']}->{edge['child']}: "
+                                + " | ".join(
+                                    dict.fromkeys(
+                                        item
+                                        for item in (
+                                            edge["production_problem"],
+                                            edge["frozen_problem"],
+                                            edge["binding_problem"],
+                                        )
+                                        if item is not None
+                                    )
+                                )
+                                for edge in candidate_edges
+                            )
+                        )
+                    else:
+                        source_index = sources[0]
+                        for index, ((_, before), edge) in enumerate(
+                            zip(carrying, candidate_edges, strict=True)
+                        ):
+                            if index == source_index:
+                                edge["role"] = "source"
+                            else:
+                                edge["role"] = "compatible-carrier"
+                                edge["problem"] = self.merge_compatible_problem(
+                                    identity, edge, before, after
+                                )
+                                if edge["problem"] and problem is None:
+                                    problem = (
+                                        f"carrying merge edge into {child} is incompatible: "
+                                        f"{edge['problem']}"
+                                    )
+            visiting.remove(child)
+            memo[child] = problem
+            return problem
+
+        problem = trace(tip)
+        result = {
+            "tip": tip,
+            "status": "valid" if problem is None else "ambiguous",
+            "reason": problem,
+            "edges": self.stable_edges(edges),
+            "outside_neutral": sorted(set(outside_neutral)),
+            "outside_collisions": sorted(
+                {json.dumps(item, sort_keys=True): item for item in outside_collisions}.values(),
+                key=lambda item: (item["parent"], item["multiplicity"]),
+            ),
+            "absent_c_parents": sorted(set(absent_c_parents)),
+        }
+        self.carry_proof_cache[key] = result
+        return result
+
+    def unique_carry_problem(self, identity: tuple, tip: str) -> str | None:
+        """Compatibility shim for callers while authority uses carry_proof."""
+        return self.carry_proof(identity, tip)["reason"]
 
     def absence_problem(
         self, identity: tuple, start: str, end: str
@@ -1142,14 +1331,17 @@ class Classifier:
         duplicate = []
         for parent in self.graph.parents[child]:
             multiplicity = len(self.states(parent, identity))
-            if multiplicity == 1:
-                carrying.append(parent)
-            elif multiplicity > 1:
-                duplicate.append(parent)
-            elif self.graph.reaches_C(parent):
-                absent.append(parent)
-            else:
+            if parent in self.graph.c_descendants:
+                if multiplicity == 1:
+                    carrying.append(parent)
+                elif multiplicity > 1:
+                    duplicate.append(parent)
+                else:
+                    absent.append(parent)
+            elif multiplicity == 0 or self.damage.ignore_outside_c_collision:
                 neutral.append(parent)
+            else:
+                duplicate.append(parent)
         return carrying, absent, neutral, duplicate
 
     def raw_direct_events(self, identity: tuple) -> list[Event]:
@@ -1165,25 +1357,48 @@ class Classifier:
             carrying, absent, neutral, duplicate = self.parent_roles(
                 identity, child
             )
-            if not carrying or absent:
+            if absent:
                 continue
             if duplicate:
+                collision_edges = []
+                for parent in duplicate:
+                    states = self.states(parent, identity)
+                    if (
+                        parent not in self.graph.c_descendants
+                        and len(states) == 1
+                    ):
+                        edge = self.authority_edge(
+                            identity, parent, child
+                        )
+                        edge["problem"] = (
+                            "outside-C parent carries a matching identity; "
+                            "its provenance is an unresolved collision"
+                        )
+                        edge["support_certificate"] = None
+                        collision_edges.append(edge)
                 event = Event(
                     "ambiguous",
                     "direct",
                     child,
-                    [],
+                    collision_edges,
                     [],
                     neutral,
                     [],
                     "direct-parent-multiplicity",
-                    "a carrying parent has duplicate exact identities",
+                    "a parent has colliding exact identity provenance",
                 )
                 events.append(
                     self.attach_causal_metadata(
-                        event, [self.synthetic_causal_root(event)]
+                        event,
+                        (
+                            self.direct_causal_roots(event)
+                            if collision_edges
+                            else [self.synthetic_causal_root(event)]
+                        ),
                     )
                 )
+                continue
+            if not carrying:
                 continue
             selected = (
                 carrying
@@ -1194,15 +1409,11 @@ class Classifier:
                 self.authority_edge(identity, parent, child)
                 for parent in selected
             ]
+            carry_proofs = [
+                self.carry_proof(identity, parent) for parent in carrying
+            ]
             continuity = next(
-                (
-                    problem
-                    for problem in (
-                        self.unique_carry_problem(identity, parent)
-                        for parent in carrying
-                    )
-                    if problem
-                ),
+                (proof["reason"] for proof in carry_proofs if proof["reason"]),
                 None,
             )
             invalid = [edge for edge in edges if edge["problem"]]
@@ -1237,10 +1448,17 @@ class Classifier:
                 child,
                 edges,
                 [],
-                neutral,
+                sorted(
+                    set(neutral).union(
+                        parent
+                        for proof in carry_proofs
+                        for parent in proof["outside_neutral"]
+                    )
+                ),
                 [],
                 code,
                 reason,
+                carry_proofs=carry_proofs,
             )
             events.append(
                 self.attach_causal_metadata(
@@ -1796,6 +2014,15 @@ class Classifier:
         binding_problem = self.binding_subset_problem(
             identity, before, after
         )
+        if (
+            self.damage.broad_review_pending_normalization
+            and binding_problem is None
+            and production_problem is not None
+            and production_problem.startswith(
+                "immutable review binding changed outside"
+            )
+        ):
+            production_problem = None
         # Production mutation authority owns ordinary linear transitions,
         # including its exact unanswered review retraction exception.  The
         # subset comparison is evidence for O anchoring and for non-authoring
@@ -2088,15 +2315,11 @@ class Classifier:
                 observed_sources.append(result)
                 results.append(result)
                 continue
+            carry_proofs = [
+                self.carry_proof(identity, parent) for parent in carrying
+            ]
             carry_problem = next(
-                (
-                    problem
-                    for problem in (
-                        self.unique_carry_problem(identity, parent)
-                        for parent in carrying
-                    )
-                    if problem
-                ),
+                (proof["reason"] for proof in carry_proofs if proof["reason"]),
                 None,
             )
             per_absent: list[list[Event]] = []
@@ -2213,6 +2436,11 @@ class Classifier:
                     for parent in source.neutral_parents
                 ]
                 + neutral
+                + [
+                    parent
+                    for proof in carry_proofs
+                    for parent in proof["outside_neutral"]
+                ]
             )
             accumulated_absent = self.stable_oids(
                 [
@@ -2431,6 +2659,7 @@ class Classifier:
             result.support_checks = self.stable_support_checks(
                 [*inherited_support_checks, *current_support_checks]
             )
+            result.carry_proofs = carry_proofs
             results.append(result)
         return results
 
@@ -2572,6 +2801,13 @@ class Classifier:
         support_checks = self.stable_support_checks(
             check for event in events for check in event.support_checks
         )
+        carry_proofs = list(
+            {
+                proof["tip"]: proof
+                for event in events
+                for proof in event.carry_proofs
+            }.values()
+        )
         reintroduced = any(
             self.has_reintroduction(identity, event) for event in events
         )
@@ -2625,6 +2861,7 @@ class Classifier:
             reason_code,
             reason,
             support_checks=support_checks,
+            carry_proofs=carry_proofs,
         )
         return self.attach_causal_metadata(
             result, causal_roots, prior_records
@@ -2773,6 +3010,7 @@ class Classifier:
             "propagation_edges": [],
             "mutation_edges": [],
             "support_checks": [],
+            "carry_proofs": [],
             "neutral_parents": [],
             "absent_parents": [],
             "causal_roots": [],
@@ -2956,6 +3194,7 @@ class Classifier:
             "propagation_edges": event.propagation_edges,
             "mutation_edges": old_mutation_edges,
             "support_checks": event.support_checks,
+            "carry_proofs": event.carry_proofs,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
             "causal_roots": event.causal_roots,
@@ -3176,6 +3415,11 @@ class Classifier:
                         check
                         for action in actions
                         for check in action["support_checks"]
+                    ],
+                    "carry_proofs": [
+                        proof
+                        for action in actions
+                        for proof in action["carry_proofs"]
                     ],
                     "actions": actions,
                     "metrics": self.metrics.as_dict(),
@@ -4569,22 +4813,16 @@ def r9_review_pending_binding(
     path = add_review(
         repo,
         label,
-        status="waiting",
-        target="pending" if field_slug == "target" else target,
-        revision="pending" if field_slug == "revision" else revision,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
     )
     C = repo.commit(f"create review with pending {field_slug} at C")
     repo.branch("old", C)
     answer_review(repo, path, "approve")
     O = feature(repo, f"{label}-old")
     repo.branch("candidate", C)
-    fill_review_pending(
-        repo,
-        path,
-        field=pending_field,
-        target=target,
-        revision=revision,
-    )
+    publish_review(repo, path, target, revision)
     answer_review(repo, path, "approve")
     authority_parent = claim_review(repo, path)
     deletion = delete_with_evidence(
@@ -5400,6 +5638,71 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         N,
         "blocking-finding" if conflict else "no-finding",
         {"source": source, "carrier": carrier, "merge": M, "conflict": conflict},
+    )
+
+
+def r17_outside_c_neutral_parent(root: Path) -> Fixture:
+    """Exact legal-restack DAG from the r17 blocking core review."""
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create root before the reviewed action exists")
+    repo.branch("reviewed-C-line", R)
+    label = "r17-outside-c-neutral-parent"
+    path = add_agent(repo, label)
+    C = repo.commit("create reviewed action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+    repo.branch("outside-C", R)
+    F = feature(repo, f"{label}-outside-parent")
+    P = repo.merge_commit(
+        (C, F),
+        "merge outside-C action-free parent while retaining Q",
+    )
+    repo.branch("candidate", P)
+    K = claim(repo, (path,), "claim reviewed action after neutral merge")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "validly resolve reviewed action after neutral merge",
+    )
+    N = feature(repo, f"{label}-task-patch")
+    old_patch = repo.run("diff", "--binary", C, O).stdout
+    replayed_patch = repo.run("diff", "--binary", deletion, N).stdout
+    bases = repo.run("merge-base", "--all", O, N).stdout.splitlines()
+    with reconciler_repository(repo.root):
+        deletion_problem = RECONCILE.queue_deletion_problem(
+            path,
+            repo.run("show", f"{K}:{path}").stdout,
+            K,
+            deletion,
+        )
+    return Fixture(
+        "R17-outside-C-neutral-parent-valid-restack",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        "no-finding",
+        {
+            "R": R,
+            "F": F,
+            "P": P,
+            "K": K,
+            "deletion": deletion,
+            "unique_merge_base": bases,
+            "task_patch_equal": old_patch == replayed_patch,
+            "production_deletion_problem": deletion_problem,
+            "reviewer_counterexample_oids": {
+                "C": "030fe92b832b1bd2790182cab030b9dfd46ec6dc",
+                "O": "07418610247abbde975bd54ac937acf75ca02500",
+                "F": "233e9c9821300b9a1579c261a37b3829d0459250",
+                "P": "bda691d6bc1759421cc55925e8c350edea7d42be",
+                "K": "920d63682562575383ac5adbaf33c5855d24a554",
+                "deletion": "d45b8657259492bbc12f6c32a2e81a7944357ce4",
+                "N": "3a60d2c225bbcdf0619135111af9bc0a1120dbce",
+            },
+        },
     )
 
 
@@ -7508,6 +7811,7 @@ def scenario_builders():
         lambda root: r14_persisted_merge_carriers(
             root, conflict=True
         ),
+        r17_outside_c_neutral_parent,
         *[
             (
                 lambda root, variant=variant:
@@ -7527,6 +7831,7 @@ def scenario_builders():
 
 
 CONTROL_NAMES = (
+    "restore-universal-ancestor-carry-scan",
     "missing-all-parent-direct-validation",
     "supplier-authority-borrowing",
     "identity-multiplicity-collapsed-to-set",
@@ -7699,6 +8004,22 @@ def validate_result(result: dict):
     if scenario == "P1-direct-linear-valid":
         if result["event_mode"] != "direct" or len(authority) != 1:
             errors.append("P1 did not select one direct authority edge")
+    if scenario == "R17-outside-C-neutral-parent-valid-restack":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            details["unique_merge_base"] != [result["C"]]
+            or not details["task_patch_equal"]
+            or details["production_deletion_problem"] is not None
+            or status != "valid"
+            or result["event_mode"] != "direct"
+            or len(authority) != 1
+            or action is None
+            or details["F"] not in action["neutral_parents"]
+        ):
+            errors.append(
+                "R17 legal outside-C neutral-parent restack did not stay clean"
+            )
     if scenario == "P2-direct-linear-invalid" and status != "invalid":
         errors.append("P2 did not name invalid production authority")
     if scenario == "P3-genuine-old-loss" and status != "none":
@@ -8606,9 +8927,17 @@ def validate_result(result: dict):
                 action["reason_records"] if action is not None else []
             )
         }
+        edge_proof_code = "foreign-or-discontinuous-carrier"
+        binding_blocked = (
+            status == "invalid"
+            and "old-tip-human-binding-conflict" in reason_codes
+        ) or (
+            status == "ambiguous"
+            and edge_proof_code in reason_codes
+        )
         if (
             action is None
-            or status != "invalid"
+            or not binding_blocked
             or result["classification"] != "blocking-finding"
             or result["event_mode"] != details["mode"]
             or len(result["authority_edges"]) != 1
@@ -8619,7 +8948,6 @@ def validate_result(result: dict):
             or result["authority_edges"][0]["problem"] is not None
             or len(propagation)
             != (1 if details["mode"] == "supplier" else 0)
-            or "old-tip-human-binding-conflict" not in reason_codes
             or old_reason_token not in action["reason"]
             or details["candidate_value"] not in action["reason"]
             or Classifier.explicit_review_pending(details["old_value"])
@@ -9282,6 +9610,12 @@ def validate_result(result: dict):
 
 
 def control_builder(name: str, root: Path):
+    if name == "restore-universal-ancestor-carry-scan":
+        return (
+            r17_outside_c_neutral_parent(root),
+            Damage(universal_ancestor_carry_scan=True),
+            "blocking-finding",
+        )
     if name == "missing-all-parent-direct-validation":
         return (
             direct_merge_fixture(
