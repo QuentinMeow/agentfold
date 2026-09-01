@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**1 action stopping work right now.** 16 questions waiting on you, 55 actions waiting on an agent. 3 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -202,7 +202,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 47
+### Never stops work — 46
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -312,7 +312,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Merging main into a stale task branch continues to fail at pre-commit even when the staged tree equals clean main; agents must avoid that merge and start fresh from main when they need current history.
 
   </details>
-- **29 backlog tasks are waiting for an agent to pick one up.**
+- **28 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -337,7 +337,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [make-a-handover-survive-the-next-commit](needs-agent/requests/non-blocking-pick-up-make-a-handover-survive-the-next-commit.md)
   - [notice-a-task-whose-work-already-merged](needs-agent/requests/non-blocking-pick-up-notice-a-task-whose-work-already-merged.md)
   - [pin-the-unproven-merge-provenance-cases](needs-agent/requests/non-blocking-pick-up-pin-the-unproven-merge-provenance-cases.md)
-  - [stop-a-restack-from-being-blamed-for-another-branchs-deletion](needs-agent/requests/non-blocking-pick-up-stop-a-restack-from-being-blamed-for-another-branchs-deletion.md)
   - [stop-a-wrapped-line-from-reading-as-a-command](needs-agent/requests/non-blocking-pick-up-stop-a-wrapped-line-from-reading-as-a-command.md)
   - [bind-task-branch-pushes-to-observed-tips](needs-agent/requests/non-blocking-pick-up-bind-task-branch-pushes-to-observed-tips.md)
   - [one-line-human-responses-refresh-open-actions-safely](needs-agent/requests/non-blocking-pick-up-one-line-human-responses-refresh-open-actions-safely.md)
@@ -355,14 +354,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** A crashed or incomplete scanner must not accidentally become evidence that content is safe.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the separate failure state remains a proposal.
-
-  </details>
-- [Choose whether atomic task claims keep a narrow direct-main exception or must use a new pull-request transaction.](needs-human/decisions/future-blocking-choose-whether-task-claims-must-use-pull-requests.md) — already answered — an agent owes the fold
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** Parallel agents need one immediate winner, while you asked for every piece of progress to remain reviewable as a pull request.
-
-  **If you do nothing:** Parent design and research continue, but the first planned implementation task cannot start; the current task remains safely claimed under the old rule.
 
   </details>
 - [After the repair is published as one exact revision, judge whether every human-attention file is understandable and answerable on its own, and approve it, name the remaining ambiguity, or reject the format.](needs-human/reviews/non-blocking-rereview-human-action-files.md) — status awaiting-artifact

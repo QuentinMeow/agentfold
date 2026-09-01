@@ -48,6 +48,7 @@
 - [Bold-key metadata stays, but two of the reasons given for it are false](decisions/2026-08-18-bold-key-metadata-stays-on-corrected-grounds.md) — Keeps `**Key:** value` metadata while retiring two false premises — YAML front matter is not invisible on GitHub, and bold-key lines do not render as readable bold text everywhere
 - [A live human question hides its machine record in one sanctioned fold, checked by position](decisions/2026-08-18-the-machine-record-is-folded-and-checked-by-position.md) **[amended]** — Machine fields on new human queue items live below the answer line inside one `<details>`, and the checks that hold that shape are scoped by line position rather than by key name
 - [Retry diagnosis may change exposed prose without changing the frozen record](decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md) — Exposed diagnostic prose in a retry's Agent notes remains editable while hidden bytes, fields, and structural boundaries stay frozen
+- [Use the existing atomic claim lane for the first proof-of-concept task](decisions/2026-08-31-task-claim-publication.md) — The first proof-of-concept task uses AgentFold's existing narrow direct-main claim lane; substantive work stays in its pull request
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
