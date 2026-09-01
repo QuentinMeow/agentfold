@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 20 focused contract regressions, and all six damaged-mode controls,
+scenarios, 29 focused contract regressions, and all seven damaged-mode controls,
 without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -21,13 +21,14 @@ worktree's current `automation/reconcile/reconcile.py`:
   emits the full returned tuple and a diagnostic hash; the hash never decides
   identity or authority.
 - `queue_deletion_problem(path, text, parent, child)` decides every lifecycle
-  authority edge. The POC adds no new claim, evidence, retry, pickup, or human
-  response rule.
+  authority edge. The POC does not synthesize a claim, evidence, retry, pickup,
+  or deletion verdict. A separate contract gate described below binds concrete
+  old-tip human responses to those production-authorized edges.
 
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 6, "controls_total": 6, "failures": [], "git": "git version 2.55.0", "passed": 69, "python": "3.14.7", "summary": "PASS", "total": 69}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 7, "controls_total": 7, "failures": [], "git": "git version 2.55.0", "passed": 78, "python": "3.14.7", "summary": "PASS", "total": 78}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -55,6 +56,21 @@ membership. Carrying histories must remain uniquely present from `C`; absent
 histories must remain absent from the chosen deletion through `N`. Missing Git
 objects, shallow required history, unrelated tips, and multiple merge bases
 return structured `unreadable` or `ambiguous` results rather than absence.
+
+When the old-tip occurrence at `O` has a concrete human response, every
+candidate authority parent must preserve every concrete response/binding field
+from `O`. For a decision this is the response field and value. For a review it
+also includes the local review target and its content revision, plus the bound
+`Reviewed revision` and terminal `Review outcome` when those were already
+concrete at `O`. Fields that were still pending at `O` may be filled by the
+candidate lifecycle. The comparison is anchored to `O`, uses the same
+production identity, and runs after the production edge validator. A mismatch
+turns the event invalid while retaining the production edge verdict, full
+authority-parent and `O` OIDs, and both bindings. The gate is in raw
+direct-event construction, so supplier mode inherits it from the sole earlier
+authority event; a propagation edge cannot bypass it. An unanswered `O` has no
+concrete binding to copy and therefore does not prohibit a valid candidate-side
+response.
 
 The two event modes are disjoint:
 
@@ -126,7 +142,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 69.
+scenario total remains 78.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -435,6 +451,82 @@ wrappers  b858978bbda2e6e8492f2678070a6ce9c34ec176
           4edb5c9b80bd4504e87b8381e8cb99521552faa1
 ```
 
+## O-anchored human binding and adapter input
+
+Seven real-Git fixtures exercise the added human binding. In all four conflict
+cases, the candidate edge independently passed `queue_deletion_problem` with
+`problem: null`; the POC blocked because the concrete response at `O` did not
+match the authority parent. The identical-binding controls prove that the gate
+does not block lifecycle-valid direct or supplier deletion.
+
+| Case | C / O / K / D / M / N | Observed result |
+|---|---|---|
+| `R8-direct-human-response-conflict` | `92c80d9c65c7be349d0a6c663a6a2ea9c3c2397c` / `1dc4f0dc77aae1eefaef0bb443ec187ff1efb23d` / `986f7667dcc5b01542c1194c72cc446c4c45e5ae` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `cb29049ff107a9a11a4ec7babbdee21819518dd6` | `invalid direct`; `O=reject`, authority parent `approve`; blocking |
+| `R8-direct-human-response-identical` | `2b79814b0bce6f1556c0b2724ade9d7bbb4bf939` / `b3879039d6d7168e89d3046e6e60e056460907c1` / `3a37fb283da1ae126bf4f24c7d08215f30d88bc5` / `f345727f01fdf252be3f622bac93c727f2c24605` / `f345727f01fdf252be3f622bac93c727f2c24605` / `2c2289035cfc91c73564f6a97b326ebca02be132` | `valid direct`; identical `approve`; no finding |
+| `R8-supplier-human-response-conflict` | `255e448f3c735fefdcee3c07071c3d6bb6abb312` / `27927fe11bdeee043660e700c81e8cb3853c56bf` / `9d999de926a3b726c4f17fa4c1aa5f0ae1a9d036` / `d3616075eb04bd2c9b5208aceb05ca8e0b3e78c7` / `04af3169e321f7615236785dd2834296aff6748b` / `1fb9fc40da2d44e839830611cc20d0aee23c560e` | `invalid supplier`; `O=reject`, authority parent `approve`; blocking |
+| `R8-supplier-human-response-identical` | `800658fac71a8c7fbc2d257bde57964cc96dcef9` / `f33b095abbf3c3e3225e0fbfc663b0a7f52d312b` / `80a4c49c8bc87882eaf02fc3e5b5a82dd2aac42e` / `da001fa3334685155798eb17efdee7b17ff02ae9` / `08a3ec18a07b71e5aa95e1651ae93ce0f0e6a8d7` / `e94946d2990fe3c67bc61676f66f90fab1b7a26a` | `valid supplier`; identical `approve`; no finding |
+| `R8-review-binding-divergent` | `88a9702f01a58999b6f2f478ea10e5ef5af5e209` / `95130080a2bb5f8cb89aef0d0539463363ea28fe` / `9018e72a02b3c162fcff7af51d563db268cda17d` / `2a6c2321461290fc4bb951597345981dc90c5987` / `2a6c2321461290fc4bb951597345981dc90c5987` / `86f1bc4f1ad2993bff8c4e9f247b30f726071435` | `invalid direct`; same response, different target and content revision; blocking |
+| `R8-review-binding-identical` | `45b7550dbdc799efed73af109da57c6906d428a0` / `a3f97a3b22945e663eb10180bde5de3b7bf790fa` / `aeef03ecb0d57aac9c9d323ed80d7c4552c1b1be` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `b2dbe65f89982fb586b0fb5349454d80c7c53310` | `valid direct`; identical target, revision, and approval; no finding |
+| `R8-review-binding-terminal-conflict` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `f56e612abf60bdf946f45bb1e7e1454c59aa0956` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `invalid direct`; same response/target/revisions, but concrete `O` outcome `rejected` versus candidate `approved`; blocking |
+
+The divergent review compared fixture-local target A at
+`sha256:2ab16346393dd555c10887e02261d9fa80124206e31437260fb5d50cc7185bd3`
+with fixture-local target B at
+`sha256:5ac4dea8ba9a26fa2e56de8e4ffb2d7fe0cf688e57fb6eeeb0091f9a399115bc`.
+The positive fixture bound both sides to its fixture-local target A at
+`sha256:371e751cdca327cb53062048f641bba3263084738230bdd8b24ae6cc4aecb484`.
+The terminal fixture preserved both `Reviewed revision` values at
+`sha256:2159f135c15139aa0fdbd35362a3dd949c47c2627bee2aae17edf746e6ba5b75`
+and exposed the exact `rejected` versus `approved` outcome mismatch. The
+identical fixture leaves those terminal fields pending at `O`; the candidate is
+therefore allowed to fill them once during its production-valid folding claim.
+
+`R8-adapter-M-input-variants` runs three classifiers over the same committed
+graph rather than changing the real adapter. Its OIDs are:
+
+```text
+C 4355a7786719d4f001028cb4d39a6348f5563a72
+O 36143d1a641c4b1233ed872cf99c36a171a4d929
+K 31a1e933998db49628eeb9621479a3cb984a7fb2
+D bdb42c6aa3dbb72a2d9c1af9d6f83a0f021944a1
+N a8e46d197e36d38637dfc0e22d7d1ce6d01d820e
+```
+
+| Declared M | Range / result | Identity / authority calls | Selected evidence |
+|---|---|---:|---|
+| `O=36143d1a641c4b1233ed872cf99c36a171a4d929` | `ambiguous`; blocking because `O` is not in candidate ancestry through `N` | 0 / 0 | no event or edge |
+| `D=bdb42c6aa3dbb72a2d9c1af9d6f83a0f021944a1` | `valid`; no-finding direct | 2 / 2 | one real authority edge |
+| `N=a8e46d197e36d38637dfc0e22d7d1ce6d01d820e` | `valid`; no-finding direct | 2 / 2 | the same authority edge |
+
+Each run enumerated the five-commit, four-edge graph exactly once. This proves
+the endpoint-equality behavior on that simple graph, not that `M=N` is a safe
+general adapter fallback. A genuine restack that still supplies `M=O` fails
+the POC gate; the explicit candidate-side `M` produces the expected safe
+verdict. The POC does not alter the real workflow or adapter.
+
+`R8-adapter-M-N-frontier-counterexample` replays the existing unrelated-invalid
+source graph. The explicit candidate selection excludes an invalid source that
+joins later, whereas substituting `M=N` widens the causal frontier and correctly
+blocks. Both runs use this one graph:
+
+```text
+C                1e44d8c3cba4bdd091bd1ae218a504f5b7d938fd
+O                ba83bd926d133cee0384ae4b8fd577de5d14e835
+valid deletion   2fe1bf184c6d0626a1622012129c5801c47d31f5
+explicit M       15688654c25ae26d20dd9d4c248f7dbbafee0d15
+unrelated delete a8ae4e0bf33ab580216e0ce83a4c5d79e66b7555
+N                433bb31a23f524c2a61cd0084e0a1ecda0af8c3c
+```
+
+| Declared M | Result | Calls / retained evidence |
+|---|---|---|
+| explicit `15688654c25ae26d20dd9d4c248f7dbbafee0d15` | `valid supplier`; no finding | 2 identity, 4 authority; one valid authority and one propagation edge |
+| endpoint `M=N=433bb31a23f524c2a61cd0084e0a1ecda0af8c3c` | range `valid`, evidence `ambiguous`; blocking | 2 identity, 4 authority; valid and invalid authority edges plus the propagation edge |
+
+Each variant enumerated eight commits and nine parent edges once. Therefore the
+adapter contract must supply the explicit selected candidate-side `M`; it must
+not automatically substitute either `O` or `N`.
+
 ## Cost and budget evidence
 
 The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
@@ -498,6 +590,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 ```
 
 | Control | Baseline -> damaged | Status | C / O / M / N |
@@ -508,6 +601,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `reopen-pre-C-genealogy` | no finding -> blocking | `OBSERVED_RED` | `cd13c47983b0624a824f5fc583f7de647b240504` / `03c76bf6661f670a705245479f406a1d3ba7b279` / `3258b9e2bac9ea4c40a95a8db2cfbdaf5c972b84` / `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` |
 | `missing-post-event-continuity` | blocking -> no finding | `OBSERVED_RED` | `ec84d0800c660f6379b21cfd721122fa06162999` / `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` / `5b3f0ee9f157786e8392185afa848583d9af19bc` / `258e858010ccd1e43716ab0269faa86ae08808a7` |
 | `sole-valid-ignores-invalid-root` | blocking -> no finding | `OBSERVED_RED` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` / `5dc5378fdc316aa30dce282d0388a438d755b067` / `c1d92f49ddecd5097d7db52863c2b8e990b43810` / `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` |
+| `omit-old-tip-human-binding` | blocking -> no finding | `OBSERVED_RED` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` |
 
 ## Commands run
 
@@ -521,11 +615,12 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 69/69
-scenarios, 4/4 executable aliases, and 6/6 controls. Each standalone control
+The installer and bytecode compilation exited `0`. The self-test passed 78/78
+scenarios, 4/4 executable aliases, and 7/7 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
 commit hook selected no repository test files because this directory is a design

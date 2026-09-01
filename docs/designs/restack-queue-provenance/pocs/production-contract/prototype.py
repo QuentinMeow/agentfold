@@ -95,6 +95,7 @@ class Damage:
     reopen_pre_c_genealogy: bool = False
     enforce_post_event_absence: bool = True
     sole_valid_ignores_competitors: bool = False
+    omit_old_tip_human_binding: bool = False
 
 
 @dataclasses.dataclass
@@ -721,6 +722,73 @@ class Classifier:
             "problem": problem,
         }
 
+    def human_response_binding(
+        self, identity: tuple, revision: str
+    ) -> tuple[tuple[str, str], ...] | None:
+        if self.identity_view(identity)["actor"] != "needs-human":
+            return None
+        states = self.states(revision, identity)
+        if len(states) != 1:
+            return None
+        fields = RECONCILE.human_response_fields(states[0].text)
+        response_key = RECONCILE.first_concrete_response(fields)
+        if response_key is None:
+            return None
+        binding = [
+            ("response_field", response_key),
+            ("response", fields[response_key]),
+        ]
+        if self.identity_view(identity)["leaf"] == "reviews":
+            for key in (
+                "Review target",
+                "Review revision",
+                "Reviewed revision",
+                "Review outcome",
+            ):
+                value = fields[key]
+                concrete = (
+                    RECONCILE.review_outcome_value(value) != "pending"
+                    if key == "Review outcome"
+                    else RECONCILE.has_concrete_value(value)
+                )
+                if concrete:
+                    binding.append((key, value))
+        return tuple(binding)
+
+    def old_tip_human_binding_problem(
+        self, identity: tuple, authority_edges: list[dict]
+    ) -> str | None:
+        if self.damage.omit_old_tip_human_binding:
+            return None
+        expected = self.human_response_binding(identity, self.fixture.O)
+        if expected is None:
+            return None
+        expected_fields = dict(expected)
+        for edge in authority_edges:
+            observed = self.human_response_binding(
+                identity, edge["parent"]
+            )
+            observed_fields = dict(observed or ())
+            mismatches = {
+                key: {
+                    "expected": value,
+                    "observed": observed_fields.get(key),
+                }
+                for key, value in expected_fields.items()
+                if observed_fields.get(key) != value
+            }
+            if mismatches:
+                return (
+                    f"authority parent {edge['parent']} does not preserve "
+                    f"every concrete O-anchored human response/review "
+                    f"binding field at "
+                    f"O {self.fixture.O}: expected "
+                    f"{json.dumps(expected_fields, sort_keys=True)}, "
+                    f"observed {json.dumps(observed_fields, sort_keys=True)}, "
+                    f"mismatches {json.dumps(mismatches, sort_keys=True)}"
+                )
+        return None
+
     def parent_roles(self, identity: tuple, child: str):
         assert self.graph is not None
         carrying = []
@@ -793,6 +861,9 @@ class Classifier:
                 None,
             )
             invalid = [edge for edge in edges if edge["problem"]]
+            old_human_problem = self.old_tip_human_binding_problem(
+                identity, edges
+            )
             if continuity:
                 status = "ambiguous"
                 code = "foreign-or-discontinuous-carrier"
@@ -804,6 +875,10 @@ class Classifier:
                     f"{edge['parent']}: {edge['problem']}"
                     for edge in invalid
                 )
+            elif old_human_problem:
+                status = "invalid"
+                code = "old-tip-human-binding-conflict"
+                reason = old_human_problem
             else:
                 status = "valid"
                 code = "valid-direct-authority"
@@ -2066,6 +2141,36 @@ def human_text(label: str, status: str = "waiting", answer="______"):
     )
 
 
+def review_text(
+    label: str,
+    *,
+    status: str = "waiting",
+    response: str = "______",
+    target: str,
+    revision: str,
+    reviewed_revision: str = "______",
+    outcome: str = "pending",
+):
+    return (
+        f"# Review {label}\n\n"
+        f"**Status:** {status}\n"
+        "**Filed:** 2026-08-31\n"
+        f"**Action:** review {label}\n"
+        f"**Full context:** `{evidence_path(label)}`\n"
+        f"**Resolution evidence:** `{evidence_path(label)}`\n"
+        "**If unanswered:** keep the review live\n"
+        f"**Your review:** {response}\n"
+        f"**Review target:** `{target}`\n"
+        f"**Review revision:** {revision}\n"
+        f"**Reviewed revision:** {reviewed_revision}\n"
+        f"**Review outcome:** {outcome}\n"
+    )
+
+
+def review_revision(payload: str) -> str:
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def initialize(repo: GitRepository):
     repo.write("README.md", "# Disposable production-contract fixture\n")
     repo.write(
@@ -2094,6 +2199,28 @@ def add_human(repo: GitRepository, label: str):
     return path
 
 
+def add_review(
+    repo: GitRepository,
+    label: str,
+    *,
+    status: str,
+    target: str,
+    revision: str,
+):
+    path = queue_path(label, actor="needs-human", leaf="reviews")
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(
+        path,
+        review_text(
+            label,
+            status=status,
+            target=target,
+            revision=revision,
+        ),
+    )
+    return path
+
+
 def claim(repo: GitRepository, paths: Iterable[str], message="claim action"):
     for path in paths:
         text = repo.read(path)
@@ -2117,6 +2244,62 @@ def answer(repo: GitRepository, path: str, value: str):
         ),
     )
     return repo.commit(f"record human answer {value}")
+
+
+def answer_review(repo: GitRepository, path: str, value: str):
+    repo.write(
+        path,
+        repo.read(path).replace(
+            "**Your review:** ______",
+            f"**Your review:** {value}",
+            1,
+        ),
+    )
+    return repo.commit(f"record human review {value}")
+
+
+def publish_review(
+    repo: GitRepository, path: str, target: str, revision: str
+):
+    text = repo.read(path)
+    text = text.replace(
+        "**Status:** awaiting-artifact", "**Status:** waiting", 1
+    )
+    text = text.replace(
+        "**Review target:** `pending`",
+        f"**Review target:** `{target}`",
+        1,
+    )
+    text = text.replace(
+        "**Review revision:** pending",
+        f"**Review revision:** {revision}",
+        1,
+    )
+    repo.write(path, text)
+    return repo.commit(f"publish review target {target}")
+
+
+def claim_review(
+    repo: GitRepository,
+    path: str,
+    *,
+    outcome: str = "approved",
+):
+    text = repo.read(path)
+    revision = RECONCILE.human_response_fields(text)["Review revision"]
+    text = text.replace("**Status:** waiting", "**Status:** folding", 1)
+    text = text.replace(
+        "**Reviewed revision:** ______",
+        f"**Reviewed revision:** {revision}",
+        1,
+    )
+    text = text.replace(
+        "**Review outcome:** pending",
+        f"**Review outcome:** {outcome}",
+        1,
+    )
+    repo.write(path, text)
+    return repo.commit(f"bind human review as {outcome}")
 
 
 def delete_with_evidence(
@@ -3026,6 +3209,233 @@ def human_supplier_fixture(
             else "no-finding"
         ),
         details,
+    )
+
+
+def r8_human_response_binding(
+    root: Path, *, mode: str, conflict: bool
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    disposition = "conflict" if conflict else "identical"
+    label = f"r8-{mode}-{disposition}-response"
+    path = add_human(repo, label)
+    C = repo.commit("create unanswered human response at C")
+    repo.branch("old", C)
+    old_response = "reject" if conflict else "approve"
+    answer(repo, path, old_response)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate-authority", C)
+    answer(repo, path, "approve")
+    authority_parent = claim(
+        repo, (path,), "fold candidate human response"
+    )
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate human response",
+    )
+    carrier = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        carrier = feature(repo, f"{label}-carrier")
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt human response supplier absence",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        f"R8-{mode}-human-response-{disposition}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "old_response": old_response,
+            "candidate_response": "approve",
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+            "mode": mode,
+            "binding_conflict": conflict,
+        },
+    )
+
+
+def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    disposition = "divergent" if divergent else "identical"
+    label = f"r8-review-{disposition}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact" if divergent else "waiting",
+        target="pending" if divergent else target_A,
+        revision="pending" if divergent else revision_A,
+    )
+    C = repo.commit("create unanswered review at C")
+    repo.branch("old", C)
+    if divergent:
+        publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    if divergent:
+        publish_review(repo, path, target_B, revision_B)
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path)
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate human review",
+    )
+    M = deletion
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        f"R8-review-binding-{disposition}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if divergent else "no-finding",
+        {
+            "old_binding": [target_A, revision_A],
+            "candidate_binding": [
+                target_B if divergent else target_A,
+                revision_B if divergent else revision_A,
+            ],
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "binding_conflict": divergent,
+        },
+    )
+
+
+def r8_review_terminal_binding_conflict(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r8-review-terminal-conflict"
+    target = f"docs/{label}-target.md"
+    payload = f"# {label} target\n"
+    repo.write(target, payload)
+    revision = review_revision(payload)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=target,
+        revision=revision,
+    )
+    C = repo.commit("create unanswered terminal-binding review at C")
+    repo.branch("old", C)
+    answer_review(repo, path, "recorded review")
+    claim_review(repo, path, outcome="rejected")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    answer_review(repo, path, "recorded review")
+    authority_parent = claim_review(repo, path, outcome="approved")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate terminal-binding review",
+    )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        "R8-review-binding-terminal-conflict",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        "blocking-finding",
+        {
+            "old_binding": [target, revision, revision, "rejected"],
+            "candidate_binding": [
+                target,
+                revision,
+                revision,
+                "approved",
+            ],
+            "old_terminal_fields": {
+                "Reviewed revision": revision,
+                "Review outcome": "rejected",
+            },
+            "candidate_terminal_fields": {
+                "Reviewed revision": revision,
+                "Review outcome": "approved",
+            },
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "binding_conflict": True,
+        },
+    )
+
+
+def r8_adapter_M_variants(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r8-adapter-M-input"
+    path = add_agent(repo, label)
+    C = repo.commit("create adapter-input action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,), "claim adapter-input action")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve adapter-input action",
+    )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        "R8-adapter-M-input-variants",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        "no-finding",
+        {
+            "adapter_M_variants": {
+                "workflow_M_equals_O": O,
+                "explicit_candidate_M": deletion,
+                "endpoint_M_equals_N": N,
+            },
+            "poc_changes_adapter": False,
+        },
+    )
+
+
+def r8_adapter_M_endpoint_counterexample(root: Path) -> Fixture:
+    base = r3_unrelated_invalid_does_not_poison(root)
+    details = {
+        **base.details,
+        "adapter_M_variants": {
+            "explicit_candidate_M": base.M,
+            "endpoint_M_equals_N": base.N,
+        },
+        "poc_changes_adapter": False,
+        "automatic_M_equals_N_safe": False,
+    }
+    return dataclasses.replace(
+        base,
+        scenario="R8-adapter-M-N-frontier-counterexample",
+        details=details,
     )
 
 
@@ -4515,6 +4925,23 @@ def scenario_builders():
             root, first_valid=False, second_kind="invalid"
         ),
         r6_same_root_all_absent_wrappers,
+        lambda root: r8_human_response_binding(
+            root, mode="direct", conflict=True
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="direct", conflict=False
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="supplier", conflict=True
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="supplier", conflict=False
+        ),
+        lambda root: r8_review_binding(root, divergent=True),
+        lambda root: r8_review_binding(root, divergent=False),
+        r8_review_terminal_binding_conflict,
+        r8_adapter_M_variants,
+        r8_adapter_M_endpoint_counterexample,
     ]
 
 
@@ -4525,6 +4952,7 @@ CONTROL_NAMES = (
     "reopen-pre-C-genealogy",
     "missing-post-event-continuity",
     "sole-valid-ignores-invalid-root",
+    "omit-old-tip-human-binding",
 )
 
 
@@ -4573,6 +5001,31 @@ SCENARIO_ALIASES = {
 
 
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
+    if "adapter_M_variants" in fixture.details:
+        if damage is not None:
+            raise ValueError("adapter-input fixture does not accept damage mode")
+        results = {}
+        for name, M in fixture.details["adapter_M_variants"].items():
+            variant = dataclasses.replace(fixture, M=M)
+            results[name] = Classifier(variant).run()
+        primary = results["explicit_candidate_M"]
+        primary["adapter_input_evidence"] = {
+            name: {
+                "C": result["C"],
+                "O": result["O"],
+                "M": result["M"],
+                "N": result["N"],
+                "classification": result["classification"],
+                "evidence_status": result["evidence_verdict"]["status"],
+                "event_mode": result["event_mode"],
+                "range_base_validation": result["range_base_validation"],
+                "authority_edges": result["authority_edges"],
+                "propagation_edges": result["propagation_edges"],
+                "metrics": result["metrics"],
+            }
+            for name, result in results.items()
+        }
+        return primary
     if "restore_hidden" not in fixture.details:
         return Classifier(fixture, damage).run()
     if damage is not None:
@@ -5351,6 +5804,169 @@ def validate_result(result: dict):
             )
         ):
             errors.append("R6 equal-root wrappers emitted a non-full OID")
+    if scenario.startswith("R8-direct-human-response-") or scenario.startswith(
+        "R8-supplier-human-response-"
+    ):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        expected_classification = (
+            "blocking-finding"
+            if details["binding_conflict"]
+            else "no-finding"
+        )
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"] != expected_classification
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or len(propagation) != (1 if details["mode"] == "supplier" else 0)
+            or (
+                details["binding_conflict"]
+                and (
+                    "old-tip-human-binding-conflict" not in reason_codes
+                    or result["O"] not in action["reason"]
+                    or details["old_response"] not in action["reason"]
+                    or details["candidate_response"] not in action["reason"]
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and "old-tip-human-binding-conflict" in reason_codes
+            )
+        ):
+            errors.append("R8 O-anchored human response binding drifted")
+    if scenario.startswith("R8-review-binding-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        terminal_tokens = [
+            f'"{key}": "{value}"'
+            for fields in (
+                details.get("old_terminal_fields", {}),
+                details.get("candidate_terminal_fields", {}),
+            )
+            for key, value in fields.items()
+        ]
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"]
+            != (
+                "blocking-finding"
+                if details["binding_conflict"]
+                else "no-finding"
+            )
+            or result["event_mode"] != "direct"
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or (
+                details["binding_conflict"]
+                and (
+                    "old-tip-human-binding-conflict" not in reason_codes
+                    or not all(
+                        value in action["reason"]
+                        for value in (
+                            details["old_binding"]
+                            + details["candidate_binding"]
+                        )
+                    )
+                    or not all(
+                        token in action["reason"]
+                        for token in terminal_tokens
+                    )
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and (
+                    details["old_binding"] != details["candidate_binding"]
+                    or "old-tip-human-binding-conflict" in reason_codes
+                )
+            )
+        ):
+            errors.append("R8 O-anchored review binding drifted")
+    if scenario == "R8-adapter-M-input-variants":
+        details = result["details"]
+        variants = result.get("adapter_input_evidence", {})
+        workflow = variants.get("workflow_M_equals_O", {})
+        explicit = variants.get("explicit_candidate_M", {})
+        endpoint = variants.get("endpoint_M_equals_N", {})
+        same_graph = all(
+            variant.get(name) == result[name]
+            for variant in variants.values()
+            for name in ("C", "O", "N")
+        )
+        if (
+            details["poc_changes_adapter"]
+            or not same_graph
+            or workflow.get("M") != result["O"]
+            or workflow.get("classification") != "blocking-finding"
+            or workflow.get("evidence_status") != "ambiguous"
+            or workflow.get("event_mode") != "none"
+            or workflow.get("range_base_validation", {}).get("status")
+            != "ambiguous"
+            or workflow.get("authority_edges")
+            or workflow.get("propagation_edges")
+            or workflow.get("metrics", {}).get("identity_calls") != 0
+            or workflow.get("metrics", {}).get("authority_calls") != 0
+            or explicit.get("M")
+            != details["adapter_M_variants"]["explicit_candidate_M"]
+            or explicit.get("classification") != "no-finding"
+            or explicit.get("evidence_status") != "valid"
+            or explicit.get("event_mode") != "direct"
+            or len(explicit.get("authority_edges", [])) != 1
+            or endpoint.get("M") != result["N"]
+            or endpoint.get("classification") != "no-finding"
+            or endpoint.get("evidence_status") != "valid"
+            or endpoint.get("event_mode") != "direct"
+            or len(endpoint.get("authority_edges", [])) != 1
+        ):
+            errors.append("R8 adapter M-input evidence is incomplete")
+    if scenario == "R8-adapter-M-N-frontier-counterexample":
+        details = result["details"]
+        variants = result.get("adapter_input_evidence", {})
+        explicit = variants.get("explicit_candidate_M", {})
+        endpoint = variants.get("endpoint_M_equals_N", {})
+        if (
+            details["poc_changes_adapter"]
+            or details["automatic_M_equals_N_safe"]
+            or explicit.get("M") != result["M"]
+            or explicit.get("classification") != "no-finding"
+            or explicit.get("evidence_status") != "valid"
+            or endpoint.get("M") != result["N"]
+            or endpoint.get("range_base_validation", {}).get("status")
+            != "valid"
+            or endpoint.get("classification") != "blocking-finding"
+            or endpoint.get("evidence_status") != "ambiguous"
+        ):
+            errors.append("R8 automatic M=N frontier widening was not blocked")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
@@ -5458,6 +6074,12 @@ def control_builder(name: str, root: Path):
                 root, first_valid=True, second_kind="invalid"
             ),
             Damage(sole_valid_ignores_competitors=True),
+            "no-finding",
+        )
+    if name == "omit-old-tip-human-binding":
+        return (
+            r8_review_terminal_binding_conflict(root),
+            Damage(omit_old_tip_human_binding=True),
             "no-finding",
         )
     raise ValueError(name)
