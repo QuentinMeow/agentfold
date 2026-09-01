@@ -51,6 +51,7 @@ class Metrics:
     candidate_commits: int = 0
     candidate_parent_edges: int = 0
     semantic_validation_calls: int = 0
+    synthetic_control_calls: int = 0
 
     def as_dict(self):
         return dataclasses.asdict(self)
@@ -406,6 +407,96 @@ def fixture_s10(root: Path) -> Fixture:
     )
 
 
+def fixture_compact_valid_at_n(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("compact",))
+    repo.branch("old", C)
+    O = feature(repo, "compact-old")
+    repo.branch("candidate", C)
+    M = claim(repo, "compact")
+    repo.write(evidence_path("compact"), "# Evidence compact: repaired at N\n")
+    repo.remove(queue_path("compact"))
+    repo.write("features/compact-old.md", "# Feature compact-old\n")
+    N = repo.commit("resolve compact action at candidate head")
+    return Fixture(
+        "compact-valid-deletion-at-N", repo, C, O, M, N, "no-finding"
+    )
+
+
+def fixture_activation_laundering(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("activation-launder",), activated=False)
+    repo.branch("old", C)
+    O = feature(repo, "activation-launder-old")
+    repo.branch("candidate", C)
+    repo.remove(queue_path("activation-launder"))
+    M = repo.commit("delete live action before queue v1")
+    repo.write(
+        "message-queue/AGENTS.md", "**Queue resolution schema:** v1\n"
+    )
+    N = feature(repo, "activation-launder-old")
+    return Fixture(
+        "activation-laundering", repo, C, O, M, N,
+        "blocking-finding", (queue_path("activation-launder"),),
+    )
+
+
+def fixture_claimed_tip_laundering(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("claimed-launder",))
+    repo.branch("old", C)
+    claim(repo, "claimed-launder")
+    O = feature(repo, "claimed-launder-old")
+    repo.branch("candidate", C)
+    M = feature(repo, "claimed-launder-base")
+    repo.write(
+        evidence_path("claimed-launder"),
+        "# Evidence claimed-launder: unrelated candidate bytes\n",
+    )
+    repo.remove(queue_path("claimed-launder"))
+    repo.write("features/claimed-launder-old.md", "# Feature claimed-launder-old\n")
+    N = repo.commit("drop claimed action with changed evidence")
+    return Fixture(
+        "claimed-tip-synthetic-evidence-laundering", repo, C, O, M, N,
+        "blocking-finding", (queue_path("claimed-launder"),),
+    )
+
+
+def fixture_repeated_incarnation(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("repeated",))
+    repo.branch("old", C)
+    O = feature(repo, "repeated-old")
+    repo.branch("candidate", C)
+    claim(repo, "repeated")
+    M = resolve(repo, "repeated", "resolve first repeated incarnation")
+    repo.write(evidence_path("repeated"), "# Evidence repeated: pending again\n")
+    repo.write(queue_path("repeated"), action_text("repeated"))
+    repo.commit("recreate the identical repeated action")
+    claim(repo, "repeated")
+    repo.write(evidence_path("repeated"), "# Evidence repeated: repaired again\n")
+    repo.remove(queue_path("repeated"))
+    N = repo.commit("resolve second repeated incarnation")
+    return Fixture(
+        "repeated-incarnation-ambiguity", repo, C, O, M, N,
+        "blocking-finding", (queue_path("repeated"),),
+    )
+
+
+def fixture_long_history(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("long",))
+    repo.branch("old", C)
+    O = feature(repo, "long-old")
+    repo.branch("candidate", C)
+    for index in range(32):
+        feature(repo, f"long-base-{index:02d}")
+    claim(repo, "long")
+    M = resolve(repo, "long")
+    N = feature(repo, "long-old")
+    return Fixture("long-history-valid-resolution", repo, C, O, M, N, "no-finding")
+
+
 BASE_FIXTURES = (
     fixture_s1,
     fixture_s2,
@@ -418,6 +509,11 @@ BASE_FIXTURES = (
     fixture_s9_not_commit,
     fixture_s9_missing,
     fixture_s10,
+    fixture_compact_valid_at_n,
+    fixture_activation_laundering,
+    fixture_claimed_tip_laundering,
+    fixture_repeated_incarnation,
+    fixture_long_history,
 )
 
 
@@ -629,6 +725,10 @@ def classify(fixture: Fixture):
                 witnesses = deletion_witnesses(
                     commits, path, old_text, metrics
                 )
+                metrics.synthetic_control_calls += 1
+                synthetic_edge_problem = RECONCILE.queue_deletion_problem(
+                    path, old_text, fixture.O, fixture.N
+                )
                 valid = [witness for witness in witnesses if witness["problem"] is None]
                 if len(witnesses) == 1 and len(valid) == 1:
                     verdict = "valid-real-edge"
@@ -651,6 +751,7 @@ def classify(fixture: Fixture):
                     "evidence_verdict": verdict,
                     "problem": problem,
                     "witnesses": witnesses,
+                    "synthetic_edge_problem": synthetic_edge_problem,
                     "finding": finding,
                 }
             findings = sorted(
@@ -715,6 +816,24 @@ def verify_result(fixture: Fixture, result):
         problems.append(
             f"expected findings {sorted(fixture.expected_findings)}, got {result['findings']}"
         )
+    if fixture.scenario_id == "compact-valid-deletion-at-N":
+        item = result["items"][queue_path("compact")]
+        if len(item["witnesses"]) != 1 or item["witnesses"][0]["child"] != fixture.N:
+            problems.append("compact deletion was not attributed to candidate head N")
+    if fixture.scenario_id == "activation-laundering":
+        item = result["items"][queue_path("activation-launder")]
+        if "not committed as in-repair" not in str(item["problem"]):
+            problems.append("pre-v1 supplier deletion was not force-validated")
+    if fixture.scenario_id == "claimed-tip-synthetic-evidence-laundering":
+        item = result["items"][queue_path("claimed-launder")]
+        if item["synthetic_edge_problem"] is not None:
+            problems.append("synthetic O->N control no longer demonstrates laundering")
+        if "not committed as in-repair" not in str(item["problem"]):
+            problems.append("real candidate deletion edge did not reject laundering")
+    if fixture.scenario_id == "repeated-incarnation-ambiguity":
+        item = result["items"][queue_path("repeated")]
+        if len(item["witnesses"]) != 2:
+            problems.append("repeated-incarnation fixture did not produce two witnesses")
     if problems:
         raise AssertionError(f"{fixture.scenario_id}: " + "; ".join(problems))
 
