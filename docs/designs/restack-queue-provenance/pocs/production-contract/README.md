@@ -52,6 +52,12 @@ The two event modes are disjoint:
 | `direct` | Every carrying parent-to-child edge independently passes the production deletion validator. | None. Neutral parents that never carried the identity are listed but do not supply authority. |
 | `supplier` | Exactly one earlier real deletion event supplies authority to every continuously absent parent. | Every carrying parent-to-merge edge proves adoption only. A claimed carrier remains propagation and cannot lend its claim or evidence. |
 
+Nested supplier events retain the original authority event and stable-deduplicate
+the prior plus current neutral and absent parent lists. Later adoption cannot
+erase ancestry evidence recorded by an earlier adoption. The same accumulation
+applies when a conflicting human response changes a source-derived event from
+valid to invalid.
+
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
 full `C/O/M/N` OIDs, the production identity tuple, endpoint paths and
 multiplicity, event OID, authority-edge validator results, propagation edges,
@@ -136,7 +142,7 @@ names.
 | PCX-03 foreign exact identity | ambiguous because the foreign occurrence is not rooted at `C` |
 | PCX-04 several absent parents | valid supplier; two absent parents trace one authority event |
 | PCX-05 competing later supplier | ambiguous `{D1,D2}`; both independently valid authority edges are emitted |
-| PCX-06 nested supplier over direct | original two direct authority edges remain disjoint from two later propagation edges |
+| PCX-06 nested supplier over direct | one original two-edge authority event remains disjoint from two propagation edges; both neutral parents and both absent-source OIDs survive in stable order |
 | PCX-07 overqualified propagation | valid supplier; claimed carrier remains one propagation edge |
 | PCX-08 invalid supplier plus claimed carrier | covered with P16; invalid supplier edge blocks |
 | PCX-09 recreated claimed bytes | ambiguous discontinuity; the old claim cannot cross recreation |
@@ -162,6 +168,26 @@ N   e0953c49e5c671bf03901dbba0ee002e66e12e99
 D1  d9b25781fbe23756d17ddd9c6e6f9c80167642ec
 D2  80c729b26bdc5c57e7fd7fc3c1416edb84ebbeb9
 ```
+
+PCX-06's two-level result emitted all nested ancestry with full OIDs:
+
+```text
+C          4fef7d2a64023363e13a455eddeac016838f651a
+O          db0f6a1bdc43a8bccc8184e323867f7ed9aa04a0
+M          ed75b619d125655b117d22c8cd53c268e8693b5d
+N          2513214e5beaae7f3a289d4fae4018a00971c21c
+authority  4740e90b648bb75107b039e0d603fe789dc57311
+adoption1  c0b33ad455675edb5aa627274086f711e5582849
+neutral1   70a2426569179f6772b355fde27e417cd08f9a94
+neutral2   d897fdd58c0b376da50fff77b289b5b3d0e1d2e0
+carrier1   0b50fc379841872baad3a4426a40e735d6d05810
+carrier2   5a49655189c80be66569d2c9d0f9f28a513aa030
+```
+
+The final event's absent parents are the authority event then `adoption1`; its
+neutral parents are `neutral1` then `neutral2`. Its propagation edges are
+`carrier1 -> adoption1` and `carrier2 -> M`. Both authority edges share the one
+authority-event child above, and neither overlaps a propagation edge.
 
 ## Cost and budget evidence
 

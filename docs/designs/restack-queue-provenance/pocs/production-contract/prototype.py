@@ -1046,6 +1046,12 @@ class Classifier:
                 conflict = self.response_conflict(
                     identity, source.authority_edges, carrying
                 )
+                accumulated_neutral = list(
+                    dict.fromkeys(source.neutral_parents + neutral)
+                )
+                accumulated_absent = list(
+                    dict.fromkeys(source.absent_parents + absent)
+                )
                 if conflict:
                     result = Event(
                         "invalid",
@@ -1053,8 +1059,8 @@ class Classifier:
                         child,
                         source.authority_edges,
                         source.propagation_edges + propagation,
-                        neutral,
-                        absent,
+                        accumulated_neutral,
+                        accumulated_absent,
                         "conflicting-human-response",
                         conflict,
                     )
@@ -1065,8 +1071,8 @@ class Classifier:
                         child,
                         source.authority_edges,
                         source.propagation_edges + propagation,
-                        neutral,
-                        absent,
+                        accumulated_neutral,
+                        accumulated_absent,
                         (
                             "damaged-propagation-borrow"
                             if borrowed_event
@@ -2208,6 +2214,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
 def pcx06_nested_supplier(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
+    R = repo.commit("create pcx06 pre-C root")
     path = add_agent(repo, "pcx06")
     C = repo.commit("create pcx06 at C")
     repo.branch("old", C)
@@ -2226,15 +2233,19 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
     )
     repo.branch("carrier-one", C)
     carrier_one = feature(repo, "pcx06-carrier-one")
+    repo.branch("neutral-one", R)
+    neutral_one = feature(repo, "pcx06-neutral-one")
     adoption_one = repo.merge_commit(
-        (deletion, carrier_one),
+        (deletion, carrier_one, neutral_one),
         "first supplier adoption",
         removes=(path,),
     )
     repo.branch("carrier-two", C)
     carrier_two = feature(repo, "pcx06-carrier-two")
+    repo.branch("neutral-two", R)
+    neutral_two = feature(repo, "pcx06-neutral-two")
     M = repo.merge_commit(
-        (adoption_one, carrier_two),
+        (adoption_one, carrier_two, neutral_two),
         "second supplier adoption",
         removes=(path,),
     )
@@ -2251,6 +2262,8 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
             "direct_event": deletion,
             "adoptions": [adoption_one, M],
             "carriers": [carrier_one, carrier_two],
+            "neutral_parents": [neutral_one, neutral_two],
+            "absent_sources": [deletion, adoption_one],
         },
     )
 
@@ -3312,8 +3325,46 @@ def validate_result(result: dict):
         ):
             errors.append("PCX-05 did not expose competing D1/D2 suppliers")
     if scenario == "PCX-06-nested-supplier-over-direct":
-        if len(authority) != 2 or len(propagation) != 2:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        authority_events = {
+            edge["child"] for edge in result["authority_edges"]
+        }
+        propagation_sequence = [
+            (edge["parent"], edge["child"])
+            for edge in result["propagation_edges"]
+        ]
+        expected_propagation = list(
+            zip(details["carriers"], details["adoptions"], strict=True)
+        )
+        fixture_oids = (
+            [details["direct_event"]]
+            + details["adoptions"]
+            + details["carriers"]
+            + details["neutral_parents"]
+            + details["absent_sources"]
+        )
+        if (
+            len(authority) != 2
+            or len(propagation) != 2
+            or authority_events != {details["direct_event"]}
+        ):
             errors.append("PCX-06 lost nested supplier edge roles")
+        if action is None:
+            errors.append("PCX-06 did not return exactly one action")
+        elif (
+            action["neutral_parents"] != details["neutral_parents"]
+            or action["absent_parents"] != details["absent_sources"]
+        ):
+            errors.append("PCX-06 lost accumulated neutral/absent ancestry")
+        if propagation_sequence != expected_propagation:
+            errors.append("PCX-06 lost stable nested propagation order")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in fixture_oids
+        ):
+            errors.append("PCX-06 emitted a non-full ancestry OID")
     if scenario == "PCX-07-overqualified-propagation":
         if (
             result["event_mode"] != "supplier"
