@@ -22,6 +22,16 @@ and publication map; each behavior change remains in its own child task and pull
       verification evidence.
 - [ ] The dependency order keeps independent fixes parallel and makes any stack explicit.
 - [ ] No fix depends on an unreviewed direct write to the default branch.
+- [ ] The durable design covers task claim, independent and overlapping edits,
+      shared-state refresh, pause/takeover, process/worktree/machine loss, prerequisite and
+      stacked changes, combined integration failure, merge, and cleanup with one disposable
+      acceptance scenario per cycle.
+- [ ] The architecture assigns one authority and one recovery ceiling to durable work
+      intent, Git change sets, live session observations, and integration runs; no
+      external product or derived viewer silently becomes a second source of truth.
+- [ ] The verification plan separates deterministic gates, fault-injection scenarios,
+      held-out agent evaluation, independent refutation, shadow operation, canary
+      promotion, and rollback, and every new check requires observed-red evidence.
 
 ## Links
 
