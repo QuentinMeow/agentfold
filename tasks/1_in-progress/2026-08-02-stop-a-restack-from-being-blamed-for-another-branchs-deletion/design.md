@@ -54,7 +54,13 @@ durable design evidence, not code to copy: its subprocess-heavy fixture classifi
 the correctness boundary, while production must reuse the reconciler's immutable object
 readers and caches.
 
-### Inputs and fail-closed boundary
+### Inputs, adapter, and fail-closed boundary
+
+Keep `--range` byte-for-byte compatible for every existing consumer. The rewritten-history
+classifier adds `--displaced-tip O` plus an explicit, full lowercase-hex
+`--candidate-base M`; `M` is valid only with `O` and a non-root full range. Fast-forward
+updates return before resolving `M`. A divergent update that has no disappeared old
+identity also needs no `M`.
 
 The classifier accepts four full committed OIDs:
 
@@ -65,9 +71,24 @@ The classifier accepts four full committed OIDs:
 
 Missing/non-commit/unrelated objects, multiple merge bases, unreadable required commits,
 trees or blobs, shallow/partial required history, an invalid `M`, or a measured graph budget
-overflow return structured `unreadable` or `ambiguous`. They never authorize absence and
-must tell the developer to fetch history/objects or simplify the rewrite, rather than accuse
-the task of a proven deletion.
+overflow return one structured incomplete result, exit 2, zero Findings, and zero retry/fix
+mutation. This transactional preflight happens before any check result is yielded or any
+writer is invoked. It tells the developer to fetch exact history/objects or simplify the
+rewrite; it never accuses the task of a proven deletion.
+
+The core is committed-history-only, provider-neutral, offline, and runs object reads with
+lazy fetch and replace refs disabled. The GitHub workflow remains a thin adapter:
+
+- pull-request synchronize events use the event's immutable base SHA as `M`;
+- a push event may query the GitHub API only when exactly one open same-repository PR has
+  the matching head ref, exact head SHA `N`, and matching base repository;
+- the adapter explicitly fetches the exact `O` and base SHA when absent, re-queries the PR,
+  and verifies that the immutable snapshot did not race;
+- it derives `M` as the unique local `merge-base --all(base,N)` and never fetches or
+  invents `M` itself;
+- zero/multiple/closed/forked/raced/mismatched PRs, API failure, or a base retarget make
+  attribution unavailable. `O`, `N`, `HEAD`, a default branch, or a moving ref are never
+  fallbacks for `M`.
 
 The classifier is committed-history-only. The existing staged/index queue checks keep their
 current authority; unmerged index stages must continue to fail closed and may not be read as
@@ -93,7 +114,11 @@ duplication, ambiguous rename, or a foreign matching parent breaks continuity.
 
 Human response/binding conflicts need an additional exact-state comparison because action
 identity deliberately excludes mutable response fields. A supplier cannot erase a divergent
-committed human answer even when its own lifecycle is valid.
+committed human answer even when its own lifecycle is valid. The `O` anchor includes every
+concrete response and every concrete review target/revision even while unanswered, plus the
+reviewed revision and terminal outcome. The candidate may fill an `O`-pending field, but all
+concrete candidate parents must unify; a concrete candidate parent cannot be replaced by a
+different concrete value.
 
 ### Event mode 1 — direct
 
@@ -121,6 +146,22 @@ valid/invalid roots block.
 Authority and propagation edge sets are disjoint. A direct event may be the authority root
 under later supplier wrappers, but no event may change modes to exploit a carrier's claim.
 
+Every valid real deletion root also issues a complete, versioned support certificate. The
+certificate binds the action identity/path/blob, every real authority edge, the exact raw
+non-action tree delta, unchanged declared dependencies, and typed production obligations.
+The currently admitted obligation leaves are ordinary agent evidence, terminal human or
+review binding, generated retry checker plus subject, and task-pickup state. Unsupported
+review successor/reask/boundary shapes fail closed until production can certify them.
+
+At each supplier adoption, every closest absent-source wrapper must agree on the root
+certificate and current support projection, and the adoption child must copy every support
+entry exactly. Typed obligations are re-evaluated at the source and child. The adoption
+edge stays propagation-only and cannot author support drift. Source-lineage evolution in a
+separate earlier commit is allowed; adoption-authored change, evidence rollback, conflicting
+sources, or an incomplete obligation blocks. Nested wrappers carry every prior support
+check, so a later exact restoration cannot heal an invalid intermediate adoption. Canonical
+certificate and parent inputs are ordered independently of Git parent order.
+
 ### Final-absence frontier
 
 Before any sole-valid return, compute every causal root participating at the final absence
@@ -137,7 +178,17 @@ classifier never chooses only the latest event.
 
 Return `valid`, `invalid`, `none`, `ambiguous`, or `unreadable` with C/O/M/N, identity and
 multiplicity, mode, canonical roots, event children, every authority verdict, propagation
-edge, neutral/absent parent, full OID, and reason lineage.
+edge, support certificate/check, neutral/absent parent, full OID, and reason lineage.
+
+Structural incompleteness produces no Finding. After a complete traversal, each disappeared
+production identity with no unique valid explanation produces exactly one stable Finding.
+The subject is `message-queue/action-identities/<digest>`, where the digest is a
+domain-separated canonical encoding of the authoritative full identity tuple; the tuple,
+not the digest, remains authority. A digest collision between different tuples is
+incomplete/exit 2. Diagnostics use a bounded lexicographic representative real path and
+never dump action text. Ordinary `M...N` queue checks remain intact; only the synthetic
+displaced-continuity duplicate is suppressed after valid attribution. Existing legacy
+path-subject retries remain frozen and require no migration or rewrite.
 
 | Development cycle | Behavior after this change |
 |---|---|
@@ -148,7 +199,10 @@ edge, neutral/absent parent, full OID, and reason lineage.
 | Complete K-then-D cherry-pick | May validate because the real lifecycle edges survive |
 | Deletion-only cherry-pick or squash | Blocking; patch similarity is not queue authority |
 | Shallow/partial/missing history | Blocking attribution-unavailable message with fetch guidance |
+| Divergent disappearance without exact `M` | Exit 2; recover the exact base, no retry is filed |
+| PR close, race, retarget, or no exact PR | Attribution unavailable; no guessed fallback |
 | Duplicate, competing, or reintroduced occurrence | Blocking ambiguity with participating OIDs |
+| Budget overflow | Exit 2 naming the counter/cap; zero Findings and zero mutation |
 | Fast-forward or carried live action | Existing clean behavior remains clean |
 
 Remote classification is a post-push advisory under current repository policy. Messages say
@@ -171,6 +225,23 @@ For one divergent `O,N` pair:
 7. on budget overflow, return structured ambiguity with zero selected events and no
    heuristic fallback.
 
+The first production ceilings are deterministic safety limits, not throughput targets:
+
+- 4,096 graph commits and 8,192 parent edges;
+- 2,048 production identities;
+- 65,536 snapshot entries and 32 MiB of unique snapshot bytes;
+- 512 authority validations and 262,144 identity-history edge checks;
+- explicit additional ceilings for support paths, flattened-tree entries, obligation
+  replays, certificate bytes, and Git child processes, measured before implementation is
+  admitted.
+
+Charge a counter before the protected work. Exactly-at-limit is allowed; limit-plus-one
+aborts the transaction. Enumerate the graph once, share graph/object/snapshot caches across
+all actions, reuse the parent map in production validators, and perform zero unmetered
+per-action history walks. The 133-commit fixture's 135 Git processes are an acceptance
+observation, not runtime authority: 129 are imported production parent queries that the
+implementation must eliminate or explicitly budget.
+
 The POC's 133-commit/16-action case used one graph enumeration, zero per-action history
 walks, and three distinct queue-subtree reads, but still spawned production validator
 subprocesses. Production tests must measure and cap those calls; the POC numbers are not a
@@ -178,15 +249,32 @@ launch benchmark or ceiling.
 
 ## Verification design
 
+The final POC candidate is commit `8e7469c45aab7f7f8c5b3e9138102691ce508682`
+(tree `5729051989d822be87c55bfb8d5ce06fbd1cd79c`). Its canonical evidence artifact is
+`sha256:9e158d2908ca224d703179125a9bd08a0d64c2bfd5246143677720e1ff9d96cc`.
+Three independent fresh-context verifiers unanimously accepted it: semantic/DAG,
+evidence-forgery, and production-composition/performance. Two independent replays across
+different roots, seeds, locales, and time zones produced byte-identical 154-row streams;
+136/136 scenarios, 4/4 aliases, 16/16 damaged-mode controls, and all 28 evidence attacks
+passed. The composition verifier proved that the five intentionally POC-blind cases are
+caught 5/5 by the existing ordinary `M...N` production checks.
+
 Production work is not complete until all of these are captured from the integrated tip:
 
-- S1–S12 plus the 69 production-contract DAG cases that map to production behavior;
+- S1–S12 plus all 136 production-contract DAG cases that map to production behavior;
 - direct two/three-parent positives and invalid-parent negatives;
 - supplier, nested wrapper, diamond, mixed-root, human conflict, retry, pickup, timing move,
   cherry-pick/squash-erasure, reintroduction, and final-frontier cases;
 - missing/non-commit/unrelated C/O/M/N, multiple bases, shallow history, missing commit/tree/
   blob, ignored replace refs, graph-budget overflow, and missing-object cache recovery;
 - existing staged unmerged-index behavior and committed continuity isolation;
+- exact/limit-plus-one tests for every graph, object, identity, authority, certificate,
+  support-path, replay, byte, and process budget with transactional zero-result assertions;
+- GitHub adapter tests for exact PR match, explicit fetch, re-query race, forks, multiple or
+  missing PRs, base retarget, same-ref base fast-forward, and no-fallback behavior;
+- stable one-Finding-per-identity projection, canonical tuple bytes, collision fail-closed,
+  bounded diagnostics, and legacy path-subject retry coexistence;
+- PCX21 staged-versus-committed parity and PCX22 unmerged-index ambiguity;
 - an observed-red production mutation that removes final-frontier competitor handling;
 - a 128+ commit/many-action process/cache assertion with one graph enumeration and no
   per-action history walk;
@@ -194,10 +282,9 @@ Production work is not complete until all of these are captured from the integra
   and the async one-way-door adversarial panel.
 
 The four POC self-tests remain executable design evidence: replay 7/7 (diagnostic only),
-edge-witness 29/29, merge-incarnation 37/37, and production-contract 69/69 with 4/4 aliases
-and 6/6 observed-red controls. A fresh frontier verifier additionally passed 98/98 exact
-comparisons across 49 twice-reconstructed DAGs. None of those results is a claim that the
-production call site or full suite already works.
+edge-witness 29/29, merge-incarnation 37/37, and production-contract 136/136 with 4/4
+aliases and 16/16 observed-red controls. None of those results is a claim that the
+production call site, GitHub adapter, staged behavior, or full suite already works.
 
 ## Non-goals
 
@@ -208,6 +295,10 @@ production call site or full suite already works.
 - no claim that the advisory check prevented a remote push;
 - no authorization for criss-cross/multiple-base, partial-history, or over-budget graphs;
 - no self-evolving agent authority over evaluators, evidence, credentials, or admission.
+- no GitHub/provider state in core and no guessed candidate base;
+- no automatic base-retarget attribution without a later independently proven causal rule;
+- no production support for supplier review successor/reask/boundary leaves until their
+  complete typed obligations and budgets have observed-red coverage.
 
 ## Core fit
 
@@ -216,4 +307,6 @@ production call site or full suite already works.
 **Repository substitution:** pass — any adopted repository using AgentFold's queue and rewritten-history gate needs the same false-accusation protection
 **User-global writes:** none
 **Why AgentFold core:** rewritten-history queue preservation and lifecycle authority are reconciler invariants, not local configuration, a product service, private overlay, or separate plugin
-**Thin adapter:** none
+**Thin adapter:** GitHub may resolve and stabilize one exact same-repository PR base SHA,
+fetch exact event objects, and derive local `M`; it owns no identity, lifecycle, authority,
+or fallback decision
