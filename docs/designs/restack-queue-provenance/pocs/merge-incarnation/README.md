@@ -2,12 +2,13 @@
 
 ## Result
 
-**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 22
-additional merge, incarnation, object-boundary, and cost attacks: 34 of 34 expected
+**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 25
+additional merge, incarnation, object-boundary, and cost attacks: 37 of 37 expected
 verdicts matched. It correctly accepted a legitimate linear resolution and an inherited
-resolution behind a merge, while it blocked an invalid base deletion, a genuine old-tip
-loss, mixed valid/invalid supplier edges, delete/recreate/delete ambiguity, merge-only
-action creation, byte-identical old-side delete/recreate, cross-occurrence claim reuse,
+resolution behind a merge, including one deletion child with three continuously carrying
+parents, while it blocked an invalid base deletion, a genuine old-tip loss, mixed
+valid/invalid supplier edges, delete/recreate/delete ambiguity, merge-only action
+creation, byte-identical old-side delete/recreate, cross-occurrence claim reuse,
 ambiguous merge provenance, a conflicting same-ID merge sibling, post-witness
 reintroduction, disconnected byte-identical merge origins, duplicate rename state,
 criss-cross history, and incomplete objects.
@@ -64,12 +65,15 @@ The safe rule is narrower than “find any valid deletion.” It is:
 7. validate the concrete deletion edge against changed non-queue evidence;
 8. prove the action stays absent on every descendant path from that witness to `N`;
 9. collapse a merge's synthetic parent deletion only when an absent sibling contains a
-   prior validated deletion in its ancestry; and
-10. accept only one unambiguous effective witness.
+   prior validated deletion in its ancestry;
+10. count all deletion edges to one merge child as one authored event only when there is
+    exactly one real edge from every direct parent and every edge validates; and
+11. accept only one unambiguous effective witness component.
 
-This POC deliberately fails closed on a merge commit that authors a deletion relative to
-two carrying parents, even if both parent edges validate. That conservative result is a
-real product tradeoff, not proof that such a merge is invalid.
+The component rule is intentionally all-or-nothing. Two or three independently valid
+parent edges to the same deletion child are one authored merge result, not competing
+witnesses. A missing, invalid, disconnected, mutated, or conflicting parent prevents the
+grouping and leaves the result blocking.
 
 ## Method
 
@@ -95,7 +99,8 @@ binding, and payload; status is mutable. The classifier:
 - rejects a same-ID candidate or sibling state unless its continuous backwards component
   intersects the inherited occurrence at `C`;
 - invalidates a witness if the action reappears anywhere on a descendant path to `N`;
-  and
+- groups real deletion edges by one merge child only after every direct parent contributes
+  exactly one independently valid edge; and
 - prints one JSON line per scenario with full `C`, `O`, `M`, and `N` OIDs,
   edge OIDs, witness cardinality, evidence verdict, expected result, measured work, and
   a human explanation.
@@ -113,14 +118,14 @@ Environment and source:
 ```text
 Python 3.14.7
 git version 2.55.0
-8f3bd168f11caaae494620136aa64847c357d4745e259024a198974b65b3dce2  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+442e025c68be6d42d170882a6e00c6efd2469f020dfd1f87fd63206081f96682  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
 8eab83888d7f614783213e57e182336c9eaa610965a538139a2883d0f3931361  docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_helper_probe.py
 ```
 
-The clean run printed 34 scenario JSON objects and ended exactly with:
+The clean run printed 37 scenario JSON objects and ended exactly with:
 
 ```json
-{"failed": 0, "git": "git version 2.55.0", "passed": 34, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 34}
+{"failed": 0, "git": "git version 2.55.0", "passed": 37, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 37}
 ```
 
 Exit status: `0`.
@@ -142,6 +147,7 @@ The common matrix produced these outcomes:
 | S11 rename carry / delete | no finding | 0 / 1 | one fingerprint follows the permitted successor path |
 | S11 duplicate rename | finding | 0 | two copies make identity ambiguous |
 | S12 merge-shaped new base | no finding | 1 valid | the absent sibling contains the real valid resolution |
+| A1 merge-authored deletion | no finding | 1 component / 2 valid edges | one merge child authors one result after both parent edges validate |
 | A6 old delete/recreate | finding | 0 | equal final bytes do not prove continuous incarnation |
 | A7 old mutation/revert | finding | 0 | restoring bytes does not erase an identity mutation |
 | A8 old duplicate/collapse | finding | 0 | restoring one path does not erase earlier ambiguity |
@@ -153,6 +159,9 @@ The common matrix produced these outcomes:
 | A14 conflicting same-ID sibling | finding | 1 invalid | a claimed parent cannot hide a different sibling incarnation |
 | A15 disconnected identical origins | finding | 1 invalid | a merge child cannot invent occurrence identity |
 | A16 shared-origin boundary merge | no finding | 1 valid | carrying parents already intersect before their merge |
+| A17 three-parent valid deletion | no finding | 1 component / 3 valid edges | one octopus child is one event after all three real edges validate |
+| A18 three-parent invalid parent | finding | 3 edges / 1 invalid | one invalid edge prevents component grouping |
+| A19 three-parent disconnected parent | finding | 3 invalid | an independent byte-identical parent is not the inherited occurrence |
 
 The important S12 OIDs and edge result were:
 
@@ -258,6 +267,24 @@ Exit status: `1`. This isolates the pre-merge origin-intersection rule. A16 is t
 positive control: both carrying parents include one shared pre-fork origin and remain
 valid.
 
+The sixth run-scratch driver replaces the all-parent grouping rule with an unsafe
+same-child-only grouping and runs A18:
+
+```sh
+python3 /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/merge-incarnation-poc/group_negative_control.py \
+  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+```
+
+The unsafe rule retained the first valid edge, hid the third parent's invalid lifecycle,
+and changed A18 from `finding` to `actual_result=no-finding`. It ended exactly with:
+
+```json
+{"failed": 1, "git": "git version 2.55.0", "passed": 0, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 1}
+```
+
+Exit status: `1`. This proves that a common deletion child is not sufficient authority
+for grouping: every real parent edge must validate first.
+
 ### Production-helper probe
 
 This command invokes the unchanged production `claimed_lifecycle_problem` on the linear,
@@ -289,6 +316,34 @@ proofs itself, and must also verify post-witness absence continuity to `N`. This
 does not claim the surrounding production restack path has any of those guards today.
 
 ## Strongest counterexamples
+
+### A valid three-parent deletion is one merge-authored component
+
+**VERIFIED:** `C` created Q, `K` claimed it, and three parents forked from `K` while
+continuously carrying the exact `in-repair` occurrence. One three-parent merge `M`
+deleted Q and changed evidence; Q stayed absent through `N`. The standalone check
+verified all three real parent edges before grouping them into one witness component:
+
+```sh
+python3 /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/merge-incarnation-poc/three_parent_check.py \
+  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+```
+
+```text
+C=547e3492f1cd1090959668805b9df6e8d0ca490c
+K=98c78762d2e4a3e02cd038bf7874ca7672637ba1
+O=f4c0c32651041d42fe960a079b801038d5b1fd7a
+P1=e0f45f13803203f2313856ff9642fdfe8777b8b5
+P2=26e4d7c05925667c16ecf9a9a24577166b4032e9
+P3=549e7ef33a0ada51763b34f9a4c2d339db1a2ea4
+M=85f365bfbe7016d1441f0b00bc1a40d601264b43
+N=05a5e68596f950ab440d964460ab703f1e2320a4
+result=no-finding; evidence=valid; real edges=3/3 valid; witness component=1
+```
+
+Exit status: `0`. A18 is the lifecycle-negative control and A19 is the
+disconnected-origin negative control. Neither groups, so a common merge child cannot
+hide an invalid or unrelated parent.
 
 ### A merge child cannot invent identity for disconnected origins
 
@@ -417,12 +472,13 @@ action before a final deletion. The first edge was explicitly invalidated with `
 reappears after the deletion witness`; an earlier reachable valid edge therefore cannot
 serve as authority unless its absence stays continuous to `N`.
 
-### Parent-edge cardinality can be conservatively noisy
+### Parent-edge cardinality must count authored components
 
-**VERIFIED:** a merge commit that deleted the action relative to two parents produced two
-valid edges to the same child and therefore failed closed. Grouping them into one
-merge-authored event could reduce the false positive, but no authority for that grouping
-has been proven. Until it is, exact-one parent-edge cardinality is safe and conservative.
+**VERIFIED:** a merge that deletes one continuously inherited occurrence produces one
+Git diff edge per carrying parent, but those edges describe one child tree. A1 accepted
+two valid parent edges as one component; A17 accepted three as one component. The rule
+does not group by child OID alone: A18 retained all three edges when one lifecycle was
+invalid, and A19 retained all three when one parent had a disconnected occurrence.
 
 ### A valid sibling must not hide an invalid competitor
 
@@ -441,10 +497,10 @@ final-tree equality, and a content hash alone are therefore insufficient.
 
 The small S12 merge case used 30 Git processes and 7 cached queue-tree reads. The
 128-unrelated-commit probe used 408 Git processes and 133 cached queue-tree reads, taking
-1719.274 ms in the recorded run:
+1707.803 ms in the recorded run:
 
 ```json
-{"actual_result": "no-finding", "elapsed_ms": 1719.274, "git_processes": 408, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
+{"actual_result": "no-finding", "elapsed_ms": 1707.803, "git_processes": 408, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
 ```
 
 **INFERENCE:** the prototype is linear in old and candidate history for one item, but its
@@ -500,7 +556,8 @@ cardinality.
 
 **PROPOSAL:** production return values should be explicit:
 
-- `valid(edge, reason)`: exactly one real edge resolves the inherited incarnation;
+- `valid(component, reason)`: one real edge or one fully validated merge-child component
+  resolves the inherited incarnation;
 - `invalid(edge, problem)`: a real deletion exists but fails lifecycle/evidence;
 - `none`: the old-side obligation has no candidate resolution;
 - `ambiguous(edges, reason)`: duplicates, repeated incarnation, competing suppliers, or
@@ -520,11 +577,13 @@ actionable than always accusing the restacked task.
   follow it.
 - Changed evidence bytes prove structural change, not truthful or sufficient human
   evidence. This POC does not solve semantic evidence laundering.
-- S12 proves one constructed sibling-supplied merge. It does not prove every octopus,
-  criss-cross, replace-object, or partial-clone topology. Multiple merge bases and shallow
-  history intentionally fail closed here.
-- The merge-only deletion false positive is not resolved. Grouping multiple parent edges
-  into one event requires a separately proven authority rule.
-- The 34/34 self-test is POC evidence only. It does not establish integration with
+- S12 and A17 prove one constructed sibling-supplied merge and one constructed
+  three-parent merge. They do not prove every octopus, criss-cross, replace-object, or
+  partial-clone topology. Multiple merge bases and shallow history intentionally fail
+  closed here.
+- The component grouping proves only the constructed two- and three-parent cases. It
+  does not authorize grouping when any direct parent edge is absent, invalid, unreadable,
+  disconnected, duplicated, or conflicting.
+- The 37/37 self-test is POC evidence only. It does not establish integration with
   `check_queue_resolution`, production regression discovery, full-suite correctness,
   cold-clone behavior, or acceptable production performance.

@@ -57,6 +57,7 @@ class Edge:
     valid: bool = False
     problem: str = "not validated"
     supplied_by_sibling: bool = False
+    grouped_in_child_component: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -66,6 +67,7 @@ class Edge:
             "valid": self.valid,
             "problem": self.problem,
             "supplied_by_sibling": self.supplied_by_sibling,
+            "grouped_in_child_component": self.grouped_in_child_component,
         }
 
 
@@ -847,6 +849,34 @@ def post_witness_absence_problem(
     return None
 
 
+def group_valid_merge_deletion_components(
+    repo: GitRepo,
+    edges: list[Edge],
+) -> None:
+    """Count one merge-authored deletion child after every parent edge validates.
+
+    Git exposes one deletion relative to each carrying parent, but a merge commit
+    authors one resulting tree.  Group those edges into one witness only when every
+    direct parent carries the deletion and every real parent edge independently
+    passed lifecycle, occurrence, origin, sibling, evidence, and post-witness checks.
+    """
+
+    by_child: dict[str, list[Edge]] = {}
+    for edge in edges:
+        if not edge.supplied_by_sibling:
+            by_child.setdefault(edge.child, []).append(edge)
+    for child, component in by_child.items():
+        parents = repo.parents(child)
+        if len(parents) < 2 or len(component) != len(parents):
+            continue
+        if {edge.parent for edge in component} != set(parents):
+            continue
+        if not all(edge.valid for edge in component):
+            continue
+        for edge in component[1:]:
+            edge.grouped_in_child_component = True
+
+
 def old_lineage_continuity_problem(
     repo: GitRepo,
     boundary: str,
@@ -1042,7 +1072,13 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
                     edge.supplied_by_sibling = True
                     break
 
-        effective = [edge for edge in edges if not edge.supplied_by_sibling]
+        group_valid_merge_deletion_components(repo, edges)
+        effective = [
+            edge
+            for edge in edges
+            if not edge.supplied_by_sibling
+            and not edge.grouped_in_child_component
+        ]
         new_snapshot = repo.snapshot(new_head)
         new_matches = occurrences(new_snapshot, incarnation)
         new_same_id = same_id(new_snapshot, old_action.action_id)
@@ -1126,13 +1162,28 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
                 edges,
             )
             return with_metrics(repo, verdict)
+        component_size = 1 + sum(
+            edge.grouped_in_child_component and edge.child == witness.child
+            for edge in edges
+        )
+        if component_size > 1:
+            human_reason = (
+                "The old branch left the action unchanged, and one merge-authored "
+                f"deletion component contains {component_size} independently validated "
+                "parent edges with a committed claim plus changed resolution evidence."
+            )
+        else:
+            human_reason = (
+                "The old branch left the action unchanged, and exactly one "
+                "candidate-side deletion edge carries a committed claim plus changed "
+                "resolution evidence."
+            )
         verdict = Verdict(
             "exempt",
             "candidate-side validated resolution",
             "valid",
             1,
-            "The old branch left the action unchanged, and exactly one candidate-side "
-            "deletion edge carries a committed claim plus changed resolution evidence.",
+            human_reason,
             edges,
         )
         return with_metrics(repo, verdict)
@@ -1558,7 +1609,7 @@ def scenario_merge_only_deletion(root: Path) -> dict[str, object]:
         "A1-merge-commit-only-deletion",
         {"C": common, "O": old, "M": new_base, "N": new},
         classify(repo, old, new, DEFAULT_PATH),
-        "finding",
+        "no-finding",
     )
 
 
@@ -2012,6 +2063,157 @@ def scenario_shared_origin_boundary_merge(root: Path) -> dict[str, object]:
     return record
 
 
+def scenario_three_parent_valid_deletion(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    claim = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("old", claim)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    parents = []
+    for branch in ("p1", "p2", "p3"):
+        repo.switch_new(branch, claim)
+        parents.append(
+            repo.commit(
+                f"carry shared occurrence on {branch}",
+                {f"{branch}.txt": f"{branch}\n"},
+            )
+        )
+    repo.switch("p1")
+    tree_source = repo.commit(
+        "prepare absent result tree",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    tree = repo.run("show", "-s", "--format=%T", tree_source).stdout.decode().strip()
+    merged = repo.commit_tree(
+        tree,
+        tuple(parents),
+        "three-parent merge deletes shared occurrence",
+    )
+    repo.run("update-ref", "refs/heads/merged", merged)
+    repo.switch("merged")
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A17-three-parent-valid-deletion-component",
+        {"C": common, "O": old, "M": merged, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+    record.update({
+        "common_claim": claim,
+        "merge_parents": parents,
+        "grouped_edges": sum(
+            edge["grouped_in_child_component"] for edge in record["edges"]
+        ),
+    })
+    return record
+
+
+def scenario_three_parent_invalid_parent(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    claim = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("old", claim)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    parents = []
+    for branch in ("p1", "p2"):
+        repo.switch_new(branch, claim)
+        parents.append(
+            repo.commit(
+                f"carry claimed occurrence on {branch}",
+                {f"{branch}.txt": f"{branch}\n"},
+            )
+        )
+    repo.switch_new("p3", claim)
+    invalid_parent = repo.commit(
+        "reopen occurrence on invalid parent",
+        {DEFAULT_PATH: action_text(status="open"), "p3.txt": "p3\n"},
+    )
+    parents.append(invalid_parent)
+    repo.switch("p1")
+    tree_source = repo.commit(
+        "prepare absent result tree",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    tree = repo.run("show", "-s", "--format=%T", tree_source).stdout.decode().strip()
+    merged = repo.commit_tree(
+        tree,
+        tuple(parents),
+        "three-parent merge includes invalid deletion edge",
+    )
+    repo.run("update-ref", "refs/heads/merged", merged)
+    repo.switch("merged")
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A18-three-parent-invalid-parent",
+        {"C": common, "O": old, "M": merged, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record.update({
+        "common_claim": claim,
+        "merge_parents": parents,
+        "invalid_parent": invalid_parent,
+    })
+    return record
+
+
+def scenario_three_parent_disconnected_parent(root: Path) -> dict[str, object]:
+    repo, root_without_action = base_repo(root, live=False)
+    common = repo.commit("common creates action", {DEFAULT_PATH: action_text()})
+    claim = repo.commit(
+        "claim common occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("old", claim)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    parents = []
+    for branch in ("p1", "p2"):
+        repo.switch_new(branch, claim)
+        parents.append(
+            repo.commit(
+                f"carry common occurrence on {branch}",
+                {f"{branch}.txt": f"{branch}\n"},
+            )
+        )
+    repo.switch_new("p3", root_without_action)
+    disconnected_parent = repo.commit(
+        "independently create byte-identical claimed action",
+        {DEFAULT_PATH: action_text(status="in-repair"), "p3.txt": "p3\n"},
+    )
+    parents.append(disconnected_parent)
+    repo.switch("p1")
+    tree_source = repo.commit(
+        "prepare absent result tree",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    tree = repo.run("show", "-s", "--format=%T", tree_source).stdout.decode().strip()
+    merged = repo.commit_tree(
+        tree,
+        tuple(parents),
+        "three-parent merge includes disconnected occurrence",
+    )
+    repo.run("update-ref", "refs/heads/merged", merged)
+    repo.switch("merged")
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A19-three-parent-disconnected-parent",
+        {"C": common, "O": old, "M": merged, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record.update({
+        "root_without_action": root_without_action,
+        "common_claim": claim,
+        "merge_parents": parents,
+        "disconnected_parent": disconnected_parent,
+    })
+    return record
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -2151,6 +2353,9 @@ INITIAL_SCENARIOS = (
     scenario_conflicting_sibling_incarnation,
     scenario_disconnected_identical_origins,
     scenario_shared_origin_boundary_merge,
+    scenario_three_parent_valid_deletion,
+    scenario_three_parent_invalid_parent,
+    scenario_three_parent_disconnected_parent,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
