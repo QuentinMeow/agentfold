@@ -107,11 +107,17 @@ state-machine behavior; live agent messaging and liveness require real sessions.
 5. Core or one-way-door changes receive a five-lens fresh-context panel and a different-
    provider refuter. An independently launched authoritative runner binds raw evidence to
    the candidate bytes: a trusted controller supplies the repository identity plus immutable
-   commit and tree object IDs; the runner checks out that commit without replace refs,
-   alternate object stores, or dirty bytes; and its manifest records the commit/tree, runner
-   version, environment image, command/test digests, raw-output hashes, and result. Negative
-   fixtures must refuse a branch moved after selection, a replace ref, a dirty worktree, a
-   substituted candidate tree, and evidence copied from a different run. Self-evolving
+   commit and tree object IDs plus a high-entropy, single-use challenge created only after
+   selection. The runner checks out that commit without replace refs, alternate object
+   stores, or dirty bytes. Its manifest records a unique run identity and challenge,
+   commit/tree, runner version and authenticated runner identity, environment image,
+   command/test digests, raw-output hashes, start/end times, and result; an independent
+   evidence collector verifies the runner signature or message-authentication code, consumes
+   the challenge exactly once, and checks every candidate identity before admission.
+   Negative fixtures must refuse a branch moved after selection, a replace ref, a dirty
+   worktree, a substituted candidate tree, a receipt from another candidate, and replay of
+   an older receipt for the same candidate under a different or already-consumed challenge.
+   Self-evolving
    agents may propose isolated candidates but cannot
    access or alter hidden tests, grader source, runner credentials, secrets, the evaluator,
    evidence collector, policy, approvals, stable pointer, or rollback controls that judge

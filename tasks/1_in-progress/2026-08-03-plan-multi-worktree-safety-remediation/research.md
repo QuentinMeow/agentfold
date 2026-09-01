@@ -1,7 +1,7 @@
 # Research — parallel-agent harnesses and evaluation
 
-**Observed:** 2026-08-31 by three read-only research agents; product facts can change after
-this date. `Verified` below means an official page, fixed source revision, or repository/API
+**Observed:** 2026-08-31; product facts can change after this date. `Verified` below means
+an official page, fixed source revision, or repository/API
 observation supported the statement. `Assessment` is the architecture judgment drawn from
 those facts. No product was installed or fault-tested in this pass.
 
