@@ -16,10 +16,11 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import subprocess
 import sys
 import tempfile
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 HERE = Path(__file__).resolve()
@@ -65,36 +66,141 @@ class Metrics:
     graph_enumerations: int = 0
     graph_commits: int = 0
     graph_parent_edges: int = 0
+    graph_output_bytes: int = 0
+    graph_line_bytes: int = 0
+    graph_line_peak_bytes: int = 0
+    graph_lines: int = 0
+    graph_commit_tokens: int = 0
+    graph_parent_tokens: int = 0
+    graph_process_terminations: int = 0
+    graph_process_reaps: int = 0
+    graph_process_cleanup_checks: int = 0
+    graph_buffered_bytes: int = 0
+    graph_stream_chunks: int = 0
+    graph_stream_peak_chunk_bytes: int = 0
+    merge_base_output_bytes: int = 0
+    merge_base_line_bytes: int = 0
+    merge_base_line_peak_bytes: int = 0
+    merge_base_lines: int = 0
+    merge_base_tokens: int = 0
+    merge_base_process_terminations: int = 0
+    merge_base_process_reaps: int = 0
+    shallow_output_bytes: int = 0
+    shallow_line_bytes: int = 0
+    shallow_line_peak_bytes: int = 0
+    shallow_lines: int = 0
+    shallow_tokens: int = 0
+    shallow_process_terminations: int = 0
+    shallow_process_reaps: int = 0
     batch_processes: int = 0
     object_reads: int = 0
     object_cache_hits: int = 0
+    object_header_bytes: int = 0
+    object_payload_bytes: int = 0
+    object_payload_peak_bytes: int = 0
+    object_process_terminations: int = 0
+    object_process_reaps: int = 0
+    tree_entries: int = 0
+    tree_entry_name_bytes: int = 0
+    flattened_paths: int = 0
+    flattened_path_bytes: int = 0
+    flat_tree_peak_paths: int = 0
     queue_snapshots_requested: int = 0
     queue_subtree_reads: int = 0
     snapshot_cache_hits: int = 0
+    queue_paths: int = 0
+    queue_path_bytes: int = 0
+    queue_blob_bytes: int = 0
     identity_calls: int = 0
     authority_calls: int = 0
     support_certificate_calls: int = 0
     support_adoption_checks: int = 0
     support_paths_checked: int = 0
+    support_delta_candidates: int = 0
+    support_delta_rows: int = 0
+    support_referenced_paths: int = 0
+    support_anchor_rows: int = 0
+    support_obligations: int = 0
+    support_serialized_bytes: int = 0
+    dynamic_support_paths_traversed: int = 0
+    dynamic_support_paths_discovered: int = 0
+    dynamic_support_path_bytes: int = 0
     mutation_calls: int = 0
     per_action_history_walks: int = 0
     carry_proof_nodes: int = 0
     carry_proof_edges: int = 0
+    production_helper_calls: int = 0
+    production_helper_input_bytes: int = 0
+    production_parent_queries: int = 0
+    git_stderr_bytes: int = 0
     _budget_limit: int | None = dataclasses.field(
         default=None, repr=False
     )
     _posthoc_budget_accounting: bool = dataclasses.field(
         default=False, repr=False
     )
+    _budget_limits: dict[str, int] = dataclasses.field(
+        default_factory=dict, repr=False
+    )
+
+    HARD_LIMITS = {
+        "graph_output_bytes": 8 * 1024 * 1024,
+        "graph_line_bytes": 8 * 1024 * 1024,
+        "graph_line_peak_bytes": 1024 * 1024,
+        "graph_lines": 200_000,
+        "graph_commit_tokens": 200_000,
+        "graph_parent_tokens": 1_000_000,
+        "merge_base_output_bytes": 1024 * 1024,
+        "merge_base_line_bytes": 1024 * 1024,
+        "merge_base_line_peak_bytes": 1024,
+        "merge_base_lines": 20_000,
+        "merge_base_tokens": 20_000,
+        "shallow_output_bytes": 64,
+        "shallow_line_bytes": 63,
+        "shallow_line_peak_bytes": 16,
+        "shallow_lines": 2,
+        "shallow_tokens": 2,
+        "object_header_bytes": 64 * 1024 * 1024,
+        "object_payload_bytes": 64 * 1024 * 1024,
+        "object_payload_peak_bytes": 8 * 1024 * 1024,
+        "tree_entries": 1_000_000,
+        "tree_entry_name_bytes": 64 * 1024 * 1024,
+        "flattened_paths": 1_000_000,
+        "flattened_path_bytes": 64 * 1024 * 1024,
+        "flat_tree_peak_paths": 1_000_000,
+        "queue_paths": 1_000_000,
+        "queue_path_bytes": 64 * 1024 * 1024,
+        "queue_blob_bytes": 64 * 1024 * 1024,
+        "support_delta_candidates": 1_000_000,
+        "support_delta_rows": 1_000_000,
+        "support_referenced_paths": 1_000_000,
+        "support_anchor_rows": 1_000_000,
+        "support_obligations": 1_000_000,
+        "support_serialized_bytes": 64 * 1024 * 1024,
+        "dynamic_support_paths_traversed": 1_000_000,
+        "dynamic_support_paths_discovered": 1_000_000,
+        "dynamic_support_path_bytes": 64 * 1024 * 1024,
+        "production_helper_input_bytes": 64 * 1024 * 1024,
+        "git_stderr_bytes": 1024 * 1024,
+    }
 
     def configure_budget(
         self,
         limit: int | None,
         *,
+        limits: dict[str, int] | None = None,
         posthoc_budget_accounting: bool = False,
     ):
         self._budget_limit = limit
+        self._budget_limits = dict(limits or {})
         self._posthoc_budget_accounting = posthoc_budget_accounting
+
+    def limit_for(self, counter: str) -> int | None:
+        if counter in self._budget_limits:
+            return self._budget_limits[counter]
+        if self._budget_limit is not None:
+            return self._budget_limit
+        return self.HARD_LIMITS.get(counter)
 
     def charge(self, counter: str, amount: int = 1):
         """Charge before work; record only limit+1 when refusing a batch."""
@@ -102,15 +208,36 @@ class Metrics:
             raise ValueError(f"invalid metric charge {counter}={amount}")
         current = getattr(self, counter)
         attempted = current + amount
+        limit = self.limit_for(counter)
         if (
-            self._budget_limit is not None
+            limit is not None
             and not self._posthoc_budget_accounting
-            and attempted > self._budget_limit
+            and attempted > limit
         ):
-            refused = self._budget_limit + 1
+            refused = limit + 1
             setattr(self, counter, refused)
-            raise BudgetExceeded(counter, refused, self._budget_limit)
+            raise BudgetExceeded(counter, refused, limit)
         setattr(self, counter, attempted)
+
+    def observe(self, counter: str, amount: int = 1):
+        """Record cleanup already performed; cleanup itself is never refused."""
+        if amount < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric observation {counter}={amount}")
+        setattr(self, counter, getattr(self, counter) + amount)
+
+    def admit_peak(self, counter: str, value: int):
+        """Refuse an individual allocation before it exceeds its peak cap."""
+        if value < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric peak {counter}={value}")
+        limit = self.limit_for(counter)
+        if (
+            limit is not None
+            and not self._posthoc_budget_accounting
+            and value > limit
+        ):
+            setattr(self, counter, limit + 1)
+            raise BudgetExceeded(counter, limit + 1, limit)
+        setattr(self, counter, max(getattr(self, counter), value))
 
     def as_dict(self):
         return {
@@ -138,6 +265,7 @@ class Fixture:
     expected: str
     details: dict = dataclasses.field(default_factory=dict)
     budget_limit: int | None = None
+    budget_limits: dict[str, int] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -172,6 +300,11 @@ class Damage:
     posthoc_budget_accounting: bool = False
     ambient_git_diagnostics: bool = False
     reopen_outside_c_boundary_ancestry: bool = False
+    buffered_graph_output: bool = False
+    unmetered_object_bytes: bool = False
+    unmetered_tree_paths: bool = False
+    unmetered_dynamic_support: bool = False
+    unmetered_support_construction: bool = False
 
 
 @dataclasses.dataclass
@@ -245,6 +378,20 @@ def count_production_git(
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
+            encoded = sum(
+                len(str(argument).encode("utf-8", errors="surrogateescape"))
+                for argument in command
+            )
+            metrics.charge("production_helper_calls")
+            metrics.charge("production_helper_input_bytes", encoded)
+            command_text = tuple(str(argument) for argument in command)
+            if (
+                "rev-list" in command_text
+                and "--parents" in command_text
+                and "-n" in command_text
+                and "1" in command_text
+            ):
+                metrics.charge("production_parent_queries")
             metrics.charge("git_processes")
             if stable_git_diagnostics:
                 kwargs["env"] = stable_git_environment(kwargs.get("env"))
@@ -344,6 +491,7 @@ class GitRepository:
                 "GIT_COMMITTER_EMAIL": "production-contract@example.invalid",
                 "GIT_AUTHOR_DATE": stamp,
                 "GIT_COMMITTER_DATE": stamp,
+                "GIT_EDITOR": "true",
             }
         )
         return environment
@@ -435,6 +583,181 @@ def run_git(
     return result
 
 
+def _terminate_and_reap(
+    process: subprocess.Popen,
+    metrics: Metrics,
+    *,
+    counter_prefix: str,
+):
+    """Terminate a refused Git child and prove that it was reaped."""
+    if process.poll() is None:
+        process.terminate()
+        metrics.observe(f"{counter_prefix}_process_terminations")
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    metrics.observe(f"{counter_prefix}_process_reaps")
+    metrics.observe("graph_process_cleanup_checks")
+    if process.poll() is None:
+        raise RuntimeError("bounded Git child was not reaped")
+
+
+def bounded_git_lines(
+    root: Path,
+    metrics: Metrics,
+    arguments: tuple[str, ...],
+    *,
+    counter_prefix: str,
+    buffered_damage: bool = False,
+    stable_git_diagnostics: bool = True,
+    line_callback: Callable[[bytes], None] | None = None,
+    command_prefix: tuple[str, ...] = ("git",),
+) -> tuple[int, tuple[bytes, ...], bytes]:
+    """Read one Git command with bounded chunks and transactional output."""
+    stream_chunk_bytes = 256
+    output_counter = f"{counter_prefix}_output_bytes"
+    line_counter = f"{counter_prefix}_line_bytes"
+    line_peak_counter = f"{counter_prefix}_line_peak_bytes"
+    lines_counter = f"{counter_prefix}_lines"
+    if buffered_damage:
+        result = run_git(
+            root,
+            metrics,
+            *arguments,
+            check=False,
+            stable_git_diagnostics=stable_git_diagnostics,
+        )
+        raw = result.stdout.encode("utf-8", errors="surrogateescape")
+        metrics.observe("graph_buffered_bytes", len(raw))
+        metrics.charge(output_counter, len(raw))
+        metrics.charge(line_counter, len(raw.replace(b"\n", b"")))
+        lines = tuple(raw.splitlines())
+        metrics.admit_peak(
+            line_peak_counter, max((len(line) for line in lines), default=0)
+        )
+        metrics.charge(lines_counter, len(lines))
+        metrics.observe(f"{counter_prefix}_process_reaps")
+        if line_callback is not None:
+            for line in lines:
+                line_callback(line)
+        return (
+            result.returncode,
+            lines,
+            result.stderr.encode("utf-8", errors="surrogateescape"),
+        )
+
+    metrics.charge("git_processes")
+    process = REAL_POPEN(
+        [*command_prefix, *arguments],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=(stable_git_environment() if stable_git_diagnostics else None),
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    line = bytearray()
+    stderr = bytearray()
+
+    def bounded_read_size(counter: str) -> int:
+        if metrics._posthoc_budget_accounting:
+            return stream_chunk_bytes
+        limit = metrics.limit_for(counter)
+        if limit is None:
+            return stream_chunk_bytes
+        return max(
+            1,
+            min(
+                stream_chunk_bytes,
+                limit - getattr(metrics, counter) + 1,
+            ),
+        )
+
+    try:
+        while selector.get_map():
+            for key, _events in selector.select():
+                stream = key.fileobj
+                if key.data == "stdout":
+                    peak_limit = metrics.limit_for(line_peak_counter)
+                    peak_room = (
+                        stream_chunk_bytes
+                        if peak_limit is None
+                        else max(1, peak_limit - len(line) + 1)
+                    )
+                    size = min(
+                        bounded_read_size(output_counter),
+                        bounded_read_size(line_counter),
+                        (
+                            stream_chunk_bytes
+                            if metrics._posthoc_budget_accounting
+                            else peak_room
+                        ),
+                    )
+                else:
+                    size = bounded_read_size("git_stderr_bytes")
+                chunk = (
+                    stream.readline(size)
+                    if key.data == "stdout"
+                    else os.read(stream.fileno(), size)
+                )
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                if key.data == "stderr":
+                    metrics.charge("git_stderr_bytes", len(chunk))
+                    stderr.extend(chunk)
+                    continue
+                if counter_prefix == "graph":
+                    metrics.observe("graph_stream_chunks")
+                    metrics.admit_peak(
+                        "graph_stream_peak_chunk_bytes", len(chunk)
+                    )
+                metrics.charge(output_counter, len(chunk))
+                metrics.charge(line_counter, len(chunk) - chunk.count(b"\n"))
+                start = 0
+                while True:
+                    newline = chunk.find(b"\n", start)
+                    if newline < 0:
+                        metrics.admit_peak(
+                            line_peak_counter,
+                            len(line) + len(chunk[start:]),
+                        )
+                        line.extend(chunk[start:])
+                        break
+                    metrics.admit_peak(
+                        line_peak_counter,
+                        len(line) + newline - start,
+                    )
+                    line.extend(chunk[start:newline])
+                    metrics.charge(lines_counter)
+                    completed = bytes(line)
+                    if line_callback is not None:
+                        line_callback(completed)
+                    line.clear()
+                    start = newline + 1
+        if line:
+            metrics.charge(lines_counter)
+            completed = bytes(line)
+            if line_callback is not None:
+                line_callback(completed)
+        returncode = process.wait(timeout=5)
+        metrics.observe(f"{counter_prefix}_process_reaps")
+        metrics.observe("graph_process_cleanup_checks")
+        return returncode, (), bytes(stderr)
+    except (BudgetExceeded, Unreadable):
+        _terminate_and_reap(
+            process, metrics, counter_prefix=counter_prefix
+        )
+        raise
+    finally:
+        selector.close()
+
+
 class ObjectDatabase:
     """One cat-file process plus immutable object/tree/snapshot caches."""
 
@@ -443,10 +766,12 @@ class ObjectDatabase:
         root: Path,
         metrics: Metrics,
         *,
+        damage: Damage | None = None,
         stable_git_diagnostics: bool = True,
     ):
         self.root = root
         self.metrics = metrics
+        self.damage = damage or Damage()
         metrics.charge("git_processes")
         metrics.charge("batch_processes")
         self.process = REAL_POPEN(
@@ -469,11 +794,26 @@ class ObjectDatabase:
         ] = {}
 
     def close(self):
-        if self.process.stdin:
-            self.process.stdin.close()
-        if self.process.stdout:
-            self.process.stdout.close()
-        self.process.wait(timeout=5)
+        if self.process.poll() is None:
+            with contextlib.suppress(BrokenPipeError):
+                if self.process.stdin:
+                    self.process.stdin.close()
+            if self.process.stdout:
+                self.process.stdout.close()
+            self.process.wait(timeout=5)
+
+    def abort(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            self.metrics.observe("object_process_terminations")
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        self.metrics.observe("object_process_reaps")
+        if self.process.poll() is None:
+            raise RuntimeError("cat-file child was not reaped")
 
     def read(self, oid: str) -> tuple[str, bytes]:
         if oid in self.objects:
@@ -482,9 +822,26 @@ class ObjectDatabase:
         self.metrics.charge("object_reads")
         assert self.process.stdin is not None
         assert self.process.stdout is not None
-        self.process.stdin.write(oid.encode("ascii") + b"\n")
-        self.process.stdin.flush()
-        header = self.process.stdout.readline().rstrip(b"\n").split()
+        try:
+            self.process.stdin.write(oid.encode("ascii") + b"\n")
+            self.process.stdin.flush()
+            header_limit = self.metrics.limit_for("object_header_bytes")
+            header_room = (
+                4096
+                if header_limit is None
+                else max(
+                    1,
+                    header_limit - self.metrics.object_header_bytes + 1,
+                )
+            )
+            raw_header = self.process.stdout.readline(header_room)
+            self.metrics.charge("object_header_bytes", len(raw_header))
+            if not raw_header.endswith(b"\n"):
+                raise Unreadable(f"malformed cat-file frame for {oid}")
+            header = raw_header.rstrip(b"\n").split()
+        except BudgetExceeded:
+            self.abort()
+            raise
         if len(header) == 2 and header[1] == b"missing":
             raise Unreadable(f"required Git object {oid} is missing")
         if len(header) != 3:
@@ -493,7 +850,14 @@ class ObjectDatabase:
             size = int(header[2])
         except ValueError as error:
             raise Unreadable(f"malformed cat-file size for {oid}") from error
-        payload = self.process.stdout.read(size)
+        try:
+            if not self.damage.unmetered_object_bytes:
+                self.metrics.admit_peak("object_payload_peak_bytes", size)
+                self.metrics.charge("object_payload_bytes", size)
+            payload = self.process.stdout.read(size)
+        except BudgetExceeded:
+            self.abort()
+            raise
         if len(payload) != size or self.process.stdout.read(1) != b"\n":
             raise Unreadable(f"truncated cat-file frame for {oid}")
         result = (header[1].decode("ascii"), payload)
@@ -536,8 +900,12 @@ class ObjectDatabase:
             nul = payload.find(b"\0", space + 1)
             if space <= offset or nul < 0 or nul + 1 + width > len(payload):
                 raise Unreadable(f"malformed tree {oid}")
+            raw_name = payload[space + 1:nul]
+            if not self.damage.unmetered_tree_paths:
+                self.metrics.charge("tree_entries")
+                self.metrics.charge("tree_entry_name_bytes", len(raw_name))
             mode = payload[offset:space].decode("ascii")
-            name = payload[space + 1:nul].decode(
+            name = raw_name.decode(
                 "utf-8", errors="surrogateescape"
             )
             child = payload[nul + 1:nul + 1 + width].hex()
@@ -553,18 +921,29 @@ class ObjectDatabase:
             self.metrics.charge("object_cache_hits")
             return self.flat_trees[root]
         flattened: dict[str, tuple[str, str]] = {}
+        leaf_count = 0
 
-        def walk(tree_oid: str, prefix: str):
-            for name, (mode, child) in sorted(
-                self.tree_entries(tree_oid).items()
-            ):
+        def walk(tree_oid: str, prefix: str, prefix_bytes: int):
+            nonlocal leaf_count
+            for name, (mode, child) in self.tree_entries(tree_oid).items():
+                path_bytes = len(
+                    name.encode("utf-8", errors="surrogateescape")
+                ) + (prefix_bytes + 1 if prefix else 0)
+                if not self.damage.unmetered_tree_paths:
+                    self.metrics.charge("flattened_paths")
+                    self.metrics.charge("flattened_path_bytes", path_bytes)
                 path = f"{prefix}/{name}" if prefix else name
                 if mode in {"40000", "040000"}:
-                    walk(child, path)
+                    walk(child, path, path_bytes)
                 else:
+                    leaf_count += 1
+                    if not self.damage.unmetered_tree_paths:
+                        self.metrics.admit_peak(
+                            "flat_tree_peak_paths", leaf_count
+                        )
                     flattened[path] = (mode, child)
 
-        walk(root, "")
+        walk(root, "", 0)
         self.flat_trees[root] = flattened
         return flattened
 
@@ -606,13 +985,18 @@ class ObjectDatabase:
         self.metrics.charge("queue_subtree_reads")
         by_identity: dict[tuple, list[ActionState]] = {}
 
-        def walk(tree_oid: str, prefix: str):
-            for name, (mode, child) in sorted(
-                self.tree_entries(tree_oid).items()
-            ):
+        def walk(tree_oid: str, prefix: str, prefix_bytes: int):
+            for name, (mode, child) in self.tree_entries(tree_oid).items():
+                path_bytes = (
+                    prefix_bytes
+                    + 1
+                    + len(name.encode("utf-8", errors="surrogateescape"))
+                )
+                self.metrics.charge("queue_paths")
+                self.metrics.charge("queue_path_bytes", path_bytes)
                 path = f"{prefix}/{name}"
                 if mode in {"40000", "040000"}:
-                    walk(child, path)
+                    walk(child, path, path_bytes)
                     continue
                 parts = Path(path).parts
                 if (
@@ -626,6 +1010,7 @@ class ObjectDatabase:
                 if kind != "blob":
                     raise Unreadable(f"queue item {path} is a {kind}")
                 try:
+                    self.metrics.charge("queue_blob_bytes", len(payload))
                     text = payload.decode("utf-8")
                 except UnicodeDecodeError as error:
                     raise Unreadable(
@@ -638,7 +1023,7 @@ class ObjectDatabase:
                 )
 
         if queue_tree is not None:
-            walk(queue_tree, "message-queue")
+            walk(queue_tree, "message-queue", len(b"message-queue"))
         frozen = {
             identity: tuple(sorted(states, key=lambda state: state.path))
             for identity, states in by_identity.items()
@@ -659,6 +1044,7 @@ class Graph:
         metrics: Metrics,
         *,
         reopen_outside_c_boundary_ancestry: bool = False,
+        buffered_graph_output: bool = False,
         stable_git_diagnostics: bool = True,
     ):
         self.root = root
@@ -666,13 +1052,40 @@ class Graph:
         self.N = N
         self.objects = objects
         self.metrics = metrics
-        shallow = run_git(
+        shallow_values: list[str] = []
+
+        def receive_shallow(line: bytes):
+            if not line:
+                return
+            metrics.charge("shallow_tokens")
+            try:
+                value = line.decode("ascii")
+            except UnicodeDecodeError as error:
+                raise Unreadable("shallow probe emitted non-ASCII data") from error
+            if value not in {"true", "false"}:
+                raise Unreadable("shallow probe emitted malformed data")
+            shallow_values.append(value)
+
+        shallow_returncode, _shallow_lines, shallow_stderr = bounded_git_lines(
             root,
             metrics,
-            "rev-parse",
-            "--is-shallow-repository",
+            ("rev-parse", "--is-shallow-repository"),
+            counter_prefix="shallow",
             stable_git_diagnostics=stable_git_diagnostics,
-        ).stdout.strip()
+            line_callback=receive_shallow,
+        )
+        if shallow_returncode or len(shallow_values) != 1:
+            diagnostic = shallow_stderr.decode(
+                "utf-8", errors="surrogateescape"
+            )
+            raise Unreadable(
+                stable_git_failure(
+                    ("rev-parse", "--is-shallow-repository"), diagnostic
+                )
+                if stable_git_diagnostics
+                else diagnostic.strip() or "could not inspect shallow state"
+            )
+        shallow = shallow_values[0]
         if shallow == "true":
             raise Unreadable("required post-C history is shallow")
         for label, oid in (("O", O), ("N", N)):
@@ -680,29 +1093,52 @@ class Graph:
                 objects.commit_tree(oid)
             except Unreadable as error:
                 raise Unreadable(f"{label}: {error}") from error
-        bases = run_git(
-            root,
-            metrics,
+        base_arguments = (
             "--no-replace-objects",
             "merge-base",
             "--all",
             O,
             N,
-            check=False,
-            stable_git_diagnostics=stable_git_diagnostics,
         )
-        if bases.returncode:
+        merge_bases: list[str] = []
+
+        def receive_base(line: bytes):
+            if not line:
+                return
+            metrics.charge("merge_base_tokens")
+            try:
+                oid = line.decode("ascii")
+            except UnicodeDecodeError as error:
+                raise Unreadable(
+                    "merge-base emitted a non-ASCII object ID"
+                ) from error
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+                raise Unreadable("merge-base emitted a malformed object ID")
+            merge_bases.append(oid)
+
+        base_returncode, _base_lines, base_stderr = bounded_git_lines(
+            root,
+            metrics,
+            base_arguments,
+            counter_prefix="merge_base",
+            stable_git_diagnostics=stable_git_diagnostics,
+            line_callback=receive_base,
+        )
+        if base_returncode:
+            decoded_stderr = base_stderr.decode(
+                "utf-8", errors="surrogateescape"
+            )
             raise Unreadable(
                 stable_git_failure(
-                    ("merge-base", "--all", O, N), bases.stderr
+                    ("merge-base", "--all", O, N), decoded_stderr
                 )
                 if stable_git_diagnostics
                 else (
-                    bases.stderr.strip()
+                    decoded_stderr.strip()
                     or "could not determine the merge base"
                 )
             )
-        merge_bases = tuple(line for line in bases.stdout.splitlines() if line)
+        merge_bases = tuple(merge_bases)
         if len(merge_bases) != 1:
             raise Unreadable(
                 f"expected exactly one merge base C; found {len(merge_bases)}"
@@ -722,35 +1158,61 @@ class Graph:
         if not reopen_outside_c_boundary_ancestry:
             listing_arguments.append("--ancestry-path")
         metrics.charge("graph_enumerations")
-        listing = run_git(
-            root,
-            metrics,
-            *listing_arguments,
-            O,
-            N,
-            f"^{self.C}",
-            stable_git_diagnostics=stable_git_diagnostics,
-        )
-        self.order = [self.C]
-        self.parents: dict[str, tuple[str, ...]] = {self.C: ()}
+        local_order = [self.C]
+        local_parents: dict[str, tuple[str, ...]] = {self.C: ()}
         seen = {self.C}
-        try:
+        metrics.charge("graph_commits")
+
+        def receive_graph_line(raw_line: bytes):
+            if not raw_line:
+                return
+            token_count = raw_line.count(b" ") + 1
+            metrics.charge("graph_commit_tokens")
+            metrics.charge("graph_parent_tokens", token_count - 1)
+            metrics.charge("graph_parent_edges", token_count - 1)
+            try:
+                fields = raw_line.decode("ascii").split()
+            except UnicodeDecodeError as error:
+                raise Unreadable("rev-list emitted non-ASCII graph data") from error
+            if len(fields) != token_count or any(
+                not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", field)
+                for field in fields
+            ):
+                raise Unreadable("rev-list emitted a malformed graph line")
+            commit, raw_parents = fields[0], tuple(fields[1:])
+            if commit in seen:
+                return
             metrics.charge("graph_commits")
-            for line in listing.stdout.splitlines():
-                fields = line.split()
-                if not fields:
-                    continue
-                commit, raw_parents = fields[0], tuple(fields[1:])
-                if commit in seen:
-                    continue
-                metrics.charge("graph_commits")
-                metrics.charge("graph_parent_edges", len(raw_parents))
-                seen.add(commit)
-                self.order.append(commit)
-                self.parents[commit] = raw_parents
+            seen.add(commit)
+            local_order.append(commit)
+            local_parents[commit] = raw_parents
+
+        try:
+            listing_returncode, _listing_lines, listing_stderr = (
+                bounded_git_lines(
+                    root,
+                    metrics,
+                    tuple([*listing_arguments, O, N, f"^{self.C}"]),
+                    counter_prefix="graph",
+                    buffered_damage=buffered_graph_output,
+                    stable_git_diagnostics=stable_git_diagnostics,
+                    line_callback=receive_graph_line,
+                )
+            )
         except BudgetExceeded as error:
             error.C = self.C
             raise
+        if listing_returncode:
+            decoded_stderr = listing_stderr.decode(
+                "utf-8", errors="surrogateescape"
+            )
+            raise Unreadable(
+                stable_git_failure(tuple(listing_arguments), decoded_stderr)
+                if stable_git_diagnostics
+                else decoded_stderr.strip() or "could not enumerate post-C graph"
+            )
+        self.order = local_order
+        self.parents = local_parents
         self.children: dict[str, list[str]] = {
             commit: [] for commit in self.order
         }
@@ -828,6 +1290,11 @@ class Classifier:
         self.metrics = Metrics()
         self.metrics.configure_budget(
             None if self.damage.unmetered_cone_work else fixture.budget_limit,
+            limits=(
+                {}
+                if self.damage.unmetered_cone_work
+                else fixture.budget_limits
+            ),
             posthoc_budget_accounting=(
                 self.damage.posthoc_budget_accounting
             ),
@@ -837,22 +1304,24 @@ class Classifier:
         self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
 
     def budget_overflows(self) -> list[tuple[str, int]]:
-        limit = self.fixture.budget_limit
-        if limit is None or self.damage.unmetered_cone_work:
+        if self.damage.unmetered_cone_work:
             return []
         return sorted(
             (name, value)
             for name, value in self.metrics.as_dict().items()
-            if value > limit
+            if (
+                self.metrics.limit_for(name) is not None
+                and value > self.metrics.limit_for(name)
+            )
         )
 
     def budget_result(self, base: dict) -> dict | None:
         overflows = self.budget_overflows()
         if not overflows:
             return None
-        limit = self.fixture.budget_limit
         reason = "; ".join(
-            f"{name}={value}>{limit}" for name, value in overflows
+            f"{name}={value}>{self.metrics.limit_for(name)}"
+            for name, value in overflows
         )
         return {
             **base,
@@ -892,6 +1361,17 @@ class Classifier:
             "production_tuple": values,
             "production_tuple_sha256": hashlib.sha256(payload).hexdigest(),
         }
+
+    def charge_production_helper_input(self, *values: str):
+        """Bound imported helper inputs before calling production code."""
+        self.metrics.charge("production_helper_calls")
+        self.metrics.charge(
+            "production_helper_input_bytes",
+            sum(
+                len(value.encode("utf-8", errors="surrogateescape"))
+                for value in values
+            ),
+        )
 
     def carry_proof(self, identity: tuple, tip: str) -> dict:
         """Prove one live occurrence by C-rooted edges, not all ancestors."""
@@ -1120,9 +1600,42 @@ class Classifier:
         return None
 
     @staticmethod
-    def canonical_digest(domain: str, value: dict) -> str:
+    def canonical_json_size(value) -> int:
+        """Compute canonical JSON bytes without constructing the full JSON."""
+        if value is None:
+            return 4
+        if value is True:
+            return 4
+        if value is False:
+            return 5
+        if isinstance(value, (int, float)):
+            return len(str(value).encode("ascii"))
+        if isinstance(value, str):
+            return len(
+                json.dumps(value, ensure_ascii=False).encode("utf-8")
+            )
+        if isinstance(value, (list, tuple)):
+            return 2 + max(0, len(value) - 1) + sum(
+                Classifier.canonical_json_size(item) for item in value
+            )
+        if isinstance(value, dict):
+            return 2 + max(0, len(value) - 1) + sum(
+                Classifier.canonical_json_size(str(key))
+                + 1
+                + Classifier.canonical_json_size(value[key])
+                for key in sorted(value)
+            )
+        raise TypeError(f"unsupported canonical JSON value {type(value)!r}")
+
+    def canonical_digest(self, domain: str, value: dict) -> str:
+        wrapped = {"domain": domain, "value": value}
+        if not self.damage.unmetered_support_construction:
+            self.metrics.charge(
+                "support_serialized_bytes",
+                self.canonical_json_size(wrapped),
+            )
         payload = json.dumps(
-            {"domain": domain, "value": value},
+            wrapped,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -1140,19 +1653,35 @@ class Classifier:
         parts = Path(state.path).parts
         actor = parts[1] if len(parts) > 1 else ""
         leaf = parts[2] if len(parts) > 2 else ""
-        declared = sorted(set(RECONCILE.context_path_candidates(state.text)))
-        obligations: list[dict] = [
+        self.charge_production_helper_input(state.text)
+        declared_candidates = RECONCILE.context_path_candidates(state.text)
+        declared_set: dict[str, None] = {}
+        for path in declared_candidates:
+            if path in declared_set:
+                continue
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_referenced_paths")
+            declared_set[path] = None
+        declared = sorted(declared_set)
+        obligations: list[dict] = []
+
+        def add_obligation(obligation: dict):
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_obligations")
+            obligations.append(obligation)
+
+        add_obligation(
             {
                 "kind": "production-deletion-postcondition",
                 "authority_parent": parent,
                 "authority_child": child,
             }
-        ]
-        obligations.extend(
-            {"kind": "declared-path-anchor", "path": path}
-            for path in declared
-            if path != state.path
         )
+        for path in declared:
+            if path != state.path:
+                add_obligation(
+                    {"kind": "declared-path-anchor", "path": path}
+                )
         if actor == "needs-agent" and leaf == "requests":
             if fields.get("Request kind", "").strip() == "task-pickup":
                 task_paths = [
@@ -1160,7 +1689,7 @@ class Classifier:
                 ]
                 if len(task_paths) != 1:
                     return obligations, "task pickup has no unique task path"
-                obligations.append(
+                add_obligation(
                     {
                         "kind": "task-pickup-postcondition",
                         "task_path": task_paths[0],
@@ -1171,7 +1700,7 @@ class Classifier:
                 return obligations, None
             if fields.get("Status", "").strip() != "in-repair":
                 return obligations, "ordinary agent action is not in-repair"
-            obligations.append({"kind": "agent-evidence-lineage"})
+            add_obligation({"kind": "agent-evidence-lineage"})
             return obligations, None
         if actor == "needs-agent" and leaf == "retries":
             item = self.fixture.repo.root / state.path
@@ -1180,7 +1709,7 @@ class Classifier:
             check = fields.get("Check", "").strip()
             if check not in RECONCILE.CHECKS:
                 return obligations, "retry names an unknown checker"
-            obligations.append(
+            add_obligation(
                 {
                     "kind": "generated-retry-clear",
                     "check": check,
@@ -1194,7 +1723,7 @@ class Classifier:
         }:
             if fields.get("Status", "").strip() != "folding":
                 return obligations, "human action is not folding"
-            obligations.append({"kind": "terminal-human-response"})
+            add_obligation({"kind": "terminal-human-response"})
             return obligations, None
         if actor == "needs-human" and leaf == "reviews":
             outcome = fields.get("Review outcome", "").strip()
@@ -1210,7 +1739,7 @@ class Classifier:
                 return obligations, "boundary review receipt is unsupported"
             if outcome not in RECONCILE.REVIEW_TERMINAL_OUTCOMES:
                 return obligations, "review has no supported terminal outcome"
-            obligations.append(
+            add_obligation(
                 {
                     "kind": "terminal-review-binding",
                     "outcome": outcome,
@@ -1235,33 +1764,51 @@ class Classifier:
         self.metrics.charge("support_certificate_calls")
         before = self.objects.flat_tree(parent)
         after = self.objects.flat_tree(child)
+        candidates: dict[str, None] = {}
+        for mapping in (before, after):
+            for path in mapping:
+                if path in candidates:
+                    continue
+                if not self.damage.unmetered_support_construction:
+                    self.metrics.charge("support_delta_candidates")
+                candidates[path] = None
         changed = sorted(
             path
-            for path in set(before).union(after)
+            for path in candidates
             if before.get(path) != after.get(path) and path != state.path
         )
-        referenced = sorted(
-            path
-            for path in set(RECONCILE.context_path_candidates(state.text))
-            if path != state.path
-        )
+        referenced_set: dict[str, None] = {}
+        self.charge_production_helper_input(state.text)
+        for path in RECONCILE.context_path_candidates(state.text):
+            if path == state.path or path in referenced_set:
+                continue
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_referenced_paths")
+            referenced_set[path] = None
+        referenced = sorted(referenced_set)
         support_paths = sorted(set(changed).union(referenced))
-        raw_delta = [
-            {
+        raw_delta = []
+        for path in changed:
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_delta_rows")
+            raw_delta.append(
+                {
                 "path": path,
                 "before": self.objects.path_entry(parent, path),
                 "after": self.objects.path_entry(child, path),
-            }
-            for path in changed
-        ]
-        anchors = [
-            {
+                }
+            )
+        anchors = []
+        for path in support_paths:
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_anchor_rows")
+            anchors.append(
+                {
                 "path": path,
                 "entry": self.objects.path_entry(child, path),
                 "changed_on_authority_edge": path in changed,
-            }
-            for path in support_paths
-        ]
+                }
+            )
         obligations, incomplete = self.support_leaf_obligations(
             state, parent, child
         )
@@ -1943,35 +2490,48 @@ class Classifier:
         self, certificate: dict, revision: str
     ) -> list[str]:
         """Resolve typed monotone obligations to their current exact paths."""
-        paths = []
+        assert self.objects is not None
+        paths: dict[str, None] = {}
+
+        def discover(path: str):
+            if path in paths:
+                return
+            if not self.damage.unmetered_dynamic_support:
+                self.metrics.charge("dynamic_support_paths_discovered")
+                self.metrics.charge(
+                    "dynamic_support_path_bytes",
+                    len(path.encode("utf-8", errors="surrogateescape")),
+                )
+            paths[path] = None
+
+        def traverse(path: str):
+            if not self.damage.unmetered_dynamic_support:
+                self.metrics.charge("dynamic_support_paths_traversed")
+
         for obligation in certificate["obligations"]:
             if obligation["kind"] == "task-pickup-postcondition":
-                try:
-                    incarnations = RECONCILE.task_incarnations_at(
-                        revision, obligation["task_id"]
-                    )
-                except (
-                    RECONCILE.GitSnapshotError,
-                    OSError,
-                    ValueError,
-                    UnicodeError,
-                ) as error:
-                    raise Unreadable(
-                        "pickup dynamic support projection could not read "
-                        f"{revision}: {error}"
-                    ) from error
-                paths.extend(incarnations)
-                assert self.objects is not None
                 tree_paths = self.objects.flat_tree(revision)
+                task_pattern = re.compile(
+                    rf"tasks/(?:{'|'.join(RECONCILE.TASK_STATUSES)})/"
+                    + re.escape(obligation["task_id"])
+                    + r"/task\.md"
+                )
+                incarnations = []
+                for path in tree_paths:
+                    traverse(path)
+                    if task_pattern.fullmatch(path):
+                        discover(path)
+                        incarnations.append(path)
                 for task_path in incarnations:
                     task_dir = Path(task_path).parent
-                    paths.extend(
-                        path
-                        for path in tree_paths
-                        if Path(path).parent == task_dir
-                        and Path(path).name
-                        in RECONCILE.TASK_ARTIFACT_NAMES
-                    )
+                    for path in tree_paths:
+                        traverse(path)
+                        if (
+                            Path(path).parent == task_dir
+                            and Path(path).name
+                            in RECONCILE.TASK_ARTIFACT_NAMES
+                        ):
+                            discover(path)
             elif obligation["kind"] == "generated-retry-clear":
                 subject = obligation["subject"].strip("`")
                 if RECONCILE.valid_queue_item_path(subject) or (
@@ -1979,8 +2539,8 @@ class Classifier:
                     and not subject.startswith("/")
                     and ".." not in Path(subject).parts
                 ):
-                    paths.append(subject)
-        return sorted(set(paths))
+                    discover(subject)
+        return sorted(paths)
 
     def supplier_support_checks(
         self,
@@ -2012,21 +2572,25 @@ class Classifier:
             problems.append("a valid authority edge has no support certificate")
         for digest, certificate in sorted(certificates.items()):
             source_parents = sorted(set(absent_parents))
-            fixed_support_paths = [
-                anchor["path"] for anchor in certificate["support_paths"]
-            ]
-            support_paths = sorted(
-                set(fixed_support_paths).union(
-                    path
-                    for revision in [*source_parents, child]
-                    for path in self.dynamic_support_paths(
-                        certificate, revision
-                    )
-                )
-            )
+            support_path_set: dict[str, None] = {}
+
+            def add_support_path(path: str):
+                if path in support_path_set:
+                    return
+                self.metrics.charge("support_paths_checked")
+                support_path_set[path] = None
+
+            for anchor in certificate["support_paths"]:
+                add_support_path(anchor["path"])
+            for revision in [*source_parents, child]:
+                for path in self.dynamic_support_paths(
+                    certificate, revision
+                ):
+                    add_support_path(path)
+            support_paths = sorted(support_path_set)
             self.metrics.charge(
                 "support_paths_checked",
-                len(support_paths) * (len(source_parents) + 1),
+                len(support_paths) * len(source_parents),
             )
             source_projections = [
                 {
@@ -3373,6 +3937,7 @@ class Classifier:
                 objects = ObjectDatabase(
                     fixture.repo.root,
                     self.metrics,
+                    damage=self.damage,
                     stable_git_diagnostics=(
                         not self.damage.ambient_git_diagnostics
                     ),
@@ -3387,6 +3952,7 @@ class Classifier:
                     reopen_outside_c_boundary_ancestry=(
                         self.damage.reopen_outside_c_boundary_ancestry
                     ),
+                    buffered_graph_output=self.damage.buffered_graph_output,
                     stable_git_diagnostics=(
                         not self.damage.ambient_git_diagnostics
                     ),
@@ -5982,7 +6548,13 @@ def r17_persisted_carry_fixture(
     )
 
 
-def r17_boundary_budget_fixture(root: Path) -> Fixture:
+def r17_boundary_budget_fixture(
+    root: Path,
+    *,
+    counter: str = "graph_parent_tokens",
+    limit: int = 7,
+    exact: bool = False,
+) -> Fixture:
     """Meter a small intrinsic cone with a wide outside-C boundary."""
     repo = GitRepository(root)
     initialize(repo)
@@ -6003,22 +6575,31 @@ def r17_boundary_budget_fixture(root: Path) -> Fixture:
         "retain action across 64 immediate outside-C boundary parents",
     )
     N = feature(repo, f"{label}-task-patch")
+    scenario = (
+        f"R17-wide-graph-{counter}-exact"
+        if exact
+        else "R17-wide-outside-C-boundary-budget"
+    )
     return Fixture(
-        "R17-wide-outside-C-boundary-budget",
+        scenario,
         repo,
         C,
         O,
         P,
         N,
-        "blocking-finding",
+        "no-finding" if exact else "blocking-finding",
         {
             "A": A,
             "P": P,
             "outside_parents": outside,
             "budget_contract": {
-                "limit": 7,
+                "counter": counter,
+                "limit": limit,
                 "overflow_classification": "budget-exceeded",
                 "transactional_zero_results": True,
+                "raw_graph_bytes": 2952,
+                "raw_graph_lines": 4,
+                "raw_graph_fields": [2, 2, 66, 2],
             },
             "review_reference_oids": {
                 "C": "b066accf737c901fd1ee314fcf310afb70c8fe87",
@@ -6027,8 +6608,40 @@ def r17_boundary_budget_fixture(root: Path) -> Fixture:
                 "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
             },
         },
-        budget_limit=7,
+        budget_limits={counter: limit},
     )
+
+
+def r17_graph_parent_tokens_exact(root: Path) -> Fixture:
+    return r17_boundary_budget_fixture(
+        root, counter="graph_parent_tokens", limit=68, exact=True
+    )
+
+
+def r17_graph_dimension_budget(
+    root: Path,
+    *,
+    counter: str,
+    limit: int,
+    overflow: bool,
+) -> Fixture:
+    fixture = r17_boundary_budget_fixture(
+        root, counter=counter, limit=limit, exact=not overflow
+    )
+    dimension = {
+        "graph_output_bytes": "output-bytes",
+        "graph_line_peak_bytes": "line-peak-bytes",
+    }[counter]
+    fixture.scenario = (
+        f"R17-graph-{dimension}-plus-one-refused"
+        if overflow
+        else f"R17-graph-{dimension}-exact"
+    )
+    fixture.expected = "blocking-finding" if overflow else "no-finding"
+    fixture.details["typed_budget_counter"] = counter
+    fixture.details["typed_budget_limit"] = limit
+    fixture.details["overflow_by_one"] = overflow
+    return fixture
 
 
 def r17_workflow_input_case(root: Path, case: str) -> Fixture:
@@ -7765,55 +8378,22 @@ def pcx18_many_actions(root: Path) -> Fixture:
 def r17_precharge_many_actions_budget(root: Path) -> Fixture:
     """Refuse P22's first over-budget operation before later work starts."""
     fixture = pcx18_many_actions(root)
+    reference = Classifier(fixture).run()["metrics"]
     fixture.scenario = "R17-precharge-P22-budget"
     fixture.expected = "blocking-finding"
-    fixture.budget_limit = 133
+    fixture.budget_limits = {"object_reads": 133}
     fixture.details.update(
         {
             "budget_counter_policy": "charge before measured work",
             "budget_limit": 133,
-            "precharge_expected_metrics": {
-                "authority_calls": 0,
-                "batch_processes": 1,
-                "carry_proof_edges": 1,
-                "carry_proof_nodes": 2,
-                "git_processes": 4,
-                "graph_commits": 133,
-                "graph_enumerations": 1,
-                "graph_parent_edges": 132,
-                "identity_calls": 32,
-                "mutation_calls": 1,
-                "object_cache_hits": 25,
-                "object_reads": 134,
-                "per_action_history_walks": 0,
-                "queue_snapshots_requested": 59,
-                "queue_subtree_reads": 3,
-                "snapshot_cache_hits": 55,
-                "support_adoption_checks": 0,
-                "support_certificate_calls": 0,
-                "support_paths_checked": 0,
-            },
-            "posthoc_reference_metrics": {
-                "authority_calls": 32,
-                "batch_processes": 1,
-                "carry_proof_edges": 2080,
-                "carry_proof_nodes": 2112,
-                "git_processes": 135,
-                "graph_commits": 133,
-                "graph_enumerations": 1,
-                "graph_parent_edges": 132,
-                "identity_calls": 32,
-                "mutation_calls": 2080,
-                "object_cache_hits": 24736,
-                "object_reads": 300,
-                "per_action_history_walks": 0,
-                "queue_snapshots_requested": 10973,
-                "queue_subtree_reads": 3,
-                "snapshot_cache_hits": 10970,
-                "support_adoption_checks": 0,
-                "support_certificate_calls": 16,
-                "support_paths_checked": 0,
-            },
+            "budget_counter": "object_reads",
+            "later_counters_unchanged": [
+                "authority_calls",
+                "support_adoption_checks",
+                "support_certificate_calls",
+                "support_serialized_bytes",
+            ],
+            "posthoc_reference_metrics": reference,
             "transactional_zero_results": True,
         }
     )
@@ -7997,6 +8577,153 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
     return fixture
 
 
+def configure_typed_budget_fixture(
+    fixture: Fixture,
+    *,
+    scenario: str,
+    counter: str,
+    overflow: bool,
+) -> Fixture:
+    """Derive one deterministic exact or exact-minus-one typed work cap."""
+    probe = Classifier(fixture).run()
+    if probe["classification"] != fixture.expected:
+        raise AssertionError(
+            f"unbudgeted probe for {scenario} changed classification"
+        )
+    measured = probe["metrics"][counter]
+    if measured <= 0:
+        raise AssertionError(f"{scenario} did not exercise {counter}")
+    limit = measured - int(overflow)
+    fixture.scenario = scenario
+    fixture.expected = "blocking-finding" if overflow else fixture.expected
+    fixture.budget_limits = {counter: limit}
+    fixture.details.update(
+        {
+            "typed_budget_counter": counter,
+            "typed_budget_limit": limit,
+            "unbudgeted_counter_value": measured,
+            "overflow_by_one": overflow,
+            "transactional_zero_results": overflow,
+        }
+    )
+    return fixture
+
+
+def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r17-large-object"
+    path = add_agent(repo, label)
+    text = repo.read(path)
+    initial_bytes = 999_995
+    target_bytes = 1_000_000
+    padding = initial_bytes - len(text.encode("utf-8"))
+    if padding <= 0:
+        raise AssertionError("large-object fixture base unexpectedly large")
+    repo.write(path, text + ("x" * padding))
+    if len(repo.read(path).encode("utf-8")) != initial_bytes:
+        raise AssertionError("large-object fixture initial size drifted")
+    C = repo.commit("create one million byte queue object")
+    repo.branch("old", C)
+    O = feature(repo, "r17-large-object-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,))
+    candidate_landmark = delete_with_evidence(
+        repo, ((label, path),), "delete large queue object"
+    )
+    N = feature(repo, "r17-large-object-old")
+    fixture = Fixture(
+        "probe-large-object",
+        repo,
+        C,
+        O,
+        candidate_landmark,
+        N,
+        "no-finding",
+        {"largest_queue_blob_bytes": target_bytes},
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-object-payload-peak-plus-one-refused"
+            if overflow
+            else "R17-object-payload-peak-exact"
+        ),
+        counter="object_payload_peak_bytes",
+        overflow=overflow,
+    )
+
+
+def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r17-wide-tree"
+    path = add_agent(repo, label)
+    for index in range(1000):
+        repo.write(f"wide-tree/{index:04d}.txt", f"{index}\n")
+    C = repo.commit("create one thousand path tree")
+    repo.branch("old", C)
+    O = feature(repo, "r17-wide-tree-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,))
+    candidate_landmark = delete_with_evidence(
+        repo, ((label, path),), "delete action beside wide tree"
+    )
+    N = feature(repo, "r17-wide-tree-old")
+    fixture = Fixture(
+        "probe-wide-tree",
+        repo,
+        C,
+        O,
+        candidate_landmark,
+        N,
+        "no-finding",
+        {"fixture_leaf_paths": 1000},
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-flat-tree-peak-plus-one-refused"
+            if overflow
+            else "R17-flat-tree-peak-exact"
+        ),
+        counter="flat_tree_peak_paths",
+        overflow=overflow,
+    )
+
+
+def r17_support_serialization_budget(
+    root: Path, *, overflow: bool
+) -> Fixture:
+    fixture = ordinary_linear_fixture(
+        root, "probe-support-serialization", valid=True
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-support-serialized-plus-one-refused"
+            if overflow
+            else "R17-support-serialized-exact"
+        ),
+        counter="support_serialized_bytes",
+        overflow=overflow,
+    )
+
+
+def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> Fixture:
+    fixture = pcx16_task_pickup(root)
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-dynamic-support-traversal-plus-one-refused"
+            if overflow
+            else "R17-dynamic-support-traversal-exact"
+        ),
+        counter="dynamic_support_paths_traversed",
+        overflow=overflow,
+    )
+
+
 def scenario_builders():
     return [
         lambda root: ordinary_linear_fixture(
@@ -8136,6 +8863,30 @@ def scenario_builders():
         pcx19_missing_claim_blob,
         lambda root: budget_fixture(root, overflow=False),
         lambda root: budget_fixture(root, overflow=True),
+        *[
+            lambda root, overflow=overflow: r17_large_object_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_wide_tree_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_support_serialization_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_dynamic_support_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
         r3_two_invalid_sources,
         r3_invalid_valid_competition,
         r3_valid_plus_invalid_at_N,
@@ -8323,6 +9074,23 @@ def scenario_builders():
             for reverse in (False, True)
         ],
         r17_boundary_budget_fixture,
+        r17_graph_parent_tokens_exact,
+        *[
+            (
+                lambda root, counter=counter, limit=limit, overflow=overflow:
+                r17_graph_dimension_budget(
+                    root,
+                    counter=counter,
+                    limit=limit - int(overflow),
+                    overflow=overflow,
+                )
+            )
+            for counter, limit in (
+                ("graph_output_bytes", 2952),
+                ("graph_line_peak_bytes", 2705),
+            )
+            for overflow in (False, True)
+        ],
         *[
             (
                 lambda root, case=case:
@@ -8358,6 +9126,12 @@ def scenario_builders():
 
 
 CONTROL_NAMES = (
+    "buffered-graph-output",
+    "stream-malformed-truncated-final-line",
+    "unmetered-object-payload",
+    "unmetered-tree-paths",
+    "unmetered-dynamic-support",
+    "unmetered-support-construction",
     "restore-universal-ancestor-carry-scan",
     "ignore-outside-C-carrier",
     "ignore-absent-C-arm",
@@ -8666,8 +9440,12 @@ def validate_result(result: dict):
             or propagation
             or len(details["outside_parents"]) != 64
             or result["metrics"]["graph_commits"] > 7
-            or result["metrics"]["graph_parent_edges"] <= 7
-            or "graph_parent_edges" not in result["evidence_verdict"]["reason"]
+            or result["metrics"]["graph_parent_tokens"] != 8
+            or "graph_parent_tokens" not in result["evidence_verdict"]["reason"]
+            or result["metrics"]["graph_output_bytes"]
+            >= details["budget_contract"]["raw_graph_bytes"]
+            or result["metrics"]["graph_process_reaps"] != 1
+            or result["metrics"]["graph_process_cleanup_checks"] < 2
         ):
             errors.append("R17 wide boundary escaped transactional budget")
         if details["review_reference_oids"] != {
@@ -8677,6 +9455,16 @@ def validate_result(result: dict):
             "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
         }:
             errors.append("R17 wide-boundary reviewer OIDs changed")
+    if scenario == "R17-wide-graph-graph_parent_tokens-exact":
+        details = result["details"]["budget_contract"]
+        if (
+            status != "none"
+            or result["audit_exit"] != 0
+            or result["metrics"]["graph_parent_tokens"] != 68
+            or result["metrics"]["graph_output_bytes"] != details["raw_graph_bytes"]
+            or result["metrics"]["graph_lines"] != 4
+        ):
+            errors.append("R17 exact graph parent-token budget did not pass")
     if scenario.startswith("W"):
         contract = result["details"]["workflow_contract"]
         if (
@@ -10256,21 +11044,71 @@ def validate_result(result: dict):
             errors.append("many-action graph is shorter than 128 commits")
         if metrics["snapshot_cache_hits"] < 128:
             errors.append("many-action case did not reuse snapshots")
+        if metrics["production_parent_queries"] != 129:
+            errors.append(
+                "many-action composition did not preserve 129 parent queries"
+            )
+    if scenario.startswith(
+        (
+            "R17-object-payload-peak-",
+            "R17-flat-tree-peak-",
+            "R17-support-serialized-",
+            "R17-dynamic-support-traversal-",
+            "R17-graph-output-bytes-",
+            "R17-graph-line-peak-bytes-",
+        )
+    ):
+        counter = result["details"]["typed_budget_counter"]
+        limit = result["details"]["typed_budget_limit"]
+        overflow = result["details"]["overflow_by_one"]
+        empty_result = not any(
+            result[key]
+            for key in (
+                "actions",
+                "authority_edges",
+                "carry_proofs",
+                "mutation_edges",
+                "propagation_edges",
+                "support_checks",
+            )
+        )
+        if overflow:
+            if (
+                result["audit_exit"] != 2
+                or status != "ambiguous"
+                or result["metrics"][counter] != limit + 1
+                or not empty_result
+                or counter not in result["evidence_verdict"]["reason"]
+            ):
+                errors.append(
+                    f"{scenario} did not refuse exact-plus-one work transactionally"
+                )
+        elif (
+            result["audit_exit"] != 0
+            or result["classification"] != "no-finding"
+            or result["metrics"][counter] != limit
+        ):
+            errors.append(f"{scenario} did not admit its exact work budget")
+        if scenario.startswith("R17-object-payload-peak-") and (
+            result["details"]["largest_queue_blob_bytes"] != 1_000_000
+            or result["details"]["unbudgeted_counter_value"] != 1_000_000
+        ):
+            errors.append("one-million-byte object admission fixture drifted")
+        if scenario.startswith("R17-graph-") and (
+            result["metrics"]["graph_stream_peak_chunk_bytes"] > 256
+            or result["metrics"]["graph_buffered_bytes"] != 0
+            or result["metrics"]["graph_process_reaps"] != 1
+        ):
+            errors.append("graph budget did not retain its streaming bound")
     if scenario == "R17-precharge-P22-budget":
         metrics = result["metrics"]
         limit = result["details"]["budget_limit"]
-        overflows = sorted(
-            (key, value)
-            for key, value in metrics.items()
-            if value > limit
-        )
+        counter = result["details"]["budget_counter"]
         if (
             result["audit_exit"] != 2
             or result["classification"] != "blocking-finding"
             or status != "ambiguous"
-            or len(overflows) != 1
-            or overflows[0][1] != limit + 1
-            or metrics != result["details"]["precharge_expected_metrics"]
+            or metrics[counter] != limit + 1
             or metrics["git_processes"] > 4
             or actions
             or authority
@@ -10278,7 +11116,11 @@ def validate_result(result: dict):
             or result["mutation_edges"]
             or result["propagation_edges"]
             or result["support_checks"]
-            or overflows[0][0] not in result["evidence_verdict"]["reason"]
+            or counter not in result["evidence_verdict"]["reason"]
+            or any(
+                metrics[name] != 0
+                for name in result["details"]["later_counters_unchanged"]
+            )
         ):
             errors.append("P22 budget did not refuse the first excess work")
     if scenario == "PCX-19-missing-claim-blob-recovery":
@@ -10324,6 +11166,36 @@ def validate_result(result: dict):
 
 
 def control_builder(name: str, root: Path):
+    if name == "buffered-graph-output":
+        return (
+            r17_boundary_budget_fixture(root),
+            Damage(buffered_graph_output=True),
+            "blocking-finding",
+        )
+    if name == "unmetered-object-payload":
+        return (
+            r17_large_object_budget(root, overflow=True),
+            Damage(unmetered_object_bytes=True),
+            "no-finding",
+        )
+    if name == "unmetered-tree-paths":
+        return (
+            r17_wide_tree_budget(root, overflow=True),
+            Damage(unmetered_tree_paths=True),
+            "no-finding",
+        )
+    if name == "unmetered-dynamic-support":
+        return (
+            r17_dynamic_support_budget(root, overflow=True),
+            Damage(unmetered_dynamic_support=True),
+            "no-finding",
+        )
+    if name == "unmetered-support-construction":
+        return (
+            r17_support_serialization_budget(root, overflow=True),
+            Damage(unmetered_support_construction=True),
+            "no-finding",
+        )
     if name == "restore-universal-ancestor-carry-scan":
         return (
             r17_outside_c_neutral_parent(root),
@@ -10522,6 +11394,65 @@ def control_builder(name: str, root: Path):
 
 
 def run_control(name: str, root: Path):
+    if name == "stream-malformed-truncated-final-line":
+        root.mkdir(parents=True, exist_ok=True)
+        observations = {}
+        for variant, payload in {
+            "malformed": (b"a" * 40) + b"\nnot-an-oid\n",
+            "truncated": (b"a" * 40) + b"\n" + (b"b" * 39),
+        }.items():
+            metrics = Metrics()
+            local_rows = []
+
+            def receive(line: bytes):
+                if not re.fullmatch(rb"[0-9a-f]{40}|[0-9a-f]{64}", line):
+                    raise Unreadable(f"{variant} graph line")
+                local_rows.append(line.decode("ascii"))
+
+            script = (
+                "import sys;sys.stdout.buffer.write("
+                + repr(payload)
+                + ");sys.stdout.flush()"
+            )
+            reason = None
+            try:
+                bounded_git_lines(
+                    root,
+                    metrics,
+                    ("-c", script),
+                    counter_prefix="graph",
+                    line_callback=receive,
+                    command_prefix=(sys.executable,),
+                )
+            except Unreadable as error:
+                reason = str(error)
+            observations[variant] = {
+                "reason": reason,
+                "local_rows_before_failure": len(local_rows),
+                "published_rows": 0,
+                "metrics": metrics.as_dict(),
+            }
+        observed = all(
+            item["reason"] == f"{variant} graph line"
+            and item["local_rows_before_failure"] == 1
+            and item["published_rows"] == 0
+            and item["metrics"]["graph_process_reaps"] == 1
+            and item["metrics"]["graph_process_cleanup_checks"] == 1
+            for variant, item in observations.items()
+        )
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": "0" * 40,
+            "O": "0" * 40,
+            "N": "0" * 40,
+            "baseline_classification": "unreadable",
+            "damaged_classification": "partial-graph",
+            "expected_baseline": "unreadable",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "stream_observation": observations,
+        }
     if name == "locale-git-error-stream-equality":
         fixture = r17_unreadable_boundary(root)
         stable = {}
@@ -10575,13 +11506,37 @@ def run_control(name: str, root: Path):
     baseline = Classifier(fixture).run()
     damaged = Classifier(fixture, damage).run()
     budget_observation = None
-    if name == "posthoc-budget-accounting":
-        limit = fixture.budget_limit
-        baseline_overflows = sorted(
-            (key, value)
-            for key, value in baseline["metrics"].items()
-            if value > limit
+    if name == "buffered-graph-output":
+        raw_bytes = fixture.details["budget_contract"]["raw_graph_bytes"]
+        budget_observation = {
+            "baseline_graph_metrics": {
+                key: value
+                for key, value in baseline["metrics"].items()
+                if key.startswith("graph_")
+            },
+            "damaged_graph_metrics": {
+                key: value
+                for key, value in damaged["metrics"].items()
+                if key.startswith("graph_")
+            },
+            "raw_graph_bytes": raw_bytes,
+        }
+        observed = bool(
+            baseline["audit_exit"] == 2
+            and damaged["audit_exit"] == 2
+            and baseline["metrics"]["graph_parent_tokens"] == 8
+            and damaged["metrics"]["graph_parent_tokens"] == 8
+            and baseline["metrics"]["graph_output_bytes"] < raw_bytes
+            and damaged["metrics"]["graph_output_bytes"] == raw_bytes
+            and baseline["metrics"]["graph_process_reaps"] == 1
+            and damaged["metrics"]["graph_process_reaps"] == 1
+            and not baseline["actions"]
+            and not damaged["actions"]
         )
+    elif name == "posthoc-budget-accounting":
+        limit = fixture.details["budget_limit"]
+        counter = fixture.details["budget_counter"]
+        baseline_overflows = [(counter, baseline["metrics"][counter])]
         reference = fixture.details["posthoc_reference_metrics"]
         budget_observation = {
             "baseline_metrics": baseline["metrics"],
@@ -10597,9 +11552,12 @@ def run_control(name: str, root: Path):
             and damaged["audit_exit"] == 2
             and len(baseline_overflows) == 1
             and baseline_overflows[0][1] == limit + 1
-            and baseline["metrics"]
-            == fixture.details["precharge_expected_metrics"]
             and damaged["metrics"] == reference
+            and baseline["metrics"][counter] == limit + 1
+            and all(
+                baseline["metrics"][metric] == 0
+                for metric in fixture.details["later_counters_unchanged"]
+            )
             and not any(
                 baseline[key]
                 for key in (
