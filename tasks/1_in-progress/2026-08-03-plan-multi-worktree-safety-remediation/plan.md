@@ -7,7 +7,7 @@
 - [x] 5. Recover the missing parent integration worktree/remote branch and publish the
       expanded commission as pull request #94 on current `main`.
 - [x] 6. Map ten common development cycles, attack the core/adapter boundary, and derive
-      the harness/self-evolution verification ladder with independent researchers.
+      the harness/self-evolution verification ladder in source-linked research.
 - [ ] 7. After the claim-publication decision is folded, land the six existing correctness
       prerequisites serially: restack provenance, explicit expected-OID publication,
       coordination write rules, stale-base admission, durable handovers, and merged-task

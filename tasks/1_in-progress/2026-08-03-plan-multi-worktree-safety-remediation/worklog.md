@@ -53,7 +53,9 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   the recovery record and this design remain reviewable. `verification.md` records the
   checks actually run against the current candidate.
 - The resulting design maps ten development cycles and a fault-injection/evaluation ladder.
-  It does not claim any behavior implementation or completed disposable scenario.
+  `research.md` records the dated official sources, unverified boundaries, maturity
+  comparison, and expected operator experience. It does not claim any behavior
+  implementation or completed disposable scenario.
 - Adjudicated the architecture as a durable repository evidence kernel plus
   runtime-authoritative expiring observations and a rebuildable read-only view. It separates
   work items, change sets, session observations, writer authorities, and integration runs

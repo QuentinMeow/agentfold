@@ -106,7 +106,13 @@ state-machine behavior; live agent messaging and liveness require real sessions.
    authority.
 5. Core or one-way-door changes receive a five-lens fresh-context panel and a different-
    provider refuter. An independently launched authoritative runner binds raw evidence to
-   the candidate bytes. Self-evolving agents may propose isolated candidates but cannot
+   the candidate bytes: a trusted controller supplies the repository identity plus immutable
+   commit and tree object IDs; the runner checks out that commit without replace refs,
+   alternate object stores, or dirty bytes; and its manifest records the commit/tree, runner
+   version, environment image, command/test digests, raw-output hashes, and result. Negative
+   fixtures must refuse a branch moved after selection, a replace ref, a dirty worktree, a
+   substituted candidate tree, and evidence copied from a different run. Self-evolving
+   agents may propose isolated candidates but cannot
    access or alter hidden tests, grader source, runner credentials, secrets, the evaluator,
    evidence collector, policy, approvals, stable pointer, or rollback controls that judge
    them; self-authored logs are not evidence.
@@ -114,6 +120,9 @@ state-machine behavior; live agent messaging and liveness require real sessions.
    low-risk work with predeclared stop conditions and an already-tested rollback.
 
 ## External product disposition
+
+The dated observations, official sources, maturity limits, and expected operator experience
+behind these dispositions are in `research.md`.
 
 - Gas Town receives the first full-stack scratch bake-off because it is the closest
   open-source task/worktree/message/recovery/merge system; its young history and operational

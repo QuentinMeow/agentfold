@@ -6,7 +6,10 @@ Only commands actually run and their real output are recorded here. This verifie
 records-only design candidate; it does not verify the deferred behavior changes or
 disposable workflow scenarios.
 
-## Full repository suite
+## Initial repository regression suite
+
+This run preceded the final source-link and exact-byte-evidence repair. It is retained as
+real history but is not the final candidate-bound result.
 
 ```
 $ python3 automation/run_tests.py --verbose
@@ -58,7 +61,10 @@ test elapsed: 0.01s
 The `0/0` result is an explicit empty selection, not evidence that a test exercised these
 records; the complete suite above is the repository-wide regression check.
 
-## Clean Git clone
+## Initial clean Git clone
+
+This branch-named clone preceded the final repair. It proved clean-clone discovery for that
+draft, not immutable binding for the final candidate.
 
 ```
 $ git clone --no-local --branch agents/2026-08-31-prove-and-land-the-common-8dba/parent-design /Users/quentinmiao/code/agentfold /private/tmp/agentfold-git-clone.yEORUx
@@ -87,11 +93,3 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 16/16 files passed
 test elapsed: 52.13s
 ```
-
-## First fresh-context review
-
-Two reviewers accepted the requirements and human-workflow lenses. The repository-contract
-reviewer blocked publication because the first draft overstated one exact task-start gate as
-applying to every new child and its worklog lacked resolvable evidence links. The draft was
-repaired before publication; final revision-bound verdicts are recorded only after the
-repaired bytes are committed and reviewed.
