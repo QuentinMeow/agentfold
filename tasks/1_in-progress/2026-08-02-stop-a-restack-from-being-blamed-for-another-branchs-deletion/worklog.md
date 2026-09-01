@@ -128,6 +128,23 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   HTTP, TLS, alternate-object, helper, and environment controls.
 - Production remains unopened pending a fresh full five-lens immutable-revision review.
 
+## 2026-09-01 — Observer-core and external-publisher correction (codex)
+
+- Review proved that the attempted sealed publisher opened a separate system: reachable-
+  closure packing, network/disk/process limits, recursive alternates, TLS redirects,
+  credentials, crash cleanup, and uncertain remote outcomes all needed independent proofs.
+- Reasserted the existing task boundary: Strategy A classifies immutable O/N and never
+  publishes. Withdrew all push-command and one-ref-moved guarantees; the existing
+  `2026-08-03-bind-task-branch-pushes-to-observed-tips` backlog task owns that future work.
+- Made every historical range/root/ref-update production invocation Linux-only under the
+  probed memory ceiling. Native macOS returns coverage-unavailable rather than running an
+  unbounded history path or pretending local prevention; remote Linux results remain
+  explicitly post-push detection.
+- Rewrote common human cycles around distinct diagnosis, external publication, observed
+  event, continuity result, and merge-eligibility states, and added negative tests proving
+  the observer never spawns publisher or credential processes.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Pre-output-memory and literal-transport correction (codex)
 
 - Semantic review accepted the executable prefix enumeration and POC-equivalent role

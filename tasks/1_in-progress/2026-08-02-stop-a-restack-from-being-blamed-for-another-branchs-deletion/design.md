@@ -2139,3 +2139,85 @@ repository.
 Production remains unopened. A fresh immutable five-lens panel must accept the Linux-only
 resource boundary, sealed publisher, and all previous semantic contracts before any
 production unit starts.
+
+## 2026-09-01 correction amendment 13 — observer core, external publisher
+
+The review of `56b73d57cd1564c510d6a331793b6b9f5aa4beed` proved that a
+sealed publisher would need its own complete pack, network, alternate-object, credential,
+cleanup, and uncertain-remote-outcome protocol. That is the scope already owned by backlog
+task `2026-08-03-bind-task-branch-pushes-to-observed-tips`, not by this continuity
+classifier. This section withdraws every earlier exact-push-command, configuration-closed
+publication, hook-closed publication, sealed-publisher, publisher-canary, or only-one-ref-
+moved implementation claim in this task. It also closes the macOS ordinary contradiction.
+
+### Core and adapter do not publish
+
+Strategy A is an observer over immutable Git object endpoints. Neither entrypoint, the
+GitHub adapter, the ordinary-history transaction, nor any implementation unit in this task
+invokes `git push`, chooses credentials, creates a remote helper, packs an object closure,
+or changes a local or remote ref. No remote name, URL, credential, proxy, TLS policy,
+askpass capability, alternate-object path, publisher temp directory, or publication result
+enters the classifier result or authority policy.
+
+The exact-lease commands recorded in rejected amendments are no longer part of this task's
+contract or tests. They remain useful motivation for the separate publisher task, which
+must independently solve multi-ref atomicity, hooks/config, pack and network budgets,
+credentials, recursive alternates, crash cleanup, and unknown remote outcome before it can
+claim prevention. This task neither weakens nor pre-accepts that future design.
+
+GitHub canary setup may use an owner-operated fixture controller outside candidate code,
+but the controller's publication mechanics are test infrastructure, not core behavior or
+proof that AgentFold prevented a ref update. The observed event's immutable O/N pair is the
+only continuity input after any external publication.
+
+### Honest human development cycles
+
+The common cycles have these observable effects:
+
+1. On a Linux host that passes the resource startup probe, a developer may run the paired
+   local O/N plus ordinary-range diagnosis before asking an external publisher to update a
+   ref. A clean result diagnoses the proposed objects; it does not reserve or move the ref.
+2. On native macOS, every production invocation with non-empty `--range`, `root:N`, or
+   `--ref-update` returns coverage-unavailable exit 2 before historical work. The task makes
+   no bounded-production claim for a legacy range path. Checks that require no protected
+   historical child are outside Strategy A and may continue under their own existing
+   contract, but cannot substitute for continuity or `OrdinaryHistorySnapshot`.
+3. A macOS developer who lacks a separately verified Linux runner cannot perform the local
+   Strategy A diagnosis. They may still publish with their external tool, but the first
+   Strategy A result is the post-push Linux provider check; this is explicitly detection,
+   not prevention.
+4. Creation, fast-forward update, divergent update/restack, repair, and deletion are all
+   externally published. Creation/deletion have the already specified zero-endpoint
+   semantics; nonzero updates use the provider's exact event O/N. No current ref or PR API
+   reconstructs a missed pair.
+5. If the external publisher reports rejection or an unknown result, the developer stops,
+   fetches the exact destination ref through that tool's trusted procedure, and compares it
+   with the expected O/N. They never infer success from local output or retry unchanged N.
+6. An invalid/ambiguous completed provider result is repaired into a new N and externally
+   published as a new update. An unavailable result remains unavailable; a later clean edge
+   does not launder it.
+
+The UI or handover must therefore say separately: proposed objects diagnosed locally,
+external publication requested, provider event observed, continuity complete/invalid/
+unavailable, and merge eligibility. It must never collapse those stages into “AgentFold
+pushed safely.”
+
+### Publisher-free verification boundary
+
+Core and adapter tests assert that no Strategy A process spawns `git push`, a credential
+helper, remote helper, receive-pack client, or publisher cleanup process. Hostile local Git
+configuration and transport environment cannot affect classification because no
+publication command exists and committed-object readers use their already isolated
+read-only object-source contracts.
+
+Live GitHub canaries remain conditional external evidence for provider payload and fetch
+behavior. Their fixture controller records only event/run artifacts; its own transport
+success is not recorded as a Strategy A guarantee. A missing authorized fixture or
+credential leaves adapter behavior unverified without blocking provider-independent core
+implementation.
+
+### Gate boundary
+
+Production remains unopened. The next five-lens review judges the smaller observer-only
+scope, Linux historical-execution boundary, and unchanged accepted O/N semantics. The
+publisher backlog stays a separate task and future PR.

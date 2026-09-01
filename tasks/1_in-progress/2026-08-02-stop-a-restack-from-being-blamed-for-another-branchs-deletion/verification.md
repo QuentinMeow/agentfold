@@ -28,6 +28,17 @@ The four-to-one panel rejected the revision. No production implementation began 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded sealed-publisher design review
+
+**Reviewed revision:** `56b73d57cd1564c510d6a331793b6b9f5aa4beed`
+
+- semantic/DAG + object view / r19-semantic-design: `block` — native macOS ordinary range availability contradicted the mandatory historical-child memory gate; sealed object semantics otherwise preserved O/N roles.
+- budgets/transaction/composition / r17-production-seam-audit: `block` — publication had no pack/network/disk/process/resource profile, failed temp repositories accumulated without a numeric cleanup contract, and macOS ordinary range remained contradictory.
+- workflow/adapter/human / r20-workflow-design: `block` — recursive alternates escaped the validated source ODB, macOS had no executable prepublication Linux path, failure/auth cleanup was open, and redirects remained enabled.
+
+The panel stopped after three independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded executable-enumeration design review
 
 **Reviewed revision:** `6643bdc0c68282420b9778badfd425d68810a900`
