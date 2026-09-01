@@ -1,923 +1,293 @@
 # Production-contract provenance POC
 
-No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 73 focused contract regressions, and all fifteen damaged-mode controls,
-without changing production code.
-
-Before this POC, the proposed restack exception had no executable proof that it
-could distinguish a branch's own deletion from an already-resolved deletion on
-another branch. The POC now classifies one occurrence rooted at the unique merge
-base `C`, calls AgentFold's production identity and deletion validators, and
-keeps supplier authority separate from merge propagation. It is evidence for a
-future production change, not that change itself.
+This file is generated in full by `audit_readme.py` from the closed
+`evidence.json` manifest. Do not edit observations here by hand.
 
 ## Result
 
-The executable is [prototype.py](prototype.py). It creates temporary Git
-repositories, commits real queue items, and imports these functions from the
-worktree's current `automation/reconcile/reconcile.py`:
-
-- `queue_action_identity(path, text)` supplies every action identity. The POC
-  emits the full returned tuple and a diagnostic hash; the hash never decides
-  identity or authority.
-- `queue_deletion_problem(path, text, parent, child)` decides every lifecycle
-  authority edge. The POC does not synthesize a claim, evidence, retry, pickup,
-  or deletion verdict. A separate contract gate described below binds concrete
-  old-tip human responses to those production-authorized edges.
-- `queue_parent_state_regression_problem(old_text, new_text)` validates mutable
-  lifecycle state when the exact production identity persists from `O` to `N`.
-- `queue_mutation_problem(source, destination, before, after, parent, child)`
-  validates every real live-to-live carrying edge of a persisted occurrence on
-  both sides of the split.
-- `queue_frozen_skeleton`, `introduces_final_retry_notes`, and
-  `pure_first_human_response` apply the production frozen-byte complement to
-  those same edges.
-
-The final self-test produced this summary and exited `0`:
-
-```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 15, "controls_total": 15, "failures": [], "git": "git version 2.55.0", "passed": 122, "python": "3.14.7", "summary": "PASS", "total": 122}
-```
-
-Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
-
-## Contract proved by the harness
-
-The POC first requires exactly one merge base and requires it to equal the
-declared `C`. It enumerates only `O N ^C`, once, with `git rev-list --parents`.
-It never opens parents of `C` for normal classification. A dedicated damaged
-control proves that reopening pre-`C` genealogy creates a false block.
-
-The declared selected range base `M` is a separate mandatory input. Immediately
-after that one graph enumeration, and before snapshots, per-action identity
-calls, deletion-authority calls, or event selection, the classifier verifies
-that `M` is an available commit in the enumerated `C`-rooted ancestry through
-`N`. Therefore `M` must descend from or equal `C` and be an ancestor of or equal
-`N`; the contract explicitly permits both endpoint equalities. Missing and
-non-commit objects return `unreadable`; readable commits outside the region
-return `ambiguous`. Both failures emit `range_base_validation` with the full
-`M` OID and reason, zero selected events, and zero identity or authority calls.
-
-Each immutable production identity maps to a list of paths in every snapshot.
-Counts and paths remain visible, so duplicates cannot collapse into set
-membership. Carrying histories must remain uniquely present from `C`; absent
-histories must remain absent from the chosen deletion through `N`. Missing Git
-objects, shallow required history, unrelated tips, and multiple merge bases
-return structured `unreadable` or `ambiguous` results rather than absence.
-
-When the old-tip occurrence at `O` has a concrete human response, every real
-carrying parent implicated in the event must preserve every concrete
-response/binding field from `O`. This includes each direct authority parent and
-both the authority and propagation parents of a supplier adoption. For a
-decision this is the response field and value. For a review it
-also includes the local review target and its content revision, plus the bound
-`Reviewed revision` and terminal `Review outcome` when those were already
-concrete at `O`. Fields that were still pending at `O` may be filled by the
-candidate lifecycle. For `Review target` and `Review revision`, plain
-case-insensitive `pending`, after outer whitespace is stripped, is the only
-explicit pending sentinel. Backticks, blank or generic placeholders, suffixes,
-and Unicode lookalikes are binding values and are preserved exactly. `Reviewed
-revision` and `Review outcome` retain the production lifecycle's existing
-pending/placeholder fill rules. The comparison is anchored to `O`, uses the same
-production identity, and runs after the production edge validator. Candidate
-parents may add values only for fields pending at `O`, and all concrete
-candidate values must unify across the implicated parents. A mismatch turns the
-event invalid while retaining the production edge verdict, full parent and `O`
-OIDs, and both bindings. An unanswered review parent is neutral only when its
-target and revision are still exactly production-pending. Once it publishes a
-concrete target or revision, those fields participate even without a response.
-An unanswered `O` likewise anchors any concrete published target and revision;
-an ordinary unanswered decision still has no binding to copy.
-
-Occurrence preservation is checked separately from Git rename detection. Every
-identity at `O` must trace one continuous live occurrence backward through all
-`C..O` carrying parents to `C`, whether the candidate preserves or deletes it.
-If the same identity remains at `N`, a second trace covers all `C..N` carrying
-parents. Each live-to-live carrying edge in those traces calls
-`queue_mutation_problem` and the frozen-skeleton complement. A merge needs at
-least one independently valid source edge; its other live carrying parents must
-preserve protected bytes, committed state, and concrete human-review fields,
-while a truly pending parent may accept a lifecycle fill supplied by the valid
-source. Separate `C`-to-`O` and `O`-to-`N` anchor checks preserve committed
-human state across the endpoints. A deleted gap, recreation, transient
-regression, conflicting merge carrier, or protected hidden-byte change blocks
-even when all endpoint bytes match.
-
-This live-occurrence trace does not claim that a propagation edge into an absent
-merge child is a standalone mutation-authority edge: direct deletion authority,
-supplier authority, propagation, and post-event absence remain the separate
-composition below. Production-valid publication, retraction, pending fill,
-first response, and terminal transitions remain allowed; multiplicity fails
-closed.
-
-The two event modes are disjoint:
-
-| Mode | Authority | Propagation |
-|---|---|---|
-| `direct` | Every carrying parent-to-child edge independently passes the production deletion validator. | None. Neutral parents that never carried the identity are listed but do not supply authority. |
-| `supplier` | Exactly one earlier real deletion event supplies authority to every continuously absent parent. | Every carrying parent-to-merge edge proves adoption only. A claimed carrier remains propagation and cannot lend its claim or evidence. |
-
-Nested supplier events retain the original authority event and stable-deduplicate
-the prior plus current propagation, neutral, and absent parent lists. Later
-adoption cannot erase ancestry evidence recorded by an earlier adoption. For
-each absent parent, the classifier first locates its closest causal-source
-wrappers, then intersects and unions the wrappers' canonical root keys. A direct
-root key contains the tagged verdict, deletion child, and complete authority-edge
-component. A valid supplier wrapper inherits that root unchanged; its adoption
-child is evidence metadata, not a new root. Equal root keys arriving through
-multiple wrappers merge every wrapper's ordered propagation, neutral/absent
-ancestry, and reason/source-child records. A sole common valid root with no
-competitor may authorize. A sole common invalid root stays invalid. Multiple
-valid roots, multiple invalid roots, or mixed valid and invalid roots are
-ambiguous. Invalid and ambiguous descendants remain traceable for later evidence
-but never enter the authorization set.
-
-Event selection computes the final-absence frontier before considering a sole
-valid event. When the action is absent at `M`, every continuous causal root
-that feeds that absence participates. Authorization requires exactly one
-canonical valid root and no invalid or ambiguous competitor. Several supplier
-wrappers of that same root merge their evidence and may authorize; distinct
-valid, invalid, or ambiguous roots block. A branch that is already absent and
-joins only after an authorized `M` is not retroactively causal. If the identity
-actually reappears, or a later carrying parent otherwise breaks continuous
-absence after `M`, the frontier extends to `N`. Reintroduced earlier and later
-occurrences both participate.
-
-If a supplier-authorized occurrence is later reintroduced and deleted again,
-the classifier does not select only the last deletion. It finds the events in
-the final-absence causal history and stable-aggregates every authority edge,
-supplier propagation edge, absent/neutral parent, canonical root, and
-reason/source-child record. Any reintroduction makes the result ambiguous even
-when the later deletion independently passes production authority, so two
-different occurrences can never authorize each other.
-
-A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
-full `C/O/M/N` OIDs, the `range_base_validation` verdict, the production
-identity tuple, endpoint paths and multiplicity, event OID, authority-edge
-validator results, propagation edges, persisted mutation edges with production
-and frozen-byte verdicts,
-neutral and absent parents, canonical roots, stable reason/source-child records,
-reason code, and measured counters.
-
-### Worked supplier example
-
-P12 starts with one action at `C`. One candidate branch claims and deletes it;
-another keeps the same `C`-rooted occurrence. The merge adopts the first
-branch's absence. The POC returns `no-finding` in `supplier` mode with these
-disjoint edges:
-
-```text
-C  3a01d100e676a9a20f8dc545fed19be3419fb759
-O  bc433c8ed8cda37d3813042f730b2f23d8e8d778
-M  5f5714f1c3661031e2200b1e1a346f236055b90f
-N  8dc6dbc10535cb058ee49c63a979d75966b7f248
-authority   34af1523579ea4589da0f84550d509d34271129c -> 64a032aa6cab8206bedfaefb1dbee32ebe867942 (valid)
-propagation bacb6b431fc91e0c51137a1f5d16f789f5ddecde -> 5f5714f1c3661031e2200b1e1a346f236055b90f
-```
-
-## S1/S2/S3/S12 executable aliases
-
-The adjudication's S-labels are aliases for four existing P fixtures, not extra
-scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
-every observed field below with the literal expectations in
-`SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 122.
-
-| Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
-|---|---|---|---|---|---|
-| S1 | `P1-direct-linear-valid` | `no-finding` | `valid` | `direct` | 1 valid / 0 |
-| S2 | `P2-direct-linear-invalid` | `blocking-finding` | `invalid` | `direct` | 1 invalid / 0 |
-| S3 | `P3-genuine-old-loss` | `blocking-finding` | `none` | `none` | 0 / 0 |
-| S12 | `P12-merge-supplier-valid` | `no-finding` | `valid` | `supplier` | 1 valid / 1 |
-
-The executable comparisons include the per-action finding boolean and the count
-of invalid authority edges. S1 and S2 therefore prove opposite verdicts over
-the same direct-event shape. S3 proves that absence with no candidate event
-cannot be authorized. S12 proves the opposite supplier outcome: one valid
-earlier authority edge plus a separate propagation edge returns no finding.
-
-## P1-P22 coverage
-
-Every row below is an asserted self-test case; an edge-role or verdict drift
-makes `--self-test` exit nonzero.
-
-| Contract | Executable case | Observed result |
-|---|---|---|
-| P1 | `P1-direct-linear-valid` | `valid direct`; one authority edge |
-| P2 | `P2-direct-linear-invalid` | `invalid`; production validator names the edge |
-| P3 | `P3-genuine-old-loss` | `none`; blocking finding |
-| P4 | `P4-pre-C-identical-origins` | no finding; one post-`C` enumeration |
-| P5 | `P5-duplicate-at-C` | ambiguous; multiplicity 2 and both paths emitted |
-| P6 | `P6a-old-delete-recreate`, `P6b-candidate-delete-recreate` | both block on discontinuity |
-| P7 | `P7-immutable-payload-change` | changed immutable payload is a distinct production identity |
-| P8 | `P8-path-timing-move` | one-to-one permitted move preserves identity; paired payload mutation does not |
-| P9 | `P9-direct-two-parent-valid` | `valid direct`; both parent edges validate |
-| P10 | `P10-direct-invalid-parent` | blocks; retains one valid and one invalid parent verdict |
-| P11 | `P11-direct-three-parent-valid` | `valid direct`; all three parent edges validate |
-| P12 | `P12-merge-supplier-valid` | `valid supplier`; one authority and one propagation edge |
-| P13 | `P13-merge-supplier-invalid` | `invalid supplier`; invalid authority edge is emitted |
-| P14 | `P14-supplier-reintroduced` | ambiguous discontinuity |
-| P15 | `P15-competing-suppliers` | ambiguous; both authority events emitted |
-| P16 | `P16-PCX-08-invalid-supplier-claimed-carrier` | invalid supplier; claimed carrier remains propagation |
-| P17 | `P17-post-event-reintroduction` | ambiguous discontinuity through `N` |
-| P18 | fifteen `P18a`-`P18o` cases | tip/history/object failures plus missing, non-commit, unrelated, and after-`N` `M` values fail structurally; `M=C` and `M=N` pass the range gate |
-| P19 | `P19-production-identities` | path-independent ordinary identity, payload distinction, typed generated retry, and duplicate multiplicity 2 emitted as blocking ambiguity |
-| P20 | `P20-lifecycle-types` | ordinary agent, human decision, generated retry, and task pickup use four production validator leaves |
-| P21 | `P21-PCX-17c-squash-erasure` | invalid; squash contains no surviving claim edge |
-| P22 | `P22-PCX-18-one-pass-many-actions` | 16 actions across 133 enumerated commits; one graph walk, eight valid and eight findings |
-
-### Selected-range-base boundary regressions
-
-P18h-P18o make the `M` gate executable. The first six rows return before action
-classification with no event and `identity_calls=0`, `authority_calls=0`. The
-last two preserve the queue action and prove that the contract's endpoint
-equalities pass the gate without claiming a deletion event.
-
-| Case | C / O / M / N | Observed result |
-|---|---|---|
-| `P18h-missing-M` | `d06a8e1f62d588293f3bf70a91e8f1900aca1edc` / `3c929150f394845dad6e969d058706c5dc878be8` / `ffffffffffffffffffffffffffffffffffffffff` / `70d6e8e514a7e81d6a91a799fcfa66e0eae162de` | `unreadable` / `unreadable` / `none`; missing `M` named |
-| `P18i-noncommit-M-blob` | `9c80ff6bb92b21e4e2206832a0080f34730d303d` / `3dbbaa22aa15be990b38094b5172de55e436adcb` / `f3fd2c414ebecbd374165a57fb97777d7854881f` / `e2f94048ffe0bb5fea0b4fcfabfbf4cc93a26285` | `unreadable` / `unreadable` / `none`; blob named |
-| `P18j-noncommit-M-tree` | `06bad3cc92638141b3f5f528b1b191e909bdbf29` / `8eea7da51b06c93ff0be6ab37d90644249993f26` / `4b825dc642cb6eb9a060e54bf8d69288fbee4904` / `5d8fd9eaa9152b6cf9bc2df1506e01c8abb9c2ea` | `unreadable` / `unreadable` / `none`; tree named |
-| `P18k-noncommit-M-tag` | `79cd0a510242ca533cd60cc19dbd7486483ec5d0` / `b631c4387527a69c216c988af10f997629ee21e6` / `d04b0f4cb2a439d32b7025e18869178554ce9609` / `110ee672efbfe974b199b21f485d6d0d5bd0070d` | `unreadable` / `unreadable` / `none`; tag named |
-| `P18l-unrelated-M` | `5deac7dbb2f7af1347528f202d2dea6305a7eed0` / `c66670d8212839c869bfe1e669e5d883d47eb2e8` / `d4a8acb5380c5835b7dbc237a3e0042d2905eec6` / `530b2c8c7e8d9ec4ef440a046e37b58db35d5981` | `blocking-finding` / `ambiguous` / `none`; outside `C..N` |
-| `P18m-M-after-N` | `e4e34696b271e37e86dde938c3f771c9cfe4bb2b` / `31f51f6be37d39d514b002a0c290a8fd6299d9c8` / `3794feb6c65bb4e6f541ddc3c2fb1e4e15434a39` / `8043519a0136308dc2f1218806192609d3b74a26` | `blocking-finding` / `ambiguous` / `none`; not an ancestor of/equal to `N` |
-| `P18n-M-equals-C` | `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` / `ae6ec2647ed53b0c6c516952e1db0fa2c1feb96c` / `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` / `8f3df0dee8d186622cb4b9f8da6d0a575a3f6d03` | `no-finding` / `none` / `none`; range valid |
-| `P18o-M-equals-N` | `740bcad8cc95b46955d8d112d070d93646351a6d` / `bc321981f1a4d3b740ce79454ccaa0ccb474e31c` / `4fda9e18664e3ae611b1d17877b03fa941783cc5` / `4fda9e18664e3ae611b1d17877b03fa941783cc5` | `no-finding` / `none` / `none`; range valid |
-
-## PCX-01-PCX-20 attack coverage
-
-The independent attack matrix is also encoded as assertions, not only fixture
-names.
-
-| Attack | Observed result |
-|---|---|
-| PCX-01 neutral parent | valid direct; two carrying edges validate and the neutral parent is listed |
-| PCX-02 neutral plus invalid carrier | invalid direct; both carrying verdicts and the neutral parent are retained |
-| PCX-03 foreign exact identity | ambiguous because the foreign occurrence is not rooted at `C` |
-| PCX-04 several absent parents | valid supplier; two absent parents trace one authority event |
-| PCX-05 competing later supplier | ambiguous `{D1,D2}`; both independently valid authority edges are emitted |
-| PCX-06 nested supplier over direct | one original two-edge authority event remains disjoint from two propagation edges; both neutral parents and both absent-source OIDs survive in stable order |
-| PCX-07 overqualified propagation | valid supplier; claimed carrier remains one propagation edge |
-| PCX-08 invalid supplier plus claimed carrier | covered with P16; invalid supplier edge blocks |
-| PCX-09 recreated claimed bytes | ambiguous discontinuity; the old claim cannot cross recreation |
-| PCX-10 transient multiplicity | ambiguous at multiplicity 2; both transient paths appear in the reason |
-| PCX-11 different payload, same path | Q-A supplier validates and distinct Q-B remains a separate finding |
-| PCX-12 timing rename | valid supplier by production identity, independent of the permitted path move |
-| PCX-13 conflicting human response | three-level invalid continuation retains the original conflict, one authority edge, three ordered propagation edges, and all neutral/absent ancestry |
-| PCX-14 valid human supplier | valid supplier through the production human validator |
-| PCX-15 generated retry | valid supplier through the generated-retry special authority |
-| PCX-16 task pickup | valid supplier through task-pickup special authority |
-| PCX-17 cherry-pick versus squash | complete K-then-D cherry-pick validates; D-only cherry-pick and squash block |
-| PCX-18 one-pass many actions | covered with P22; measured counters are below |
-| PCX-19 missing claim blob | first result `unreadable`, restored-object result `valid` in the same Python process |
-| PCX-20 budget overflow | at limit returns normal `valid`; limit plus one returns `ambiguous` with zero selected events |
-
-PCX-05's recorded OIDs make the competing events reproducible:
-
-```text
-C   d297f8d7d5f3557c94f944194e6da99c1c092c81
-O   39f138bf6fdf1db76fe12a652664dbdd3fcb33e6
-M   6bc1b1aa685794aa4f4c17625c59319fe8264ec1
-N   5cc308cff656d4866cfd255d968e65ee17b58271
-D1  d9b25781fbe23756d17ddd9c6e6f9c80167642ec
-D2  80c729b26bdc5c57e7fd7fc3c1416edb84ebbeb9
-```
-
-PCX-06's two-level result emitted all nested ancestry with full OIDs:
-
-```text
-C          4fef7d2a64023363e13a455eddeac016838f651a
-O          db0f6a1bdc43a8bccc8184e323867f7ed9aa04a0
-M          ed75b619d125655b117d22c8cd53c268e8693b5d
-N          2513214e5beaae7f3a289d4fae4018a00971c21c
-authority  4740e90b648bb75107b039e0d603fe789dc57311
-adoption1  c0b33ad455675edb5aa627274086f711e5582849
-neutral1   70a2426569179f6772b355fde27e417cd08f9a94
-neutral2   d897fdd58c0b376da50fff77b289b5b3d0e1d2e0
-carrier1   0b50fc379841872baad3a4426a40e735d6d05810
-carrier2   5a49655189c80be66569d2c9d0f9f28a513aa030
-```
-
-The final event's absent parents are the authority event then `adoption1`; its
-neutral parents are `neutral1` then `neutral2`. Its propagation edges are
-`carrier1 -> adoption1` and `carrier2 -> M`. Both authority edges share the one
-authority-event child above, and neither overlaps a propagation edge.
-
-PCX-13 exercises the invalid path through three supplier adoptions. Its final
-reason retains `conflicting-human-response` at `adoption1`, then names each
-later `upstream-invalid-supplier` adoption:
-
-```text
-C          58e15401aaba3e6f056f7dbaf6789c10d35ae553
-O          1e790e17e8d0ba21ab1a7213d6e0e0fa2d12f047
-M/adopt3   52419f64aecef7454ed6a37a29d085583ff75eaf
-N          14707f668aecd10bb531aa6fa0ec57700d26844b
-authority  bceaeebe51c25436265952f3b9afa6c9a7745a6c
-adoption1  8e72a13292b567ab5d5d8ece80c4c232f14d1899
-adoption2  819fc8dd0712aad77810b9ac82c7c1624214fd89
-carrier1   6a0d26ac7cf32e178357f6d85d49dd3981026b98
-carrier2   87e0359c1f7bb3578cf78ca24c42d0ea5b451244
-carrier3   6cb0a022a513d3c72d0df2d5f80352fbe71bb9d0
-neutral1   efed253a1c01456840b916c81818d8c08ad10399
-neutral2   aff11ce760bd2ec6d93cdeef39a450cc6998c48c
-neutral3   0cac705b7eb426e12e80d835cf76e71d75920851
-```
-
-The final invalid event emits absent sources `[authority, adoption1,
-adoption2]`, all three neutral parents, and propagation edges `carrier1 ->
-adoption1`, `carrier2 -> adoption2`, and `carrier3 -> M`. The original valid
-human deletion edge remains the only authority edge and cannot override the
-conflicting response carried by the invalid lineage.
-
-### Mixed causal-source regressions
-
-Three additional asserted real-Git graphs exercise the causal-source union that
-the prescribed P/PCX fixtures did not isolate:
-
-| Case | Observed result |
-|---|---|
-| `R3-01-two-invalid-causal-sources` | `blocking-finding` / `ambiguous` / `supplier`; two independent conflicting-human sources retain two authority edges, three ordered propagation edges, three neutral parents, and four absent-source OIDs |
-| `R3-02-invalid-valid-causal-competition` | `blocking-finding` / `ambiguous` / `supplier`; one invalid adoption and one valid direct source both retain their authority, propagation, neutral/absent ancestry, and reason lineage |
-| `R3-03-unrelated-invalid-does-not-poison` | `no-finding` / `valid` / `supplier`; an invalid deletion outside the absent ancestry appears nowhere in selected evidence |
-
-The two-invalid output used these full OIDs:
-
-```text
-C           73373ac5106e43d8643b5b616268d77a5ca1d264
-O           8f89d0fc4c063c0bbabb284434f74bcf244fb5d3
-M           e7f081a1bf94edfa0f7bec6f5cd0953631515354
-N           8ed846d60715d845a5e19ab6b299ce853a592614
-authority1  3298fff9fce2f3fc3ebbd376028cae9ded66c7b5
-authority2  8e26d51c111af7adbbe07af7017e319279d97c9c
-source1     554be4701af24ac290d8bd6c5c3cc2917c415092
-source2     9c6e72444535b5fcdb3d936d1ef4e0261514e0fe
-carrier1    16d3a0e951f19c1537db4170ea1433d586c93eb4
-carrier2    9da752810d7adfe967d48ea1a3451e256166f1ac
-carrier3    e920f2aaef840688a8352d3f796a14ebd8c82b03
-neutral1    291fae01a5ce5d6d601a6892ac0c5d76ccf974ba
-neutral2    fd4e2a2d7ead4cba18280c374682fd597eb988d2
-neutral3    e87aa1ec0d4a309775906d27669ebae40bc6b861
-```
-
-Its reason names
-`conflicting-human-response@554be4701af24ac290d8bd6c5c3cc2917c415092`
-and
-`conflicting-human-response@9c6e72444535b5fcdb3d936d1ef4e0261514e0fe`.
-The mixed invalid+valid result analogously names
-`conflicting-human-response@d1035891cfb898b501d4c4358e0cda42fa0cfefc`
-and
-`valid-direct-authority@86400c66cf071a7d6d02a7391373b2ca471ecb91`;
-its final adoption is `212aed04a9840447658dd22d468fbe33fd2867d8`.
-The unrelated-source positive selected supplier
-`2fe1bf184c6d0626a1622012129c5801c47d31f5` and excluded invalid commit
-`a8ae4e0bf33ab580216e0ce83a4c5d79e66b7555` from its selected evidence even
-though the invalid commit is reachable from `N` and its production authority
-verdict was evaluated.
-
-### Canonical-root diamond regressions
-
-The r4 fixtures distinguish one deletion root wrapped twice from two genuinely
-different roots:
-
-| Case | Observed result |
-|---|---|
-| `R4-01-same-root-valid-diamond` | `no-finding` / `valid` / `supplier`; one root and one authority edge, with three ordered propagation edges and both wrapper envelopes retained |
-| `R4-02-distinct-valid-root-diamond` | `blocking-finding` / `ambiguous` / `supplier`; two valid roots and both complete envelopes remain visible |
-| `R4-03-equal-root-plus-invalid-diamond` | `blocking-finding` / `ambiguous` / `supplier`; the shared valid root collapses across wrappers, while the additional invalid root remains distinct with its failing production verdict |
-
-The positive diamond produced these full OIDs:
-
-```text
-C           4e831314d34c2897a072cca5b58303d8fd0e7ddd
-O           2ae7f29324bd8d6b29c1f7640602fe7ec9193b1e
-M           01eb3e5ec92cb370e449ab8788842c6da54c8c80
-N           a7bbf4b40d0a3322205e3d8407eee73b9b11ccc9
-root        0d870542d2a2a42b5093b146d2245740fa456437
-adoption1   05eb28ca77abe9062af6b586812bf1d5826523e6
-adoption2   2e9c1be263ae8ef2e8a8b2d0aea9f9280688c3f8
-carrier1    d70acd9d9fbb16b7690db3870d991831ac7c4471
-carrier2    0126791301359b150774ad66054cab13f133d7b3
-carrier3    5c1cf625b6c4b9894b0d9c32dec182853253961b
-neutral1    de6e2d9ee44f6cb1603502078b88542ee4c2cdd7
-neutral2    3a89de69ac2eb966fa10f51c60f10a98b64f34d2
-neutral3    f855f6e72bab04fdd85ba2f25a4a76c7a1a966ac
-```
-
-Its single emitted `causal_roots` record is tagged `valid`, names `root`, and
-contains the root's authority component. Its stable `reason_records` name
-`[root, adoption1, adoption2, M]`. The absent ancestry is `[root, adoption1,
-adoption2]`; propagation is `carrier1 -> adoption1`, `carrier2 -> adoption2`,
-then `carrier3 -> M`.
-
-The distinct-root negative retained valid roots
-`294a23354c2b7009f017a0853af22b10223a9336` and
-`7fc7a0d2d0d55eb62722301bd958f574d41347b2`. The mixed negative retained
-valid root `c7e6eed4001a36d03480ed64b6cb67c3bbbe7e76` and invalid root
-`94140cd414a88d470dba443360d8b55c35f02844`, including the production
-validator's missing-claim problem for the invalid authority edge.
-
-### Reintroduced-occurrence history regressions
-
-The r5 fixtures isolate the final-history aggregation. Both begin with real
-authority `K -> D`, adopt `D` through supplier propagation `P -> M`, reintroduce
-the action, and delete the new occurrence. Both return `ambiguous` and retain
-two authority edges, one propagation edge, absent source `D`, canonical roots
-for both deletions, and reason/source-child records for `D`, `M`, and the final
-deletion. The later invalid fixture records the production missing-claim
-problem; the later valid fixture records a second passing production verdict,
-but still cannot collapse two occurrences into one authorized deletion.
-
-```text
-R5-01 invalid later deletion
-C          1e5dad973b3278ca8c12f3dd74f72250eaaf9f09
-O          c63664276a141f3f60f61c9d404de201e6f8cf16
-M          3b07620bd6ed19324c9ee2dc55474f10854dc1e1
-N          d40a531fd9a0dacb986f9259ac6f94ec0d248faa
-authority1 d097d2d4349754253439ed58633b35fbf5853341 -> 657f1c682a87519967522b7cdae62f344c3a4925 (valid)
-propagation 88436bd443f79b863ddce9b04c9610992955e68a -> 3b07620bd6ed19324c9ee2dc55474f10854dc1e1
-authority2 44cc5668629790c721576756a38b630d563c746a -> 4338a7869360b2e539dd905c7204c948d573f06b (invalid)
-
-R5-02 valid later deletion
-C          79b338b3ef54382a0ec95e87a7ba962b1ec7c20a
-O          9c8b1418effb6889d14466e278a7987b7e7cfbc3
-M          3b0a6316833b818079a00141bb5ef27df4a4bc36
-N          fb0bff9778f436aed2a46f887eafb84e1c74ea5f
-authority1 287db35c723666b4f76026d4df9a4957eb700fb6 -> 70c42629ff66371a7d94eca7e18596d5e0dc631b (valid)
-propagation 295eee5d213e52511863f8a3208b832941959e86 -> 3b0a6316833b818079a00141bb5ef27df4a4bc36
-authority2 e1127dd93fc3b2324b7181086232ce6946e44cbe -> b51f3158e90132b85b13544e650101185228505a (valid)
-```
-
-### All-absent frontier regressions
-
-The r6 fixtures prove that a sole passing edge cannot hide another root feeding
-the same absence at `M`:
-
-| Case | Observed result |
-|---|---|
-| `R6-01-valid-plus-invalid-all-absent` | `blocking-finding` / `ambiguous` / `ambiguous`; both authority edges, their valid/invalid root tags, event OIDs, reasons, and the invalid production verdict remain visible |
-| `R6-02-valid-plus-ambiguous-all-absent` | `blocking-finding` / `ambiguous` / `ambiguous`; the valid `C`-rooted edge cannot override a foreign/discontinuous root |
-| `R6-03-two-invalid-all-absent` | `blocking-finding` / `ambiguous` / `ambiguous`; both invalid roots and both missing-claim verdicts remain visible |
-| `R6-04-same-valid-root-all-absent-wrappers` | `no-finding` / `valid` / `supplier`; two wrappers of one canonical valid root merge to one authority edge, two propagation edges, two neutral parents, and one absent root |
-
-```text
-R6-01  C 566072d117ff7a1e4309949f6a885bd8e26d65d2
-        O 5dc5378fdc316aa30dce282d0388a438d755b067
-        M c1d92f49ddecd5097d7db52863c2b8e990b43810
-        N abe68c6bcfb89b4194e7d9f3ace08a58e985a450
-valid     7a1ee6b0fe01d25adab3131239ad4f7728bae45b -> b3c7cbbaeba2bfa439cd71dea95572e8a2a29d31
-invalid   566072d117ff7a1e4309949f6a885bd8e26d65d2 -> f94d0c965cca8ea6a8405fd160219a9f4ee6fee2
-
-R6-02  C f61617485ff0160e37de559fe752c56ff3bcb5f7
-        O 10a37a2bc559519d6d84f70850b0a78445c3d5ec
-        M bae78a9473f3a719563bfac05f9a815f8003917b
-        N 4ab46009954bb98c5f22629274722667dc21ca37
-roots     59faf341cb5439564cb32ab17c841f121673c12b (valid)
-          5e7f50d8bb733603dbe6f33ff13411f7090c5036 (ambiguous)
-
-R6-03  C f5141f92b29541282cf1ec520470e8c604aeaa6b
-        O eb354df4fb54776834a9dff53f51f496a2bb338f
-        M b5c24e5f55b7a8e0a89d51599153e77ebbbf85b8
-        N 8f769727f1c641bd2587115f2fbcda5fdda816d1
-roots     dc00143829641a9ff403c040c4f3e1f864587df5 (invalid)
-          2ec9cda06efaf587cc9a124d78ad122c947171c1 (invalid)
-
-R6-04  C c4ad2cb41bff8803f0f3d5b81ea0cfd785c9aa59
-        O c3b9fb54026383a350146fb2f25243c9e8c7cb01
-        M 82463b399db3f3fb0aabd0ca1e0b82a61afb96fc
-        N 7bf74330f432155c3c39eedbfc81fa72bface489
-root      dbd3a072a00de50212cd93e44a31cb731ce70360
-wrappers  b858978bbda2e6e8492f2678070a6ce9c34ec176
-          4edb5c9b80bd4504e87b8381e8cb99521552faa1
-```
-
-## O-anchored human binding and adapter input
-
-Seven real-Git fixtures exercise the added human binding. In all four conflict
-cases, the candidate edge independently passed `queue_deletion_problem` with
-`problem: null`; the POC blocked because the concrete response at `O` did not
-match the authority parent. The identical-binding controls prove that the gate
-does not block lifecycle-valid direct or supplier deletion.
-
-| Case | C / O / K / D / M / N | Observed result |
-|---|---|---|
-| `R8-direct-human-response-conflict` | `92c80d9c65c7be349d0a6c663a6a2ea9c3c2397c` / `1dc4f0dc77aae1eefaef0bb443ec187ff1efb23d` / `986f7667dcc5b01542c1194c72cc446c4c45e5ae` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `cb29049ff107a9a11a4ec7babbdee21819518dd6` | `blocking-finding` / `invalid` / `direct`; `O=reject`, authority parent `approve` |
-| `R8-direct-human-response-identical` | `2b79814b0bce6f1556c0b2724ade9d7bbb4bf939` / `b3879039d6d7168e89b3046e6e60e056460907c1` / `3a37fb283da1ae126bf4f24c7d08215f30d88bc5` / `f345727f01fdf252be3f622bac93c727f2c24605` / `f345727f01fdf252be3f622bac93c727f2c24605` / `2c2289035cfc91c73564f6a97b326ebca02be132` | `no-finding` / `valid` / `direct`; identical `approve` |
-| `R8-supplier-human-response-conflict` | `255e448f3c735fefdcee3c07071c3d6bb6abb312` / `27927fe11bdeee043660e700c81e8cb3853c56bf` / `9d999de926a3b726c4f17fa4c1aa5f0ae1a9d036` / `d3616075eb04bd2c9b5208aceb05ca8e0b3e78c7` / `04af3169e321f7615236785dd2834296aff6748b` / `1fb9fc40da2d44e839830611cc20d0aee23c560e` | `blocking-finding` / `invalid` / `supplier`; `O=reject`, authority parent `approve` |
-| `R8-supplier-human-response-identical` | `800658fac71a8c7fbc2d257bde57964cc96dcef9` / `f33b095abbf3c3e3225e0fbfc663b0a7f52d312b` / `80a4c49c8bc87882eaf02fc3e5b5a82dd2aac42e` / `da001fa3334685155798eb17efdee7b17ff02ae9` / `08a3ec18a07b71e5aa95e1651ae93ce0f0e6a8d7` / `e94946d2990fe3c67bc61676f66f90fab1b7a26a` | `no-finding` / `valid` / `supplier`; identical `approve` |
-| `R8-review-binding-divergent` | `9b4889771f49a83cd02600a2de58fc5e6e8b8259` / `e3c594800cfe94f4f23c58060ae4ab31f50c078c` / `f78c058e2bf8e307365640a89d8dee7aaac1ae22` / `8f4cb69d5a3f4eac8d69165b54f73f45e53d1f98` / `8f4cb69d5a3f4eac8d69165b54f73f45e53d1f98` / `dc70864ec5e13a399d4966356b9803075681a0e6` | `blocking-finding` / `invalid` / `direct`; same response, different target and content revision |
-| `R8-review-binding-identical` | `45b7550dbdc799efed73af109da57c6906d428a0` / `a3f97a3b22945e663eb10180bde5de3b7bf790fa` / `aeef03ecb0d57aac9c9d323ed80d7c4552c1b1be` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `b2dbe65f89982fb586b0fb5349454d80c7c53310` | `no-finding` / `valid` / `direct`; identical target, revision, and approval |
-| `R8-review-binding-terminal-conflict` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `f56e612abf60bdf946f45bb1e7e1454c59aa0956` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `blocking-finding` / `invalid` / `direct`; same response/target/revisions, but concrete `O` outcome `rejected` versus candidate `approved` |
-
-The divergent review compared fixture-local target A at
-`sha256:2ab16346393dd555c10887e02261d9fa80124206e31437260fb5d50cc7185bd3`
-with fixture-local target B at
-`sha256:5ac4dea8ba9a26fa2e56de8e4ffb2d7fe0cf688e57fb6eeeb0091f9a399115bc`.
-The positive fixture bound both sides to its fixture-local target A at
-`sha256:371e751cdca327cb53062048f641bba3263084738230bdd8b24ae6cc4aecb484`.
-The terminal fixture preserved both `Reviewed revision` values at
-`sha256:2159f135c15139aa0fdbd35362a3dd949c47c2627bee2aae17edf746e6ba5b75`
-and exposed the exact `rejected` versus `approved` outcome mismatch. The
-identical fixture leaves those terminal fields pending at `O`; the candidate is
-therefore allowed to fill them once during its production-valid folding claim.
-
-### Pending review target and revision
-
-Four r9 real-Git cells prove that an explicit pending target or revision at `O`
-does not become a false immutable binding. Each candidate fills the field,
-commits the same human response, folds the review, and deletes it on a real edge
-for which `queue_deletion_problem` returns `problem: null`.
-
-| Case | C / O / K / D / M / N | Observed result |
-|---|---|---|
-| `R9-direct-review-target-pending-fill` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `2bcdbeb26265a2e08394d310b3a46a41833a5133` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` | `no-finding` / `valid` / `direct`; plain target `pending` -> concrete target |
-| `R9-direct-review-revision-pending-fill` | `323d65ca92bcab39b2c0612a27b148e391cce838` / `ea123742664bc85265ab6385a846c020a8ca3e8c` / `a9e99679ebb7750092bd7ca6cf2dad939a4c510b` / `310feea03d098ab049b5b5c0c781134aef3281b1` / `310feea03d098ab049b5b5c0c781134aef3281b1` / `6f11bd5de26dda0bbf565ba63d829a72ef51360b` | `no-finding` / `valid` / `direct`; plain revision `pending` -> immutable sha256 |
-| `R9-supplier-review-target-pending-fill` | `a88ea4ed82ce9d444b54742625a56bdc9abad2ab` / `20cb6a6f44d996a53ee5b1885bc53f6ab176aa68` / `90de9bf54ef6fa4f307d424e1a40a3c730cb0a49` / `ec7e67775fd8b8569b164a34a42a6b8baefa8d82` / `7c9db45a3c694b3b6c80b01c1eec00d70a584caa` / `601d084d2fb4d533d8794dbfa14d530d1bd19dce` | `no-finding` / `valid` / `supplier`; plain target `pending` -> concrete target |
-| `R9-supplier-review-revision-pending-fill` | `fe04e4837703b729500127432fb439f8714c4f95` / `e76da4ccabd64cc1cfa96050fff7486272a3336e` / `949c4fd1f3f130306e4182946157bcf81d01849b` / `34c2c8878a6abcd9b06b183029e57a69b3bf9e81` / `da736296c1764ede66977136251d3e78dca23f5b` / `77cebbd7a8d42d98fdb88db9452ced1cd3a27bb5` | `no-finding` / `valid` / `supplier`; plain revision `pending` -> immutable sha256 |
-
-Each direct cell enumerated eight commits and seven parent edges once, made five
-production identity calls and two authority calls, and selected no propagation.
-Each supplier cell enumerated ten commits and ten parent edges once, made five
-identity calls and two authority calls, and retained one propagation edge. The
-revision values filled by the direct and supplier cells were respectively
-`sha256:7b0d8084905c6e81c7f74bf50eb38a2c22eac406092088111603b64855fc1575`
-and
-`sha256:5706f8e796fc78b6bf7465c994523dec4fe9240309bbdb51c0bda69dfe0e5b70`.
-
-The executable assertions accept only outer-trimmed plain, case-insensitive
-`pending`. They reject balanced or partial backticks, suffixes, blank/generic
-placeholders, dotless-i lookalikes, and unrelated invalid values. The
-pre-existing divergent target/revision and terminal-outcome fixtures still
-block, proving genuinely binding old-tip bytes remain fail closed.
-
-### Malformed review target and revision
-
-Two r10 real-Git negatives prove that the narrow production sentinel cannot be
-broadened. In both cases the deletion edge independently passed
-`queue_deletion_problem` with `problem: null`, but the old value was not the
-plain `pending` sentinel and therefore remained bound to `O`.
-
-| Case | C / O / K / D / M / N | Observed result |
-|---|---|---|
-| `R10-direct-review-target-backtick-dotless-rejected` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `0f7fa628b211648e7f8d22e11e753ffdfe26e3ab` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` | `blocking-finding` / `invalid` / `direct`; backticked `pendıng` (dotless i) -> concrete target |
-| `R10-supplier-review-revision-generic-placeholder-rejected` | `b13043f4864a963aee7af4e3e3a913313f9f7b19` / `9d96a7eecc2b34704ef588142e4b48111849f3a9` / `a4688c89cf2a68edd653dd3b8778713293d1c0b8` / `8b761c2ffd576357e869f02a2463d9b50f8f45dd` / `acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e` / `02371c1e8f0eebe4e567694cfe6677c8b872a7a8` | `blocking-finding` / `invalid` / `supplier`; generic `______` revision -> immutable sha256, one propagation edge |
-
-The direct case enumerated eight commits and seven parent edges once, made five
-production identity calls and two authority calls, and selected no propagation.
-The supplier case enumerated ten commits and ten parent edges once, made five
-identity calls and two authority calls, and retained propagation
-`d2692c17d6bd2be654ebea449d86a841a08ad86e` ->
-`acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e`. Its concrete replacement revision
-was `sha256:62b8e9ca2b243a2fc6baf048001d518d73455c3829217d3703fede4cd2f524b9`.
-
-### Implicated-parent and persisted-state regressions
-
-Eight r13 review fixtures bind all concrete review fields across every parent
-that carries the occurrence into a direct deletion or supplier adoption. The
-three supplier negatives reproduce the independent target, revision, and
-terminal-outcome false greens: the source authority edge still has
-`problem: null`, but the propagation parent conflicts and the result is
-`invalid supplier`. The matching direct fixtures block through either the same
-O-anchored unification or the independently invalid production deletion edge.
-Both identical-binding fixtures remain valid.
-
-| Case | C / O / M / N | Classification / evidence / mode |
-|---|---|---|
-| `R13-direct-review-binding-identical` | `d6d18f0c56d196748c9a94adad1191e68722eb4a` / `7e0284f9a2354f44218502da59ca365cff918285` / `429a42042f2544e7c6a64e1cdd4085cd88f12118` / `88dc201a2aae2ad0b8984b58fff19f45c78d7859` | `no-finding` / `valid` / `direct` |
-| `R13-direct-review-binding-target` | `8454b9025487d126acbb3eb278584199e4d93bc2` / `75d9c282afe629e2fee58b878ffe93481926e719` / `550cce0661417e0b707d14904559142d585333fb` / `74f92dd03eaf05333a9e7168644bbae38b7bb50f` | `blocking-finding` / `invalid` / `direct` |
-| `R13-direct-review-binding-revision` | `f7d60f4ef43874a6e2045634265a8bb7968e07f4` / `e51c37206f2fa3f2d3a5ee9ff92aeaedc0aa431b` / `37fbca351cfb6d4d34d8fe2e8ad7c9a9e499cd5e` / `a4d2d52e8f40a5ba80cf350bd00db494c92c2eae` | `blocking-finding` / `invalid` / `direct` |
-| `R13-direct-review-binding-terminal` | `32a00d09012a40145f9abdaedea2734348c68e5f` / `d784ca71704ac0bd18e1a70b45c18d1994353eb9` / `9bb9aeeaf1479c58354889ebbc41eb7c6a61cb95` / `6677edfd8778a755904939d01b070af66f32bcaa` | `blocking-finding` / `invalid` / `direct` |
-| `R13-supplier-review-binding-identical` | `14976a93658e5bcfe9339368e77f82e77f31830d` / `ffc5d33bc00724fa377f13ce6ed824f6dc9fc02b` / `afc8edcc93e5de5da648126ad821357cd8500d2d` / `962821fb4d4faabe72c3b8e86823a5367aa3294f` | `no-finding` / `valid` / `supplier` |
-| `R13-supplier-review-binding-target` | `874d2e356033d133cd409bc9deb8e93198d0ec78` / `adf1ce7876b84e595992f5865f871b59ea892234` / `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` / `8c3e7d42c53baf018d30c895ecd64b799edb5d45` | `blocking-finding` / `invalid` / `supplier` |
-| `R13-supplier-review-binding-revision` | `52fe1848f1536143161e717bf436ee8c8b07df59` / `e7a884697094e9be1c876b78fc33d9e259d92149` / `200871b889045e16a784c3de722863123881f7af` / `8fd2e814f38bf145bd7c84d9e22a355056d40649` | `blocking-finding` / `invalid` / `supplier` |
-| `R13-supplier-review-binding-terminal` | `e93ff6925d5008e9c95866628b410dda5b293e91` / `60538a926a9acd01f898ba0371ad5249c912f7fc` / `128875ca6b9fff728b2f964bd81eb8841229bcdc` / `1031e6315881cdc99376df52bcddc86a4427e920` | `blocking-finding` / `invalid` / `supplier` |
-
-Nine more fixtures move one persisted identity without relying on rename
-classification. The two response-removal/change negatives use large response
-fields and make ordinary `git diff --name-status -M` report separate add and
-delete records. The other fixtures use identity matching even when Git detects a
-rename. Every candidate carrying edge is production-valid; the six negatives
-block only at the independent `O` anchor. Unchanged state, pending review fill,
-and a production-valid terminal transition remain clean.
-
-| Case | C / O / M / N | Classification / evidence / mode |
-|---|---|---|
-| `R13-persisted-same-state` | `0d4f188e038977d78c48829a48b12354ffc8aa32` / `a3edb26d4a2069954d0459dd9ea503cc27833f61` / `6ed596b6e32ca919ed3622089a9a1217602659a5` / `edee50f1fe44db9136335db0de7e27ad442f4eca` | `no-finding` / `none` / `none` |
-| `R13-persisted-response-removal` | `49d500f64d51f720b0decb65db3ad5163d4f72e4` / `69bbf3a1bec29fcf92121c581925bb092d1535ab` / `d7c174ae5a575350b4c3fcc426a89ceb15119b69` / `24126e616db515f5ee1d08d4f2da297b50e02f3a` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-response-change` | `68dfa83702f8aa1a82181785ff40b9e0eb0f2958` / `af35b452b83aa6f8fee2d3dcf01a951a83cc0f19` / `69a46a9c107d10ae18cef7347e0f0f832a1bd7ef` / `464115d4c500dda036c5592c6c8f21fe9a959e15` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-target-change` | `de7f303a3f48d8d27eb65e7388d0f8dd934b4e96` / `2c37567f76cece330ee8c4997c96aa2bcd1764e0` / `73f686b71fc4503ed9319e814339a8f086c79c40` / `4f6be0576ef37c17b25b0268542bf4003a7b56bb` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-revision-change` | `952a03b6b34abb531365195232acd149ec51e221` / `cc3bf0c5664ca51a1c1df82759aaa607efd30550` / `eec9f2c2db8266f1f219bb1a656ebd3d9f01a11f` / `344c8d4e0333b14fb5b21550528242614812a55b` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-outcome-change` | `103fdd9bd623d90d09b2193e9272b3980c80906a` / `2c3f7acfeeb385de256074091a38c9953ce7f1f9` / `0c32f4efcc0c588a53c02e34064c1013163f2921` / `c8a8b37e924d1e18c54dd5bea09d07191b6b0be6` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-claim-loss` | `5604e77ef241630dd284448a224de046d2caf460` / `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` / `215f27a473f8476dc01cc01efe69516a76346385` / `8702850ba2e7f56c29b16557c496adcaa627829b` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-pending-fill` | `6b710008b02a5c4b970a282ad2624b0384727292` / `5218487e636b8519c69f49d146acd9b7f8b25948` / `457f5f699f2bbe03994adec75f5a5bebca91125b` / `31a21eb1595bd8ebe46e55bb235d8d677edd6d58` | `no-finding` / `none` / `none` |
-| `R13-persisted-terminal-fill` | `ba73b784939318c875041e869d49a08cfd88f440` / `b5ea69a78713ea41e8229125a90fa2718088c6f9` / `3e711d2f2bb5de235a037e4675fe93f3d124c9d5` / `8250a2475da8b2c1a0dfffd5ecbe3e73fdd9b838` | `no-finding` / `none` / `none` |
-
-### Unanswered review and continuous persisted-state regressions
-
-The r14 review matrix treats concrete Review target/revision fields as binding
-even when the review response is still absent. A completely production-pending
-carrier stays compatible, as does an unanswered carrier that publishes the same
-binding. A different target or revision blocks. The independent 17-record r12
-oracle now reports 14 safe controls as `PASS` and all three former false greens
-as `NOT_REPRODUCED`; the independent six-case carrier oracle returns the expected
-three no-findings and three blocking findings.
-
-| Case | C / O / M / N | Classification / evidence / mode |
-|---|---|---|
-| `R14-direct-old-unanswered-carrier-same` | `c1a83b69fb7f04ea375aca7027b157dd9cc266ef` / `37d577cc2c265e8e7082bfd86dd156172db98c5c` / `23bfa540b7b2b710bc71dc8de3aa9cb7c8aeaeb7` / `ae63528ae1af829ced9c2f1b763cc6aeb8c054ec` | `no-finding` / `valid` / `direct` |
-| `R14-direct-old-unanswered-carrier-target` | `0f221025b8224d465679596d3dfd44b6023371ca` / `d39ee31be16db2789928827c2e132a31e22b828f` / `ff2c698bac44b2bfb79623769f79914b9bb74216` / `9c07f77ec2836ec0f4222313e315b3ddc31c4ccd` | `blocking-finding` / `invalid` / `direct` |
-| `R14-supplier-old-answered-carrier-pending` | `7f104616c4fd6c3d1f15d7467a7e0da9e164f6e7` / `6f1dba05d9dca3e3776da3c7005a83807190ae74` / `e3876d1bfc361db4849cbb0205ff484aa10633a2` / `0662f0827db1ad2e39f59626dd8d87f316b73421` | `no-finding` / `valid` / `supplier` |
-| `R14-supplier-old-answered-carrier-same` | `d87b23dffb37c46a64f0f37fd10db886fc100532` / `a6ff10d32896ec2d87dad1696b24e07cc73ead65` / `8765211171ea8284a872f854a9bed3268e0d60ab` / `9f1c795a2f4fd1450d4d524f3f7adbdf0c496c52` | `no-finding` / `valid` / `supplier` |
-| `R14-supplier-old-answered-carrier-target` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` / `8a2de576d9304a51988bfbd943749129f828f882` / `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` / `b952d0de4952cb720e3056abe78c7ad8ee52d50f` | `blocking-finding` / `invalid` / `supplier` |
-| `R14-supplier-old-answered-carrier-revision` | `9121f39bba512fa9fd762c3d07c93d1c11d5bc42` / `6d9c8b1bfed15a512d68db494efb71a2d0577f33` / `98e0e2378d9bb06282339cbc3a6a0e67c8154f53` / `0b0243e67b4d4635716eb2113f81419da982ba3c` | `blocking-finding` / `invalid` / `supplier` |
-| `R14-supplier-old-unanswered-carrier-same` | `186d0ffca8ab62c6de1677780cb4153eced4fe53` / `b6e124010b1f74882864bdc3dc1fbd289fd5305c` / `6a00e16a8416c1572149fd45d4102d87cea7832b` / `e9e33f66742ae613b738497753ffb4957610b85e` | `no-finding` / `valid` / `supplier` |
-| `R14-supplier-old-unanswered-carrier-target` | `9109e916c44dbeaa2bfe0e3b5497e9d98ef3e9a3` / `a09f2f2ed771008847609d177c72e0b1f62d8084` / `d76ee4b89ef81e391e3b7ce4265919166fe070f7` / `0c38b44e67a3ad27238aed8c8a667837aa7fc444` | `blocking-finding` / `invalid` / `supplier` |
-
-The eight persisted-state fixtures below prove that the classifier follows the
-live `C` occurrence through the candidate DAG rather than trusting endpoint
-identity. Every result emits the real mutation edges, production mutation
-verdict, frozen-byte verdict, roles, and full parent/child OIDs. The negative
-cases catch hidden protected bytes, transient claim/review regressions,
-delete/recreate, and conflicting merge carriers. The positives preserve the
-production-valid review retraction, large first response followed by a D+A path
-move, and a merge where another source supplies a pending carrier's lifecycle
-fill.
-
-| Case | C / O / M / N | Classification / evidence / mode |
-|---|---|---|
-| `R14-persisted-hidden-bytes-low-similarity` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` / `d115e7063e3ffad24a495c9ffae5d70ffaf81928` / `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` / `a47b7307d654cb07612ccd7b04f1c32ab874c475` | `blocking-finding` / `invalid` / `none` |
-| `R14-persisted-intermediate-claim-regression` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` / `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` / `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` / `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` | `blocking-finding` / `invalid` / `none` |
-| `R14-persisted-intermediate-review-regression` | `5fe7bc2ba01136ca7e91068de3c21394628d8616` / `ceeb45bc58cb8e6726517130e20fff034db993f3` / `6937469bf807de32150751925eab9747c97b9801` / `b7e814f11797fcf8cc10f0a41b0dd8f0849718cc` | `blocking-finding` / `invalid` / `none` |
-| `R14-persisted-delete-recreate` | `32c778b5ec16afe676bcd2ce898c89388b28ea0e` / `68f01125491f31f259d6cc636bc2f818c9529571` / `e7d51374356e1865109e6556047a4bb02919e46e` / `0d272d85cea3703f4fdc3aedfa7e821374de51ab` | `blocking-finding` / `ambiguous` / `none` |
-| `R14-persisted-valid-review-retraction` | `58a66e99ff34cdfa5e2bd150d68d5d6121b0cd71` / `03f6cd5ee859d98e6110b2554606ba655ea9b66c` / `ba95216a82bb0d53f1116f7e57f6f1499459a40c` / `75f7c3689154b3ecf8e5c67d467e338ab24a47cb` | `no-finding` / `none` / `none` |
-| `R14-persisted-valid-first-response-low-similarity` | `b14ffe7afbd09ecdcf3fcdecbf99fcd42e5f9e59` / `dafb69000967fde6234bce7999767113def81c5c` / `44680a86ed369e379a1cd20eb759c8fa1005e019` / `690a6c7b5a5425bcd8a3abfa90b75c77ecbde966` | `no-finding` / `none` / `none` |
-| `R14-persisted-merge-carrier-pending` | `01b493c655badddcf6641e8a7d21d3594a0cb5c3` / `74442946b6639f57e7167838a13cc286f39d3519` / `d9dd6fac07cb976806b98aa75b872664d32c899b` / `ca8939b406b7b2323fd08b044625639f5e80cb6b` | `no-finding` / `none` / `none` |
-| `R14-persisted-merge-carrier-conflict` | `00a09440e320c344f9840d7939f97b5a72654aa1` / `521e76aa7253b7dc1214c2bbdca5c788a601e21d` / `efba97f7919902dbe9b3c7ffc9550918dae871a6` / `e2f3eacb8b4a86f383f8a76be26dac7e4966edad` | `blocking-finding` / `invalid` / `none` |
-
-### Old-side C-rooted occurrence regressions
-
-R15 applies the same occurrence invariant to `C..O` before selecting a direct
-or supplier event. In every negative below, the action has exactly the same
-production identity and bytes at `C`, `O`, and `N`. Both an unauthorized and a
-production-authorized deletion followed by recreation block because the later
-file is a distinct occurrence; the authorized deletion's real
-`queue_deletion_problem` returned `null`. A concrete response or protected byte
-may not change and later be restored invisibly. The positive graph carries the
-same occurrence continuously through both sides and remains clean.
-
-| Case | C / O / M / N | Classification / evidence / mode |
-|---|---|---|
-| `R15-old-invalid-delete-recreate` | `f26bbc4c9cdbbf3ad4b2cd18c03b6ae60ef51fc4` / `4fa6ffd247960df785d1e957e4cd902382e8f437` / `6c016fd4936961a124612cdf9e3d0593a5ae4253` / `b3e62e6398e4ee29f708d4eca4bd98a4b699b015` | `blocking-finding` / `ambiguous` / `none` |
-| `R15-old-valid-delete-recreate` | `d949c6358b9809dbc4c19c55ccc30fab511c7413` / `5f6066d0642c29fbb3414c54445b8ac08d5c99ff` / `195db54730459f533d7ca3acfe495c8539bff024` / `de690fe09e6d88d499db4b3ebccdb7dbfb8b5617` | `blocking-finding` / `ambiguous` / `none` |
-| `R15-old-human-binding-restore` | `ed9337d8d288a493c724a71081e4db71972e2e08` / `1d8e4411979ce8ea8dc5697180f8d17be74f1be6` / `311b7ca39ec2903382b3a5da355712e18669e5d0` / `fce1db3bfd0846d5af6dcc96b362a52baec376bc` | `blocking-finding` / `invalid` / `none` |
-| `R15-old-hidden-bytes-restore` | `600ae7430233c349c25bbe4ab0f9f8fb55e7c92e` / `023e0594e4a6d2f3403635decbac7a9d90ec06f0` / `0d61ca753740d7acbbbc8be097c22249fe1814c3` / `20096f8d2a62bfe7e6990d90b91135ef249879c6` | `blocking-finding` / `invalid` / `none` |
-| `R15-old-continuous-preserved` | `9972c0979b118b85b5c9d80a811679b41840910b` / `6e29170cbd7791baf6f74923a50387a9359979e1` / `07b1760283e8c3d5239743a99feef50b56c62c46` / `316e8cd76611658ad9587c73e54cbfb6f3c9f379` | `no-finding` / `none` / `none` |
-
-`R8-adapter-M-input-variants` runs three classifiers over the same committed
-graph rather than changing the real adapter. Its OIDs are:
-
-```text
-C 4355a7786719d4f001028cb4d39a6348f5563a72
-O 36143d1a641c4b1233ed872cf99c36a171a4d929
-K 31a1e933998db49628eeb9621479a3cb984a7fb2
-D bdb42c6aa3dbb72a2d9c1af9d6f83a0f021944a1
-N a8e46d197e36d38637dfc0e22d7d1ce6d01d820e
-```
-
-| Declared M | Range / result | Identity / authority calls | Selected evidence |
-|---|---|---:|---|
-| `O=36143d1a641c4b1233ed872cf99c36a171a4d929` | `ambiguous`; blocking because `O` is not in candidate ancestry through `N` | 0 / 0 | no event or edge |
-| `D=bdb42c6aa3dbb72a2d9c1af9d6f83a0f021944a1` | `valid`; no-finding direct | 2 / 2 | one real authority edge |
-| `N=a8e46d197e36d38637dfc0e22d7d1ce6d01d820e` | `valid`; no-finding direct | 2 / 2 | the same authority edge |
-
-Each run enumerated the five-commit, four-edge graph exactly once. This proves
-the endpoint-equality behavior on that simple graph, not that `M=N` is a safe
-general adapter fallback. A genuine restack that still supplies `M=O` fails
-the POC gate; the explicit candidate-side `M` produces the expected safe
-verdict. The POC does not alter the real workflow or adapter.
-
-`R8-adapter-M-N-frontier-counterexample` replays the existing unrelated-invalid
-source graph. The explicit candidate selection excludes an invalid source that
-joins later, whereas substituting `M=N` widens the causal frontier and correctly
-blocks. Both runs use this one graph:
-
-```text
-C                1e44d8c3cba4bdd091bd1ae218a504f5b7d938fd
-O                ba83bd926d133cee0384ae4b8fd577de5d14e835
-valid deletion   2fe1bf184c6d0626a1622012129c5801c47d31f5
-explicit M       15688654c25ae26d20dd9d4c248f7dbbafee0d15
-unrelated delete a8ae4e0bf33ab580216e0ce83a4c5d79e66b7555
-N                433bb31a23f524c2a61cd0084e0a1ecda0af8c3c
-```
-
-| Declared M | Result | Calls / retained evidence |
-|---|---|---|
-| explicit `15688654c25ae26d20dd9d4c248f7dbbafee0d15` | `valid supplier`; no finding | 2 identity, 4 authority; one valid authority and one propagation edge |
-| endpoint `M=N=433bb31a23f524c2a61cd0084e0a1ecda0af8c3c` | range `valid`, evidence `ambiguous`; blocking | 2 identity, 4 authority; valid and invalid authority edges plus the propagation edge |
-
-Each variant enumerated eight commits and nine parent edges once. Therefore the
-adapter contract must supply the explicit selected candidate-side `M`; it must
-not automatically substitute either `O` or `N`.
-
-## Cost and budget evidence
-
-The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
-actions had real claims and eight did not. The POC classified the expected eight
-as valid and emitted eight findings. These are measured counts from that run:
-
-| Counter | Count |
-|---|---:|
-| Graph commits | 133 |
-| Graph parent edges | 132 |
-| Graph enumerations | 1 |
-| Per-action history walks | 0 |
-| Queue snapshots requested | 10,972 |
-| Snapshot cache hits | 10,969 |
-| Distinct queue subtree reads | 3 |
-| Git object reads | 297 |
-| Object cache hits | 21,691 |
-| Production identity calls | 32 |
-| Production authority calls | 32 |
-| Production mutation calls | 16 |
-| `cat-file --batch` processes | 1 |
-| Actual Git child processes, including production validator calls | 135 |
-
-The fixture OIDs were:
-
-```text
-C  df53962cd25ebbb38830454e977caf65252ce009
-O  8533fdc2d343b168d822c683379bfabbb49c0d28
-M  1e7ca201682935795c94620176f77dd50b6ec769
-N  466dae5f060fd0aa74cf71db38fa694686afd7ae
-```
-
-The budget fixtures use a measured demonstration limit, not a proposed launch
-ceiling. At 10 graph commits, the classifier returned its normal valid verdict.
-At 11 graph commits with a limit of 10, it returned structured ambiguity,
-selected no event, and made zero identity or authority calls. The result carries
-`limit_is_launch_ceiling: false`; this POC does not guess a production ceiling.
-
-The zero `Per-action history walks` counter is scoped to POC-owned traversal;
-zero POC-owned per-action history walks is not a claim of zero total per-commit
-history queries. Independent OS-launch instrumentation observed the same 135 Git
-children: 132 `subprocess.run` launches and three `cat-file` processes. The 132
-include one graph enumeration, one merge-base query, one revision parse, and 129
-imported production `git rev-list --parents -n 1` queries. A production
-integration must reuse the enumerated parent cache, eliminate those queries, and
-set a measured process budget.
-
-PCX-19 temporarily removed loose blob
-`22c64f4979ae39fb51a881c576f38740bc78b7f3`. The first classification returned
-`unreadable` with that OID. After restoration in the same Python process, a new
-object reader returned `valid`, proving that a missing object was not cached as
-absence. Its endpoint OIDs were:
-
-```text
-C  759e2f27b42fa1f3bf68d8b436eed022ee8f1f5c
-O  90aed2b3f8214a269d6421e6f4fe63ad3a61b091
-M  3d4fd278b276f3e142f45300789259c7dd862165
-N  dd34454f3204840ae81e2f273772c00488e681ea
-```
+The real-Git self-test passed 136/136 scenarios, 4/4 executable aliases, and 16/16 damaged-mode controls.
+It imports and calls the worktree's actual `queue_action_identity` and
+`queue_deletion_problem`; it never invents an Action-ID or lifecycle verdict.
+
+Canonical evidence artifact: `sha256:9e158d2908ca224d703179125a9bd08a0d64c2bfd5246143677720e1ff9d96cc`.
+Canonical semantic stream: `sha256:a509d7d0d92bd315aed7bcd6b57edf7fe9d2b1ca095735eb1dd163f3b5baa3e2`.
+The raw JSONL stream is ephemeral and has no stored hash claim.
+
+## Contract exercised
+
+The classifier admits exactly one merge base `C`, seeds the occurrence at `C`,
+and does not inspect pre-`C` genealogy. Production identities map to exact
+path lists, so multiplicity cannot collapse to membership. Old and candidate
+carrying paths require one continuously valid `C`-rooted occurrence; each
+persisted edge calls production mutation authority and its frozen-byte complement.
+
+Direct mode requires every carrying parent-to-child deletion edge to pass
+production deletion authority independently. Supplier mode requires one earlier
+real deletion root, continuous absence to absent parents, live carrying parents,
+and merge adoption. Carrying-to-merge edges remain propagation-only.
+
+A supplier root carries a domain-separated `queue-supplier-support/v1` certificate
+binding the real authority edge, raw non-action tree delta, every concrete path
+referenced by the authoritative action, typed lifecycle obligations, and a
+canonical digest. Adoption exact-copies the closest absent source's current
+support projection. Earlier source-lineage evolution is allowed; adoption drift,
+dropped evidence, conflicting projections, incomplete leaf coverage, or a failed
+typed obligation blocks. Pickup accepts one uniquely claimed resolving task with
+no pickup backlink; retry reruns its checker. Unsupported successor/reask and
+boundary-review support dependencies fail closed.
+
+Concrete human response/review binding is anchored at `O` and unified across
+every real authority or propagation parent. Only outer-trimmed plain `pending`
+is the Review target/revision pending sentinel. Final absence remains continuous
+to `N`; reintroduction and competing roots aggregate complete evidence and block.
+
+`M` is validated before identity or authority calls: it is an available commit
+in the `C`-rooted candidate graph and an ancestor of/equal to `N`. A real workflow
+input with `M=O` fails when outside that region. `M=N` is representable but not
+a safe automatic fallback; a counterexample widens the causal frontier. The safe
+adapter contract demonstrated here supplies an explicit candidate-side `M`.
+
+## Input byte identities
+
+| Path | Bytes | SHA-256 |
+|---|---:|---|
+| `docs/AGENTS.md` | 675 | `sha256:5342de9cada318428ea9b091e2434ad4d1e19e173a87295fe978651dc1a04b14` |
+| `docs/designs/AGENTS.md` | 709 | `sha256:0e8c04dea40750971f0a567e84dd33ae5529960629abee9323234046105649e8` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 48570 | `sha256:2dcf6684b6844d899d36f28660dd16576ea5a836e233b7c089c77616ffdf85da` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 331516 | `sha256:34be995583c46178fca63b1bc415d4069940be834f3fb2a2d4db33140f493e94` |
+| `automation/check_action_projection.py` | 123062 | `sha256:bd9f73b79b3fac94f36d8248b4ce23c6fa7826da45d562a85bd9b1e14255e0c1` |
+| `automation/markdown_semantics.py` | 33735 | `sha256:a5f58a99e739af4e3e61109caa880cb68dc739d93c727b74b8e2456220641c63` |
+| `automation/reconcile/reconcile.py` | 499357 | `sha256:0436489bf3bb9a52ff80e6e36962393413d626d034b029e938876f4ddd84c0b7` |
+
+## Seven fixture SHA bindings
+
+| Claim | Scenario | JSON pointer | SHA-256 |
+|---|---|---|---|
+| `r8-divergent-old-target` | `R8-review-binding-divergent` | /details/old_binding/1 | `sha256:2ab16346393dd555c10887e02261d9fa80124206e31437260fb5d50cc7185bd3` |
+| `r8-divergent-candidate-target` | `R8-review-binding-divergent` | /details/candidate_binding/1 | `sha256:5ac4dea8ba9a26fa2e56de8e4ffb2d7fe0cf688e57fb6eeeb0091f9a399115bc` |
+| `r8-identical-target` | `R8-review-binding-identical` | /details/old_binding/1 | `sha256:371e751cdca327cb53062048f641bba3263084738230bdd8b24ae6cc4aecb484` |
+| `r8-terminal-reviewed-revision` | `R8-review-binding-terminal-conflict` | /details/old_binding/1 | `sha256:2159f135c15139aa0fdbd35362a3dd949c47c2627bee2aae17edf746e6ba5b75` |
+| `r9-direct-filled-revision` | `R9-direct-review-revision-pending-fill` | /details/candidate_value | `sha256:7b0d8084905c6e81c7f74bf50eb38a2c22eac406092088111603b64855fc1575` |
+| `r9-supplier-filled-revision` | `R9-supplier-review-revision-pending-fill` | /details/candidate_value | `sha256:5706f8e796fc78b6bf7465c994523dec4fe9240309bbdb51c0bda69dfe0e5b70` |
+| `r10-malformed-bound-revision` | `R10-supplier-review-revision-generic-placeholder-rejected` | /details/candidate_value | `sha256:62b8e9ca2b243a2fc6baf048001d518d73455c3829217d3703fede4cd2f524b9` |
+
+## Scenario evidence inventory
+
+Each record digest binds its complete canonical scenario JSON, including
+all nested OIDs, verdicts, reasons, paths, counters, certificates, and
+adapter variants. It is not an OID-pool membership check.
+
+| Scenario | C | O | M | N | Classification | Evidence | Mode | A/P/M/S | Validation | Record SHA-256 |
+|---|---|---|---|---|---|---|---|---:|---|---|
+| `P1-direct-linear-valid` | `46109f507dba3eeb6191db457fc7848c415e8979` | `2819957948197a593fb1d0dc966e747c44db9ee5` | `0f122705ca3c1d1c1b36ddf27514d49346316b59` | `029be55decf7d7f65826f86684cc8605d5d47b18` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:e090eda07095f9c10604ccf5f2a30551d2b95e0be5f79726e055125ff86253ac` |
+| `P10-direct-invalid-parent` | `2ef716a2345dffac470956041b5245e20fbc8f98` | `1ac818d6b6ce87da87358e55015671ecf823dbb5` | `a7c688cb122c32a01d177c45332894977ed79b54` | `8f7e8c69c7ec6e4af250366114c90ecc24ce811d` | `blocking-finding` | `invalid` | `direct` | 2/0/1/0 | `PASS` | `sha256:b7fcdb8f800cfbb70f8a36c905e232a36bb91d29c98c650182dd70326e07b28b` |
+| `P11-direct-three-parent-valid` | `78ad042cef55f824658b367d8599c5523b4e601d` | `b5726dd5f1e717518fae85cf820fc7b134db83fc` | `fb729cee3b8b3497dfffb0cbf3e487cc55f262ae` | `ad16f6d1f31e155a41a236d51a7a396e54dd5ea3` | `no-finding` | `valid` | `direct` | 3/0/1/0 | `PASS` | `sha256:d8fb875b0c00f8d48ece7de4acaaa71c7e472fea3fd0df3d8db8992e26489955` |
+| `P12-merge-supplier-valid` | `3a01d100e676a9a20f8dc545fed19be3419fb759` | `bc433c8ed8cda37d3813042f730b2f23d8e8d778` | `5f5714f1c3661031e2200b1e1a346f236055b90f` | `8dc6dbc10535cb058ee49c63a979d75966b7f248` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:a7712cd7b42341bddb22720666bbc1ee81b6025ac84ee7b7894adfaa0f766a1c` |
+| `P13-merge-supplier-invalid` | `c9de2e4ee2e285093b2b1ae42b597989f5e2c267` | `898789857318c82970d920a105ee1a124474e155` | `dabb97e803392a65acbabbd6c2f7f721a7087877` | `9424f0b01381a9388d58b77c06efec9a59f0249f` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/0 | `PASS` | `sha256:331b28daf3e07871f5c23545ff9211861f5a4a0e219c0edf0f28ca87831d3de4` |
+| `P14-supplier-reintroduced` | `f340f1d750e747d6cf6a74dfac05146fd208f964` | `bf8487fe5085a4dc4b483f512c51ecd10cf7c253` | `9406a4f023f8952aa950e2be26eb4a41325da410` | `14d300ed67dece9c599e5c0d096b708cc38bafa6` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/0 | `PASS` | `sha256:3ae836c5bacfbab182afea885704f863c4beb4a5d623d1b935c1fc4bbc260013` |
+| `P15-competing-suppliers` | `80b72ef13352057aa74028971730fbfb266b56f9` | `20a4f077a613c17b6e3f36d87f807bed9395d541` | `4e18aea08ca7ebfec9c9df4b281abb7ecad29fb7` | `fe575f3eecc1f2b034bcbeb17a0021fce16bb82f` | `blocking-finding` | `ambiguous` | `supplier` | 2/1/1/0 | `PASS` | `sha256:492f20e9f65875f63659a5549036345b5730b6fa163e89a72d2f34ef329af8aa` |
+| `P16-PCX-08-invalid-supplier-claimed-carrier` | `b76e3dd3be1c4896d95f0ade31b63eada3ec7002` | `b756376fce02251f8036c1b1560d8c6c96dd0699` | `d22d14c098eb80cad2be1557c519fb567d1d7e90` | `b23ca400da3968f74afc3b950ff4d4eb27307196` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/0 | `PASS` | `sha256:9b572429e41aca9902a240ee9626cb70ab2a9732d4422bc9e689f540b02324bc` |
+| `P17-post-event-reintroduction` | `ec84d0800c660f6379b21cfd721122fa06162999` | `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` | `5b3f0ee9f157786e8392185afa848583d9af19bc` | `258e858010ccd1e43716ab0269faa86ae08808a7` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:6b87aad0411a77b237f325cd6f7a4388446caf9f3e8d0cd8f8ef9546246125ff` |
+| `P18a-missing-tip` | `6b1c6e561f71be3f810b8e052d64f9b586d350d0` | `ffffffffffffffffffffffffffffffffffffffff` | `8bd41c425e8c02856c8fda7aff000ec07e1a7e74` | `907f5d5221680a4ff7eccd647bcf26bcd5e9c4d5` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:d23a316941190e5c210576fa8e0b065832020dc2c394fcd8f2c44059d4b5ab9f` |
+| `P18b-noncommit-tip` | `80f767707bc3776bed60f33fa4f74f0be372c846` | `90db16de6c0119c0c924c80d206b1e80bc3d2331` | `e05d5a59983c2502825bc2889e1007f7837c3c70` | `22be33aff3fad75ef91ab1e1cae2f2f8da2987d3` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:95c5151bee6e886e32151d01c5d990bd6fe91c63d5aa443a2e14168795a82a63` |
+| `P18c-unrelated-tip` | `21cfb2f879f2c045f8abe0476f8e857e3cb9df62` | `22628ae24f01e250d30bb4cf9c2a7832f217677e` | `a2312dc07b7d85aa78d555c6440644a4d53db211` | `e46c2df2b7bdeeedf09b55b74a3745ea6d7f5139` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:643a6290c52bf114dba0d5915938937cb88b5b08f13ae6aa6c6186974d19e957` |
+| `P18d-shallow-required-region` | `4564792530b6e89f1cc957aa73791394cd3654ed` | `e68bb90fcc341adde9f4372caff5ecc6f9b1e340` | `8ad3e672d58825aa6c55669016f2f50f963b83a4` | `4303d2f9587973759de42362a6c20b4b48170ab5` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:17636608e51f7e17c3d4704dd957aee1dfc6478ff123c4269b44f95aac4e786b` |
+| `P18e-missing-queue-blob` | `a668e725d1233ee7d5930c077268d222dd27c277` | `8d7223893ec84e193595fe975a53d36f893502cb` | `b1ff40b6859a4d0d524482711fba52aa63a4a3a4` | `ec9f29e0560c60e66700496cee9ce14858aebb4d` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:6fbddeaf2023a1df9264c8c208d4ec59bf39e7343834bf5c0eeb52b57fd675c9` |
+| `P18f-missing-queue-tree` | `80ee9796305f288404f4aab5960193d8555c5e5a` | `61e6b7c9b52f0ea9ecb35c5bb8da8211aa7232d5` | `e74f62498e77feaf7eb749641cad895244b1c9e4` | `4f08ffcf2930d3d3a121b453b4b16a5b5f0bfa73` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:3757e5d12963f5b14900cb090f399f0583b3c473d9969f66721678cce42e0e7c` |
+| `P18g-multiple-merge-bases` | `08a25d1eda8a5533167be0e819deb20fd75279d4` | `c9a1e28be75d020fa3222bfb2a5b04649329083e` | `b93aa09ec6673686cab30b8605ec3a1089e278b3` | `8e067847820ccf0c7ed10b39c330162e1b10d880` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:ebaeb25c23343c0f6e441ec42ab44ae42274e9a6c3a99cb5af3782518ef83c69` |
+| `P18h-missing-M` | `d06a8e1f62d588293f3bf70a91e8f1900aca1edc` | `3c929150f394845dad6e969d058706c5dc878be8` | `ffffffffffffffffffffffffffffffffffffffff` | `70d6e8e514a7e81d6a91a799fcfa66e0eae162de` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:ab731bfdf6bd1ca23de69eb902d627376f6f84792447aa128bd3cd4837c23273` |
+| `P18i-noncommit-M-blob` | `9c80ff6bb92b21e4e2206832a0080f34730d303d` | `3dbbaa22aa15be990b38094b5172de55e436adcb` | `f3fd2c414ebecbd374165a57fb97777d7854881f` | `e2f94048ffe0bb5fea0b4fcfabfbf4cc93a26285` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:8b0378afc29db5459a31105de7e972b270c16365de6aa7d0a8cb38faa45d18c3` |
+| `P18j-noncommit-M-tree` | `06bad3cc92638141b3f5f528b1b191e909bdbf29` | `8eea7da51b06c93ff0be6ab37d90644249993f26` | `4b825dc642cb6eb9a060e54bf8d69288fbee4904` | `5d8fd9eaa9152b6cf9bc2df1506e01c8abb9c2ea` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:6ec90131ee1c06e26d5cab4f70c162ca5d8252bf5c21e25532801f80b1659bce` |
+| `P18k-noncommit-M-tag` | `79cd0a510242ca533cd60cc19dbd7486483ec5d0` | `b631c4387527a69c216c988af10f997629ee21e6` | `d04b0f4cb2a439d32b7025e18869178554ce9609` | `110ee672efbfe974b199b21f485d6d0d5bd0070d` | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:c5e6d6a9aff6961c63aa7c1283643059d7ecd70259221a01b61c56263998b773` |
+| `P18l-unrelated-M` | `5deac7dbb2f7af1347528f202d2dea6305a7eed0` | `c66670d8212839c869bfe1e669e5d883d47eb2e8` | `d4a8acb5380c5835b7dbc237a3e0042d2905eec6` | `530b2c8c7e8d9ec4ef440a046e37b58db35d5981` | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:aa49147b9c9a132097d56c1c9b07fbc35caae2be04e2cfe64e5e70d8c3655f1a` |
+| `P18m-M-after-N` | `e4e34696b271e37e86dde938c3f771c9cfe4bb2b` | `31f51f6be37d39d514b002a0c290a8fd6299d9c8` | `3794feb6c65bb4e6f541ddc3c2fb1e4e15434a39` | `8043519a0136308dc2f1218806192609d3b74a26` | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:571dfd813ba42976e4dfb5b6c875edb56fdd3bb6bb745c7ee65349126e290f03` |
+| `P18n-M-equals-C` | `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` | `ae6ec2647ed53b0c6c516952e1db0fa2c1feb96c` | `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` | `8f3df0dee8d186622cb4b9f8da6d0a575a3f6d03` | `no-finding` | `none` | `none` | 0/0/2/0 | `PASS` | `sha256:258f245f0b1c511580eb5d8e3b349762a0ce42bfa7f2e053b757fb0da3c56dbc` |
+| `P18o-M-equals-N` | `740bcad8cc95b46955d8d112d070d93646351a6d` | `bc321981f1a4d3b740ce79454ccaa0ccb474e31c` | `4fda9e18664e3ae611b1d17877b03fa941783cc5` | `4fda9e18664e3ae611b1d17877b03fa941783cc5` | `no-finding` | `none` | `none` | 0/0/2/0 | `PASS` | `sha256:40a706a164f7eb206b4b593c5765eb668cdbc1b10d0cd4ff88938875c838a34b` |
+| `P19-production-identities` | `b9960dc72147b900fabc01a32e0057e6499059df` | `e702490de9ecf76f7a638b39d49006dc32229c4f` | `2a6452bd348a0c3187f13847b1103e5c1dbf1654` | `f10076f83de90580658d6d1599b0ee208b7fac87` | `blocking-finding` | `ambiguous` | `none` | 0/0/6/0 | `PASS` | `sha256:c3b50d59407dae6448b198455d9421d04041d4ffa6da78d1609465848094776c` |
+| `P2-direct-linear-invalid` | `70b791b1e8a9bd24f58737e93a443451f8f0ca11` | `ab15090d6bc10c375e03aa38f1ca6aa87d672a98` | `12066f29b8e1b8f5c040a29197ecee7ab5fdfee0` | `b00411d0cb294fe228cef9fa6744869d212bff1b` | `blocking-finding` | `invalid` | `direct` | 1/0/1/0 | `PASS` | `sha256:f800d9216dc63c772ab21bc1c909656dd8038e9e7dd5e860d4ccb54dbbe99633` |
+| `P20-lifecycle-types` | `dec0d432ddbb67c88d9833003f2939a596372ba5` | `d2e3aa02bfe5ddff10ea863ef5c6fe6557d54e36` | `e433afd86f4fe60bc51f05376047c9dfe330fc27` | `822ee419b65be452b934eb592888a07ad6b74f9e` | `no-finding` | `valid` | `direct` | 4/0/9/0 | `PASS` | `sha256:968cb4b410a604bb658ceba1b7f27c8b1d48dd83157205f8769a6df32a5d0c92` |
+| `P21-PCX-17c-squash-erasure` | `34448e62dde0da7a459c9f068a1929a11404bc60` | `67154541398ed536f17c169d282b151571b9031e` | `64fb52e9c37f9bdea9593f8c442df58320c67a41` | `cdd5e979ba9eeb3e6caf97b05a182981178203bf` | `blocking-finding` | `invalid` | `direct` | 1/0/1/0 | `PASS` | `sha256:4107025683600456ccd6bd35e3b38be1e384c1565e721aa2e70ea3afcb52f35f` |
+| `P22-PCX-18-one-pass-many-actions` | `df53962cd25ebbb38830454e977caf65252ce009` | `8533fdc2d343b168d822c683379bfabbb49c0d28` | `1e7ca201682935795c94620176f77dd50b6ec769` | `466dae5f060fd0aa74cf71db38fa694686afd7ae` | `blocking-finding` | `invalid` | `direct` | 16/0/16/0 | `PASS` | `sha256:a2e525463ede0a738146522a2536e3be072b8952acec3e1c98882d1ecffe0dc6` |
+| `P3-genuine-old-loss` | `94db247b706f734bca553f86045fba8b98158a6c` | `5fa1eba2f8984af57952e6c083a0c455fc65d54c` | `f4ca86c37cc12153f119ee30f611488acbbbad31` | `5dffe2d077e79208c3e05ec0bfdd5de39600292e` | `blocking-finding` | `none` | `none` | 0/0/0/0 | `PASS` | `sha256:f5fdd31f1cc08bafa5e253aa64bd1d11ede03f290923592ac5eda8776a99d003` |
+| `P4-pre-C-identical-origins` | `cd13c47983b0624a824f5fc583f7de647b240504` | `03c76bf6661f670a705245479f406a1d3ba7b279` | `3258b9e2bac9ea4c40a95a8db2cfbdaf5c972b84` | `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:9f78efb5dd78aba940056acf7d3dc413220df6faa0e4c7ac80f84c1901a9cf22` |
+| `P5-duplicate-at-C` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` | `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` | `f75429c785808a191c0600345870097251ca8f8a` | `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:edc54801dd1b096c64301156aef9e6deb358b10fdceca75e9c1e89d90e781fd8` |
+| `P6a-old-delete-recreate` | `8039e1a89ee29be7b3a79d4fda7aa15a8653058f` | `900438d3fe4393f0ea2f87aa4d8dfc1e188f5919` | `35265c1c5c882a94e26d13c2c0f67dea26d5dd3a` | `6781a4eaee80c8ebde47bef04c33dcb47e91bc98` | `blocking-finding` | `ambiguous` | `none` | 0/0/1/0 | `PASS` | `sha256:8cf2ed09d4457a9acece497b8b17aa2f20f1af19503ff69d745c6dc33196d602` |
+| `P6b-candidate-delete-recreate` | `b5161adf1ba6eeb99b2181aa264598f707d19a95` | `bfb4c66d18c551b23a8580132543db2357ddb4f7` | `127df3d3fe753e043dba90611a33da7e8aa83ed3` | `ca9f44b0f38c99dc7c70093046ead1b19f464389` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:c602fe8a41d87d2d1e10914c93beb46d62944649f2a2cc79c68eb3a5e7457f1f` |
+| `P7-immutable-payload-change` | `43f673bf99a741dc37c6631d39bd5e9c037f7368` | `523cb1cb6e17b0e00b3bc3235618cfc0834d233f` | `919d9a7c1f9b32808435f835dfda9eed9cc419ad` | `03ae818dc35342d03432e7e25ca292808528ff3d` | `blocking-finding` | `none` | `none` | 0/0/0/0 | `PASS` | `sha256:cbafb92ad5ab0046ef4361d309162ec6c24d02a13617e370cf2cc88e0489ef3d` |
+| `P8-path-timing-move` | `1c34d6196d22c53ce54eac5b2cbed46be8432134` | `f9bdb1fd1af9e2d3b5b405594d2ef37ab55ac025` | `077582d6115938f9bf87c7f3c02112a02bed223a` | `cef78e9bb54e4b4318172d0a2b6881da3a4b8971` | `no-finding` | `none` | `none` | 0/0/3/0 | `PASS` | `sha256:4631b9ebd123e93623bcc381fe32b844cfed09fc2558f94c29c86403a220d5af` |
+| `P9-direct-two-parent-valid` | `074b437bb8582cabd4372ea380454368e8d81ab3` | `2380b58d4a6b687769359903f12100d69a543b2d` | `7940f1351b2420884599747358a4f81a2c322315` | `faa886162cc54c7c6544e33793a6e7f4342a90a0` | `no-finding` | `valid` | `direct` | 2/0/1/0 | `PASS` | `sha256:599f8c0febcd636e679b993a4c4baa7cae2b0ec06e306261c9e7938309c0c5a2` |
+| `PCX-01-neutral-parent` | `ee5d0eb6e70a978d7da73147f1faef9615f8624e` | `c4b177d1b0039326cd6592c90f7ce62e729ed3a8` | `63b362e60ce26351fd9ce0c6d61631ab3f84dfc6` | `acc6673079b122e2ae443cc91c4012c83344430d` | `no-finding` | `valid` | `direct` | 2/0/1/0 | `PASS` | `sha256:fb60328328bb6960bba18dee0d7c4356db5a428e95581ba621ae78d2b66f0f3d` |
+| `PCX-02-neutral-plus-invalid-carrier` | `b02a161fd6cd727aa2eb6bdf5ec43f5c5587e04d` | `78c77a131414cb7f196137896f9fd0080bb6552e` | `d6a37957cd16358ad54f54004f160226e6826883` | `cf599de5003f9d108a979cb21f6d36c5c3785dee` | `blocking-finding` | `invalid` | `direct` | 2/0/1/0 | `PASS` | `sha256:107c4476e58449d0cbbc3d358273f36a46c3c21b7f29fb165157735a645ef915` |
+| `PCX-03-foreign-exact-identity` | `35f271b5d18393dac59002bb0c0c794d3589659b` | `36313b4892aaa243fc2d01fd05ebc8e7ac0145e3` | `f88f77839c674dd969004f6e9a06c531ecb5d764` | `f7fb0303c3061d22daf61cdeb03cd67496639432` | `blocking-finding` | `ambiguous` | `direct` | 2/0/1/0 | `PASS` | `sha256:258c0b6abf4b03185d2b3b9350884a750d9b05953adc611f805366b69bbe6f62` |
+| `PCX-04-several-absent-one-supplier` | `32c7576c4c4aca96bdad8162078e9b2a28d6ae33` | `c4cf7124f59fc3edbec373d87507aba76143cfd6` | `12b4337512cd0e5e6628f76f62e03d79e98675fe` | `cb06b9b4e0a3ae842774d0f888ebb5f1bca53881` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:0dec1049f484b16bdeebadb2bd8b154005ce888e585b6ab03a4643085b22ca3e` |
+| `PCX-05-competing-later-supplier` | `d297f8d7d5f3557c94f944194e6da99c1c092c81` | `39f138bf6fdf1db76fe12a652664dbdd3fcb33e6` | `6bc1b1aa685794aa4f4c17625c59319fe8264ec1` | `5cc308cff656d4866cfd255d968e65ee17b58271` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/0 | `PASS` | `sha256:f9ecaf2024dd6e7d4a6570b840c1a847dda8ddca20555f25f3a3353062f6ffaa` |
+| `PCX-06-nested-supplier-over-direct` | `4fef7d2a64023363e13a455eddeac016838f651a` | `db0f6a1bdc43a8bccc8184e323867f7ed9aa04a0` | `ed75b619d125655b117d22c8cd53c268e8693b5d` | `2513214e5beaae7f3a289d4fae4018a00971c21c` | `no-finding` | `valid` | `supplier` | 2/2/1/4 | `PASS` | `sha256:722938d3a3eef49406dc7af419218edde66cb45884cc8c1127bf610059b9bb4f` |
+| `PCX-07-overqualified-propagation` | `e9920c69e87c8fadecea9dd6bfce80039a60619b` | `4eb27ecce806ae96e902a1c1cb1098fb7e8d7ba7` | `5e5858981f382e6c875e4f929b3478dd8acd8a9f` | `ea08bb6dd2a18266bfd6f436011c1cc610c4c8dd` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:7634dd9eec3958de0cf8945a7918472b8b0afe37122579bdddfecba03b096358` |
+| `PCX-09-recreated-claimed-bytes` | `41008171d1f9c6afd397a17c3e5567e040d881e2` | `9e38900a6d2f2e3b48457b5fe92fb55cf68ef1ed` | `47fdbfe559ffef8306bd34171343efffd279d532` | `626d32b7150a4185dddc568c91f3f096abd5f4e5` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/0 | `PASS` | `sha256:6d728a83461b78c7e74ab0008cdfb1940303fdb87b26865046def40fb4a3de88` |
+| `PCX-10-transient-multiplicity` | `04b5c0356d29ee676d98d58fc639efaaa47278ea` | `cb082de1d3492e0b6e85918c5b1a4d2d600a110c` | `30d93382268d77f8827532b02619799b1b13fd1e` | `6dc48150188c026a1300d5fa19b065b1ad6a01aa` | `blocking-finding` | `ambiguous` | `direct` | 1/0/1/0 | `PASS` | `sha256:8683acdfa53d3c3976a2971a004ad761df72b18aea569f1e3bac5e74a8acb60f` |
+| `PCX-11-different-payload-same-path` | `9f7f5b9e5ce030055a6151bed80dfb6db1a94206` | `d45b35ca53a81320262faaeb7136fd081e8c1fef` | `fcd40651e4a25b5199cf500e146bb6a727237a31` | `78876b74b5d5c2cbdd3085a992a484c82280c769` | `blocking-finding` | `invalid` | `mixed` | 2/1/1/1 | `PASS` | `sha256:4778d8d03fbf929a4264de0a6622f97a9a9aeb8a639bf2ebf9fd902b888c7ab8` |
+| `PCX-12-timing-rename-supplier` | `c81cd1ddc4c58f7e6d5b9bd7f0a626f972651c79` | `e89ed03c9f3c8d338d6b4f03dfee7d6994ce400e` | `7bb54681d7ce10ce98805b08965fb60a37bc3b1f` | `97ae732aab6ceb15bba65fdc775f3b4d5115a3a2` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:431d05bcd2de61af4d3013e4cf20267537582e8d39c2a83c74547a2b2c51a22b` |
+| `PCX-13-conflicting-human-response` | `58e15401aaba3e6f056f7dbaf6789c10d35ae553` | `1e790e17e8d0ba21ab1a7213d6e0e0fa2d12f047` | `52419f64aecef7454ed6a37a29d085583ff75eaf` | `14707f668aecd10bb531aa6fa0ec57700d26844b` | `blocking-finding` | `invalid` | `supplier` | 1/3/1/1 | `PASS` | `sha256:87a999a1cc4946c31e0d03c7ec2c8c8e2ce8cb970a6d4389cb25399c303837f7` |
+| `PCX-14-valid-human-supplier` | `920e716ffd62703b03e21acd40423d34d60f165d` | `15ab9f04625ca7c4d6a8847bebaaa2b3169b5b69` | `c22567a6b63362822dc7952219b0240cd7cccff6` | `36eaf058713764ea31d22a9cc74f800aaefbed1d` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:fb8dbec69dc781e4cb0d6fbc48b86bdcb1e25eb8e3fe4d78f4c142015c37d14d` |
+| `PCX-15-generated-retry-supplier` | `f5df7b0d8cf5622f4f786cbe936003b31c493199` | `d66c33a79421c1c87e7477e748fbb3513f8d0de5` | `9f6ffaaa5116d981eb228ba0c773715aad6e36d6` | `5f8251bbbc8ce9fc2742bc88cbd70bf88615b05a` | `no-finding` | `valid` | `supplier` | 1/1/7/1 | `PASS` | `sha256:92f458e07e06e49cf15021fe385815285cc63c7b0cc25ce636d2e8e6fae5939c` |
+| `PCX-16-task-pickup-supplier` | `ab3f73cb72be2389d566fb06118bc841facffc86` | `be2b18037fbd9785128edb1af215d459b7be8b9c` | `ba80c790ec56a8bf5fadd57529c336b49a215786` | `fcf1b089a8cf59a77e3d1740409e12b12815f7fc` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:1f7391a7f3b318a7486f6d8209ac0331cb1665ba264e5ed422e6177655ac78d3` |
+| `PCX-17-complete-cherry-pick` | `33db81167dcecdaa77e3c6e97ea6305b99d13346` | `8385f0c8c1094932a794ebb94b32b4d872806cd2` | `98fb636f9aa7d4817f387da63c98f3f6d6c21a51` | `855eaa3b813900caaa0e523baa198491cb4bc47b` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:d165a0c3ff3f9233ce352fa7bc0736f1baa44f3eb131aa1d68b097691e1874a3` |
+| `PCX-17-deletion-only-cherry-pick` | `56008eecc6492c2c091a516834d675e283cc40bd` | `35b9163866f1c9cf6ab2435eeba3abfc0b9fd1fa` | `ce39fc571161e61959764fb88379fd495bee5941` | `5da95440d2c9065d8b6f4506d2108a3f97bed539` | `blocking-finding` | `invalid` | `direct` | 1/0/1/0 | `PASS` | `sha256:e7d9d8043ed331fa67617513b12371017386dec121e2c6380f83a2c2e7139d1f` |
+| `PCX-19-missing-claim-blob-recovery` | `759e2f27b42fa1f3bf68d8b436eed022ee8f1f5c` | `90aed2b3f8214a269d6421e6f4fe63ad3a61b091` | `3d4fd278b276f3e142f45300789259c7dd862165` | `dd34454f3204840ae81e2f273772c00488e681ea` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:58e8f1a2bc9dedc8208275e4b827369d201ba774155d4981c0a50cba20526a4b` |
+| `PCX-20a-budget-below-limit` | `c957293f54b1b960b7b7f351087c77ac874eb253` | `ad76497bc5fa23076fff741b5d419a2ccd714637` | `80558a19843cff3ee0fa0e679abe2c94efdaeb0e` | `ce775146b901f12bc2c05d22f06343da4d2c66d0` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:a1d4e6fee06d12b0ff1e59a400b5b7abdbc52a01cfa64dba737a5bb8812d1877` |
+| `PCX-20b-budget-overflow` | `a018c90c3dbe1374339730ede5c7b76e21fee985` | `fb2043655802898f2561cc21431580a2609aef9c` | `744998ca8374bbeeb9dad19fbdf6c5d7fd0354c1` | `06abdb0e773f19b6acc2ecf85d17e6c1770e7295` | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:bdc051fbfc72c88c7261ffe087307f52d11bc6c5c0a6d8d062146bad09d8ff0f` |
+| `R10-direct-review-target-backtick-dotless-rejected` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` | `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` | `32c6405daf9887441afff5bc7ec846e3fb3e2096` | `ba4edb8f323adba9645e47c2536f2b621bed7855` | `blocking-finding` | `invalid` | `direct` | 1/0/2/0 | `PASS` | `sha256:e694f11f3aa5946f135983c46deaf202094c9f48b67fb0fb44cdc0779fc9a12d` |
+| `R10-supplier-review-revision-generic-placeholder-rejected` | `b13043f4864a963aee7af4e3e3a913313f9f7b19` | `9d96a7eecc2b34704ef588142e4b48111849f3a9` | `acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e` | `02371c1e8f0eebe4e567694cfe6677c8b872a7a8` | `blocking-finding` | `invalid` | `supplier` | 1/1/2/0 | `PASS` | `sha256:05521236d2c78775a881acbb6f8601e53fd4f9ef119ebef0a2a1142f127c12e2` |
+| `R13-direct-review-binding-identical` | `d6d18f0c56d196748c9a94adad1191e68722eb4a` | `7e0284f9a2354f44218502da59ca365cff918285` | `429a42042f2544e7c6a64e1cdd4085cd88f12118` | `88dc201a2aae2ad0b8984b58fff19f45c78d7859` | `no-finding` | `valid` | `direct` | 2/0/4/0 | `PASS` | `sha256:35a133e5f9105a7090f32d1e462e471c06b54cbe384a579e44f0cfdf6fea4b8d` |
+| `R13-direct-review-binding-revision` | `f7d60f4ef43874a6e2045634265a8bb7968e07f4` | `e51c37206f2fa3f2d3a5ee9ff92aeaedc0aa431b` | `37fbca351cfb6d4d34d8fe2e8ad7c9a9e499cd5e` | `a4d2d52e8f40a5ba80cf350bd00db494c92c2eae` | `blocking-finding` | `invalid` | `direct` | 2/0/3/0 | `PASS` | `sha256:c2ce91169a17c787586229f4b9aa8c3a091f34cf025a963b1a382afc141b38e1` |
+| `R13-direct-review-binding-target` | `8454b9025487d126acbb3eb278584199e4d93bc2` | `75d9c282afe629e2fee58b878ffe93481926e719` | `550cce0661417e0b707d14904559142d585333fb` | `74f92dd03eaf05333a9e7168644bbae38b7bb50f` | `blocking-finding` | `invalid` | `direct` | 2/0/3/0 | `PASS` | `sha256:7ec092221f41859629dcd3ea35dff815686b6ba0aa4b8df2bd0cf295978ba101` |
+| `R13-direct-review-binding-terminal` | `32a00d09012a40145f9abdaedea2734348c68e5f` | `d784ca71704ac0bd18e1a70b45c18d1994353eb9` | `9bb9aeeaf1479c58354889ebbc41eb7c6a61cb95` | `6677edfd8778a755904939d01b070af66f32bcaa` | `blocking-finding` | `invalid` | `direct` | 2/0/4/0 | `PASS` | `sha256:5d7e6356ec843fffe3e63f79ea767903513de3c8561ad9e15bf1d85a1cbf7c39` |
+| `R13-persisted-claim-loss` | `5604e77ef241630dd284448a224de046d2caf460` | `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` | `215f27a473f8476dc01cc01efe69516a76346385` | `8702850ba2e7f56c29b16557c496adcaa627829b` | `blocking-finding` | `invalid` | `none` | 0/0/4/0 | `PASS` | `sha256:c792d4921f18c479daf999d7178e3a7974188e552d2635ecf1095a0d7b0825c4` |
+| `R13-persisted-pending-fill` | `6b710008b02a5c4b970a282ad2624b0384727292` | `5218487e636b8519c69f49d146acd9b7f8b25948` | `457f5f699f2bbe03994adec75f5a5bebca91125b` | `31a21eb1595bd8ebe46e55bb235d8d677edd6d58` | `no-finding` | `none` | `none` | 0/0/4/0 | `PASS` | `sha256:b8cbfa24c64a935e37ffc0411b82f19cab7e18bcb20ac5a87c3c8a8f257a24c9` |
+| `R13-persisted-response-change` | `68dfa83702f8aa1a82181785ff40b9e0eb0f2958` | `af35b452b83aa6f8fee2d3dcf01a951a83cc0f19` | `69a46a9c107d10ae18cef7347e0f0f832a1bd7ef` | `464115d4c500dda036c5592c6c8f21fe9a959e15` | `blocking-finding` | `invalid` | `none` | 0/0/5/0 | `PASS` | `sha256:dea0becac165e81714d80d0fa38b18dfb2333291f495a9db72041168a1aac496` |
+| `R13-persisted-response-removal` | `49d500f64d51f720b0decb65db3ad5163d4f72e4` | `69bbf3a1bec29fcf92121c581925bb092d1535ab` | `d7c174ae5a575350b4c3fcc426a89ceb15119b69` | `24126e616db515f5ee1d08d4f2da297b50e02f3a` | `blocking-finding` | `invalid` | `none` | 0/0/4/0 | `PASS` | `sha256:4b5d0a5888d47dcd95c2f3b4d40c592031a5a9fbc67c595f5486b57f05290fa6` |
+| `R13-persisted-review-outcome-change` | `103fdd9bd623d90d09b2193e9272b3980c80906a` | `2c3f7acfeeb385de256074091a38c9953ce7f1f9` | `0c32f4efcc0c588a53c02e34064c1013163f2921` | `c8a8b37e924d1e18c54dd5bea09d07191b6b0be6` | `blocking-finding` | `invalid` | `none` | 0/0/7/0 | `PASS` | `sha256:2d4a6e5e05ec3971f448e34714ecd3360519831f81c6854b40b18a9e91b71289` |
+| `R13-persisted-review-revision-change` | `952a03b6b34abb531365195232acd149ec51e221` | `cc3bf0c5664ca51a1c1df82759aaa607efd30550` | `eec9f2c2db8266f1f219bb1a656ebd3d9f01a11f` | `344c8d4e0333b14fb5b21550528242614812a55b` | `blocking-finding` | `invalid` | `none` | 0/0/7/0 | `PASS` | `sha256:02206d1e5ac24d63b1e6b1cee2807a71d599696e19e130d8cac37825bbd9a75b` |
+| `R13-persisted-review-target-change` | `de7f303a3f48d8d27eb65e7388d0f8dd934b4e96` | `2c37567f76cece330ee8c4997c96aa2bcd1764e0` | `73f686b71fc4503ed9319e814339a8f086c79c40` | `4f6be0576ef37c17b25b0268542bf4003a7b56bb` | `blocking-finding` | `invalid` | `none` | 0/0/7/0 | `PASS` | `sha256:135fe7dab163933bdf2c9ef90c0be125b03b65196d886eec5f3840cb0e7972d4` |
+| `R13-persisted-same-state` | `0d4f188e038977d78c48829a48b12354ffc8aa32` | `a3edb26d4a2069954d0459dd9ea503cc27833f61` | `6ed596b6e32ca919ed3622089a9a1217602659a5` | `edee50f1fe44db9136335db0de7e27ad442f4eca` | `no-finding` | `none` | `none` | 0/0/3/0 | `PASS` | `sha256:27d9a86fafacb6bc50186f1590ef95d708ae320c34f114bde388bd61079e7659` |
+| `R13-persisted-terminal-fill` | `ba73b784939318c875041e869d49a08cfd88f440` | `b5ea69a78713ea41e8229125a90fa2718088c6f9` | `3e711d2f2bb5de235a037e4675fe93f3d124c9d5` | `8250a2475da8b2c1a0dfffd5ecbe3e73fdd9b838` | `no-finding` | `none` | `none` | 0/0/6/0 | `PASS` | `sha256:b52dd117bd518b3ee4135067a01ffcef16eb0a1f4eb2e8755183a9835226f9f8` |
+| `R13-supplier-review-binding-identical` | `14976a93658e5bcfe9339368e77f82e77f31830d` | `ffc5d33bc00724fa377f13ce6ed824f6dc9fc02b` | `afc8edcc93e5de5da648126ad821357cd8500d2d` | `962821fb4d4faabe72c3b8e86823a5367aa3294f` | `no-finding` | `valid` | `supplier` | 1/1/4/1 | `PASS` | `sha256:4db9f963bb2a61ec8c7c81e6bc46b1d4405841e636f08b789a4874874d145865` |
+| `R13-supplier-review-binding-revision` | `52fe1848f1536143161e717bf436ee8c8b07df59` | `e7a884697094e9be1c876b78fc33d9e259d92149` | `200871b889045e16a784c3de722863123881f7af` | `8fd2e814f38bf145bd7c84d9e22a355056d40649` | `blocking-finding` | `invalid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:33e8c8489df27bba19070c497210fdd3ecc2621b0c445233cb002197b781a861` |
+| `R13-supplier-review-binding-target` | `874d2e356033d133cd409bc9deb8e93198d0ec78` | `adf1ce7876b84e595992f5865f871b59ea892234` | `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` | `8c3e7d42c53baf018d30c895ecd64b799edb5d45` | `blocking-finding` | `invalid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:542c4a4dc7d3f7c5fa154f334da8ed0747a2cf89a1b839facf0744ee32af4874` |
+| `R13-supplier-review-binding-terminal` | `e93ff6925d5008e9c95866628b410dda5b293e91` | `60538a926a9acd01f898ba0371ad5249c912f7fc` | `128875ca6b9fff728b2f964bd81eb8841229bcdc` | `1031e6315881cdc99376df52bcddc86a4427e920` | `blocking-finding` | `invalid` | `supplier` | 1/1/4/1 | `PASS` | `sha256:e745ac4ff65e5bef4f2e014d8790fc1491df067f7ded3ea7abab17d830d05b32` |
+| `R14-direct-old-unanswered-carrier-same` | `c1a83b69fb7f04ea375aca7027b157dd9cc266ef` | `37d577cc2c265e8e7082bfd86dd156172db98c5c` | `23bfa540b7b2b710bc71dc8de3aa9cb7c8aeaeb7` | `ae63528ae1af829ced9c2f1b763cc6aeb8c054ec` | `no-finding` | `valid` | `direct` | 1/0/2/0 | `PASS` | `sha256:11760014f50dd1e1ea5ff649539f7b97fdb1a7625493778fa343507e931f098f` |
+| `R14-direct-old-unanswered-carrier-target` | `0f221025b8224d465679596d3dfd44b6023371ca` | `d39ee31be16db2789928827c2e132a31e22b828f` | `ff2c698bac44b2bfb79623769f79914b9bb74216` | `9c07f77ec2836ec0f4222313e315b3ddc31c4ccd` | `blocking-finding` | `invalid` | `direct` | 1/0/2/0 | `PASS` | `sha256:d02844dab6c7fd974b0a992d750276036420f014ff65eafe0deea4a27daa2c5e` |
+| `R14-persisted-delete-recreate` | `32c778b5ec16afe676bcd2ce898c89388b28ea0e` | `68f01125491f31f259d6cc636bc2f818c9529571` | `e7d51374356e1865109e6556047a4bb02919e46e` | `0d272d85cea3703f4fdc3aedfa7e821374de51ab` | `blocking-finding` | `ambiguous` | `none` | 0/0/2/0 | `PASS` | `sha256:ebef53cf7b45fd6035115c6c85e54d3f4685f3e97a84b665fc43da7b777a5a07` |
+| `R14-persisted-hidden-bytes-low-similarity` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` | `d115e7063e3ffad24a495c9ffae5d70ffaf81928` | `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` | `a47b7307d654cb07612ccd7b04f1c32ab874c475` | `blocking-finding` | `invalid` | `none` | 0/0/3/0 | `PASS` | `sha256:1d3ec6bc56f8781d0c79b1ba53ec9a264f5035fea29034195187e4bdd1c7a2e7` |
+| `R14-persisted-intermediate-claim-regression` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` | `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` | `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` | `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` | `blocking-finding` | `invalid` | `none` | 0/0/5/0 | `PASS` | `sha256:c3774fc76cb7a331d2d474e1b3fb0ce0257b41f0a7204838001a01512743d4e1` |
+| `R14-persisted-intermediate-review-regression` | `5fe7bc2ba01136ca7e91068de3c21394628d8616` | `ceeb45bc58cb8e6726517130e20fff034db993f3` | `6937469bf807de32150751925eab9747c97b9801` | `b7e814f11797fcf8cc10f0a41b0dd8f0849718cc` | `blocking-finding` | `invalid` | `none` | 0/0/4/0 | `PASS` | `sha256:08d7b5cb3bc8aa6fc18b26d29652ddd1c22c518661a149be28a4bd94925ae84c` |
+| `R14-persisted-merge-carrier-conflict` | `00a09440e320c344f9840d7939f97b5a72654aa1` | `521e76aa7253b7dc1214c2bbdca5c788a601e21d` | `efba97f7919902dbe9b3c7ffc9550918dae871a6` | `e2f3eacb8b4a86f383f8a76be26dac7e4966edad` | `blocking-finding` | `invalid` | `none` | 0/0/8/0 | `PASS` | `sha256:1c74a2cc5d88e82a54db7cd7f46840ec3b374247cd8aa7940ef0b5fc57401ccc` |
+| `R14-persisted-merge-carrier-pending` | `01b493c655badddcf6641e8a7d21d3594a0cb5c3` | `74442946b6639f57e7167838a13cc286f39d3519` | `d9dd6fac07cb976806b98aa75b872664d32c899b` | `ca8939b406b7b2323fd08b044625639f5e80cb6b` | `no-finding` | `none` | `none` | 0/0/8/0 | `PASS` | `sha256:1368242f03cc971031b8a1dc19f19606f24f7f7963fa2d5a2a29b017ef2f98e5` |
+| `R14-persisted-valid-first-response-low-similarity` | `b14ffe7afbd09ecdcf3fcdecbf99fcd42e5f9e59` | `dafb69000967fde6234bce7999767113def81c5c` | `44680a86ed369e379a1cd20eb759c8fa1005e019` | `690a6c7b5a5425bcd8a3abfa90b75c77ecbde966` | `no-finding` | `none` | `none` | 0/0/4/0 | `PASS` | `sha256:92adac1f85dbe5adaafe15c387cad761978aacd78c89a9f939529e1d30beef62` |
+| `R14-persisted-valid-review-retraction` | `58a66e99ff34cdfa5e2bd150d68d5d6121b0cd71` | `03f6cd5ee859d98e6110b2554606ba655ea9b66c` | `ba95216a82bb0d53f1116f7e57f6f1499459a40c` | `75f7c3689154b3ecf8e5c67d467e338ab24a47cb` | `no-finding` | `none` | `none` | 0/0/5/0 | `PASS` | `sha256:0a4edcb304f57f8cd6cd2f5861c5d742b5233ae5a4e29af3b65a4679b86be054` |
+| `R14-supplier-old-answered-carrier-pending` | `7f104616c4fd6c3d1f15d7467a7e0da9e164f6e7` | `6f1dba05d9dca3e3776da3c7005a83807190ae74` | `e3876d1bfc361db4849cbb0205ff484aa10633a2` | `0662f0827db1ad2e39f59626dd8d87f316b73421` | `no-finding` | `valid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:54908296dcffffab9a5b0c1d12c59c55bb4022a55debf5b29ac97339d20076d1` |
+| `R14-supplier-old-answered-carrier-revision` | `9121f39bba512fa9fd762c3d07c93d1c11d5bc42` | `6d9c8b1bfed15a512d68db494efb71a2d0577f33` | `98e0e2378d9bb06282339cbc3a6a0e67c8154f53` | `0b0243e67b4d4635716eb2113f81419da982ba3c` | `blocking-finding` | `invalid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:6f763b9bd97c5dcab7a8b75663df27c0ed442e1ab621e69284a8f1023f195fa3` |
+| `R14-supplier-old-answered-carrier-same` | `d87b23dffb37c46a64f0f37fd10db886fc100532` | `a6ff10d32896ec2d87dad1696b24e07cc73ead65` | `8765211171ea8284a872f854a9bed3268e0d60ab` | `9f1c795a2f4fd1450d4d524f3f7adbdf0c496c52` | `no-finding` | `valid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:e834c1095ae73ba43f4d248920b3b77aafb03358d1fc587803a440ff07b1ef1b` |
+| `R14-supplier-old-answered-carrier-target` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` | `8a2de576d9304a51988bfbd943749129f828f882` | `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` | `b952d0de4952cb720e3056abe78c7ad8ee52d50f` | `blocking-finding` | `invalid` | `supplier` | 1/1/3/1 | `PASS` | `sha256:e56475baca2c077a017577b230e02935e59918125c33c69e9791fba3d628fa0e` |
+| `R14-supplier-old-unanswered-carrier-same` | `186d0ffca8ab62c6de1677780cb4153eced4fe53` | `b6e124010b1f74882864bdc3dc1fbd289fd5305c` | `6a00e16a8416c1572149fd45d4102d87cea7832b` | `e9e33f66742ae613b738497753ffb4957610b85e` | `no-finding` | `valid` | `supplier` | 1/1/2/1 | `PASS` | `sha256:d5c5c39967630b56612419c721dcaf4639c9aef803937adb703edaef6773170a` |
+| `R14-supplier-old-unanswered-carrier-target` | `9109e916c44dbeaa2bfe0e3b5497e9d98ef3e9a3` | `a09f2f2ed771008847609d177c72e0b1f62d8084` | `d76ee4b89ef81e391e3b7ce4265919166fe070f7` | `0c38b44e67a3ad27238aed8c8a667837aa7fc444` | `blocking-finding` | `invalid` | `supplier` | 1/1/2/1 | `PASS` | `sha256:c70f54e9aec2e0abca3c147f89f2e0389b28312e4818334b6d76ca4c92a86372` |
+| `R15-old-continuous-preserved` | `9972c0979b118b85b5c9d80a811679b41840910b` | `6e29170cbd7791baf6f74923a50387a9359979e1` | `07b1760283e8c3d5239743a99feef50b56c62c46` | `316e8cd76611658ad9587c73e54cbfb6f3c9f379` | `no-finding` | `none` | `none` | 0/0/4/0 | `PASS` | `sha256:06b099a00dc6d1260c24c8036a37b22a76f9fd15235c6f2ea9a1dbf7f4688de1` |
+| `R15-old-hidden-bytes-restore` | `600ae7430233c349c25bbe4ab0f9f8fb55e7c92e` | `023e0594e4a6d2f3403635decbac7a9d90ec06f0` | `0d61ca753740d7acbbbc8be097c22249fe1814c3` | `20096f8d2a62bfe7e6990d90b91135ef249879c6` | `blocking-finding` | `invalid` | `none` | 0/0/5/0 | `PASS` | `sha256:7a2e512399cd9f985c107df4704a60ff80fca5427c17409f978e83a628985ec7` |
+| `R15-old-human-binding-restore` | `ed9337d8d288a493c724a71081e4db71972e2e08` | `1d8e4411979ce8ea8dc5697180f8d17be74f1be6` | `311b7ca39ec2903382b3a5da355712e18669e5d0` | `fce1db3bfd0846d5af6dcc96b362a52baec376bc` | `blocking-finding` | `invalid` | `none` | 0/0/5/0 | `PASS` | `sha256:07ac22def5f4cdeed8c7ac281d83e81615b0128b8aabe9278a928884fe45e1a7` |
+| `R15-old-invalid-delete-recreate` | `f26bbc4c9cdbbf3ad4b2cd18c03b6ae60ef51fc4` | `4fa6ffd247960df785d1e957e4cd902382e8f437` | `6c016fd4936961a124612cdf9e3d0593a5ae4253` | `b3e62e6398e4ee29f708d4eca4bd98a4b699b015` | `blocking-finding` | `ambiguous` | `none` | 0/0/3/0 | `PASS` | `sha256:fb217f099220cab6fad15c006951e97597ba59704e67f0834792ef660f360927` |
+| `R15-old-valid-delete-recreate` | `d949c6358b9809dbc4c19c55ccc30fab511c7413` | `5f6066d0642c29fbb3414c54445b8ac08d5c99ff` | `195db54730459f533d7ca3acfe495c8539bff024` | `de690fe09e6d88d499db4b3ebccdb7dbfb8b5617` | `blocking-finding` | `ambiguous` | `none` | 0/0/3/0 | `PASS` | `sha256:91a3e1a43f370c28cb380cd4769a7f0fc187fe76b6a867a6b2c7841dabf8789e` |
+| `R16-earlier-landed-evidence-reversal` | `e731036f833027f6e32ae9d17deec1f1b3114412` | `f8186fb2af1ae0e23196a4ac0095582433643daa` | `f683decfbff9ef63199263286c9e84464510596a` | `aee42abb66d8ba55343efe6f741c32987563844e` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:db4272f6cb89674c6de7e319d7dd9f815459f745fc8ca2fb05dae151ef656677` |
+| `R16-pickup-evolution-0-backlog` | `41945ab0488983f425986ec3f815e50e974be318` | `ddee8c3c0a47baed150ff41c81fe3dd3578991e0` | `9855a5872fa2cf2df888f6d9e67e623d3d1a6336` | `50ddfeceda267269a756eff178f2e6f2dcde7af7` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:6ae1dae872c3a7edd31242f52b70f341388d6d362975b8bf59f4ab0d370a6e39` |
+| `R16-pickup-evolution-2-blocked` | `e7e14e5b5790e4682f7609b3ca494fc9fd1e9218` | `97de8555908750bc8bfe4f195811124e6639b33e` | `33ad8c66fdbdffdc0243fe153551135b9005716c` | `48a4d96e210ac69ff036bff2bd154d6e496e6a05` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:867b42883e619030833384ff432cbab393ed91b47cdf562973ba7e3a5bdf0fe6` |
+| `R16-pickup-evolution-3-in-review` | `7be6b185c13cdf698e8617ca833d5916efff192d` | `0732fd851a8ac5e656c0ce67c7e1dc8a32b5278c` | `5cf4e2b071339b798526a53a583445a2486574c9` | `66aae1f38225afbdde6a9af1c261223a7505c461` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:aa1c3061c0e6c20ecc7ddcb8b71e5aed70c651879361ebcbab59378ffd95c164` |
+| `R16-pickup-evolution-3-in-review-drop-artifact` | `7be6b185c13cdf698e8617ca833d5916efff192d` | `0732fd851a8ac5e656c0ce67c7e1dc8a32b5278c` | `1f755543bb27e4bf3993cda3a0e3caa23958156e` | `04e4cdf6f4c210ea0a27c59ed86f1d01627024c2` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:500aaf169463aeeee146b1f8af3855995cdd2caab1ac372f4b449bcb66f5ea95` |
+| `R16-pickup-evolution-4-done` | `28b720891ddfd4c7291ada824d3d2196cf4a560b` | `da9ebd1326c500e7d2c008fdb80f43be5cf13ff9` | `73671f9d7c2e8bbb33502cea70d458f393e193de` | `a8a309c333926cb8144f022c4356736917e5907f` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:50bf31020dbfa1e2ed4e92ef0adc43b6a4b1096c4a0d96bf3c8c1c428ad674ad` |
+| `R16-support-adoption-drift` | `a831384530c69ef834d1d997c25ffb996cfa4bbc` | `be001bade214359024c192e8b06d79229261a4c7` | `73831199772231659ced8a48120aad1300b8c748` | `ce12604ff0140d20fdda463a6140634b62f35bed` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:c03411f841106c432429370938b464f91f7c5bcbbd0cf6dfddcd988dc5d94a2b` |
+| `R16-support-forward` | `8617eee2ba78f3977a9e7e0329159f725633daac` | `4690d1f06ca2513358bd47fc88e8dfdee3a15d71` | `96bc9493f05ebaadc816a3ae65eda0b5ff5d7500` | `9e15331efb2e68a1762d26fed1df245232a40f2d` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:61dbd10e57ea026a619b9d25d212143e5e0fd87c07a5adf01f03433e66b43d05` |
+| `R16-support-invalid-source` | `b5e005e8c934907d6548515f752cba73b79797da` | `8cc15771a0e42ecaa2b04166fdd57589976cb454` | `721b76a6cbd766fe86194e47131e6c285dfeadae` | `2c6d7881177ab459839ec9bf195c035cb8faeddf` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/0 | `PASS` | `sha256:b3c2d5ec408247b116ec3fa8cd60b15d583e70e06a8624e2ae5ce997f8283183` |
+| `R16-support-nested-drop` | `168496fb2f34612a9276eab0151b2b83bf1edd88` | `13967af6be58e3cbea6ee31c6f54f6c39b246626` | `aef26152c29cebb399b327271148437ada1e6ed4` | `95622f34bd3618ecc561897fe977861d26c1a4c8` | `blocking-finding` | `invalid` | `supplier` | 1/2/1/2 | `PASS` | `sha256:4cfff5efd9dced517657b86be6250185e3d99faf13519c4f598c849dcb990700` |
+| `R16-support-permutation-diamond` | `f3d302490bc5c12be93f9392e00071fef0822ffa` | `b82141d042aba0552175891be684c7dd7eccc579` | `6d22e2f6448d676ffb9274da6d517fbe4c0a578c` | `04baf28178f9b9b80761050e875ca2f993b4792a` | `no-finding` | `valid` | `supplier` | 1/3/1/3 | `PASS` | `sha256:5cdba507e02086888c2ad8642181a8fde442864553707edd43441ddfc92f1cf0` |
+| `R16-support-reverse-drop` | `96de2cbd6d1afee44ffb6a03dcd12ea53ade9d70` | `fdd6aafdea7adfb0255ef9c1cf12168a23685d00` | `804755e7eb510b8b91248f005aae36c71ffd8943` | `c24c0ed6dd25307717255c297879a96ee8c40f7c` | `blocking-finding` | `invalid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:9f11ef60937ef4cdd1503dbe17a8af743dec2325c8e23c241844f677932a1d06` |
+| `R16-support-reverse-preserved` | `f3b2fb92a748ae2b38142cc01b1542b5302dcdfb` | `1f62604717746cdf35f2f13b4efe8789e9a73118` | `0fdd67b1c8fc2e22fa8ac52d78b5bad18472cdab` | `e38824daf72c0fbb9c049b6662fea36ad262f8cd` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:ae47d50a7bb9965758a298e562364dbe1727657073a2c146896d8e0d1cb16a83` |
+| `R16-support-source-evolution` | `ffc5faa56114e44e8497228192ca4daacd278179` | `91474815e967e29084c0d18638907fe068dfd87e` | `fd4c72dc55aefa17db4c423688cf49ad002dcd38` | `2614fbbda55f0fd12af32872df6361a290c8b12b` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:d3f8577f925be69e550282d37738f6a4d8b0e07b78ee8e7a8fe137e1378c67d6` |
+| `R3-01-two-invalid-causal-sources` | `73373ac5106e43d8643b5b616268d77a5ca1d264` | `8f89d0fc4c063c0bbabb284434f74bcf244fb5d3` | `e7f081a1bf94edfa0f7bec6f5cd0953631515354` | `8ed846d60715d845a5e19ab6b299ce853a592614` | `blocking-finding` | `ambiguous` | `supplier` | 2/3/1/2 | `PASS` | `sha256:45ebbbd011273dfbedaec9e1e7cb9d0200bd379ef0b04f52c983aaf8f375f088` |
+| `R3-02-invalid-valid-causal-competition` | `16722b83a642e40f2157c752a07adffddfaa709d` | `35e767d91f32b96f8f8308b431b5c6a0b35be23f` | `212aed04a9840447658dd22d468fbe33fd2867d8` | `ff42531aadc6ffa000560bc56d995993ffa8e62c` | `blocking-finding` | `ambiguous` | `supplier` | 2/2/1/1 | `PASS` | `sha256:ee67c20dcffb1ba55a5eed7c3c720622a59be9e484e253bbb88a6ee75407a029` |
+| `R3-03-unrelated-invalid-does-not-poison` | `1e44d8c3cba4bdd091bd1ae218a504f5b7d938fd` | `ba83bd926d133cee0384ae4b8fd577de5d14e835` | `15688654c25ae26d20dd9d4c248f7dbbafee0d15` | `433bb31a23f524c2a61cd0084e0a1ecda0af8c3c` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:0c8274679ec73f9ccfd034b8195c617c5e2c80b0915e68dec2cef212a7bc0694` |
+| `R4-01-same-root-valid-diamond` | `4e831314d34c2897a072cca5b58303d8fd0e7ddd` | `2ae7f29324bd8d6b29c1f7640602fe7ec9193b1e` | `01eb3e5ec92cb370e449ab8788842c6da54c8c80` | `a7bbf4b40d0a3322205e3d8407eee73b9b11ccc9` | `no-finding` | `valid` | `supplier` | 1/3/1/3 | `PASS` | `sha256:128388a65e4bd80e44340dd14bfce63d6255db837bc74a4177ee2158929770cb` |
+| `R4-02-distinct-valid-root-diamond` | `10965dc1169826888c7d66e2389f9f90787c0064` | `286e35141edc20fad35f8b0d4aeb4930c403d038` | `9fcd47d11efc1e44d5037a8a8701c4bb63aa4172` | `37a75ca4c96e8966c19fa18afe6b6f9b1e4c10d7` | `blocking-finding` | `ambiguous` | `supplier` | 2/3/1/2 | `PASS` | `sha256:9b8e69880252fc28e96b714ccb691042bc1f70ca7a381f20b87916fa684d5600` |
+| `R4-03-equal-root-plus-invalid-diamond` | `90e37b9adc7b3b428f2963282519639354bd2b56` | `de44aaea6c73d11ca46c2255f39f9b9a3d10d36e` | `a9a5dab2ef770bd3d77a9a1eee125e74d02f2b3b` | `3c9778ae10bc7a945bb59ad802db12bd6803ea64` | `blocking-finding` | `ambiguous` | `supplier` | 2/3/1/1 | `PASS` | `sha256:7ff2cb76bac717e77058a3fb78a449ac19bc94bc7da26fabb40e41c524164b0e` |
+| `R5-01-invalid-redelete-after-supplier-reintroduction` | `1e5dad973b3278ca8c12f3dd74f72250eaaf9f09` | `c63664276a141f3f60f61c9d404de201e6f8cf16` | `3b07620bd6ed19324c9ee2dc55474f10854dc1e1` | `d40a531fd9a0dacb986f9259ac6f94ec0d248faa` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/1 | `PASS` | `sha256:39bdc37a0963059db1738eb4c0baa4be7cf270a2027c4bb237fed9b2f7946914` |
+| `R5-02-valid-redelete-after-supplier-reintroduction` | `79b338b3ef54382a0ec95e87a7ba962b1ec7c20a` | `9c8b1418effb6889d14466e278a7987b7e7cfbc3` | `3b0a6316833b818079a00141bb5ef27df4a4bc36` | `fb0bff9778f436aed2a46f887eafb84e1c74ea5f` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/1 | `PASS` | `sha256:f99bcab751563646578e9bc3557ae334db1af4267413b4fa82cd054ebbc7c015` |
+| `R6-01-valid-plus-invalid-all-absent` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` | `5dc5378fdc316aa30dce282d0388a438d755b067` | `c1d92f49ddecd5097d7db52863c2b8e990b43810` | `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:f048b23084064b592a798268d02937f4a70248185e22e7a167f0e37a68aef9d4` |
+| `R6-02-valid-plus-ambiguous-all-absent` | `f61617485ff0160e37de559fe752c56ff3bcb5f7` | `10a37a2bc559519d6d84f70850b0a78445c3d5ec` | `bae78a9473f3a719563bfac05f9a815f8003917b` | `4ab46009954bb98c5f22629274722667dc21ca37` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:1c702699d863225cb310146d009618efcd910d6bf84ee77ae6235e5b92fe6751` |
+| `R6-03-two-invalid-all-absent` | `f5141f92b29541282cf1ec520470e8c604aeaa6b` | `eb354df4fb54776834a9dff53f51f496a2bb338f` | `b5c24e5f55b7a8e0a89d51599153e77ebbbf85b8` | `8f769727f1c641bd2587115f2fbcda5fdda816d1` | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:feb12cb61eb8cbc357e559997a8bd1e40af5b5c512359554edc0eb07b663f62a` |
+| `R6-04-same-valid-root-all-absent-wrappers` | `c4ad2cb41bff8803f0f3d5b81ea0cfd785c9aa59` | `c3b9fb54026383a350146fb2f25243c9e8c7cb01` | `82463b399db3f3fb0aabd0ca1e0b82a61afb96fc` | `7bf74330f432155c3c39eedbfc81fa72bface489` | `no-finding` | `valid` | `supplier` | 1/2/1/2 | `PASS` | `sha256:542a53d71868a77626c97a15ffbec7d36760d143cb17f81cfa73a9e0ea92339a` |
+| `R8-adapter-M-N-frontier-counterexample` | `1e44d8c3cba4bdd091bd1ae218a504f5b7d938fd` | `ba83bd926d133cee0384ae4b8fd577de5d14e835` | `15688654c25ae26d20dd9d4c248f7dbbafee0d15` | `433bb31a23f524c2a61cd0084e0a1ecda0af8c3c` | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:7495d7c5ac4883303d45c695e165824f98f62c32df4bc607134fc1ea90caff0b` |
+| `R8-adapter-M-input-variants` | `4355a7786719d4f001028cb4d39a6348f5563a72` | `36143d1a641c4b1233ed872cf99c36a171a4d929` | `bdb42c6aa3dbb72a2d9c1af9d6f83a0f021944a1` | `a8e46d197e36d38637dfc0e22d7d1ce6d01d820e` | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:8ee45980af0c910253652c0ee4154ad0784b84f9239e1145aef0d7647275190a` |
+| `R8-direct-human-response-conflict` | `92c80d9c65c7be349d0a6c663a6a2ea9c3c2397c` | `1dc4f0dc77aae1eefaef0bb443ec187ff1efb23d` | `2b7dacb87e24c729b4948de47f6d473c153fc210` | `cb29049ff107a9a11a4ec7babbdee21819518dd6` | `blocking-finding` | `invalid` | `direct` | 1/0/2/0 | `PASS` | `sha256:283f4947e9e94273b7855dc1ef435158bbfce6095d13da21984a6da606617692` |
+| `R8-direct-human-response-identical` | `2b79814b0bce6f1556c0b2724ade9d7bbb4bf939` | `b3879039d6d7168e89b3046e6e60e056460907c1` | `f345727f01fdf252be3f622bac93c727f2c24605` | `2c2289035cfc91c73564f6a97b326ebca02be132` | `no-finding` | `valid` | `direct` | 1/0/2/0 | `PASS` | `sha256:a529776297f294bb02b095b3216b0fa9936b495663e14a5b87fcfb4691462f62` |
+| `R8-review-binding-divergent` | `9b4889771f49a83cd02600a2de58fc5e6e8b8259` | `e3c594800cfe94f4f23c58060ae4ab31f50c078c` | `8f4cb69d5a3f4eac8d69165b54f73f45e53d1f98` | `dc70864ec5e13a399d4966356b9803075681a0e6` | `blocking-finding` | `invalid` | `direct` | 1/0/3/0 | `PASS` | `sha256:0e2480ff56b9f154ca4f63d6a3a7644c33b56ae3bf6a94b2c87d7c1d3f56eeae` |
+| `R8-review-binding-identical` | `45b7550dbdc799efed73af109da57c6906d428a0` | `a3f97a3b22945e663eb10180bde5de3b7bf790fa` | `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` | `b2dbe65f89982fb586b0fb5349454d80c7c53310` | `no-finding` | `valid` | `direct` | 1/0/2/0 | `PASS` | `sha256:20456f97ce822cb1e571affc1548f6902ca7f264084520da4857555e3c0feff2` |
+| `R8-review-binding-terminal-conflict` | `cd64224f775f16bc2099816c594012a9592f8536` | `356f3f37cdffaf8f6c568a158a32c478f55a0e13` | `317ee20aba90b31295ed5626eb1bd37f1926a011` | `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `blocking-finding` | `invalid` | `direct` | 1/0/3/0 | `PASS` | `sha256:f9d40c937d06f5528428728a9a3cb777af87382f4d411e383b9d3de390e7a47e` |
+| `R8-supplier-human-response-conflict` | `255e448f3c735fefdcee3c07071c3d6bb6abb312` | `27927fe11bdeee043660e700c81e8cb3853c56bf` | `04af3169e321f7615236785dd2834296aff6748b` | `1fb9fc40da2d44e839830611cc20d0aee23c560e` | `blocking-finding` | `invalid` | `supplier` | 1/1/2/0 | `PASS` | `sha256:ca5e2e4a936316236357db35ad9f1fe548a4f93ccb9917a6be8b3151f44f07fb` |
+| `R8-supplier-human-response-identical` | `800658fac71a8c7fbc2d257bde57964cc96dcef9` | `f33b095abbf3c3e3225e0fbfc663b0a7f52d312b` | `08a3ec18a07b71e5aa95e1651ae93ce0f0e6a8d7` | `e94946d2990fe3c67bc61676f66f90fab1b7a26a` | `no-finding` | `valid` | `supplier` | 1/1/2/1 | `PASS` | `sha256:bdb502404344f08c0e23444c3882626da1efdb7156e95b3a09ba4c09ad96eb9e` |
+| `R9-direct-review-revision-pending-fill` | `323d65ca92bcab39b2c0612a27b148e391cce838` | `ea123742664bc85265ab6385a846c020a8ca3e8c` | `310feea03d098ab049b5b5c0c781134aef3281b1` | `6f11bd5de26dda0bbf565ba63d829a72ef51360b` | `no-finding` | `valid` | `direct` | 1/0/2/0 | `PASS` | `sha256:0503890a048e78da0740624d7721ce93c32b975c5d7c04094d60c227998348a4` |
+| `R9-direct-review-target-pending-fill` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` | `a7ca8baea31e18d5a66c9866590838aa61b01c76` | `b55151e1a8c959e07397fd35006ab4b98e466972` | `7406c126a4a04f22492f7e1677d05be0f2c5951f` | `no-finding` | `valid` | `direct` | 1/0/2/0 | `PASS` | `sha256:b65ceb9f5342816bb64cb40e7eeb41e154ecc371f958756eef29da8f281c57c8` |
+| `R9-supplier-review-revision-pending-fill` | `fe04e4837703b729500127432fb439f8714c4f95` | `e76da4ccabd64cc1cfa96050fff7486272a3336e` | `da736296c1764ede66977136251d3e78dca23f5b` | `77cebbd7a8d42d98fdb88db9452ced1cd3a27bb5` | `no-finding` | `valid` | `supplier` | 1/1/2/1 | `PASS` | `sha256:8e185bbb6ce9ba7135014381a4653f2e0f7a13c219a296ef4a054e424a37a92d` |
+| `R9-supplier-review-target-pending-fill` | `a88ea4ed82ce9d444b54742625a56bdc9abad2ab` | `20cb6a6f44d996a53ee5b1885bc53f6ab176aa68` | `7c9db45a3c694b3b6c80b01c1eec00d70a584caa` | `601d084d2fb4d533d8794dbfa14d530d1bd19dce` | `no-finding` | `valid` | `supplier` | 1/1/2/1 | `PASS` | `sha256:9e65d8f88c8f9a578a5fbc2247474f2f24c8fe97900e5d8e975b5d5dc4f84301` |
+
+A/P/M/S means authority, propagation, persisted mutation, and supplier-support checks.
+
+## Executable S aliases
+
+| Alias | Maps to | Classification | Evidence | Mode | Authority | Invalid authority | Propagation | Status | Record SHA-256 |
+|---|---|---|---|---|---:|---:|---:|---|---|
+| `S1` | `P1-direct-linear-valid` | `no-finding` | `valid` | `direct` | 1 | 0 | 0 | `PASS` | `sha256:fef7c69b2733ef9300eb8a94c5402f06644504c1630441cd8bc5f6ae421c57e0` |
+| `S12` | `P12-merge-supplier-valid` | `no-finding` | `valid` | `supplier` | 1 | 0 | 1 | `PASS` | `sha256:adb7c8e1467d16f5adb49e5287cc1393850094f70ea67894484b9ad98e6ac8f9` |
+| `S2` | `P2-direct-linear-invalid` | `blocking-finding` | `invalid` | `direct` | 1 | 1 | 0 | `PASS` | `sha256:88ba94fa4ccea046af31fca874581f9a7cffa7f52de5f67e6a8d799ef6e05268` |
+| `S3` | `P3-genuine-old-loss` | `blocking-finding` | `none` | `none` | 0 | 0 | 0 | `PASS` | `sha256:55e72e86cc683168757a7da62a39580e628f3a5af4662244e3715d24e458c397` |
 
 ## Damaged-mode controls
 
-Each command first runs the undamaged classifier, then enables one deliberately
-wrong behavior. `OBSERVED_RED` means the damage changed the verdict in the unsafe
-or unsupported direction that the control was designed to expose.
+| Control | C | O | M | N | Baseline | Damaged | Status | Record SHA-256 |
+|---|---|---|---|---|---|---|---|---|
+| `broad-review-pending-normalization` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` | `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` | `32c6405daf9887441afff5bc7ec846e3fb3e2096` | `ba4edb8f323adba9645e47c2536f2b621bed7855` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:23dc8ec686edc2320d069f0c120f48741453a33e5cdbff08cb8af6a409d68087` |
+| `identity-multiplicity-collapsed-to-set` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` | `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` | `f75429c785808a191c0600345870097251ca8f8a` | `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:3798269dfc5cdf8327f54a4447b5fc95652b9d0edd0601e2323fa03a0a577d2f` |
+| `literal-review-pending-treated-concrete` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` | `a7ca8baea31e18d5a66c9866590838aa61b01c76` | `b55151e1a8c959e07397fd35006ab4b98e466972` | `7406c126a4a04f22492f7e1677d05be0f2c5951f` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:945dffe0d06d94a47a6ba22555489e51f9b9da2ec02df9ba39a133bb79d417e0` |
+| `missing-all-parent-direct-validation` | `d7dc739a275601572c26fadc522a2ae4b71d3b12` | `ff1d9fce8cf6d941f7e0210a9cc6b3380df94741` | `84115c60a389aebfc0cb9c89964539849e1540d3` | `bd005f27951b3bae6225e8cc736936db93667388` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:425af7a4e7cd2b66e2dc4495098026cbe8c875706e12799668550c5a191102b7` |
+| `missing-post-event-continuity` | `ec84d0800c660f6379b21cfd721122fa06162999` | `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` | `5b3f0ee9f157786e8392185afa848583d9af19bc` | `258e858010ccd1e43716ab0269faa86ae08808a7` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:c25f47b169e09cd2ef7ea0ecb57afe8253e5119d6f2374c2c0a7b3ccf7de6afb` |
+| `omit-old-tip-human-binding` | `cd64224f775f16bc2099816c594012a9592f8536` | `356f3f37cdffaf8f6c568a158a32c478f55a0e13` | `317ee20aba90b31295ed5626eb1bd37f1926a011` | `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:0bab94306d6845f2ec8cdf4c1de522611bb05418095ace343fee1fd23969eb71` |
+| `omit-supplier-carrier-human-binding` | `874d2e356033d133cd409bc9deb8e93198d0ec78` | `adf1ce7876b84e595992f5865f871b59ea892234` | `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` | `8c3e7d42c53baf018d30c895ecd64b799edb5d45` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:e5e53510d1286a20c149383d705033fbfcfa65864a45a46d4ebbc52a9d9df85a` |
+| `omit-unanswered-published-review-binding` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` | `8a2de576d9304a51988bfbd943749129f828f882` | `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` | `b952d0de4952cb720e3056abe78c7ad8ee52d50f` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:67790aaca6d00cdccfdfd7afb72471323bbe3419e942eb942c5661facfc0a536` |
+| `reopen-pre-C-genealogy` | `cd13c47983b0624a824f5fc583f7de647b240504` | `03c76bf6661f670a705245479f406a1d3ba7b279` | `3258b9e2bac9ea4c40a95a8db2cfbdaf5c972b84` | `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:c23f6f8f8d46e62ae9feac23176e4d6280df20347adebb0f264ffed3cdc155a4` |
+| `skip-old-side-continuity` | `f26bbc4c9cdbbf3ad4b2cd18c03b6ae60ef51fc4` | `4fa6ffd247960df785d1e957e4cd902382e8f437` | `6c016fd4936961a124612cdf9e3d0593a5ae4253` | `b3e62e6398e4ee29f708d4eca4bd98a4b699b015` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:4f837d564a3490535c3be2f769eca9fdfae36359ef183709f0338bb488b19504` |
+| `skip-persisted-candidate-continuity` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` | `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` | `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` | `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:5bbd7f36f6064440fa1486abf6770ba12e12a95d1fcce0a96a7e00d2a6e37eeb` |
+| `skip-persisted-frozen-skeleton` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` | `d115e7063e3ffad24a495c9ffae5d70ffaf81928` | `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` | `a47b7307d654cb07612ccd7b04f1c32ab874c475` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:d5b91976527792e4100bbc995aac896c228865d0ea364385ab59fb9942e576dd` |
+| `skip-preserved-state-validation` | `5604e77ef241630dd284448a224de046d2caf460` | `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` | `215f27a473f8476dc01cc01efe69516a76346385` | `8702850ba2e7f56c29b16557c496adcaa627829b` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:4cdde642ed2858d83065a58bef16993ccc7f5dc2e785e027e8cbd17298e5f939` |
+| `skip-supplier-support-certificate` | `96de2cbd6d1afee44ffb6a03dcd12ea53ade9d70` | `fdd6aafdea7adfb0255ef9c1cf12168a23685d00` | `804755e7eb510b8b91248f005aae36c71ffd8943` | `c24c0ed6dd25307717255c297879a96ee8c40f7c` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:14e4404804f372ac8a54f54f8040390979d34bcbb6d80272ea9b329013049dca` |
+| `sole-valid-ignores-invalid-root` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` | `5dc5378fdc316aa30dce282d0388a438d755b067` | `c1d92f49ddecd5097d7db52863c2b8e990b43810` | `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:1ca789ec3d390b1ec93dc149a9ffd72d5b4887793591c934e1edfa48132290c4` |
+| `supplier-authority-borrowing` | `8d565f19c072aa8f0cef381b3f0e8fc58029820f` | `41865c9def0f066b1d121b9882872ecf33bfe729` | `fe37d71173d0c2d5841f116326eacd8b75eab8cc` | `8579708e09425d6c4e09b9260991148f8ef3ed6b` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:a43a1fe4324e4cb4ca24da8856bf1bfd5e950af0c6adf47854486375cd455de0` |
+
+## Measured cost and object recovery
+
+P22 measured 133 graph commits and 16 disappeared actions with exactly 1 POC graph enumeration, 0 POC-owned per-action history walks, 10972 snapshot requests, 10969 snapshot-cache hits, and 135 actual Git processes.
+The process count includes 129 imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. Production must reuse its parent cache and set a measured process budget. This POC sets no guessed ceiling.
+
+PCX-19 is replay-bound by `sha256:58e8f1a2bc9dedc8208275e4b827369d201ba774155d4981c0a50cba20526a4b`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.
+
+## Reproducible audit
+
+Use two fresh, empty scratch roots:
 
 ```sh
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-all-parent-direct-validation
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control supplier-authority-borrowing
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-unanswered-published-review-binding
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-frozen-skeleton
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-candidate-continuity
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-old-side-continuity
-```
-
-| Control | Baseline -> damaged | Status | C / O / M / N |
-|---|---|---|---|
-| `missing-all-parent-direct-validation` | blocking -> no finding | `OBSERVED_RED` | `d7dc739a275601572c26fadc522a2ae4b71d3b12` / `ff1d9fce8cf6d941f7e0210a9cc6b3380df94741` / `84115c60a389aebfc0cb9c89964539849e1540d3` / `bd005f27951b3bae6225e8cc736936db93667388` |
-| `supplier-authority-borrowing` | blocking -> no finding | `OBSERVED_RED` | `8d565f19c072aa8f0cef381b3f0e8fc58029820f` / `41865c9def0f066b1d121b9882872ecf33bfe729` / `fe37d71173d0c2d5841f116326eacd8b75eab8cc` / `8579708e09425d6c4e09b9260991148f8ef3ed6b` |
-| `identity-multiplicity-collapsed-to-set` | blocking -> no finding | `OBSERVED_RED` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` / `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` / `f75429c785808a191c0600345870097251ca8f8a` / `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` |
-| `reopen-pre-C-genealogy` | no finding -> blocking | `OBSERVED_RED` | `cd13c47983b0624a824f5fc583f7de647b240504` / `03c76bf6661f670a705245479f406a1d3ba7b279` / `3258b9e2bac9ea4c40a95a8db2cfbdaf5c972b84` / `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` |
-| `missing-post-event-continuity` | blocking -> no finding | `OBSERVED_RED` | `ec84d0800c660f6379b21cfd721122fa06162999` / `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` / `5b3f0ee9f157786e8392185afa848583d9af19bc` / `258e858010ccd1e43716ab0269faa86ae08808a7` |
-| `sole-valid-ignores-invalid-root` | blocking -> no finding | `OBSERVED_RED` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` / `5dc5378fdc316aa30dce282d0388a438d755b067` / `c1d92f49ddecd5097d7db52863c2b8e990b43810` / `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` |
-| `omit-old-tip-human-binding` | blocking -> no finding | `OBSERVED_RED` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` |
-| `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` |
-| `broad-review-pending-normalization` | blocking -> no finding | `OBSERVED_RED` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` |
-| `omit-supplier-carrier-human-binding` | blocking -> no finding | `OBSERVED_RED` | `874d2e356033d133cd409bc9deb8e93198d0ec78` / `adf1ce7876b84e595992f5865f871b59ea892234` / `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` / `8c3e7d42c53baf018d30c895ecd64b799edb5d45` |
-| `skip-preserved-state-validation` | blocking -> no finding | `OBSERVED_RED` | `5604e77ef241630dd284448a224de046d2caf460` / `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` / `215f27a473f8476dc01cc01efe69516a76346385` / `8702850ba2e7f56c29b16557c496adcaa627829b` |
-| `omit-unanswered-published-review-binding` | blocking -> no finding | `OBSERVED_RED` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` / `8a2de576d9304a51988bfbd943749129f828f882` / `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` / `b952d0de4952cb720e3056abe78c7ad8ee52d50f` |
-| `skip-persisted-frozen-skeleton` | blocking -> no finding | `OBSERVED_RED` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` / `d115e7063e3ffad24a495c9ffae5d70ffaf81928` / `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` / `a47b7307d654cb07612ccd7b04f1c32ab874c475` |
-| `skip-persisted-candidate-continuity` | blocking -> no finding | `OBSERVED_RED` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` / `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` / `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` / `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` |
-| `skip-old-side-continuity` | blocking -> no finding | `OBSERVED_RED` | `f26bbc4c9cdbbf3ad4b2cd18c03b6ae60ef51fc4` / `4fa6ffd247960df785d1e957e4cd902382e8f437` / `6c016fd4936961a124612cdf9e3d0593a5ae4253` / `b3e62e6398e4ee29f708d4eca4bd98a4b699b015` |
-
-## Evidence audit
-
-The committed [audit_readme.py](audit_readme.py) is a standard-library-only
-checker for this evidence. It reads a self-test JSONL stream and verifies all
-471 README Git OID occurrences against their named scenario/control regions,
-all seven fixture identity SHA claims, the exact row inventories and ordered
-endpoint OIDs for thirteen named evidence tables, scenario/control result tuples,
-the P1-P22 and PCX-01-PCX-20 inventories, measured counters, aliases, controls,
-and nonclaims. It rejects extra, missing, duplicate, or unknown named rows; an
-OID merely pooled elsewhere in the same region cannot authorize a row. The
-auditor pins its own coverage-check topology instead of accepting edited
-transcript counts. No historical-OID exemption is used.
-
-Two fresh 139-record streams were generated in different scratch roots with
-`PYTHONHASHSEED=1` and `PYTHONHASHSEED=777`. They had zero differing records and
-zero differing fields. Their raw bytes happened to match in the tested macOS,
-Python 3.14.7, and Git 2.55.0 environment, at
-`84b9767384611c5144f7693b40d3b4ae81fbdfa6d6128c1c694fd7007f08a522`.
-That raw digest is an observed replay result, not a portable contract: the raw
-summary includes the Python and Git version strings. The auditor also defines
-a canonical semantic stream by removing only those two summary fields and
-canonicalizing JSON object serialization. It retains every Git OID, reason,
-path, result, edge, and metric. Canonical semantic SHA-256:
-`50d50aac9963a9ee75b373a28978ac32c2a0d6a89c0891b86137cd6659707cf7`.
-
-The ordinary two-stream audit output was:
-
-```json
-{"audit": "PASS", "checks_passed": 2070, "checks_total": 2070, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 24, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 471, "pcx_rows": 20, "pinned_controls": 15, "pinned_scenarios": 122, "plain_inventory_rows": 46, "record_rows": 109, "region_oid_claims": 471, "schema_rows": 84, "schema_semantic_rows": 84, "semantic_row_checks": 186, "unique_oids": 407}
-```
-
-The audit damage control makes nine disposable README copies. Three change a
-current OID, the PCX-01 result, or the 133-commit counter. Six insert a false
-invented row with real OIDs, insert an invented row without OIDs, duplicate or
-remove a real row, swap same-region endpoint OIDs, or edit transcript counts.
-All nine return audit `FAIL`. A tenth control changes one semantic result field
-in a disposable comparison stream; strict comparison reports one differing
-record and one differing field. All ten return `OBSERVED_RED`. These audit-only
-controls are separate from the fifteen classifier damaged-mode controls and do
-not change the 122-scenario/15-control self-test inventory.
-
-## Commands run
-
-```sh
-python3 automation/install.py
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-all-parent-direct-validation
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control supplier-authority-borrowing
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-unanswered-published-review-binding
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-frozen-skeleton
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-candidate-continuity
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-old-side-continuity
-root_a="$(mktemp -d /tmp/production-contract-r15-seed1.XXXXXX)"
-root_b="$(mktemp -d /tmp/production-contract-r15-seed777.XXXXXX)"
-PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r15-seed1.jsonl
-PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r15-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r15-seed1.jsonl --compare /tmp/production-contract-r15-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r15-seed1.jsonl --damage-control
+PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r16-seed1 > /tmp/production-contract-r16-seed1.jsonl
+PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r16-seed777 > /tmp/production-contract-r16-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r16-seed1.jsonl --compare /tmp/production-contract-r16-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r16-seed1.jsonl --damage-test
+python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
 python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 122/122
-scenarios, 4/4 executable aliases, and 15/15 controls. Each standalone control
-exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
-findings and six pre-existing advisories about frozen human-action records. The
-first commit hook selected no repository test files because this directory is a
-design record path. A commit-message-only amend then selected the full lane
-because its staged diff was empty; all 16/16 repository test files passed.
-The r15 evidence pass explicitly reran that full lane; 16/16 files passed in
-53.62 seconds.
+The auditor requires raw and semantic equality for comparison, rejects
+duplicate keys/IDs, enforces exact catalogs/key sets, compares a fresh
+manifest byte-for-byte, and regenerates this README in full. Its damage
+matrix covers invented/duplicate/missing rows, same-region OID swaps, tuple
+relabels, false verdicts/counters, contradictory transcripts/digests,
+unknown cost rows, noncanonical ordering, BOM, CRLF, and missing newline.
 
-## Nonclaims and tests not run
+## Nonclaims and integration gates
 
-- The exact pending comparison and its O-binding contract exist only in this
-  executable POC. They mirror the production schema's accepted sentinel but do
-  not change production review parsing, schemas, templates, or workflow behavior.
-- The POC does not change or claim parity with the production reconciler's staged
-  index path. PCX-21 staged/committed parity and PCX-22 unmerged-index handling
-  remain production-integration gates and were not run.
-- The POC does not prove that a remote ref update is prevented. Repository
-  remote status is post-push advisory, so no push-prevention claim is made.
-- Squash remains unsupported. P21 proves that a squash-erased lifecycle blocks;
-  this POC does not invent a squash-stable receipt or patch-similarity authority.
-- The pre-commit full repository lane ran 16/16 test files. No push lane,
-  platform matrix, or hosted integration suite was run.
-- No remote, hosted-provider, partial-clone, or production-scale performance test
-  was run. The only cost claim is the measured 133-commit, 16-action fixture above.
-- No production code, schema, task record, contract, dependency, adapter, or
-  neighboring POC changed, and no branch was pushed or pull request opened.
+- This POC changes no production reconciler, restack adapter, workflow input, schema, task, or run record.
+- A post-push check can only be advisory; prevention requires a pre-push or server-side production gate.
+- Squash/deletion-only provenance is unsupported and blocks; only complete cherry-pick preserves authority.
+- `M=N` is not a general fallback; the adapter must provide explicit candidate-side `M`.
+- Certificates intentionally overbind non-action authority delta and referenced paths until production exposes a validator-owned support receipt.
+- Review successor/reask and boundary-review supplier leaves fail closed rather than simulate semantics.
+- The one-pass claim excludes imported production parent queries; production integration must cache/eliminate them.
+- PCX-21/22 remain production-integration gates, not isolated-POC completion claims.
+
+## Tests not represented by this artifact
+
+This artifact does not claim deployment, a real remote push, production
+adapter wiring, server enforcement, or unsupported review-successor coverage.

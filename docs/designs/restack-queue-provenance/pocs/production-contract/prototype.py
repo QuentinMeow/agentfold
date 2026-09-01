@@ -61,6 +61,9 @@ class Metrics:
     snapshot_cache_hits: int = 0
     identity_calls: int = 0
     authority_calls: int = 0
+    support_certificate_calls: int = 0
+    support_adoption_checks: int = 0
+    support_paths_checked: int = 0
     mutation_calls: int = 0
     per_action_history_walks: int = 0
 
@@ -105,6 +108,7 @@ class Damage:
     skip_persisted_frozen_skeleton: bool = False
     skip_persisted_candidate_continuity: bool = False
     skip_old_side_continuity: bool = False
+    skip_supplier_support_certificate: bool = False
 
 
 @dataclasses.dataclass
@@ -120,6 +124,7 @@ class Event:
     reason: str
     causal_roots: list[dict] = dataclasses.field(default_factory=list)
     reason_records: list[dict] = dataclasses.field(default_factory=list)
+    support_checks: list[dict] = dataclasses.field(default_factory=list)
 
 
 def is_git_command(command) -> bool:
@@ -330,6 +335,7 @@ class ObjectDatabase:
         metrics.batch_processes += 1
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
+        self.flat_trees: dict[str, dict[str, tuple[str, str]]] = {}
         self.snapshots: dict[
             str | None, dict[tuple, tuple[ActionState, ...]]
         ] = {}
@@ -411,6 +417,47 @@ class ObjectDatabase:
             offset = nul + 1 + width
         self.trees[oid] = entries
         return entries
+
+    def flat_tree(self, commit: str) -> dict[str, tuple[str, str]]:
+        """Return every leaf path with its exact mode and object OID."""
+        root = self.commit_tree(commit)
+        if root in self.flat_trees:
+            self.metrics.object_cache_hits += 1
+            return self.flat_trees[root]
+        flattened: dict[str, tuple[str, str]] = {}
+
+        def walk(tree_oid: str, prefix: str):
+            for name, (mode, child) in sorted(
+                self.tree_entries(tree_oid).items()
+            ):
+                path = f"{prefix}/{name}" if prefix else name
+                if mode in {"40000", "040000"}:
+                    walk(child, path)
+                else:
+                    flattened[path] = (mode, child)
+
+        walk(root, "")
+        self.flat_trees[root] = flattened
+        return flattened
+
+    def path_entry(self, commit: str, path: str) -> dict:
+        """Return one typed exact tree entry or an explicit absence."""
+        entry = self.flat_tree(commit).get(path)
+        if entry is None:
+            return {"state": "absent"}
+        mode, oid = entry
+        if mode == "160000":
+            kind = "commit"
+        elif mode == "120000" or mode.startswith("100"):
+            kind = "blob"
+        else:
+            kind = "unknown"
+        return {
+            "state": "present",
+            "mode": mode,
+            "type": kind,
+            "oid": oid,
+        }
 
     def queue_tree(self, commit: str) -> str | None:
         root = self.commit_tree(commit)
@@ -692,6 +739,185 @@ class Classifier:
                     )
         return None
 
+    @staticmethod
+    def canonical_digest(domain: str, value: dict) -> str:
+        payload = json.dumps(
+            {"domain": domain, "value": value},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    def support_leaf_obligations(
+        self,
+        state: ActionState,
+        parent: str,
+        child: str,
+    ) -> tuple[list[dict], str | None]:
+        """Describe only production leaves this POC can certify completely."""
+        fields = RECONCILE.text_fields(state.text)
+        parts = Path(state.path).parts
+        actor = parts[1] if len(parts) > 1 else ""
+        leaf = parts[2] if len(parts) > 2 else ""
+        declared = sorted(set(RECONCILE.context_path_candidates(state.text)))
+        obligations: list[dict] = [
+            {
+                "kind": "production-deletion-postcondition",
+                "authority_parent": parent,
+                "authority_child": child,
+            }
+        ]
+        obligations.extend(
+            {"kind": "declared-path-anchor", "path": path}
+            for path in declared
+            if path != state.path
+        )
+        if actor == "needs-agent" and leaf == "requests":
+            if fields.get("Request kind", "").strip() == "task-pickup":
+                task_paths = [
+                    path for path in declared if path.startswith("tasks/")
+                ]
+                if len(task_paths) != 1:
+                    return obligations, "task pickup has no unique task path"
+                obligations.append(
+                    {
+                        "kind": "task-pickup-postcondition",
+                        "task_path": task_paths[0],
+                        "task_id": Path(task_paths[0]).parts[2],
+                        "pickup_path": state.path,
+                    }
+                )
+                return obligations, None
+            if fields.get("Status", "").strip() != "in-repair":
+                return obligations, "ordinary agent action is not in-repair"
+            obligations.append({"kind": "agent-evidence-lineage"})
+            return obligations, None
+        if actor == "needs-agent" and leaf == "retries":
+            item = self.fixture.repo.root / state.path
+            if not RECONCILE.reconciler_owned_retry(item, state.text):
+                return obligations, "retry is not a production-owned retry"
+            check = fields.get("Check", "").strip()
+            if check not in RECONCILE.CHECKS:
+                return obligations, "retry names an unknown checker"
+            obligations.append(
+                {
+                    "kind": "generated-retry-clear",
+                    "check": check,
+                    "subject": fields.get("Subject", "").strip(),
+                }
+            )
+            return obligations, None
+        if actor == "needs-human" and leaf in {
+            "decisions",
+            "clarifications",
+        }:
+            if fields.get("Status", "").strip() != "folding":
+                return obligations, "human action is not folding"
+            obligations.append({"kind": "terminal-human-response"})
+            return obligations, None
+        if actor == "needs-human" and leaf == "reviews":
+            outcome = fields.get("Review outcome", "").strip()
+            if outcome in (
+                set(RECONCILE.REVIEW_SUCCESSOR_OUTCOMES)
+                | set(RECONCILE.REVIEW_REASK_OUTCOMES)
+            ):
+                return (
+                    obligations,
+                    "review successor/reask support certificate is unsupported",
+                )
+            if RECONCILE.delivery_class(Path(state.path).name) != "non-blocking":
+                return obligations, "boundary review receipt is unsupported"
+            if outcome not in RECONCILE.REVIEW_TERMINAL_OUTCOMES:
+                return obligations, "review has no supported terminal outcome"
+            obligations.append(
+                {
+                    "kind": "terminal-review-binding",
+                    "outcome": outcome,
+                    "review_target": fields.get("Review target", "").strip(),
+                    "review_revision": fields.get(
+                        "Review revision", ""
+                    ).strip(),
+                }
+            )
+            return obligations, None
+        return obligations, f"unsupported authority leaf {actor}/{leaf}"
+
+    def build_support_certificate(
+        self,
+        identity: tuple,
+        state: ActionState,
+        parent: str,
+        child: str,
+    ) -> dict:
+        """Bind one real authority root to its complete support projection."""
+        assert self.objects is not None
+        self.metrics.support_certificate_calls += 1
+        before = self.objects.flat_tree(parent)
+        after = self.objects.flat_tree(child)
+        changed = sorted(
+            path
+            for path in set(before).union(after)
+            if before.get(path) != after.get(path) and path != state.path
+        )
+        referenced = sorted(
+            path
+            for path in set(RECONCILE.context_path_candidates(state.text))
+            if path != state.path
+        )
+        support_paths = sorted(set(changed).union(referenced))
+        raw_delta = [
+            {
+                "path": path,
+                "before": self.objects.path_entry(parent, path),
+                "after": self.objects.path_entry(child, path),
+            }
+            for path in changed
+        ]
+        anchors = [
+            {
+                "path": path,
+                "entry": self.objects.path_entry(child, path),
+                "changed_on_authority_edge": path in changed,
+            }
+            for path in support_paths
+        ]
+        obligations, incomplete = self.support_leaf_obligations(
+            state, parent, child
+        )
+        unknown_entry = next(
+            (
+                entry
+                for delta in raw_delta
+                for entry in (delta["before"], delta["after"])
+                if entry.get("type") == "unknown"
+            ),
+            None,
+        )
+        if unknown_entry is not None:
+            incomplete = "support projection contains an unknown object type"
+        body = {
+            "support_schema": "queue-supplier-support/v1",
+            "authority_parent": parent,
+            "authority_child": child,
+            "action": {
+                "identity": list(identity),
+                "path": state.path,
+                "blob_oid": state.blob_oid,
+            },
+            "raw_delta": raw_delta,
+            "support_paths": anchors,
+            "obligations": obligations,
+            "completeness": "complete" if incomplete is None else "incomplete",
+            "incomplete_reason": incomplete,
+        }
+        return {
+            **body,
+            "certificate_digest": self.canonical_digest(
+                "queue-supplier-support/v1", body
+            ),
+        }
+
     def authority_edge(
         self, identity: tuple, parent: str, child: str
     ) -> dict:
@@ -721,11 +947,19 @@ class Classifier:
                 "production deletion authority could not read "
                 f"{parent}->{child}: {error}"
             ) from error
+        certificate = (
+            self.build_support_certificate(
+                identity, state, parent, child
+            )
+            if problem is None
+            else None
+        )
         return {
             "parent": parent,
             "child": child,
             "path": state.path,
             "problem": problem,
+            "support_certificate": certificate,
         }
 
     def human_response_binding(
@@ -1147,6 +1381,327 @@ class Classifier:
                 for edge in edges
             }.values()
         )
+
+    @staticmethod
+    def stable_support_checks(checks):
+        ordered = {}
+        for check in checks:
+            key = (
+                check["certificate_digest"],
+                check["adoption_child"],
+                tuple(check["absent_source_parents"]),
+            )
+            ordered.setdefault(key, check)
+        return list(ordered.values())
+
+    def replay_support_postcondition(
+        self,
+        identity: tuple,
+        certificate: dict,
+        revision: str,
+    ) -> str | None:
+        """Re-evaluate the root action at one source/adoption projection."""
+        states = [
+            state
+            for state in self.states(
+                certificate["authority_parent"], identity
+            )
+            if state.path == certificate["action"]["path"]
+            and state.blob_oid == certificate["action"]["blob_oid"]
+        ]
+        if len(states) != 1:
+            return "authority root action bytes are not uniquely readable"
+        self.metrics.support_adoption_checks += 1
+        try:
+            return RECONCILE.queue_deletion_problem(
+                states[0].path,
+                states[0].text,
+                certificate["authority_parent"],
+                revision,
+            )
+        except (
+            RECONCILE.GitSnapshotError,
+            OSError,
+            ValueError,
+            UnicodeError,
+        ) as error:
+            raise Unreadable(
+                "supplier support postcondition could not read "
+                f"{certificate['authority_parent']}->{revision}: {error}"
+            ) from error
+
+    def evaluate_support_obligations(
+        self,
+        identity: tuple,
+        certificate: dict,
+        revision: str,
+    ) -> dict:
+        """Evaluate complete typed obligations; generic replay is diagnostic."""
+        states = [
+            state
+            for state in self.states(
+                certificate["authority_parent"], identity
+            )
+            if state.path == certificate["action"]["path"]
+            and state.blob_oid == certificate["action"]["blob_oid"]
+        ]
+        generic_problem = self.replay_support_postcondition(
+            identity, certificate, revision
+        )
+        if len(states) != 1:
+            return {
+                "revision": revision,
+                "generic_replay_problem": generic_problem,
+                "problem": "authority root action bytes are not unique",
+            }
+        state = states[0]
+        obligations = certificate["obligations"]
+        pickup = next(
+            (
+                item
+                for item in obligations
+                if item["kind"] == "task-pickup-postcondition"
+            ),
+            None,
+        )
+        retry = next(
+            (
+                item
+                for item in obligations
+                if item["kind"] == "generated-retry-clear"
+            ),
+            None,
+        )
+        problem = None
+        if pickup is not None:
+            try:
+                status, task = RECONCILE.task_status_at(
+                    revision, pickup["task_id"]
+                )
+            except (
+                RECONCILE.GitSnapshotError,
+                OSError,
+                ValueError,
+                UnicodeError,
+            ) as error:
+                raise Unreadable(
+                    "pickup support obligation could not read "
+                    f"{revision}: {error}"
+                ) from error
+            claimant = (task or {}).get("Claimed-by", "").strip()
+            queue_paths = RECONCILE.task_queue_paths(
+                (task or {}).get("Queue actions", "")
+            )
+            if (
+                status not in RECONCILE.RESOLVING_TASK_STATUSES
+                or not RECONCILE.has_concrete_value(claimant)
+                or claimant == "unclaimed"
+                or pickup["pickup_path"] in queue_paths
+            ):
+                problem = (
+                    "pickup task is not one uniquely claimed monotone "
+                    f"incarnation at {revision}"
+                )
+        elif retry is not None:
+            try:
+                clear = RECONCILE.generated_retry_clear(
+                    state.text, revision
+                )
+            except (
+                RECONCILE.GitSnapshotError,
+                OSError,
+                ValueError,
+                UnicodeError,
+            ) as error:
+                raise Unreadable(
+                    "retry support obligation could not read "
+                    f"{revision}: {error}"
+                ) from error
+            if not clear:
+                problem = (
+                    f"retry checker {retry['check']} still reports subject "
+                    f"{retry['subject']} at {revision}"
+                )
+        else:
+            problem = generic_problem
+        return {
+            "revision": revision,
+            "generic_replay_problem": generic_problem,
+            "problem": problem,
+        }
+
+    def dynamic_support_paths(
+        self, certificate: dict, revision: str
+    ) -> list[str]:
+        """Resolve typed monotone obligations to their current exact paths."""
+        paths = []
+        for obligation in certificate["obligations"]:
+            if obligation["kind"] == "task-pickup-postcondition":
+                try:
+                    incarnations = RECONCILE.task_incarnations_at(
+                        revision, obligation["task_id"]
+                    )
+                except (
+                    RECONCILE.GitSnapshotError,
+                    OSError,
+                    ValueError,
+                    UnicodeError,
+                ) as error:
+                    raise Unreadable(
+                        "pickup dynamic support projection could not read "
+                        f"{revision}: {error}"
+                    ) from error
+                paths.extend(incarnations)
+                assert self.objects is not None
+                tree_paths = self.objects.flat_tree(revision)
+                for task_path in incarnations:
+                    task_dir = Path(task_path).parent
+                    paths.extend(
+                        path
+                        for path in tree_paths
+                        if Path(path).parent == task_dir
+                        and Path(path).name
+                        in RECONCILE.TASK_ARTIFACT_NAMES
+                    )
+            elif obligation["kind"] == "generated-retry-clear":
+                subject = obligation["subject"].strip("`")
+                if RECONCILE.valid_queue_item_path(subject) or (
+                    subject
+                    and not subject.startswith("/")
+                    and ".." not in Path(subject).parts
+                ):
+                    paths.append(subject)
+        return sorted(set(paths))
+
+    def supplier_support_checks(
+        self,
+        identity: tuple,
+        authority_edges: list[dict],
+        absent_parents: list[str],
+        child: str,
+    ) -> tuple[list[dict], str | None]:
+        """Require adoption to copy each root's current source projection."""
+        assert self.objects is not None
+        if self.damage.skip_supplier_support_certificate:
+            return [], None
+        certificates = {
+            edge["support_certificate"]["certificate_digest"]: edge[
+                "support_certificate"
+            ]
+            for edge in authority_edges
+            if edge.get("support_certificate") is not None
+        }
+        checks = []
+        problems = []
+        if len(certificates) != len(
+            {
+                (edge["parent"], edge["child"])
+                for edge in authority_edges
+                if edge.get("problem") is None
+            }
+        ):
+            problems.append("a valid authority edge has no support certificate")
+        for digest, certificate in sorted(certificates.items()):
+            source_parents = sorted(set(absent_parents))
+            fixed_support_paths = [
+                anchor["path"] for anchor in certificate["support_paths"]
+            ]
+            support_paths = sorted(
+                set(fixed_support_paths).union(
+                    path
+                    for revision in [*source_parents, child]
+                    for path in self.dynamic_support_paths(
+                        certificate, revision
+                    )
+                )
+            )
+            source_projections = [
+                {
+                    "parent": parent,
+                    "entries": [
+                        {
+                            "path": path,
+                            "entry": self.objects.path_entry(parent, path),
+                        }
+                        for path in support_paths
+                    ],
+                }
+                for parent in source_parents
+            ]
+            child_projection = [
+                {
+                    "path": path,
+                    "entry": self.objects.path_entry(child, path),
+                }
+                for path in support_paths
+            ]
+            self.metrics.support_paths_checked += len(support_paths) * (
+                len(source_parents) + 1
+            )
+            agreed = bool(source_projections) and all(
+                projection["entries"] == source_projections[0]["entries"]
+                for projection in source_projections[1:]
+            )
+            copied = bool(source_projections) and (
+                child_projection == source_projections[0]["entries"]
+            )
+            replay = [
+                self.evaluate_support_obligations(
+                    identity, certificate, revision
+                )
+                for revision in [*source_parents, child]
+            ]
+            replay_valid = all(item["problem"] is None for item in replay)
+            complete = certificate["completeness"] == "complete"
+            local_problems = []
+            if not complete:
+                local_problems.append(
+                    "incomplete certificate: "
+                    + str(certificate["incomplete_reason"])
+                )
+            if not agreed:
+                local_problems.append(
+                    "absent source parents disagree on support projection"
+                )
+            if not copied:
+                local_problems.append(
+                    "supplier adoption did not copy source support projection"
+                )
+            if not replay_valid:
+                local_problems.append(
+                    "root deletion postcondition failed at source/adoption: "
+                    + "; ".join(
+                        f"{item['revision']}: {item['problem']}"
+                        for item in replay
+                        if item["problem"] is not None
+                    )
+                )
+            check = {
+                "support_schema": "queue-supplier-support/v1",
+                "certificate_digest": digest,
+                "authority_parent": certificate["authority_parent"],
+                "authority_child": certificate["authority_child"],
+                "adoption_child": child,
+                "absent_source_parents": source_parents,
+                "source_projections": source_projections,
+                "adoption_projection": child_projection,
+                "tree_projection_status": (
+                    "valid" if agreed and copied else "invalid"
+                ),
+                "postcondition_status": (
+                    "valid" if replay_valid else "invalid"
+                ),
+                "obligation_evaluations": replay,
+                "status": "valid" if not local_problems else "invalid",
+                "problem": (
+                    None if not local_problems else "; ".join(local_problems)
+                ),
+            }
+            checks.append(check)
+            problems.extend(local_problems)
+        if not certificates:
+            problems.append("supplier root has no support certificate")
+        return checks, (None if not problems else "; ".join(problems))
 
     @staticmethod
     def stable_oids(oids):
@@ -1672,6 +2227,19 @@ class Classifier:
                 for source in participating
                 for record in source.reason_records
             )
+            inherited_support_checks = self.stable_support_checks(
+                check
+                for source in participating
+                for check in source.support_checks
+            )
+            current_support_checks: list[dict] = []
+            support_problem = None
+            if unique_authorizing and borrowed_event is None:
+                current_support_checks, support_problem = (
+                    self.supplier_support_checks(
+                        identity, authority_edges, absent, child
+                    )
+                )
             if not participating:
                 result = Event(
                     "invalid",
@@ -1783,15 +2351,7 @@ class Classifier:
                     )
                     observed_sources.append(result)
                 else:
-                    binding_problem = (
-                        self.supplier_carrier_human_binding_problem(
-                            identity,
-                            authority_edges,
-                            propagation_edges,
-                        )
-                    )
-                    conflict = binding_problem
-                    if conflict:
+                    if support_problem:
                         result = Event(
                             "invalid",
                             "supplier",
@@ -1800,12 +2360,8 @@ class Classifier:
                             propagation_edges,
                             accumulated_neutral,
                             accumulated_absent,
-                            (
-                                "old-tip-human-binding-conflict"
-                                if binding_problem
-                                else "conflicting-human-response"
-                            ),
-                            conflict,
+                            "supplier-support-certificate-invalid",
+                            support_problem,
                         )
                         result = self.attach_causal_metadata(
                             result,
@@ -1814,35 +2370,67 @@ class Classifier:
                         )
                         observed_sources.append(result)
                     else:
-                        result = Event(
-                            "valid",
-                            "supplier",
-                            child,
-                            authority_edges,
-                            propagation_edges,
-                            accumulated_neutral,
-                            accumulated_absent,
-                            (
-                                "damaged-propagation-borrow"
-                                if borrowed_event
-                                else "valid-supplier-authority"
-                            ),
-                            (
-                                "DAMAGED: propagation borrowed lifecycle "
-                                "authority"
-                                if borrowed_event
-                                else (
-                                    "one prior real deletion event supplies "
-                                    "all absent parents; carrying edges only "
-                                    "propagate"
-                                )
-                            ),
+                        binding_problem = (
+                            self.supplier_carrier_human_binding_problem(
+                                identity,
+                                authority_edges,
+                                propagation_edges,
+                            )
                         )
-                        result = self.attach_causal_metadata(
-                            result, causal_roots, prior_records
-                        )
-                        sources.append(result)
-                        observed_sources.append(result)
+                        conflict = binding_problem
+                        if conflict:
+                            result = Event(
+                                "invalid",
+                                "supplier",
+                                child,
+                                authority_edges,
+                                propagation_edges,
+                                accumulated_neutral,
+                                accumulated_absent,
+                                "old-tip-human-binding-conflict",
+                                conflict,
+                            )
+                            result = self.attach_causal_metadata(
+                                result,
+                                self.retag_roots(
+                                    causal_roots, "invalid"
+                                ),
+                                prior_records,
+                            )
+                            observed_sources.append(result)
+                        else:
+                            result = Event(
+                                "valid",
+                                "supplier",
+                                child,
+                                authority_edges,
+                                propagation_edges,
+                                accumulated_neutral,
+                                accumulated_absent,
+                                (
+                                    "damaged-propagation-borrow"
+                                    if borrowed_event
+                                    else "valid-supplier-authority"
+                                ),
+                                (
+                                    "DAMAGED: propagation borrowed lifecycle "
+                                    "authority"
+                                    if borrowed_event
+                                    else (
+                                        "one prior real deletion event supplies "
+                                        "all absent parents; carrying edges only "
+                                        "propagate and copy its support projection"
+                                    )
+                                ),
+                            )
+                            result = self.attach_causal_metadata(
+                                result, causal_roots, prior_records
+                            )
+                            sources.append(result)
+                            observed_sources.append(result)
+            result.support_checks = self.stable_support_checks(
+                [*inherited_support_checks, *current_support_checks]
+            )
             results.append(result)
         return results
 
@@ -1981,6 +2569,9 @@ class Classifier:
         prior_records = self.stable_reason_records(
             record for event in events for record in event.reason_records
         )
+        support_checks = self.stable_support_checks(
+            check for event in events for check in event.support_checks
+        )
         reintroduced = any(
             self.has_reintroduction(identity, event) for event in events
         )
@@ -2033,6 +2624,7 @@ class Classifier:
             absent_parents,
             reason_code,
             reason,
+            support_checks=support_checks,
         )
         return self.attach_causal_metadata(
             result, causal_roots, prior_records
@@ -2180,6 +2772,7 @@ class Classifier:
             "authority_edges": [],
             "propagation_edges": [],
             "mutation_edges": [],
+            "support_checks": [],
             "neutral_parents": [],
             "absent_parents": [],
             "causal_roots": [],
@@ -2362,6 +2955,7 @@ class Classifier:
             "authority_edges": event.authority_edges,
             "propagation_edges": event.propagation_edges,
             "mutation_edges": old_mutation_edges,
+            "support_checks": event.support_checks,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
             "causal_roots": event.causal_roots,
@@ -2468,6 +3062,7 @@ class Classifier:
                         "authority_edges": [],
                         "propagation_edges": [],
                         "mutation_edges": [],
+                        "support_checks": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -2499,6 +3094,7 @@ class Classifier:
                         "authority_edges": [],
                         "propagation_edges": [],
                         "mutation_edges": [],
+                        "support_checks": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -2576,6 +3172,11 @@ class Classifier:
                         for action in actions
                         for edge in action["mutation_edges"]
                     ],
+                    "support_checks": [
+                        check
+                        for action in actions
+                        for check in action["support_checks"]
+                    ],
                     "actions": actions,
                     "metrics": self.metrics.as_dict(),
                     "details": fixture.details,
@@ -2604,6 +3205,7 @@ class Classifier:
                 "authority_edges": [],
                 "propagation_edges": [],
                 "mutation_edges": [],
+                "support_checks": [],
                 "actions": [],
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
@@ -5841,6 +6443,307 @@ def pcx16_task_pickup(root: Path) -> Fixture:
     )
 
 
+def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
+    """Exercise exact source support copying without carrier authority."""
+    variants = {
+        "forward": "no-finding",
+        "reverse-drop": "blocking-finding",
+        "reverse-preserved": "no-finding",
+        "invalid-source": "blocking-finding",
+        "source-evolution": "no-finding",
+        "adoption-drift": "blocking-finding",
+        "nested-drop": "blocking-finding",
+        "permutation-diamond": "no-finding",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r16-support-{variant}"
+    path = add_agent(repo, label)
+    evidence = evidence_path(label)
+    C = repo.commit("create r16 supplier support action")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("support-source", C)
+    if variant == "invalid-source":
+        authority_parent = C
+        repo.remove(path)
+        authority_child = repo.commit("delete without production authority")
+    else:
+        authority_parent = claim(repo, (path,), "claim support source")
+        authority_child = delete_with_evidence(
+            repo, ((label, path),), "delete with support authority"
+        )
+    source_parent = authority_child
+    if variant == "source-evolution":
+        repo.write(evidence, f"# Evidence {label}: evolved-source\n")
+        source_parent = repo.commit("evolve support on absent source lineage")
+
+    repo.branch("support-carrier", C)
+    carrier = claim(repo, (path,), "overqualified support carrier")
+    resolved = f"# Evidence {label}: resolved\n"
+    if variant == "forward":
+        parents = (authority_child, carrier)
+        M = repo.merge_commit(
+            parents, "forward supplier support adoption", removes=(path,)
+        )
+    elif variant == "reverse-preserved":
+        parents = (carrier, authority_child)
+        M = repo.merge_commit(
+            parents,
+            "reverse supplier support adoption with projection",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+    elif variant == "source-evolution":
+        parents = (carrier, source_parent)
+        M = repo.merge_commit(
+            parents,
+            "copy evolved source support at adoption",
+            writes={
+                evidence: f"# Evidence {label}: evolved-source\n"
+            },
+            removes=(path,),
+        )
+    elif variant == "adoption-drift":
+        parents = (authority_child, carrier)
+        M = repo.merge_commit(
+            parents,
+            "invent support state in adoption commit",
+            writes={evidence: f"# Evidence {label}: adoption-drift\n"},
+            removes=(path,),
+        )
+    elif variant == "nested-drop":
+        first = repo.merge_commit(
+            (authority_child, carrier),
+            "first support-preserving adoption",
+            removes=(path,),
+        )
+        repo.branch("second-support-carrier", C)
+        second_carrier = claim(repo, (path,), "second support carrier")
+        M = repo.merge_commit(
+            (second_carrier, first),
+            "nested adoption drops source support",
+            removes=(path,),
+        )
+        parents = (second_carrier, first)
+    elif variant == "permutation-diamond":
+        first = repo.merge_commit(
+            (authority_child, carrier),
+            "first parent-order support adoption",
+            removes=(path,),
+        )
+        repo.branch("reverse-support-carrier", C)
+        reverse_carrier = claim(
+            repo, (path,), "reverse parent-order support carrier"
+        )
+        second = repo.merge_commit(
+            (reverse_carrier, authority_child),
+            "reverse parent-order support adoption",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+        repo.branch("diamond-support-carrier", C)
+        final_carrier = claim(
+            repo, (path,), "final diamond support carrier"
+        )
+        parents = (second, final_carrier, first)
+        M = repo.merge_commit(
+            parents,
+            "join equal support roots through both parent orders",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+    else:
+        parents = (carrier, authority_child)
+        M = repo.merge_commit(
+            parents,
+            "reverse supplier support adoption",
+            removes=(path,),
+        )
+    N = feature(repo, f"{label}-new")
+    with reconciler_repository(repo.root):
+        source_problem = RECONCILE.queue_deletion_problem(
+            path,
+            repo.run("show", f"{authority_parent}:{path}").stdout,
+            authority_parent,
+            authority_child,
+        )
+    return Fixture(
+        f"R16-support-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        variants[variant],
+        {
+            "variant": variant,
+            "authority_parent": authority_parent,
+            "authority_child": authority_child,
+            "source_parent": source_parent,
+            "carrier": carrier,
+            "merge_parents": list(parents),
+            "source_problem": source_problem,
+        },
+    )
+
+
+def r16_earlier_evidence_reversal(root: Path) -> Fixture:
+    """Prove generic root replay cannot authorize an evidence reversal."""
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r16-earlier-evidence-reversal"
+    path = queue_path(label, timing="blocking")
+    evidence = evidence_path(label)
+    task_id = "2026-08-31-r16-earlier-evidence"
+    task_path = f"tasks/1_in-progress/{task_id}/task.md"
+    repo.write(evidence, "# Evidence v0\n")
+    repo.write(
+        path,
+        "# Earlier evidence\n\n"
+        "**Status:** open\n"
+        "**Filed:** 2026-08-31\n"
+        "**Action:** repair earlier evidence\n"
+        f"**Full context:** `{evidence}`\n"
+        f"**Resolution evidence:** `{evidence}`\n"
+        "**Blocks now:** operation:release\n",
+    )
+    repo.write(
+        task_path,
+        "# Task\n\n"
+        "**Claimed-by:** r16-agent\n"
+        f"**Queue actions:** `{path}`\n",
+    )
+    repo.write(str(Path(task_path).with_name("plan.md")), "# Plan\n")
+    repo.write(str(Path(task_path).with_name("worklog.md")), "# Worklog\n")
+    C = repo.commit("create earlier evidence supplier root")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("earlier-evidence-source", C)
+    repo.write(evidence, "# Evidence v1\n")
+    repo.commit(f"repair evidence\n\ntask: {task_id}")
+    authority_parent = claim(repo, (path,), "claim earlier evidence action")
+    repo.remove(path)
+    authority_child = repo.commit("delete using admitted earlier evidence")
+    repo.branch("earlier-evidence-carrier", C)
+    carrier = claim(repo, (path,), "claim stale evidence carrier")
+    M = repo.merge_commit(
+        (carrier, authority_child),
+        "reverse adoption reverts earlier evidence",
+        removes=(path,),
+    )
+    N = feature(repo, f"{label}-new")
+    authority_text = repo.run(
+        "show", f"{authority_parent}:{path}"
+    ).stdout
+    with reconciler_repository(repo.root):
+        source_problem = RECONCILE.queue_deletion_problem(
+            path,
+            authority_text,
+            authority_parent,
+            authority_child,
+        )
+        replay_problem = RECONCILE.queue_deletion_problem(
+            path, authority_text, authority_parent, M
+        )
+    return Fixture(
+        "R16-earlier-landed-evidence-reversal",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_parent": authority_parent,
+            "authority_child": authority_child,
+            "source_problem": source_problem,
+            "replay_problem": replay_problem,
+            "expected_evidence": repo.tree_entry_oid(
+                authority_child, evidence
+            ),
+            "reverted_evidence": repo.tree_entry_oid(M, evidence),
+        },
+    )
+
+
+def r16_pickup_evolution(
+    root: Path, target_status: str, *, drop_artifact: bool = False
+) -> Fixture:
+    """Exercise typed monotone pickup support beyond 1_in-progress."""
+    allowed = {"2_blocked", "3_in-review", "4_done", "0_backlog"}
+    if target_status not in allowed:
+        raise ValueError(target_status)
+    if drop_artifact and target_status != "3_in-review":
+        raise ValueError("artifact-drop control uses the in-review receipt")
+    repo = GitRepository(root)
+    initialize(repo)
+    slug = target_status.replace("_", "-")
+    pickup, backlog, active = add_pickup(repo, f"r16-{slug}")
+    task_id = Path(backlog).parts[2]
+    C = repo.commit("create pickup evolution root")
+    repo.branch("old", C)
+    O = feature(repo, f"r16-pickup-{slug}-old")
+    repo.branch("pickup-source", C)
+    complete_pickup(repo, pickup, backlog, active)
+    authority_child = repo.commit("complete pickup authority edge")
+    destination = f"tasks/{target_status}/{task_id}/task.md"
+    repo.move(active, destination)
+    if target_status in {"3_in-review", "4_done"}:
+        repo.write(
+            str(Path(destination).with_name("verification.md")),
+            "# Verification\n",
+        )
+    source_parent = repo.commit("evolve picked-up task monotonically")
+    task_dir = Path(destination).parent
+    task_writes = {
+        path.relative_to(repo.root).as_posix(): path.read_text()
+        for path in sorted((repo.root / task_dir).iterdir())
+        if path.is_file()
+        and path.name in RECONCILE.TASK_ARTIFACT_NAMES
+    }
+    adoption_writes = dict(task_writes)
+    if drop_artifact:
+        adoption_writes.pop(
+            str(task_dir / "verification.md"), None
+        )
+    repo.branch("pickup-carrier", C)
+    carrier = feature(repo, f"r16-pickup-{slug}-carrier")
+    M = repo.merge_commit(
+        (carrier, source_parent),
+        "copy current pickup support projection",
+        writes=adoption_writes,
+        removes=(pickup, backlog, active),
+    )
+    N = feature(repo, f"r16-pickup-{slug}-new")
+    return Fixture(
+        f"R16-pickup-evolution-{slug}"
+        + ("-drop-artifact" if drop_artifact else ""),
+        repo,
+        C,
+        O,
+        M,
+        N,
+        (
+            "blocking-finding"
+            if target_status == "0_backlog" or drop_artifact
+            else "no-finding"
+        ),
+        {
+            "target_status": target_status,
+            "authority_child": authority_child,
+            "source_parent": source_parent,
+            "carrier": carrier,
+            "task_path": destination,
+            "task_artifacts": sorted(task_writes),
+            "drop_artifact": drop_artifact,
+        },
+    )
+
+
 def p19_identities(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
@@ -6418,6 +7321,38 @@ def scenario_builders():
         ),
         pcx15_generated_retry,
         pcx16_task_pickup,
+        *[
+            (
+                lambda root, variant=variant:
+                r16_supplier_support_fixture(root, variant)
+            )
+            for variant in (
+                "forward",
+                "reverse-drop",
+                "reverse-preserved",
+                "invalid-source",
+                "source-evolution",
+                "adoption-drift",
+                "nested-drop",
+                "permutation-diamond",
+            )
+        ],
+        lambda root: r16_pickup_evolution(
+            root, "3_in-review", drop_artifact=True
+        ),
+        r16_earlier_evidence_reversal,
+        *[
+            (
+                lambda root, target_status=target_status:
+                r16_pickup_evolution(root, target_status)
+            )
+            for target_status in (
+                "2_blocked",
+                "3_in-review",
+                "4_done",
+                "0_backlog",
+            )
+        ],
         lambda root: pcx17_cherry_pick(root, "complete"),
         lambda root: pcx17_cherry_pick(root, "deletion-only"),
         pcx19_missing_claim_blob,
@@ -6607,6 +7542,7 @@ CONTROL_NAMES = (
     "skip-persisted-frozen-skeleton",
     "skip-persisted-candidate-continuity",
     "skip-old-side-continuity",
+    "skip-supplier-support-certificate",
 )
 
 
@@ -6675,6 +7611,7 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
                 "range_base_validation": result["range_base_validation"],
                 "authority_edges": result["authority_edges"],
                 "propagation_edges": result["propagation_edges"],
+                "support_checks": result["support_checks"],
                 "metrics": result["metrics"],
             }
             for name, result in results.items()
@@ -6684,18 +7621,49 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
         return Classifier(fixture, damage).run()
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
+    missing_oid = fixture.details["missing_claim_blob_oid"]
+    reader_metrics = Metrics()
+    reader = ObjectDatabase(fixture.repo.root, reader_metrics)
+    first_reader_reason = None
+    try:
+        reader.read(missing_oid)
+    except Unreadable as error:
+        first_reader_reason = str(error)
+    missing_cached = missing_oid in reader.objects
     first = Classifier(fixture).run()
     hidden = fixture.repo.root / fixture.details["restore_hidden"]
     target = fixture.repo.root / fixture.details["restore_target"]
     if hidden.is_file():
         hidden.rename(target)
+    try:
+        restored_kind, restored_payload = reader.read(missing_oid)
+        success_cached = missing_oid in reader.objects
+        cache_hits_before = reader_metrics.object_cache_hits
+        cached_kind, cached_payload = reader.read(missing_oid)
+        cache_hit_after_restore = (
+            reader_metrics.object_cache_hits == cache_hits_before + 1
+        )
+    finally:
+        reader.close()
     second = Classifier(fixture).run()
     second["recovery"] = {
         "first_status": first["evidence_verdict"]["status"],
         "first_reason": first["evidence_verdict"]["reason"],
         "second_status": second["evidence_verdict"]["status"],
         "same_process": True,
-        "missing_oid": fixture.details["missing_claim_blob_oid"],
+        "same_reader": True,
+        "first_reader_reason": first_reader_reason,
+        "missing_cached": missing_cached,
+        "restored_kind": restored_kind,
+        "restored_payload_size": len(restored_payload),
+        "success_cached": success_cached,
+        "cache_hit_after_restore": cache_hit_after_restore,
+        "cached_bytes_equal": (
+            cached_kind == restored_kind
+            and cached_payload == restored_payload
+        ),
+        "reader_metrics": dataclasses.asdict(reader_metrics),
+        "missing_oid": missing_oid,
     }
     return second
 
@@ -8010,6 +8978,188 @@ def validate_result(result: dict):
             not in {edge["child"] for edge in action["mutation_edges"]}
         ):
             errors.append("R15 continuous old-side occurrence was blocked")
+    if scenario.startswith("R16-support-"):
+        variant = result["details"]["variant"]
+        positive = variant in {
+            "forward",
+            "reverse-preserved",
+            "source-evolution",
+            "permutation-diamond",
+        }
+        support_checks = result["support_checks"]
+        if result["details"]["source_problem"] is not None and variant \
+                != "invalid-source":
+            errors.append("R16 fixture authority edge was not production-valid")
+        if variant == "invalid-source":
+            if (
+                status != "invalid"
+                or result["details"]["source_problem"] is None
+                or support_checks
+            ):
+                errors.append("R16 invalid source gained a certificate")
+        elif (
+            result["event_mode"] != "supplier"
+            or not support_checks
+            or any(
+                len(check["authority_parent"]) not in {40, 64}
+                or len(check["authority_child"]) not in {40, 64}
+                or len(check["adoption_child"]) not in {40, 64}
+                or not check["certificate_digest"].startswith("sha256:")
+                or len(check["certificate_digest"]) != 71
+                for check in support_checks
+            )
+            or (
+                positive
+                and (
+                    status != "valid"
+                    or any(
+                        check["status"] != "valid"
+                        for check in support_checks
+                    )
+                )
+            )
+            or (
+                not positive
+                and (
+                    status != "invalid"
+                    or not any(
+                        check["status"] == "invalid"
+                        for check in support_checks
+                    )
+                    or not any(
+                        action["reason_code"]
+                        == "supplier-support-certificate-invalid"
+                        for action in actions
+                    )
+                )
+            )
+        ):
+            errors.append("R16 supplier support certificate drifted")
+        if variant == "source-evolution" and (
+            result["details"]["source_parent"]
+            == result["details"]["authority_child"]
+        ):
+            errors.append("R16 source evolution fixture did not evolve")
+        if variant == "adoption-drift" and not any(
+            check["tree_projection_status"] == "invalid"
+            and check["postcondition_status"] == "valid"
+            for check in support_checks
+        ):
+            errors.append("R16 adoption drift did not isolate projection gate")
+        if variant == "permutation-diamond" and (
+            len(support_checks) != 3
+            or len(
+                {
+                    check["certificate_digest"]
+                    for check in support_checks
+                }
+            )
+            != 1
+            or len(
+                {check["adoption_child"] for check in support_checks}
+            )
+            != 3
+        ):
+            errors.append("R16 equal-root parent permutation drifted")
+    if scenario == "R16-earlier-landed-evidence-reversal":
+        support_checks = result["support_checks"]
+        if (
+            result["details"]["source_problem"] is not None
+            or result["details"]["replay_problem"] is not None
+            or result["details"]["expected_evidence"]
+            == result["details"]["reverted_evidence"]
+            or status != "invalid"
+            or not support_checks
+            or not any(
+                check["tree_projection_status"] == "invalid"
+                and check["postcondition_status"] == "valid"
+                for check in support_checks
+            )
+            or not any(
+                action["reason_code"]
+                == "supplier-support-certificate-invalid"
+                for action in actions
+            )
+        ):
+            errors.append("R16 replay-only evidence reversal false-greened")
+    if scenario.startswith("R16-pickup-evolution-"):
+        target_status = result["details"]["target_status"]
+        resolving = target_status in RECONCILE.RESOLVING_TASK_STATUSES
+        expected_valid = resolving and not result["details"]["drop_artifact"]
+        support_checks = result["support_checks"]
+        evaluations = [
+            evaluation
+            for check in support_checks
+            for evaluation in check["obligation_evaluations"]
+        ]
+        if (
+            not support_checks
+            or not evaluations
+            or (
+                expected_valid
+                and (
+                    status != "valid"
+                    or any(
+                        evaluation["problem"] is not None
+                        for evaluation in evaluations
+                    )
+                )
+            )
+            or (
+                not expected_valid
+                and not result["details"]["drop_artifact"]
+                and (
+                    status != "invalid"
+                    or not any(
+                        evaluation["problem"] is not None
+                        for evaluation in evaluations
+                    )
+                )
+            )
+            or (
+                result["details"]["drop_artifact"]
+                and (
+                    status != "invalid"
+                    or not any(
+                        check["tree_projection_status"] == "invalid"
+                        for check in support_checks
+                    )
+                )
+            )
+        ):
+            errors.append("R16 typed pickup status obligation drifted")
+        if target_status in {"3_in-review", "4_done"}:
+            verification = next(
+                (
+                    path for path in result["details"]["task_artifacts"]
+                    if path.endswith("/verification.md")
+                ),
+                None,
+            )
+            source_paths = {
+                entry["path"]
+                for check in support_checks
+                for projection in check["source_projections"]
+                for entry in projection["entries"]
+            }
+            adoption_paths = {
+                entry["path"]
+                for check in support_checks
+                for entry in check["adoption_projection"]
+            }
+            if (
+                verification is None
+                or verification not in source_paths
+                or verification not in adoption_paths
+                or (
+                    result["details"]["drop_artifact"]
+                    and not any(
+                        check["tree_projection_status"] == "invalid"
+                        for check in support_checks
+                    )
+                )
+            ):
+                errors.append("R16 pickup receipt projection is incomplete")
     if scenario == "R8-adapter-M-input-variants":
         details = result["details"]
         variants = result.get("adapter_input_evidence", {})
@@ -8108,6 +9258,14 @@ def validate_result(result: dict):
             recovery.get("first_status") != "unreadable"
             or recovery.get("second_status") != "valid"
             or not recovery.get("same_process")
+            or not recovery.get("same_reader")
+            or "missing" not in (recovery.get("first_reader_reason") or "")
+            or recovery.get("missing_cached")
+            or recovery.get("restored_kind") != "blob"
+            or recovery.get("restored_payload_size", 0) <= 0
+            or not recovery.get("success_cached")
+            or not recovery.get("cache_hit_after_restore")
+            or not recovery.get("cached_bytes_equal")
         ):
             errors.append("PCX-19 missing object recovery failed")
     if scenario == "PCX-20b-budget-overflow":
@@ -8241,6 +9399,12 @@ def control_builder(name: str, root: Path):
         return (
             r15_old_side_continuity(root, "invalid-delete-recreate"),
             Damage(skip_old_side_continuity=True),
+            "no-finding",
+        )
+    if name == "skip-supplier-support-certificate":
+        return (
+            r16_supplier_support_fixture(root, "reverse-drop"),
+            Damage(skip_supplier_support_certificate=True),
             "no-finding",
         )
     raise ValueError(name)

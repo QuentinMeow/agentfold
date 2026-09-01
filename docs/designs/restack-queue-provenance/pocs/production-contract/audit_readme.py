@@ -1,1238 +1,1001 @@
 #!/usr/bin/env python3
-"""Audit the production-contract README against a self-test JSONL stream.
+"""Generate and verify the production-contract POC evidence artifact.
 
-The audit intentionally uses only the Python standard library.  It checks the
-durable evidence claims rather than trusting a copied transcript.  The optional
-comparison canonicalizes only the two environment strings in the summary; all
-scenario OIDs, reasons, verdicts, edge lists, paths, and counters remain covered.
+``evidence.json`` is the sole machine-observation artifact. This stdlib-only
+program derives it from a fresh prototype JSONL stream, enforces a closed
+schema and exact record catalog, and renders README.md in full. Verification
+compares bytes, never prose fragments or an OID pool.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
-import re
-import sys
-import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
-OID_PATTERN = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])")
-FIXTURE_SHA_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
-EXPECTED_SCENARIOS = 122
-EXPECTED_CONTROLS = 15
-EXPECTED_ALIASES = 4
-EXPECTED_AUDIT_CHECKS = 2070
-
-
-@dataclass(frozen=True)
-class NamedTableSchema:
-    name: str
-    start: str
-    end: str
-    header: str
-    header_index: int
-    row_names: tuple[str, ...]
-    oid_shape: str
-    records: str = "scenarios"
-
-
-P18_ROWS = tuple(
-    f"P18{letter}-{suffix}"
-    for letter, suffix in (
-        ("h", "missing-M"),
-        ("i", "noncommit-M-blob"),
-        ("j", "noncommit-M-tree"),
-        ("k", "noncommit-M-tag"),
-        ("l", "unrelated-M"),
-        ("m", "M-after-N"),
-        ("n", "M-equals-C"),
-        ("o", "M-equals-N"),
-    )
+SCHEMA = "agentfold-production-contract-evidence/v1"
+METRIC_KEYS = (
+    "authority_calls", "batch_processes", "git_processes", "graph_commits",
+    "graph_enumerations", "graph_parent_edges", "identity_calls",
+    "mutation_calls", "object_cache_hits", "object_reads",
+    "per_action_history_walks", "queue_snapshots_requested",
+    "queue_subtree_reads", "snapshot_cache_hits",
+    "support_adoption_checks", "support_certificate_calls",
+    "support_paths_checked",
 )
-R3_ROWS = (
+SCENARIO_IDS = tuple(sorted((
+    "P1-direct-linear-valid",
+    "P2-direct-linear-invalid",
+    "P3-genuine-old-loss",
+    "P4-pre-C-identical-origins",
+    "P5-duplicate-at-C",
+    "P6a-old-delete-recreate",
+    "P6b-candidate-delete-recreate",
+    "P7-immutable-payload-change",
+    "P8-path-timing-move",
+    "P9-direct-two-parent-valid",
+    "P10-direct-invalid-parent",
+    "P11-direct-three-parent-valid",
+    "P12-merge-supplier-valid",
+    "P13-merge-supplier-invalid",
+    "P14-supplier-reintroduced",
+    "P15-competing-suppliers",
+    "P16-PCX-08-invalid-supplier-claimed-carrier",
+    "P17-post-event-reintroduction",
+    "P18a-missing-tip",
+    "P18b-noncommit-tip",
+    "P18c-unrelated-tip",
+    "P18d-shallow-required-region",
+    "P18e-missing-queue-blob",
+    "P18f-missing-queue-tree",
+    "P18g-multiple-merge-bases",
+    "P18h-missing-M",
+    "P18i-noncommit-M-blob",
+    "P18j-noncommit-M-tree",
+    "P18k-noncommit-M-tag",
+    "P18l-unrelated-M",
+    "P18m-M-after-N",
+    "P18n-M-equals-C",
+    "P18o-M-equals-N",
+    "P19-production-identities",
+    "P20-lifecycle-types",
+    "P21-PCX-17c-squash-erasure",
+    "P22-PCX-18-one-pass-many-actions",
+    "PCX-01-neutral-parent",
+    "PCX-02-neutral-plus-invalid-carrier",
+    "PCX-03-foreign-exact-identity",
+    "PCX-04-several-absent-one-supplier",
+    "PCX-05-competing-later-supplier",
+    "PCX-06-nested-supplier-over-direct",
+    "PCX-07-overqualified-propagation",
+    "PCX-09-recreated-claimed-bytes",
+    "PCX-10-transient-multiplicity",
+    "PCX-11-different-payload-same-path",
+    "PCX-12-timing-rename-supplier",
+    "PCX-13-conflicting-human-response",
+    "PCX-14-valid-human-supplier",
+    "PCX-15-generated-retry-supplier",
+    "PCX-16-task-pickup-supplier",
+    "PCX-17-complete-cherry-pick",
+    "PCX-17-deletion-only-cherry-pick",
+    "PCX-19-missing-claim-blob-recovery",
+    "PCX-20a-budget-below-limit",
+    "PCX-20b-budget-overflow",
     "R3-01-two-invalid-causal-sources",
     "R3-02-invalid-valid-causal-competition",
     "R3-03-unrelated-invalid-does-not-poison",
-)
-R4_ROWS = (
     "R4-01-same-root-valid-diamond",
     "R4-02-distinct-valid-root-diamond",
     "R4-03-equal-root-plus-invalid-diamond",
-)
-R6_ROWS = (
+    "R5-01-invalid-redelete-after-supplier-reintroduction",
+    "R5-02-valid-redelete-after-supplier-reintroduction",
     "R6-01-valid-plus-invalid-all-absent",
     "R6-02-valid-plus-ambiguous-all-absent",
     "R6-03-two-invalid-all-absent",
     "R6-04-same-valid-root-all-absent-wrappers",
-)
-R8_ROWS = (
+    "R8-adapter-M-N-frontier-counterexample",
+    "R8-adapter-M-input-variants",
     "R8-direct-human-response-conflict",
     "R8-direct-human-response-identical",
-    "R8-supplier-human-response-conflict",
-    "R8-supplier-human-response-identical",
     "R8-review-binding-divergent",
     "R8-review-binding-identical",
     "R8-review-binding-terminal-conflict",
-)
-R9_ROWS = (
-    "R9-direct-review-target-pending-fill",
+    "R8-supplier-human-response-conflict",
+    "R8-supplier-human-response-identical",
     "R9-direct-review-revision-pending-fill",
-    "R9-supplier-review-target-pending-fill",
+    "R9-direct-review-target-pending-fill",
     "R9-supplier-review-revision-pending-fill",
-)
-R10_ROWS = (
+    "R9-supplier-review-target-pending-fill",
     "R10-direct-review-target-backtick-dotless-rejected",
     "R10-supplier-review-revision-generic-placeholder-rejected",
-)
-R13_BINDING_ROWS = (
     "R13-direct-review-binding-identical",
-    "R13-direct-review-binding-target",
     "R13-direct-review-binding-revision",
+    "R13-direct-review-binding-target",
     "R13-direct-review-binding-terminal",
-    "R13-supplier-review-binding-identical",
-    "R13-supplier-review-binding-target",
-    "R13-supplier-review-binding-revision",
-    "R13-supplier-review-binding-terminal",
-)
-R13_PERSISTED_ROWS = (
-    "R13-persisted-same-state",
-    "R13-persisted-response-removal",
-    "R13-persisted-response-change",
-    "R13-persisted-review-target-change",
-    "R13-persisted-review-revision-change",
-    "R13-persisted-review-outcome-change",
     "R13-persisted-claim-loss",
     "R13-persisted-pending-fill",
+    "R13-persisted-response-change",
+    "R13-persisted-response-removal",
+    "R13-persisted-review-outcome-change",
+    "R13-persisted-review-revision-change",
+    "R13-persisted-review-target-change",
+    "R13-persisted-same-state",
     "R13-persisted-terminal-fill",
-)
-R14_BINDING_ROWS = (
+    "R13-supplier-review-binding-identical",
+    "R13-supplier-review-binding-revision",
+    "R13-supplier-review-binding-target",
+    "R13-supplier-review-binding-terminal",
     "R14-direct-old-unanswered-carrier-same",
     "R14-direct-old-unanswered-carrier-target",
-    "R14-supplier-old-answered-carrier-pending",
-    "R14-supplier-old-answered-carrier-same",
-    "R14-supplier-old-answered-carrier-target",
-    "R14-supplier-old-answered-carrier-revision",
-    "R14-supplier-old-unanswered-carrier-same",
-    "R14-supplier-old-unanswered-carrier-target",
-)
-R14_PERSISTED_ROWS = (
+    "R14-persisted-delete-recreate",
     "R14-persisted-hidden-bytes-low-similarity",
     "R14-persisted-intermediate-claim-regression",
     "R14-persisted-intermediate-review-regression",
-    "R14-persisted-delete-recreate",
-    "R14-persisted-valid-review-retraction",
-    "R14-persisted-valid-first-response-low-similarity",
-    "R14-persisted-merge-carrier-pending",
     "R14-persisted-merge-carrier-conflict",
-)
-R15_ROWS = (
+    "R14-persisted-merge-carrier-pending",
+    "R14-persisted-valid-first-response-low-similarity",
+    "R14-persisted-valid-review-retraction",
+    "R14-supplier-old-answered-carrier-pending",
+    "R14-supplier-old-answered-carrier-revision",
+    "R14-supplier-old-answered-carrier-same",
+    "R14-supplier-old-answered-carrier-target",
+    "R14-supplier-old-unanswered-carrier-same",
+    "R14-supplier-old-unanswered-carrier-target",
+    "R15-old-continuous-preserved",
+    "R15-old-hidden-bytes-restore",
+    "R15-old-human-binding-restore",
     "R15-old-invalid-delete-recreate",
     "R15-old-valid-delete-recreate",
-    "R15-old-human-binding-restore",
-    "R15-old-hidden-bytes-restore",
-    "R15-old-continuous-preserved",
-)
-CONTROL_ROWS = (
-    "missing-all-parent-direct-validation",
-    "supplier-authority-borrowing",
-    "identity-multiplicity-collapsed-to-set",
-    "reopen-pre-C-genealogy",
-    "missing-post-event-continuity",
-    "sole-valid-ignores-invalid-root",
-    "omit-old-tip-human-binding",
-    "literal-review-pending-treated-concrete",
+    "R16-earlier-landed-evidence-reversal",
+    "R16-pickup-evolution-0-backlog",
+    "R16-pickup-evolution-2-blocked",
+    "R16-pickup-evolution-3-in-review",
+    "R16-pickup-evolution-3-in-review-drop-artifact",
+    "R16-pickup-evolution-4-done",
+    "R16-support-adoption-drift",
+    "R16-support-forward",
+    "R16-support-invalid-source",
+    "R16-support-nested-drop",
+    "R16-support-permutation-diamond",
+    "R16-support-reverse-drop",
+    "R16-support-reverse-preserved",
+    "R16-support-source-evolution",
+)))
+CONTROL_IDS = tuple(sorted((
     "broad-review-pending-normalization",
+    "identity-multiplicity-collapsed-to-set",
+    "literal-review-pending-treated-concrete",
+    "missing-all-parent-direct-validation",
+    "missing-post-event-continuity",
+    "omit-old-tip-human-binding",
     "omit-supplier-carrier-human-binding",
-    "skip-preserved-state-validation",
     "omit-unanswered-published-review-binding",
-    "skip-persisted-frozen-skeleton",
-    "skip-persisted-candidate-continuity",
+    "reopen-pre-C-genealogy",
     "skip-old-side-continuity",
+    "skip-persisted-candidate-continuity",
+    "skip-persisted-frozen-skeleton",
+    "skip-preserved-state-validation",
+    "skip-supplier-support-certificate",
+    "sole-valid-ignores-invalid-root",
+    "supplier-authority-borrowing",
+)))
+ALIAS_IDS = ("S1", "S12", "S2", "S3")
+INPUT_PATHS = (
+    "docs/AGENTS.md",
+    "docs/designs/AGENTS.md",
+    "docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
+    "docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py",
+    "automation/check_action_projection.py",
+    "automation/markdown_semantics.py",
+    "automation/reconcile/reconcile.py",
+)
+FIXTURE_CLAIMS = (
+    ("r8-divergent-old-target", "R8-review-binding-divergent", ("details", "old_binding", 1)),
+    ("r8-divergent-candidate-target", "R8-review-binding-divergent", ("details", "candidate_binding", 1)),
+    ("r8-identical-target", "R8-review-binding-identical", ("details", "old_binding", 1)),
+    ("r8-terminal-reviewed-revision", "R8-review-binding-terminal-conflict", ("details", "old_binding", 1)),
+    ("r9-direct-filled-revision", "R9-direct-review-revision-pending-fill", ("details", "candidate_value")),
+    ("r9-supplier-filled-revision", "R9-supplier-review-revision-pending-fill", ("details", "candidate_value")),
+    ("r10-malformed-bound-revision", "R10-supplier-review-revision-generic-placeholder-rejected", ("details", "candidate_value")),
 )
 
 
-EXACT_NAMED_TABLES = (
-    NamedTableSchema("P18 range base", "### Selected-range-base boundary regressions", "## PCX-01-PCX-20 attack coverage", "Case", 0, P18_ROWS, "C-O-M-N"),
-    NamedTableSchema("R3 causal sources", "### Mixed causal-source regressions", "### Canonical-root diamond regressions", "Case", 0, R3_ROWS, "none"),
-    NamedTableSchema("R4 canonical roots", "### Canonical-root diamond regressions", "### Reintroduced-occurrence history regressions", "Case", 0, R4_ROWS, "none"),
-    NamedTableSchema("R6 absent frontier", "### All-absent frontier regressions", "## O-anchored human binding and adapter input", "Case", 0, R6_ROWS, "none"),
-    NamedTableSchema("R8 old binding", "## O-anchored human binding and adapter input", "### Pending review target and revision", "Case", 0, R8_ROWS, "C-O-authority-M-N"),
-    NamedTableSchema("R9 pending binding", "### Pending review target and revision", "### Malformed review target and revision", "Case", 0, R9_ROWS, "C-O-authority-M-N"),
-    NamedTableSchema("R10 malformed binding", "### Malformed review target and revision", "### Implicated-parent and persisted-state regressions", "Case", 0, R10_ROWS, "C-O-authority-M-N"),
-    NamedTableSchema("R13 implicated binding", "### Implicated-parent and persisted-state regressions", "### Unanswered review and continuous persisted-state regressions", "Case", 0, R13_BINDING_ROWS, "C-O-M-N"),
-    NamedTableSchema("R13 persisted endpoint", "### Implicated-parent and persisted-state regressions", "### Unanswered review and continuous persisted-state regressions", "Case", 1, R13_PERSISTED_ROWS, "C-O-M-N"),
-    NamedTableSchema("R14 unanswered binding", "### Unanswered review and continuous persisted-state regressions", "### Old-side C-rooted occurrence regressions", "Case", 0, R14_BINDING_ROWS, "C-O-M-N"),
-    NamedTableSchema("R14 persisted continuity", "### Unanswered review and continuous persisted-state regressions", "### Old-side C-rooted occurrence regressions", "Case", 1, R14_PERSISTED_ROWS, "C-O-M-N"),
-    NamedTableSchema("R15 old-side continuity", "### Old-side C-rooted occurrence regressions", "`R8-adapter-M-input-variants` runs three classifiers", "Case", 0, R15_ROWS, "C-O-M-N"),
-    NamedTableSchema("damaged controls", "## Damaged-mode controls", "## Evidence audit", "Control", 0, CONTROL_ROWS, "C-O-M-N", "controls"),
-)
+class EvidenceError(ValueError):
+    pass
 
 
-@dataclass
-class Checks:
-    failures: list[str] = field(default_factory=list)
-    total: int = 0
-
-    def require(self, condition: bool, message: str) -> None:
-        self.total += 1
-        if not condition:
-            self.failures.append(message)
-
-
-@dataclass
-class Stream:
-    path: Path
-    raw: bytes
-    objects: list[dict[str, Any]]
-    scenarios: dict[str, dict[str, Any]]
-    controls: dict[str, dict[str, Any]]
-    aliases: dict[str, Any]
-    summary: dict[str, Any]
-
-    @classmethod
-    def load(cls, path: Path) -> "Stream":
-        raw = path.read_bytes()
-        objects = [json.loads(line) for line in raw.decode().splitlines()]
-        scenario_rows = [item for item in objects if "scenario" in item]
-        control_rows = [item for item in objects if "control" in item]
-        scenarios = {item["scenario"]: item for item in scenario_rows}
-        controls = {item["control"]: item for item in control_rows}
-        if len(scenarios) != len(scenario_rows):
-            raise ValueError("duplicate scenario names in self-test stream")
-        if len(controls) != len(control_rows):
-            raise ValueError("duplicate control names in self-test stream")
-        alias_rows = [item for item in objects if "scenario_alias_inventory" in item]
-        summary_rows = [item for item in objects if "summary" in item]
-        if len(alias_rows) != 1 or len(summary_rows) != 1:
-            raise ValueError(
-                "expected exactly one alias inventory and one summary record"
-            )
-        return cls(
-            path=path,
-            raw=raw,
-            objects=objects,
-            scenarios=scenarios,
-            controls=controls,
-            aliases=alias_rows[0],
-            summary=summary_rows[0],
-        )
-
-    def raw_sha256(self) -> str:
-        return hashlib.sha256(self.raw).hexdigest()
-
-    def canonical_bytes(self) -> bytes:
-        rows: list[str] = []
-        for item in self.objects:
-            canonical = dict(item)
-            if "summary" in canonical:
-                canonical.pop("git", None)
-                canonical.pop("python", None)
-            rows.append(
-                json.dumps(
-                    canonical,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-            )
-        return ("\n".join(rows) + "\n").encode()
-
-    def canonical_sha256(self) -> str:
-        return hashlib.sha256(self.canonical_bytes()).hexdigest()
-
-
-def normalized(text: str) -> str:
-    return " ".join(text.split())
-
-
-def friendly_classification(value: str) -> str:
-    return "no finding" if value == "no-finding" else "blocking"
-
-
-def record_serialization(records: dict[str, dict[str, Any]], names: Iterable[str]) -> str:
-    return "\n".join(json.dumps(records[name], sort_keys=True) for name in names)
-
-
-def heading_span(readme: str, start: str, end: str | None = None) -> tuple[int, int]:
-    begin = readme.index(start)
-    finish = readme.index(end, begin + len(start)) if end else len(readme)
-    return begin, finish
-
-
-def table_row(lines: list[str], label: str) -> tuple[int, str] | None:
-    matches = [
-        (number, line)
-        for number, line in enumerate(lines, 1)
-        if line.startswith("|") and label in line
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    return None
-
-
-def first_table_cell(line: str) -> str | None:
-    if not line.startswith("|") or "|" not in line[1:]:
-        return None
-    cell = line[1:].split("|", 1)[0].strip()
-    if len(cell) >= 2 and cell.startswith("`") and cell.endswith("`"):
-        return cell[1:-1]
-    return cell
-
-
-def markdown_table_blocks(section: str, header: str) -> list[list[str]]:
-    lines = section.splitlines()
-    blocks: list[list[str]] = []
-    for index, line in enumerate(lines):
-        if first_table_cell(line) != header:
-            continue
-        block: list[str] = []
-        cursor = index + 1
-        if cursor < len(lines) and re.fullmatch(r"\|[-: |]+\|", lines[cursor]):
-            cursor += 1
-        while cursor < len(lines) and lines[cursor].startswith("|"):
-            block.append(lines[cursor])
-            cursor += 1
-        blocks.append(block)
-    return blocks
-
-
-def expected_row_oids(item: dict[str, Any], shape: str) -> list[str]:
-    if shape == "none":
-        return []
-    if shape == "C-O-M-N":
-        return [item[key] for key in ("C", "O", "M", "N")]
-    if shape == "C-O-authority-M-N":
-        details = item["details"]
-        return [
-            item["C"],
-            item["O"],
-            details["authority_parent"],
-            details["authority_child"],
-            item["M"],
-            item["N"],
-        ]
-    raise ValueError(f"unknown exact-table OID shape: {shape}")
-
-
-def audit_exact_named_tables(
-    readme: str,
-    scenarios: dict[str, dict[str, Any]],
-    controls: dict[str, dict[str, Any]],
-    checks: Checks,
-) -> tuple[int, int]:
-    schemas_by_section: dict[tuple[str, str, str], list[NamedTableSchema]] = {}
-    for schema in EXACT_NAMED_TABLES:
-        schemas_by_section.setdefault(
-            (schema.start, schema.end, schema.header), []
-        ).append(schema)
-
-    cached_blocks: dict[tuple[str, str, str], list[list[str]]] = {}
-    for key, schemas in schemas_by_section.items():
-        start, end, header = key
-        try:
-            begin, finish = heading_span(readme, start, end)
-        except ValueError as error:
-            checks.require(False, f"missing exact-table boundary: {error}")
-            cached_blocks[key] = []
-            continue
-        blocks = markdown_table_blocks(readme[begin:finish], header)
-        expected_blocks = max(schema.header_index for schema in schemas) + 1
-        checks.require(
-            len(blocks) == expected_blocks,
-            f"{start}: expected {expected_blocks} {header!r} table(s), got {len(blocks)}",
-        )
-        cached_blocks[key] = blocks
-
-    audited_rows = 0
-    semantic_rows = 0
-    for schema in EXACT_NAMED_TABLES:
-        key = (schema.start, schema.end, schema.header)
-        blocks = cached_blocks.get(key, [])
-        if schema.header_index >= len(blocks):
-            checks.require(False, f"missing exact table: {schema.name}")
-            continue
-        block = blocks[schema.header_index]
-        actual_names = tuple(
-            name
-            for line in block
-            if (name := first_table_cell(line)) is not None
-        )
-        checks.require(
-            actual_names == schema.row_names,
-            f"{schema.name}: row inventory differs; expected {schema.row_names}, got {actual_names}",
-        )
-        records = scenarios if schema.records == "scenarios" else controls
-        for name in schema.row_names:
-            matches = [line for line in block if first_table_cell(line) == name]
-            checks.require(
-                len(matches) == 1,
-                f"{schema.name}: expected exactly one row named {name}, got {len(matches)}",
-            )
-            checks.require(name in records, f"{schema.name}: stream has no record {name}")
-            if len(matches) != 1 or name not in records:
-                continue
-            row = matches[0]
-            item = records[name]
-            expected_oids = expected_row_oids(item, schema.oid_shape)
-            checks.require(
-                OID_PATTERN.findall(row) == expected_oids,
-                f"{schema.name}: ordered endpoint OIDs differ for {name}",
-            )
-            if schema.records == "controls":
-                checks.require(
-                    item["status"] in row,
-                    f"{schema.name}: control status differs for {name}",
-                )
-                baseline = friendly_classification(item["baseline_classification"])
-                damaged = friendly_classification(item["damaged_classification"])
-                checks.require(
-                    f"{baseline} -> {damaged}" in row.lower(),
-                    f"{schema.name}: control transition differs for {name}",
-                )
-            else:
-                semantic = (
-                    f"`{item['classification']}` / "
-                    f"`{item['evidence_verdict']['status']}` / "
-                    f"`{item['event_mode']}`"
-                )
-                checks.require(
-                    semantic in row,
-                    f"{schema.name}: classification/status/mode differs for {name}",
-                )
-            audited_rows += 1
-            semantic_rows += 1
-    return audited_rows, semantic_rows
-
-
-P_CONTRACT_SCENARIOS: dict[str, tuple[str, ...]] = {
-    "P1": ("P1-direct-linear-valid",),
-    "P2": ("P2-direct-linear-invalid",),
-    "P3": ("P3-genuine-old-loss",),
-    "P4": ("P4-pre-C-identical-origins",),
-    "P5": ("P5-duplicate-at-C",),
-    "P6": ("P6a-old-delete-recreate", "P6b-candidate-delete-recreate"),
-    "P7": ("P7-immutable-payload-change",),
-    "P8": ("P8-path-timing-move",),
-    "P9": ("P9-direct-two-parent-valid",),
-    "P10": ("P10-direct-invalid-parent",),
-    "P11": ("P11-direct-three-parent-valid",),
-    "P12": ("P12-merge-supplier-valid",),
-    "P13": ("P13-merge-supplier-invalid",),
-    "P14": ("P14-supplier-reintroduced",),
-    "P15": ("P15-competing-suppliers",),
-    "P16": ("P16-PCX-08-invalid-supplier-claimed-carrier",),
-    "P17": ("P17-post-event-reintroduction",),
-    "P18": (),
-    "P19": ("P19-production-identities",),
-    "P20": ("P20-lifecycle-types",),
-    "P21": ("P21-PCX-17c-squash-erasure",),
-    "P22": ("P22-PCX-18-one-pass-many-actions",),
-}
-
-
-def audit_plain_table_inventories(readme: str, checks: Checks) -> int:
-    schemas = (
-        (
-            "S alias",
-            "## S1/S2/S3/S12 executable aliases",
-            "## P1-P22 coverage",
-            "Alias",
-            ("S1", "S2", "S3", "S12"),
-        ),
-        (
-            "P contract",
-            "## P1-P22 coverage",
-            "### Selected-range-base boundary regressions",
-            "Contract",
-            tuple(P_CONTRACT_SCENARIOS),
-        ),
-        (
-            "PCX attack",
-            "## PCX-01-PCX-20 attack coverage",
-            "### Mixed causal-source regressions",
-            "Attack",
-            tuple(PCX_ROWS),
-        ),
-    )
-    audited = 0
-    for name, start, end, header, expected_names in schemas:
-        try:
-            begin, finish = heading_span(readme, start, end)
-        except ValueError as error:
-            checks.require(False, f"missing {name} table boundary: {error}")
-            continue
-        blocks = markdown_table_blocks(readme[begin:finish], header)
-        checks.require(len(blocks) == 1, f"{name}: expected exactly one table")
-        if len(blocks) != 1:
-            continue
-        rows = blocks[0]
-        actual_names = tuple(
-            row_name
-            for line in rows
-            if (row_name := first_table_cell(line)) is not None
-        )
-        checks.require(
-            actual_names == expected_names,
-            f"{name}: row inventory differs; expected {expected_names}, got {actual_names}",
-        )
-        if name == "P contract":
-            for contract, scenario_names in P_CONTRACT_SCENARIOS.items():
-                matches = [line for line in rows if first_table_cell(line) == contract]
-                checks.require(len(matches) == 1, f"P contract: duplicate/missing {contract}")
-                if len(matches) == 1:
-                    found_names = tuple(
-                        scenario
-                        for scenario in scenario_names
-                        if f"`{scenario}`" in matches[0]
-                    )
-                    checks.require(
-                        found_names == scenario_names,
-                        f"P contract: executable cases differ for {contract}",
-                    )
-        audited += len(expected_names)
-    return audited
-
-
-def audit_aliases(
-    readme: str, stream: Stream, checks: Checks
-) -> int:
-    inventory = stream.aliases["scenario_alias_inventory"]
-    checks.require(stream.aliases.get("status") == "PASS", "alias inventory is not PASS")
-    checks.require(len(inventory) == EXPECTED_ALIASES, "alias inventory is not 4 rows")
-    row_count = 0
-    for item in inventory:
-        alias = item["alias"]
-        expected = item["expected"]
-        checks.require(item.get("status") == "PASS", f"{alias} did not pass")
-        checks.require(
-            item.get("maps_to") == expected.get("scenario"),
-            f"{alias} mapping differs from its expectation",
-        )
-        checks.require(
-            item.get("observed") == expected,
-            f"{alias} observed evidence differs from its expectation",
-        )
-        authority_kind = "invalid" if expected["invalid_authority_edges"] else "valid"
-        authority_cell = (
-            f"{expected['authority_edges']} {authority_kind}"
-            if expected["authority_edges"]
-            else "0"
-        )
-        rendered = (
-            f"| {alias} | `{expected['scenario']}` | `{expected['classification']}` | "
-            f"`{expected['evidence_status']}` | `{expected['event_mode']}` | "
-            f"{authority_cell} / {expected['propagation_edges']} |"
-        )
-        checks.require(rendered in readme, f"README alias row differs for {alias}")
-        row_count += 1
-    return row_count
-
-
-def audit_named_rows(
-    lines: list[str], records: dict[str, dict[str, Any]], controls: dict[str, dict[str, Any]], checks: Checks
-) -> tuple[int, int]:
-    row_checks = 0
-    semantic_checks = 0
-    for number, line in enumerate(lines, 1):
-        if not line.startswith("|"):
-            continue
-        names = [name for name in records if f"`{name}`" in line]
-        if not names:
-            continue
-        row_checks += 1
-        serialized = record_serialization(records, names)
-        for oid in OID_PATTERN.findall(line):
-            checks.require(
-                oid in serialized,
-                f"line {number}: row OID {oid} is absent from {names}",
-            )
-        if len(names) != 1:
-            continue
-        name = names[0]
-        item = records[name]
-        lower = line.lower()
-        if name in controls:
-            expected_oids = [item[key] for key in ("C", "O", "M", "N")]
-            checks.require(
-                OID_PATTERN.findall(line) == expected_oids,
-                f"line {number}: control endpoints differ for {name}",
-            )
-            checks.require(
-                item["status"] in line,
-                f"line {number}: control status differs for {name}",
-            )
-            baseline = friendly_classification(item["baseline_classification"])
-            damaged = friendly_classification(item["damaged_classification"])
-            checks.require(
-                f"{baseline} -> {damaged}" in lower,
-                f"line {number}: control transition differs for {name}",
-            )
-            semantic_checks += 3
-            continue
-        status = item["evidence_verdict"]["status"]
-        mode = item["event_mode"]
-        if "no finding" in lower or "no-finding" in lower:
-            semantic_checks += 1
-            checks.require(
-                item["classification"] == "no-finding",
-                f"line {number}: no-finding claim differs for {name}",
-            )
-        if "blocking" in lower or " block" in lower:
-            semantic_checks += 1
-            checks.require(
-                item["classification"] == "blocking-finding",
-                f"line {number}: blocking claim differs for {name}",
-            )
-        for claimed_status in ("unreadable", "ambiguous", "invalid", "none"):
-            if f"`{claimed_status}`" in lower or re.search(
-                rf"\|\s*{claimed_status}(?:\s|;|\{{)", lower
-            ):
-                semantic_checks += 1
-                checks.require(
-                    status == claimed_status
-                    or (
-                        claimed_status == "invalid"
-                        and "valid and one invalid" in lower
-                    ),
-                    f"line {number}: {claimed_status} claim differs from {status} for {name}",
-                )
-                break
-        for claim_status, claim_mode in (
-            ("valid", "direct"),
-            ("valid", "supplier"),
-            ("invalid", "direct"),
-            ("invalid", "supplier"),
-        ):
-            if f"`{claim_status} {claim_mode}`" in lower:
-                semantic_checks += 1
-                checks.require(
-                    status == claim_status and mode == claim_mode,
-                    f"line {number}: {claim_status}-{claim_mode} claim differs for {name}",
-                )
-    return row_checks, semantic_checks
-
-
-PCX_ROWS: dict[str, tuple[list[str], list[str]]] = {
-    "PCX-01 neutral parent": (["PCX-01-neutral-parent"], ["valid direct", "neutral parent"]),
-    "PCX-02 neutral plus invalid carrier": (["PCX-02-neutral-plus-invalid-carrier"], ["invalid direct", "neutral parent"]),
-    "PCX-03 foreign exact identity": (["PCX-03-foreign-exact-identity"], ["ambiguous", "not rooted at `C`"]),
-    "PCX-04 several absent parents": (["PCX-04-several-absent-one-supplier"], ["valid supplier", "two absent parents"]),
-    "PCX-05 competing later supplier": (["PCX-05-competing-later-supplier"], ["ambiguous", "both independently valid authority edges"]),
-    "PCX-06 nested supplier over direct": (["PCX-06-nested-supplier-over-direct"], ["two-edge authority event", "two propagation edges", "stable order"]),
-    "PCX-07 overqualified propagation": (["PCX-07-overqualified-propagation"], ["valid supplier", "remains one propagation edge"]),
-    "PCX-08 invalid supplier plus claimed carrier": (["P16-PCX-08-invalid-supplier-claimed-carrier"], ["invalid supplier", "blocks"]),
-    "PCX-09 recreated claimed bytes": (["PCX-09-recreated-claimed-bytes"], ["ambiguous discontinuity"]),
-    "PCX-10 transient multiplicity": (["PCX-10-transient-multiplicity"], ["ambiguous at multiplicity 2"]),
-    "PCX-11 different payload, same path": (["PCX-11-different-payload-same-path"], ["supplier validates", "separate finding"]),
-    "PCX-12 timing rename": (["PCX-12-timing-rename-supplier"], ["valid supplier"]),
-    "PCX-13 conflicting human response": (["PCX-13-conflicting-human-response"], ["three-level invalid continuation", "three ordered propagation edges"]),
-    "PCX-14 valid human supplier": (["PCX-14-valid-human-supplier"], ["valid supplier"]),
-    "PCX-15 generated retry": (["PCX-15-generated-retry-supplier"], ["valid supplier"]),
-    "PCX-16 task pickup": (["PCX-16-task-pickup-supplier"], ["valid supplier"]),
-    "PCX-17 cherry-pick versus squash": (["PCX-17-complete-cherry-pick", "PCX-17-deletion-only-cherry-pick", "P21-PCX-17c-squash-erasure"], ["complete K-then-D cherry-pick validates", "D-only cherry-pick and squash block"]),
-    "PCX-18 one-pass many actions": (["P22-PCX-18-one-pass-many-actions"], ["covered with P22"]),
-    "PCX-19 missing claim blob": (["PCX-19-missing-claim-blob-recovery"], ["first result `unreadable`", "restored-object result `valid`"]),
-    "PCX-20 budget overflow": (["PCX-20a-budget-below-limit", "PCX-20b-budget-overflow"], ["normal `valid`", "returns `ambiguous`", "zero selected events"]),
-}
-
-
-PCX_EXPECTATIONS: dict[str, tuple[str, str, str]] = {
-    "PCX-01-neutral-parent": ("no-finding", "valid", "direct"),
-    "PCX-02-neutral-plus-invalid-carrier": ("blocking-finding", "invalid", "direct"),
-    "PCX-03-foreign-exact-identity": ("blocking-finding", "ambiguous", "direct"),
-    "PCX-04-several-absent-one-supplier": ("no-finding", "valid", "supplier"),
-    "PCX-05-competing-later-supplier": ("blocking-finding", "ambiguous", "ambiguous"),
-    "PCX-06-nested-supplier-over-direct": ("no-finding", "valid", "supplier"),
-    "PCX-07-overqualified-propagation": ("no-finding", "valid", "supplier"),
-    "P16-PCX-08-invalid-supplier-claimed-carrier": ("blocking-finding", "invalid", "supplier"),
-    "PCX-09-recreated-claimed-bytes": ("blocking-finding", "ambiguous", "ambiguous"),
-    "PCX-10-transient-multiplicity": ("blocking-finding", "ambiguous", "direct"),
-    "PCX-11-different-payload-same-path": ("blocking-finding", "invalid", "mixed"),
-    "PCX-12-timing-rename-supplier": ("no-finding", "valid", "supplier"),
-    "PCX-13-conflicting-human-response": ("blocking-finding", "invalid", "supplier"),
-    "PCX-14-valid-human-supplier": ("no-finding", "valid", "supplier"),
-    "PCX-15-generated-retry-supplier": ("no-finding", "valid", "supplier"),
-    "PCX-16-task-pickup-supplier": ("no-finding", "valid", "supplier"),
-    "PCX-17-complete-cherry-pick": ("no-finding", "valid", "direct"),
-    "PCX-17-deletion-only-cherry-pick": ("blocking-finding", "invalid", "direct"),
-    "P21-PCX-17c-squash-erasure": ("blocking-finding", "invalid", "direct"),
-    "PCX-19-missing-claim-blob-recovery": ("no-finding", "valid", "direct"),
-    "PCX-20a-budget-below-limit": ("no-finding", "valid", "direct"),
-    "PCX-20b-budget-overflow": ("blocking-finding", "ambiguous", "none"),
-}
-
-
-def audit_pcx_rows(lines: list[str], scenarios: dict[str, dict[str, Any]], checks: Checks) -> int:
-    checked = 0
-    for label, (names, fragments) in PCX_ROWS.items():
-        found = table_row(lines, f"| {label} |")
-        checks.require(found is not None, f"missing or duplicate attack row: {label}")
-        if found is None:
-            continue
-        number, row = found
-        for fragment in fragments:
-            if fragment.startswith("valid "):
-                present = re.search(rf"(?<![A-Za-z]){re.escape(fragment)}", row) is not None
-            else:
-                present = fragment in row
-            checks.require(present, f"line {number}: missing PCX claim {fragment!r}")
-        for name in names:
-            checks.require(name in scenarios, f"line {number}: missing scenario {name}")
-            if name not in scenarios or name not in PCX_EXPECTATIONS:
-                continue
-            item = scenarios[name]
-            classification, status, mode = PCX_EXPECTATIONS[name]
-            checks.require(
-                (item["classification"], item["evidence_verdict"]["status"], item["event_mode"])
-                == (classification, status, mode),
-                f"line {number}: {name} result differs from the attack-row contract",
-            )
-        checked += 1
-
-    pcx11 = scenarios.get("PCX-11-different-payload-same-path", {})
-    checks.require(
-        [(action.get("status"), action.get("event_mode"), action.get("finding")) for action in pcx11.get("actions", [])]
-        == [("valid", "supplier", False), ("invalid", "direct", True)],
-        "PCX-11 no longer contains the claimed valid supplier plus distinct finding",
-    )
-    pcx19 = scenarios.get("PCX-19-missing-claim-blob-recovery", {})
-    checks.require(
-        pcx19.get("recovery")
-        and pcx19["recovery"].get("first_status") == "unreadable"
-        and pcx19["recovery"].get("second_status") == "valid"
-        and pcx19["recovery"].get("same_process") is True,
-        "PCX-19 recovery claim differs from the scenario record",
-    )
-    return checked
-
-
-def audit_costs(readme: str, scenarios: dict[str, dict[str, Any]], checks: Checks) -> int:
-    many = scenarios["P22-PCX-18-one-pass-many-actions"]
-    expected_costs = {
-        "Graph commits": many["metrics"]["graph_commits"],
-        "Graph parent edges": many["metrics"]["graph_parent_edges"],
-        "Graph enumerations": many["metrics"]["graph_enumerations"],
-        "Per-action history walks": many["metrics"]["per_action_history_walks"],
-        "Queue snapshots requested": many["metrics"]["queue_snapshots_requested"],
-        "Snapshot cache hits": many["metrics"]["snapshot_cache_hits"],
-        "Distinct queue subtree reads": many["metrics"]["queue_subtree_reads"],
-        "Git object reads": many["metrics"]["object_reads"],
-        "Object cache hits": many["metrics"]["object_cache_hits"],
-        "Production identity calls": many["metrics"]["identity_calls"],
-        "Production authority calls": many["metrics"]["authority_calls"],
-        "Production mutation calls": many["metrics"]["mutation_calls"],
-        "`cat-file --batch` processes": many["metrics"]["batch_processes"],
-        "Actual Git child processes, including production validator calls": many["metrics"]["git_processes"],
-    }
-    count = 0
-    for label, value in expected_costs.items():
-        checks.require(
-            f"| {label} | {value:,} |" in readme,
-            f"cost counter differs: {label} expected {value:,}",
-        )
-        count += 1
-    for field_name, expected in (
-        ("history_commits", 128),
-        ("disappeared_actions", 16),
-        ("expected_authorized", 8),
-        ("expected_findings", 8),
-    ):
-        checks.require(
-            many["details"].get(field_name) == expected,
-            f"many-action detail {field_name} changed from {expected}",
-        )
-        count += 1
-    below = scenarios["PCX-20a-budget-below-limit"]
-    over = scenarios["PCX-20b-budget-overflow"]
-    budget_claims = (
-        (below["metrics"]["graph_commits"] == 10, "below-limit graph count"),
-        (below["evidence_verdict"]["status"] == "valid", "below-limit verdict"),
-        (over["metrics"]["graph_commits"] == 11, "overflow graph count"),
-        (over["details"].get("demonstration_limit") == 10, "overflow limit"),
-        (not over["actions"], "overflow selected events"),
-        (
-            over["metrics"]["identity_calls"] == over["metrics"]["authority_calls"] == 0,
-            "overflow authority/identity calls",
-        ),
-    )
-    for condition, label in budget_claims:
-        checks.require(condition, f"budget claim differs: {label}")
-        count += 1
-    return count
-
-
-def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
-    readme = readme_path.read_text()
-    lines = readme.splitlines()
-    checks = Checks()
-    scenarios = stream.scenarios
-    controls = stream.controls
-    records = scenarios | controls
-
-    checks.require(len(stream.objects) == 139, "self-test stream is not 139 records")
-    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 122")
-    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 15")
-    summary_expected = {
-        "aliases_passed": EXPECTED_ALIASES,
-        "aliases_total": EXPECTED_ALIASES,
-        "controls_passed": EXPECTED_CONTROLS,
-        "controls_total": EXPECTED_CONTROLS,
-        "failures": [],
-        "passed": EXPECTED_SCENARIOS,
-        "summary": "PASS",
-        "total": EXPECTED_SCENARIOS,
-    }
-    for key, expected in summary_expected.items():
-        checks.require(stream.summary.get(key) == expected, f"summary field {key} differs")
-    for phrase in (
-        "49 prescribed real-Git scenarios, 73 focused contract regressions, and all fifteen damaged-mode controls",
-        "122/122 scenarios, 4/4 executable aliases, and 15/15 controls",
-    ):
-        checks.require(normalized(phrase) in normalized(readme), f"missing total claim: {phrase}")
-
-    oid_occurrences = list(OID_PATTERN.finditer(readme))
-    fixture_sha_occurrences = list(FIXTURE_SHA_PATTERN.finditer(readme))
-    artifact = stream.raw.decode()
-    for match in oid_occurrences:
-        line = readme.count("\n", 0, match.start()) + 1
-        checks.require(
-            match.group(0) in artifact,
-            f"line {line}: OID absent from self-test output: {match.group(0)}",
-        )
-    checks.require(len(fixture_sha_occurrences) == 7, "README does not contain 7 fixture SHA claims")
-    for match in fixture_sha_occurrences:
-        line = readme.count("\n", 0, match.start()) + 1
-        checks.require(
-            match.group(0) in artifact,
-            f"line {line}: fixture SHA absent from self-test output: {match.group(0)}",
-        )
-
-    regions = [
-        ("P12 starts with", "## S1/S2/S3/S12", ["P12-merge-supplier-valid"]),
-        (
-            "### Selected-range-base boundary regressions",
-            "## PCX-01-PCX-20 attack coverage",
-            [
-                f"P18{letter}-{suffix}"
-                for letter, suffix in (
-                    ("h", "missing-M"),
-                    ("i", "noncommit-M-blob"),
-                    ("j", "noncommit-M-tree"),
-                    ("k", "noncommit-M-tag"),
-                    ("l", "unrelated-M"),
-                    ("m", "M-after-N"),
-                    ("n", "M-equals-C"),
-                    ("o", "M-equals-N"),
-                )
-            ],
-        ),
-        (
-            "## PCX-01-PCX-20 attack coverage",
-            "### Mixed causal-source regressions",
-            [name for name in scenarios if name.startswith("PCX-")]
-            + ["P16-PCX-08-invalid-supplier-claimed-carrier", "P22-PCX-18-one-pass-many-actions"],
-        ),
-        (
-            "### Mixed causal-source regressions",
-            "### Canonical-root diamond regressions",
-            ["R3-01-two-invalid-causal-sources", "R3-02-invalid-valid-causal-competition", "R3-03-unrelated-invalid-does-not-poison"],
-        ),
-        (
-            "### Canonical-root diamond regressions",
-            "### Reintroduced-occurrence history regressions",
-            ["R4-01-same-root-valid-diamond", "R4-02-distinct-valid-root-diamond", "R4-03-equal-root-plus-invalid-diamond"],
-        ),
-        (
-            "### Reintroduced-occurrence history regressions",
-            "### All-absent frontier regressions",
-            ["R5-01-invalid-redelete-after-supplier-reintroduction", "R5-02-valid-redelete-after-supplier-reintroduction"],
-        ),
-        (
-            "### All-absent frontier regressions",
-            "## O-anchored human binding and adapter input",
-            ["R6-01-valid-plus-invalid-all-absent", "R6-02-valid-plus-ambiguous-all-absent", "R6-03-two-invalid-all-absent", "R6-04-same-valid-root-all-absent-wrappers"],
-        ),
-        (
-            "## O-anchored human binding and adapter input",
-            "### Pending review target and revision",
-            [
-                "R8-direct-human-response-conflict",
-                "R8-direct-human-response-identical",
-                "R8-supplier-human-response-conflict",
-                "R8-supplier-human-response-identical",
-                "R8-review-binding-divergent",
-                "R8-review-binding-identical",
-                "R8-review-binding-terminal-conflict",
-            ],
-        ),
-        (
-            "### Pending review target and revision",
-            "### Malformed review target and revision",
-            [name for name in scenarios if name.startswith("R9-")],
-        ),
-        (
-            "### Malformed review target and revision",
-            "### Implicated-parent and persisted-state regressions",
-            [name for name in scenarios if name.startswith("R10-")],
-        ),
-        (
-            "### Implicated-parent and persisted-state regressions",
-            "### Unanswered review and continuous persisted-state regressions",
-            [name for name in scenarios if name.startswith("R13-")],
-        ),
-        (
-            "### Unanswered review and continuous persisted-state regressions",
-            "### Old-side C-rooted occurrence regressions",
-            [name for name in scenarios if name.startswith("R14-")],
-        ),
-        (
-            "### Old-side C-rooted occurrence regressions",
-            "`R8-adapter-M-input-variants` runs three classifiers",
-            [name for name in scenarios if name.startswith("R15-")],
-        ),
-        (
-            "`R8-adapter-M-input-variants` runs three classifiers",
-            "## Cost and budget evidence",
-            ["R8-adapter-M-input-variants", "R8-adapter-M-N-frontier-counterexample"],
-        ),
-        (
-            "## Cost and budget evidence",
-            "## Damaged-mode controls",
-            ["P22-PCX-18-one-pass-many-actions", "PCX-19-missing-claim-blob-recovery", "PCX-20a-budget-below-limit", "PCX-20b-budget-overflow"],
-        ),
-        ("## Damaged-mode controls", "## Evidence audit", list(controls)),
-    ]
-    covered_positions: set[int] = set()
-    region_oid_claims = 0
-    for start, end, names in regions:
-        missing = [name for name in names if name not in records]
-        checks.require(not missing, f"missing records for README region {start}: {missing}")
-        try:
-            begin, finish = heading_span(readme, start, end)
-        except ValueError as error:
-            checks.require(False, f"missing README region boundary: {error}")
-            continue
-        if missing:
-            continue
-        allowed = record_serialization(records, names)
-        for match in oid_occurrences:
-            if begin <= match.start() < finish:
-                region_oid_claims += 1
-                covered_positions.add(match.start())
-                line = readme.count("\n", 0, match.start()) + 1
-                checks.require(
-                    match.group(0) in allowed,
-                    f"line {line}: OID is not in its named scenario/control region: {match.group(0)}",
-                )
-    unmapped = [
-        (readme.count("\n", 0, match.start()) + 1, match.group(0))
-        for match in oid_occurrences
-        if match.start() not in covered_positions
-    ]
-    checks.require(not unmapped, f"unmapped README OID claims: {unmapped}")
-
-    alias_rows = audit_aliases(readme, stream, checks)
-    plain_inventory_rows = audit_plain_table_inventories(readme, checks)
-    schema_rows, schema_semantic_rows = audit_exact_named_tables(
-        readme, scenarios, controls, checks
-    )
-    row_checks, semantic_row_checks = audit_named_rows(lines, records, controls, checks)
-    pcx_rows = audit_pcx_rows(lines, scenarios, checks)
-    counter_checks = audit_costs(readme, scenarios, checks)
-
-    canonical_digest = stream.canonical_sha256()
-    raw_digest = stream.raw_sha256()
-    checks.require(
-        f"environment, at `{raw_digest}`." in normalized(readme),
-        "README tested-environment raw digest is missing or stale",
-    )
-    checks.require(
-        f"Canonical semantic SHA-256: `{canonical_digest}`." in normalized(readme),
-        "README canonical semantic digest is missing or stale",
-    )
-    nonclaims = (
-        "do not change production review parsing, schemas, templates, or workflow behavior.",
-        "PCX-21 staged/committed parity and PCX-22 unmerged-index handling remain production-integration gates and were not run.",
-        "no push-prevention claim is made.",
-        "Squash remains unsupported.",
-        "it must not automatically substitute either `O` or `N`.",
-        "zero POC-owned per-action history walks is not a claim of zero total per-commit history queries.",
-        "production integration must reuse the enumerated parent cache, eliminate those queries, and set a measured process budget.",
-        "No production code, schema, task record, contract, dependency, adapter, or neighboring POC changed",
-        "no branch was pushed or pull request opened.",
-    )
-    normalized_readme = normalized(readme)
-    for phrase in nonclaims:
-        checks.require(normalized(phrase) in normalized_readme, f"missing nonclaim: {phrase}")
-    checks.require(
-        checks.total + 2 == EXPECTED_AUDIT_CHECKS,
-        "auditor coverage-check topology changed without updating its pinned schema",
-    )
-    checks.require(
-        f'"audit": "PASS", "checks_passed": {EXPECTED_AUDIT_CHECKS}, '
-        f'"checks_total": {EXPECTED_AUDIT_CHECKS}'
-        in readme,
-        "README audit PASS/check-count transcript is missing or stale",
-    )
-
-    return {
-        "audit": "PASS" if not checks.failures else "FAIL",
-        "alias_rows": alias_rows,
-        "canonical_sha256": canonical_digest,
-        "checks_passed": checks.total - len(checks.failures),
-        "checks_total": checks.total,
-        "control_rows": len(controls),
-        "counter_checks": counter_checks,
-        "failures": checks.failures,
-        "fixture_sha256_claims": len(fixture_sha_occurrences),
-        "oid_occurrences": len(oid_occurrences),
-        "pcx_rows": pcx_rows,
-        "pinned_controls": len(controls),
-        "pinned_scenarios": len(scenarios),
-        "plain_inventory_rows": plain_inventory_rows,
-        "raw_sha256": stream.raw_sha256(),
-        "record_rows": row_checks,
-        "region_oid_claims": region_oid_claims,
-        "schema_rows": schema_rows,
-        "schema_semantic_rows": schema_semantic_rows,
-        "semantic_row_checks": semantic_row_checks,
-        "unique_oids": len({match.group(0) for match in oid_occurrences}),
-    }
-
-
-def recursive_field_differences(left: Any, right: Any) -> int:
-    if type(left) is not type(right):
-        return 1
-    if isinstance(left, dict):
-        keys = set(left) | set(right)
-        return sum(
-            1
-            if key not in left or key not in right
-            else recursive_field_differences(left[key], right[key])
-            for key in keys
-        )
-    if isinstance(left, list):
-        common = min(len(left), len(right))
-        return abs(len(left) - len(right)) + sum(
-            recursive_field_differences(left[index], right[index])
-            for index in range(common)
-        )
-    return int(left != right)
-
-
-def compare_streams(left: Stream, right: Stream) -> dict[str, Any]:
-    common = min(len(left.objects), len(right.objects))
-    record_differences = sum(
-        left.objects[index] != right.objects[index] for index in range(common)
-    ) + abs(len(left.objects) - len(right.objects))
-    field_differences = abs(len(left.objects) - len(right.objects))
-    field_differences += sum(
-        recursive_field_differences(left.objects[index], right.objects[index])
-        for index in range(common)
-    )
-    result = {
-        "canonical_equal": left.canonical_bytes() == right.canonical_bytes(),
-        "canonical_sha256_left": left.canonical_sha256(),
-        "canonical_sha256_right": right.canonical_sha256(),
-        "differing_fields": field_differences,
-        "differing_records": record_differences,
-        "raw_equal": left.raw == right.raw,
-        "raw_sha256_left": left.raw_sha256(),
-        "raw_sha256_right": right.raw_sha256(),
-    }
-    result["comparison"] = (
-        "PASS"
-        if result["canonical_equal"]
-        and result["raw_equal"]
-        and result["differing_records"] == 0
-        and result["differing_fields"] == 0
-        else "FAIL"
-    )
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise EvidenceError(f"duplicate JSON key {key!r}")
+        result[key] = value
     return result
 
 
-def damage_control(readme_path: Path, stream: Stream) -> dict[str, Any]:
-    original = readme_path.read_text()
-    literal_mutations = {
-        "readme-oid": (
-            "3a01d100e676a9a20f8dc545fed19be3419fb759",
-            "0000000000000000000000000000000000000000",
-        ),
-        "readme-result": (
-            "| PCX-01 neutral parent | valid direct;",
-            "| PCX-01 neutral parent | invalid direct;",
-        ),
-        "readme-counter": ("| Graph commits | 133 |", "| Graph commits | 134 |"),
-    }
-    mutations: list[tuple[str, str, int]] = []
-    for name, (old, new) in literal_mutations.items():
-        mutations.append((name, original.replace(old, new, 1), original.count(old)))
-
-    r14_row = next(
-        line
-        for line in original.splitlines()
-        if first_table_cell(line) == "R14-direct-old-unanswered-carrier-target"
-    )
-    forged_real_oids = r14_row.replace(
-        "`R14-direct-old-unanswered-carrier-target`",
-        "`R14-invented-real-oids`",
-        1,
-    ).replace(
-        "`blocking-finding` / `invalid` / `direct`",
-        "`no-finding` / `valid` / `direct`",
-        1,
-    )
-    mutations.extend(
-        (
-            (
-                "invented-row-real-oids-false-verdict",
-                original.replace(r14_row, r14_row + "\n" + forged_real_oids, 1),
-                1,
-            ),
-            (
-                "invented-row-no-oids",
-                original.replace(
-                    r14_row,
-                    r14_row
-                    + "\n| `R14-invented-no-oids` | none | "
-                    + "`no-finding` / `valid` / `direct` |",
-                    1,
-                ),
-                1,
-            ),
-            (
-                "duplicate-real-row",
-                original.replace(r14_row, r14_row + "\n" + r14_row, 1),
-                1,
-            ),
-            (
-                "missing-real-row",
-                original.replace(r14_row + "\n", "", 1),
-                1,
-            ),
-        )
-    )
-    row_oids = OID_PATTERN.findall(r14_row)
-    swapped_row = r14_row.replace(row_oids[0], "OID_SWAP_SENTINEL", 1)
-    swapped_row = swapped_row.replace(row_oids[1], row_oids[0], 1)
-    swapped_row = swapped_row.replace("OID_SWAP_SENTINEL", row_oids[1], 1)
-    mutations.append(
-        (
-            "swapped-same-region-oids",
-            original.replace(r14_row, swapped_row, 1),
-            1,
-        )
-    )
-    transcript_match = re.search(
-        r'"checks_passed": (\d+), "checks_total": (\d+)', original
-    )
-    if transcript_match:
-        changed_transcript = (
-            f'"checks_passed": {int(transcript_match.group(1)) + 1}, '
-            f'"checks_total": {int(transcript_match.group(2)) + 1}'
-        )
-        mutations.append(
-            (
-                "changed-transcript-counts",
-                original[: transcript_match.start()]
-                + changed_transcript
-                + original[transcript_match.end() :],
-                1,
-            )
-        )
-    else:
-        mutations.append(("changed-transcript-counts", original, 0))
-
-    results: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="production-contract-readme-audit-") as root:
-        for name, damaged, occurrences in mutations:
-            path = Path(root) / f"{name}.md"
-            path.write_text(damaged)
-            result = audit_readme(path, stream)
-            observed = occurrences >= 1 and result["audit"] == "FAIL"
-            results.append(
-                {
-                    "control": name,
-                    "failure_count": len(result["failures"]),
-                    "status": "OBSERVED_RED" if observed else "FAILED_TO_RED",
-                }
-            )
-        damaged_objects = json.loads(json.dumps(stream.objects))
-        damaged_objects[0]["classification"] = "blocking-finding"
-        damaged_stream_path = Path(root) / "semantic-stream.jsonl"
-        damaged_stream_path.write_text(
-            "\n".join(
-                json.dumps(item, ensure_ascii=False, sort_keys=True)
-                for item in damaged_objects
-            )
-            + "\n"
-        )
-        comparison = compare_streams(stream, Stream.load(damaged_stream_path))
-        comparison_control = {
-            "control": "comparison-semantic-field",
-            "differing_fields": comparison["differing_fields"],
-            "differing_records": comparison["differing_records"],
-            "status": (
-                "OBSERVED_RED"
-                if comparison["comparison"] == "FAIL"
-                else "FAILED_TO_RED"
-            ),
-        }
-    passed = all(item["status"] == "OBSERVED_RED" for item in results)
-    passed = passed and comparison_control["status"] == "OBSERVED_RED"
-    return {
-        "audit_damage_control": "PASS" if passed else "FAIL",
-        "comparison_control": comparison_control,
-        "controls": results,
-    }
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--jsonl", required=True, type=Path, help="self-test JSONL to audit"
-    )
-    parser.add_argument(
-        "--readme",
-        type=Path,
-        default=Path(__file__).with_name("README.md"),
-        help="README to audit (defaults to the sibling README.md)",
-    )
-    parser.add_argument("--compare", type=Path, help="second self-test stream")
-    parser.add_argument(
-        "--damage-control",
-        action="store_true",
-        help="prove README schema and evidence mutations fail the audit",
-    )
-    arguments = parser.parse_args()
+def load_json(raw: bytes) -> Any:
     try:
-        stream = Stream.load(arguments.jsonl)
-        result = audit_readme(arguments.readme, stream)
-        if arguments.compare:
-            comparison = compare_streams(
-                stream, Stream.load(arguments.compare)
-            )
-            result["comparison"] = comparison
-            if comparison["comparison"] != "PASS":
-                result["audit"] = "FAIL"
-                result["failures"].append(
-                    "comparison stream differs from the primary stream"
+        return json.loads(
+            raw.decode("utf-8"), object_pairs_hook=reject_duplicate_keys
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, EvidenceError) as error:
+        raise EvidenceError(f"invalid JSON: {error}") from error
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        + "\n"
+    ).encode("utf-8")
+
+
+def digest_bytes(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def record_digest(value: Any) -> str:
+    return digest_bytes(canonical_bytes(value))
+
+
+def repo_root() -> Path:
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "automation/reconcile/reconcile.py").is_file():
+            return candidate
+    raise EvidenceError("could not locate repository root")
+
+
+def require_keys(value: Any, keys, context: str):
+    if not isinstance(value, dict):
+        raise EvidenceError(f"{context} is not an object")
+    observed, expected = set(value), set(keys)
+    if observed != expected:
+        raise EvidenceError(
+            f"{context} keys differ: missing={sorted(expected-observed)}, "
+            f"extra={sorted(observed-expected)}"
+        )
+
+
+def require_digest(value: Any, context: str):
+    if not (
+        isinstance(value, str) and len(value) == 71
+        and value.startswith("sha256:")
+        and all(char in "0123456789abcdef" for char in value[7:])
+    ):
+        raise EvidenceError(f"{context} is not a canonical SHA-256")
+
+
+def require_oid(value: Any, context: str):
+    if not (
+        isinstance(value, str) and len(value) == 40
+        and all(char in "0123456789abcdef" for char in value)
+    ):
+        raise EvidenceError(f"{context} is not a full Git OID")
+
+
+def require_nonnegative_int(value: Any, context: str):
+    if type(value) is not int or value < 0:
+        raise EvidenceError(f"{context} is not an exact nonnegative integer")
+
+
+def normalized_record(value: dict) -> dict:
+    result = copy.deepcopy(value)
+    if "summary" in result:
+        result.pop("git", None)
+        result.pop("python", None)
+    return result
+
+
+class Stream:
+    def __init__(self, path: Path):
+        self.path = path
+        self.raw = path.read_bytes()
+        self.objects = []
+        for number, line in enumerate(self.raw.splitlines(), start=1):
+            if not line:
+                raise EvidenceError(f"blank JSONL line {number}")
+            value = load_json(line)
+            if not isinstance(value, dict):
+                raise EvidenceError(f"JSONL line {number} is not an object")
+            self.objects.append(value)
+        self.scenarios = self._unique("scenario")
+        self.controls = self._unique("control")
+        aliases = [x for x in self.objects if "scenario_alias_inventory" in x]
+        summaries = [x for x in self.objects if "summary" in x]
+        if len(aliases) != 1 or len(summaries) != 1:
+            raise EvidenceError("stream needs exactly one alias and summary row")
+        if len(self.objects) != len(self.scenarios) + len(self.controls) + 2:
+            raise EvidenceError("stream contains an unknown record kind")
+        self.aliases, self.summary = aliases[0], summaries[0]
+        self._validate()
+
+    def _unique(self, key):
+        result = {}
+        for row in (x for x in self.objects if key in x):
+            if row[key] in result:
+                raise EvidenceError(f"duplicate {key} {row[key]!r}")
+            result[row[key]] = row
+        return result
+
+    def _validate(self):
+        if tuple(sorted(self.scenarios)) != SCENARIO_IDS:
+            raise EvidenceError("scenario catalog differs from closed inventory")
+        if tuple(sorted(self.controls)) != CONTROL_IDS:
+            raise EvidenceError("control catalog differs from closed inventory")
+        inventory = self.aliases.get("scenario_alias_inventory")
+        names = [row.get("alias") for row in inventory or []]
+        if tuple(sorted(names)) != ALIAS_IDS or len(set(names)) != 4:
+            raise EvidenceError("alias catalog differs from closed inventory")
+        expected = {
+            "summary": "PASS", "passed": len(SCENARIO_IDS),
+            "total": len(SCENARIO_IDS), "controls_passed": len(CONTROL_IDS),
+            "controls_total": len(CONTROL_IDS),
+            "aliases_passed": len(ALIAS_IDS), "aliases_total": len(ALIAS_IDS),
+            "failures": [],
+        }
+        for key, value in expected.items():
+            if self.summary.get(key) != value:
+                raise EvidenceError(f"stream summary {key} is not {value!r}")
+
+    def semantic_bytes(self):
+        return b"".join(canonical_bytes(normalized_record(x)) for x in self.objects)
+
+
+def pointer(value, parts):
+    for part in parts:
+        value = value[part]
+    return value
+
+
+def edge_projection(edge):
+    certificate = edge.get("support_certificate")
+    return {
+        "child": edge["child"], "parent": edge["parent"],
+        "path": edge.get("path"), "problem": edge.get("problem"),
+        "support_certificate": certificate.get("certificate_digest") if certificate else None,
+    }
+
+
+def propagation_projection(edge):
+    return {
+        "child": edge["child"], "parent": edge["parent"],
+        "path": edge.get("path"), "role": edge.get("role"),
+    }
+
+
+def support_projection(check):
+    return {
+        "absent_source_parents": check["absent_source_parents"],
+        "adoption_child": check["adoption_child"],
+        "authority_child": check["authority_child"],
+        "authority_parent": check["authority_parent"],
+        "certificate_digest": check["certificate_digest"],
+        "postcondition_status": check["postcondition_status"],
+        "status": check["status"],
+        "tree_projection_status": check["tree_projection_status"],
+    }
+
+
+def endpoints(row):
+    return {
+        "C": {"oid": row["C"], "role": "admitted-merge-base"},
+        "M": {"oid": row["M"], "role": "selected-range-base"},
+        "N": {"oid": row["N"], "role": "candidate-tip"},
+        "O": {"oid": row["O"], "role": "old-tip"},
+    }
+
+
+def scenario_projection(row, failed):
+    return {
+        "authority_edges": [edge_projection(x) for x in row["authority_edges"]],
+        "classification": row["classification"],
+        "endpoints": endpoints(row),
+        "event_mode": row["event_mode"],
+        "evidence_status": row["evidence_verdict"]["status"],
+        "expected_result": row["expected_result"],
+        "finding_count": sum(bool(x.get("finding")) for x in row["actions"]),
+        "id": row["scenario"],
+        "metrics": {key: row["metrics"][key] for key in METRIC_KEYS},
+        "mutation_edge_count": len(row["mutation_edges"]),
+        "propagation_edges": [propagation_projection(x) for x in row["propagation_edges"]],
+        "range_base_status": row["range_base_validation"]["status"],
+        "reason_codes": [x.get("reason_code") for x in row["actions"]],
+        "record_sha256": record_digest(normalized_record(row)),
+        "support_checks": [support_projection(x) for x in row["support_checks"]],
+        "validation_status": "FAIL" if row["scenario"] in failed else "PASS",
+    }
+
+
+def control_projection(row):
+    return {
+        "authority_edges": [edge_projection(x) for x in row["authority_edges"]],
+        "baseline_classification": row["baseline_classification"],
+        "damaged_classification": row["damaged_classification"],
+        "endpoints": endpoints(row), "expected_baseline": row["expected_baseline"],
+        "id": row["control"],
+        "propagation_edges": [propagation_projection(x) for x in row["propagation_edges"]],
+        "record_sha256": record_digest(row), "status": row["status"],
+    }
+
+
+def alias_projection(row):
+    return {
+        "expected": row["expected"], "id": row["alias"],
+        "maps_to": row["maps_to"], "observed": row["observed"],
+        "record_sha256": record_digest(row), "status": row["status"],
+    }
+
+
+def input_projection():
+    root = repo_root()
+    return [
+        {"path": path, "sha256": digest_bytes((root / path).read_bytes()),
+         "size": (root / path).stat().st_size}
+        for path in INPUT_PATHS
+    ]
+
+
+def manifest_from_stream(stream):
+    failed = {x["scenario"] for x in stream.summary["failures"] if "scenario" in x}
+    aliases = {x["alias"]: x for x in stream.aliases["scenario_alias_inventory"]}
+    claims = []
+    for claim_id, scenario, path in FIXTURE_CLAIMS:
+        claims.append({
+            "id": claim_id, "scenario": scenario,
+            "json_pointer": "/" + "/".join(map(str, path)),
+            "sha256": pointer(stream.scenarios[scenario], path),
+        })
+    manifest = {
+        "aliases": [alias_projection(aliases[x]) for x in ALIAS_IDS],
+        "controls": [control_projection(stream.controls[x]) for x in CONTROL_IDS],
+        "fixture_sha_claims": claims,
+        "inputs": input_projection(),
+        "scenarios": [scenario_projection(stream.scenarios[x], failed) for x in SCENARIO_IDS],
+        "schema": SCHEMA,
+        "summary": {
+            "aliases_passed": stream.summary["aliases_passed"],
+            "aliases_total": stream.summary["aliases_total"],
+            "canonical_stream_sha256": digest_bytes(stream.semantic_bytes()),
+            "controls_passed": stream.summary["controls_passed"],
+            "controls_total": stream.summary["controls_total"],
+            "scenario_passed": stream.summary["passed"],
+            "scenario_total": stream.summary["total"],
+            "status": stream.summary["summary"],
+        },
+    }
+    validate_manifest(manifest)
+    return manifest
+
+
+def validate_endpoints(value, context):
+    require_keys(value, ("C", "M", "N", "O"), context)
+    roles = {"C": "admitted-merge-base", "M": "selected-range-base",
+             "N": "candidate-tip", "O": "old-tip"}
+    for label, role in roles.items():
+        require_keys(value[label], ("oid", "role"), f"{context}.{label}")
+        require_oid(value[label]["oid"], f"{context}.{label}.oid")
+        if value[label]["role"] != role:
+            raise EvidenceError(f"{context}.{label} role changed")
+
+
+def validate_edge(value, context):
+    require_keys(value, ("child", "parent", "path", "problem", "support_certificate"), context)
+    require_oid(value["parent"], f"{context}.parent")
+    require_oid(value["child"], f"{context}.child")
+    if value["support_certificate"] is not None:
+        require_digest(value["support_certificate"], f"{context}.support_certificate")
+
+
+def validate_propagation(value, context):
+    require_keys(value, ("child", "parent", "path", "role"), context)
+    require_oid(value["parent"], f"{context}.parent")
+    require_oid(value["child"], f"{context}.child")
+    if value["role"] != "propagation-only":
+        raise EvidenceError(f"{context} is not propagation-only")
+
+
+def validate_support(value, context):
+    require_keys(value, (
+        "absent_source_parents", "adoption_child", "authority_child",
+        "authority_parent", "certificate_digest", "postcondition_status",
+        "status", "tree_projection_status",
+    ), context)
+    for key in ("adoption_child", "authority_child", "authority_parent"):
+        require_oid(value[key], f"{context}.{key}")
+    for index, oid in enumerate(value["absent_source_parents"]):
+        require_oid(oid, f"{context}.absent_source_parents[{index}]")
+    require_digest(value["certificate_digest"], f"{context}.certificate_digest")
+    for key in ("postcondition_status", "status", "tree_projection_status"):
+        if value[key] not in {"valid", "invalid"}:
+            raise EvidenceError(f"{context}.{key} is not structured")
+
+
+def validate_manifest(manifest):
+    require_keys(manifest, (
+        "aliases", "controls", "fixture_sha_claims", "inputs", "scenarios",
+        "schema", "summary",
+    ), "manifest")
+    if manifest["schema"] != SCHEMA:
+        raise EvidenceError("manifest schema differs")
+    require_keys(manifest["summary"], (
+        "aliases_passed", "aliases_total", "canonical_stream_sha256",
+        "controls_passed", "controls_total", "scenario_passed",
+        "scenario_total", "status",
+    ), "summary")
+    summary = manifest["summary"]
+    require_digest(summary["canonical_stream_sha256"], "summary stream digest")
+    counts = {
+        "aliases_passed": len(ALIAS_IDS), "aliases_total": len(ALIAS_IDS),
+        "controls_passed": len(CONTROL_IDS), "controls_total": len(CONTROL_IDS),
+        "scenario_passed": len(SCENARIO_IDS), "scenario_total": len(SCENARIO_IDS),
+        "status": "PASS",
+    }
+    for key, expected in counts.items():
+        if summary[key] != expected:
+            raise EvidenceError(f"summary {key} is not {expected!r}")
+        if key != "status":
+            require_nonnegative_int(summary[key], f"summary.{key}")
+
+    scenarios = manifest["scenarios"]
+    if [x.get("id") for x in scenarios] != list(SCENARIO_IDS):
+        raise EvidenceError("manifest scenario inventory/order differs")
+    scenario_keys = (
+        "authority_edges", "classification", "endpoints", "event_mode",
+        "evidence_status", "expected_result", "finding_count", "id",
+        "metrics", "mutation_edge_count", "propagation_edges",
+        "range_base_status", "reason_codes", "record_sha256",
+        "support_checks", "validation_status",
+    )
+    for index, row in enumerate(scenarios):
+        context = f"scenarios[{index}]"
+        require_keys(row, scenario_keys, context)
+        validate_endpoints(row["endpoints"], f"{context}.endpoints")
+        if row["classification"] not in {
+            "no-finding", "blocking-finding", "unreadable"
+        }:
+            raise EvidenceError(f"{context} classification is invalid")
+        if row["expected_result"] != row["classification"]:
+            raise EvidenceError(f"{context} did not meet expected result")
+        if row["evidence_status"] not in {"valid", "invalid", "none", "ambiguous", "unreadable"}:
+            raise EvidenceError(f"{context} evidence status is invalid")
+        if row["event_mode"] not in {
+            "direct", "supplier", "none", "ambiguous", "mixed"
+        }:
+            raise EvidenceError(f"{context} event mode is invalid")
+        if row["validation_status"] != "PASS":
+            raise EvidenceError(f"{context} validation did not pass")
+        require_keys(row["metrics"], METRIC_KEYS, f"{context}.metrics")
+        for key, value in row["metrics"].items():
+            require_nonnegative_int(value, f"{context}.metrics.{key}")
+        require_nonnegative_int(row["finding_count"], f"{context}.finding_count")
+        require_nonnegative_int(
+            row["mutation_edge_count"], f"{context}.mutation_edge_count"
+        )
+        require_digest(row["record_sha256"], f"{context}.record_sha256")
+        for i, edge in enumerate(row["authority_edges"]):
+            validate_edge(edge, f"{context}.authority_edges[{i}]")
+        for i, edge in enumerate(row["propagation_edges"]):
+            validate_propagation(edge, f"{context}.propagation_edges[{i}]")
+        for i, check in enumerate(row["support_checks"]):
+            validate_support(check, f"{context}.support_checks[{i}]")
+
+    controls = manifest["controls"]
+    if [x.get("id") for x in controls] != list(CONTROL_IDS):
+        raise EvidenceError("manifest control inventory/order differs")
+    control_keys = (
+        "authority_edges", "baseline_classification", "damaged_classification",
+        "endpoints", "expected_baseline", "id", "propagation_edges",
+        "record_sha256", "status",
+    )
+    for index, row in enumerate(controls):
+        context = f"controls[{index}]"
+        require_keys(row, control_keys, context)
+        validate_endpoints(row["endpoints"], f"{context}.endpoints")
+        if row["status"] != "OBSERVED_RED":
+            raise EvidenceError(f"{context} did not observe red")
+        if row["baseline_classification"] != row["expected_baseline"]:
+            raise EvidenceError(f"{context} baseline differs")
+        if row["damaged_classification"] == row["expected_baseline"]:
+            raise EvidenceError(f"{context} damage did not change verdict")
+        require_digest(row["record_sha256"], f"{context}.record_sha256")
+        for i, edge in enumerate(row["authority_edges"]):
+            validate_edge(edge, f"{context}.authority_edges[{i}]")
+        for i, edge in enumerate(row["propagation_edges"]):
+            validate_propagation(edge, f"{context}.propagation_edges[{i}]")
+
+    aliases = manifest["aliases"]
+    if [x.get("id") for x in aliases] != list(ALIAS_IDS):
+        raise EvidenceError("manifest alias inventory/order differs")
+    alias_fields = (
+        "authority_edges", "classification", "event_mode", "evidence_status",
+        "finding", "invalid_authority_edges", "propagation_edges", "scenario",
+    )
+    for index, row in enumerate(aliases):
+        context = f"aliases[{index}]"
+        require_keys(row, ("expected", "id", "maps_to", "observed", "record_sha256", "status"), context)
+        require_keys(row["expected"], alias_fields, f"{context}.expected")
+        require_keys(row["observed"], alias_fields, f"{context}.observed")
+        if row["status"] != "PASS" or row["expected"] != row["observed"]:
+            raise EvidenceError(f"{context} alias assertion did not pass")
+        for view_name in ("expected", "observed"):
+            view = row[view_name]
+            if type(view["finding"]) is not bool:
+                raise EvidenceError(f"{context}.{view_name}.finding is not boolean")
+            for key in (
+                "authority_edges", "invalid_authority_edges",
+                "propagation_edges",
+            ):
+                require_nonnegative_int(
+                    view[key], f"{context}.{view_name}.{key}"
                 )
-        if arguments.damage_control:
-            result["observed_red"] = damage_control(arguments.readme, stream)
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        require_digest(row["record_sha256"], f"{context}.record_sha256")
+
+    if [x.get("path") for x in manifest["inputs"]] != list(INPUT_PATHS):
+        raise EvidenceError("manifest input inventory/order differs")
+    for index, row in enumerate(manifest["inputs"]):
+        require_keys(row, ("path", "sha256", "size"), f"inputs[{index}]")
+        require_digest(row["sha256"], f"inputs[{index}].sha256")
+        if type(row["size"]) is not int or row["size"] <= 0:
+            raise EvidenceError(f"inputs[{index}] size is invalid")
+
+    claims = manifest["fixture_sha_claims"]
+    if [x.get("id") for x in claims] != [x[0] for x in FIXTURE_CLAIMS]:
+        raise EvidenceError("fixture SHA claim inventory/order differs")
+    for index, row in enumerate(claims):
+        require_keys(row, ("id", "json_pointer", "scenario", "sha256"), f"fixture_sha_claims[{index}]")
+        require_digest(row["sha256"], f"fixture_sha_claims[{index}].sha256")
+
+    by_id = {x["id"]: x for x in scenarios}
+    p22 = by_id["P22-PCX-18-one-pass-many-actions"]["metrics"]
+    if p22["graph_enumerations"] != 1 or p22["graph_commits"] < 128 or p22["per_action_history_walks"] != 0:
+        raise EvidenceError("P22 one-pass cost invariant differs")
+
+
+def render_readme(manifest):
+    validate_manifest(manifest)
+    evidence_sha = digest_bytes(canonical_bytes(manifest))
+    summary = manifest["summary"]
+    by_id = {x["id"]: x for x in manifest["scenarios"]}
+    p22, p19 = by_id["P22-PCX-18-one-pass-many-actions"], by_id["PCX-19-missing-claim-blob-recovery"]
+    lines = [
+        "# Production-contract provenance POC", "",
+        "This file is generated in full by `audit_readme.py` from the closed",
+        "`evidence.json` manifest. Do not edit observations here by hand.", "",
+        "## Result", "",
+        f"The real-Git self-test passed {summary['scenario_passed']}/{summary['scenario_total']} scenarios, {summary['aliases_passed']}/{summary['aliases_total']} executable aliases, and {summary['controls_passed']}/{summary['controls_total']} damaged-mode controls.",
+        "It imports and calls the worktree's actual `queue_action_identity` and",
+        "`queue_deletion_problem`; it never invents an Action-ID or lifecycle verdict.", "",
+        f"Canonical evidence artifact: `{evidence_sha}`.",
+        f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
+        "The raw JSONL stream is ephemeral and has no stored hash claim.", "",
+        "## Contract exercised", "",
+        "The classifier admits exactly one merge base `C`, seeds the occurrence at `C`,",
+        "and does not inspect pre-`C` genealogy. Production identities map to exact",
+        "path lists, so multiplicity cannot collapse to membership. Old and candidate",
+        "carrying paths require one continuously valid `C`-rooted occurrence; each",
+        "persisted edge calls production mutation authority and its frozen-byte complement.", "",
+        "Direct mode requires every carrying parent-to-child deletion edge to pass",
+        "production deletion authority independently. Supplier mode requires one earlier",
+        "real deletion root, continuous absence to absent parents, live carrying parents,",
+        "and merge adoption. Carrying-to-merge edges remain propagation-only.", "",
+        "A supplier root carries a domain-separated `queue-supplier-support/v1` certificate",
+        "binding the real authority edge, raw non-action tree delta, every concrete path",
+        "referenced by the authoritative action, typed lifecycle obligations, and a",
+        "canonical digest. Adoption exact-copies the closest absent source's current",
+        "support projection. Earlier source-lineage evolution is allowed; adoption drift,",
+        "dropped evidence, conflicting projections, incomplete leaf coverage, or a failed",
+        "typed obligation blocks. Pickup accepts one uniquely claimed resolving task with",
+        "no pickup backlink; retry reruns its checker. Unsupported successor/reask and",
+        "boundary-review support dependencies fail closed.", "",
+        "Concrete human response/review binding is anchored at `O` and unified across",
+        "every real authority or propagation parent. Only outer-trimmed plain `pending`",
+        "is the Review target/revision pending sentinel. Final absence remains continuous",
+        "to `N`; reintroduction and competing roots aggregate complete evidence and block.", "",
+        "`M` is validated before identity or authority calls: it is an available commit",
+        "in the `C`-rooted candidate graph and an ancestor of/equal to `N`. A real workflow",
+        "input with `M=O` fails when outside that region. `M=N` is representable but not",
+        "a safe automatic fallback; a counterexample widens the causal frontier. The safe",
+        "adapter contract demonstrated here supplies an explicit candidate-side `M`.", "",
+        "## Input byte identities", "",
+        "| Path | Bytes | SHA-256 |", "|---|---:|---|",
+    ]
+    for row in manifest["inputs"]:
+        lines.append(f"| `{row['path']}` | {row['size']} | `{row['sha256']}` |")
+    lines += ["", "## Seven fixture SHA bindings", "",
+              "| Claim | Scenario | JSON pointer | SHA-256 |", "|---|---|---|---|"]
+    for row in manifest["fixture_sha_claims"]:
+        lines.append(f"| `{row['id']}` | `{row['scenario']}` | {row['json_pointer']} | `{row['sha256']}` |")
+    lines += ["", "## Scenario evidence inventory", "",
+              "Each record digest binds its complete canonical scenario JSON, including",
+              "all nested OIDs, verdicts, reasons, paths, counters, certificates, and",
+              "adapter variants. It is not an OID-pool membership check.", "",
+              "| Scenario | C | O | M | N | Classification | Evidence | Mode | A/P/M/S | Validation | Record SHA-256 |",
+              "|---|---|---|---|---|---|---|---|---:|---|---|"]
+    for row in manifest["scenarios"]:
+        e = row["endpoints"]
+        counts = f"{len(row['authority_edges'])}/{len(row['propagation_edges'])}/{row['mutation_edge_count']}/{len(row['support_checks'])}"
+        lines.append(f"| `{row['id']}` | `{e['C']['oid']}` | `{e['O']['oid']}` | `{e['M']['oid']}` | `{e['N']['oid']}` | `{row['classification']}` | `{row['evidence_status']}` | `{row['event_mode']}` | {counts} | `{row['validation_status']}` | `{row['record_sha256']}` |")
+    lines += ["", "A/P/M/S means authority, propagation, persisted mutation, and supplier-support checks.", "",
+              "## Executable S aliases", "",
+              "| Alias | Maps to | Classification | Evidence | Mode | Authority | Invalid authority | Propagation | Status | Record SHA-256 |",
+              "|---|---|---|---|---|---:|---:|---:|---|---|"]
+    for row in manifest["aliases"]:
+        o = row["observed"]
+        lines.append(f"| `{row['id']}` | `{row['maps_to']}` | `{o['classification']}` | `{o['evidence_status']}` | `{o['event_mode']}` | {o['authority_edges']} | {o['invalid_authority_edges']} | {o['propagation_edges']} | `{row['status']}` | `{row['record_sha256']}` |")
+    lines += ["", "## Damaged-mode controls", "",
+              "| Control | C | O | M | N | Baseline | Damaged | Status | Record SHA-256 |",
+              "|---|---|---|---|---|---|---|---|---|"]
+    for row in manifest["controls"]:
+        e = row["endpoints"]
+        lines.append(f"| `{row['id']}` | `{e['C']['oid']}` | `{e['O']['oid']}` | `{e['M']['oid']}` | `{e['N']['oid']}` | `{row['baseline_classification']}` | `{row['damaged_classification']}` | `{row['status']}` | `{row['record_sha256']}` |")
+    m = p22["metrics"]
+    lines += ["", "## Measured cost and object recovery", "",
+              f"P22 measured {m['graph_commits']} graph commits and 16 disappeared actions with exactly {m['graph_enumerations']} POC graph enumeration, {m['per_action_history_walks']} POC-owned per-action history walks, {m['queue_snapshots_requested']} snapshot requests, {m['snapshot_cache_hits']} snapshot-cache hits, and {m['git_processes']} actual Git processes.",
+              "The process count includes 129 imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. Production must reuse its parent cache and set a measured process budget. This POC sets no guessed ceiling.", "",
+              f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
+              "## Reproducible audit", "",
+              "Use two fresh, empty scratch roots:", "", "```sh",
+              "PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r16-seed1 > /tmp/production-contract-r16-seed1.jsonl",
+              "PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r16-seed777 > /tmp/production-contract-r16-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r16-seed1.jsonl --compare /tmp/production-contract-r16-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r16-seed1.jsonl --damage-test",
+              "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
+              "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
+              "The auditor requires raw and semantic equality for comparison, rejects",
+              "duplicate keys/IDs, enforces exact catalogs/key sets, compares a fresh",
+              "manifest byte-for-byte, and regenerates this README in full. Its damage",
+              "matrix covers invented/duplicate/missing rows, same-region OID swaps, tuple",
+              "relabels, false verdicts/counters, contradictory transcripts/digests,",
+              "unknown cost rows, noncanonical ordering, BOM, CRLF, and missing newline.", "",
+              "## Nonclaims and integration gates", "",
+              "- This POC changes no production reconciler, restack adapter, workflow input, schema, task, or run record.",
+              "- A post-push check can only be advisory; prevention requires a pre-push or server-side production gate.",
+              "- Squash/deletion-only provenance is unsupported and blocks; only complete cherry-pick preserves authority.",
+              "- `M=N` is not a general fallback; the adapter must provide explicit candidate-side `M`.",
+              "- Certificates intentionally overbind non-action authority delta and referenced paths until production exposes a validator-owned support receipt.",
+              "- Review successor/reask and boundary-review supplier leaves fail closed rather than simulate semantics.",
+              "- The one-pass claim excludes imported production parent queries; production integration must cache/eliminate them.",
+              "- PCX-21/22 remain production-integration gates, not isolated-POC completion claims.", "",
+              "## Tests not represented by this artifact", "",
+              "This artifact does not claim deployment, a real remote push, production",
+              "adapter wiring, server enforcement, or unsupported review-successor coverage.", ""]
+    return "\n".join(lines).encode("utf-8")
+
+
+def audit_artifacts(evidence_raw, readme_raw, expected):
+    try:
+        manifest = load_json(evidence_raw)
+        validate_manifest(manifest)
+    except (EvidenceError, KeyError, TypeError, IndexError) as error:
+        return [str(error)]
+    failures = []
+    if evidence_raw != canonical_bytes(manifest):
+        failures.append("evidence.json is not canonical UTF-8 JSON+LF")
+    if manifest != expected:
+        failures.append("evidence.json differs from fresh replay manifest")
+    if readme_raw != render_readme(manifest):
+        failures.append("README.md differs from exact generated rendering")
+    return failures
+
+
+def stream_differences(first, second):
+    def keyed(stream):
+        result = {}
+        for row in stream.objects:
+            key = ("scenario:" + row["scenario"] if "scenario" in row else
+                   "control:" + row["control"] if "control" in row else
+                   "aliases" if "scenario_alias_inventory" in row else "summary")
+            result[key] = normalized_record(row)
+        return result
+    left, right = keyed(first), keyed(second)
+    def diff(a, b):
+        if type(a) is not type(b):
+            return 1
+        if isinstance(a, dict):
+            sentinel = object()
+            return sum(diff(a.get(k, sentinel), b.get(k, sentinel)) for k in set(a) | set(b))
+        if isinstance(a, list):
+            sentinel = object()
+            return sum(diff(a[i] if i < len(a) else sentinel, b[i] if i < len(b) else sentinel) for i in range(max(len(a), len(b))))
+        return int(a != b)
+    fields = records = 0
+    sentinel = object()
+    for name in set(left) | set(right):
+        count = diff(left.get(name, sentinel), right.get(name, sentinel))
+        fields += count
+        records += bool(count)
+    return {"canonical_equal": first.semantic_bytes() == second.semantic_bytes(),
+            "differing_fields": fields, "differing_records": records,
+            "raw_equal": first.raw == second.raw}
+
+
+def damage_matrix(expected):
+    evidence, readme = canonical_bytes(expected), render_readme(expected)
+    cases = []
+    def append(name, text):
+        cases.append(
+            (name, evidence, readme + text.encode(), "README.md differs")
+        )
+    oid = expected["scenarios"][0]["endpoints"]["C"]["oid"]
+    append("invented-real-oids-false-verdict", f"| `invented` | `{oid}` | no-finding valid direct |\n")
+    append("invented-no-oid-row", "| invented-cost | Graph commits=999 |\n")
+    p1 = next(x for x in readme.splitlines(keepends=True) if x.startswith(b"| `P1-direct-linear-valid`"))
+    cases += [
+        ("duplicate-real-row", evidence, readme + p1, "README.md differs"),
+        (
+            "missing-real-row", evidence, readme.replace(p1, b"", 1),
+            "README.md differs",
+        ),
+    ]
+    append("count-transcript-only", "PASS 999/999 Graph commits=999\n")
+    append("r5-verdict-oid-substitution", "R5 no-finding valid deadbeef\n")
+    append("r9-prose-counter", "R9 passed 9 cells\n")
+    append("contradictory-pass-digest-graph999", "PASS 1/1 sha256:" + "0"*64 + " Graph commits=999\n")
+    append("unknown-no-oid-cost-row", "| unknown-cost | no-finding | 999 |\n")
+    def manifest_case(name, mutate, expected_failure="fresh replay manifest"):
+        changed = copy.deepcopy(expected)
+        mutate(changed)
+        raw = canonical_bytes(changed)
+        try:
+            rendered = render_readme(changed)
+        except EvidenceError:
+            rendered = readme
+        cases.append((name, raw, rendered, expected_failure))
+    def swap_endpoint(data):
+        e = data["scenarios"][0]["endpoints"]
+        e["C"], e["O"] = e["O"], e["C"]
+    manifest_case("same-region-endpoint-swap", swap_endpoint, "role changed")
+    def swap_oid_under_label(data):
+        e = data["scenarios"][0]["endpoints"]
+        e["C"]["oid"], e["O"]["oid"] = e["O"]["oid"], e["C"]["oid"]
+    manifest_case("same-region-oid-under-label-swap", swap_oid_under_label)
+    def pcx_swap(data):
+        by = {x["id"]: x for x in data["scenarios"]}
+        by["PCX-05-competing-later-supplier"]["endpoints"]["N"] = by["R5-01-invalid-redelete-after-supplier-reintroduction"]["endpoints"]["N"]
+    manifest_case("pcx05-same-region-oid-substitution", pcx_swap)
+    def relabel(data):
+        by = {x["id"]: x for x in data["scenarios"]}
+        a, b = by["R5-01-invalid-redelete-after-supplier-reintroduction"], by["R5-02-valid-redelete-after-supplier-reintroduction"]
+        a["id"], b["id"] = b["id"], a["id"]
+    manifest_case("exact-tuple-relabel", relabel, "inventory/order differs")
+    def adapter(data):
+        next(x for x in data["scenarios"] if x["id"] == "R8-adapter-M-input-variants")["classification"] = "blocking-finding"
+    manifest_case(
+        "adapter-false-verdict-same-oid", adapter,
+        "did not meet expected result",
+    )
+    def counter(data):
+        next(x for x in data["scenarios"] if x["id"] == "P22-PCX-18-one-pass-many-actions")["metrics"]["graph_commits"] = 999
+    manifest_case("counter-substitution", counter)
+    manifest_case(
+        "duplicate-scenario-id",
+        lambda d: d["scenarios"][1].update(id=d["scenarios"][0]["id"]),
+        "inventory/order differs",
+    )
+    manifest_case(
+        "unknown-scenario-id",
+        lambda d: d["scenarios"][0].update(id="UNKNOWN"),
+        "inventory/order differs",
+    )
+    manifest_case(
+        "missing-scenario-id", lambda d: d["scenarios"].pop(),
+        "inventory/order differs",
+    )
+    manifest_case(
+        "unknown-scenario-field",
+        lambda d: d["scenarios"][0].update(unknown_machine_claim=1),
+        "keys differ",
+    )
+    def missing_field(data):
+        data["scenarios"][0].pop("classification")
+    manifest_case("missing-scenario-field", missing_field, "keys differ")
+    def duplicate_fixture_claim(data):
+        data["fixture_sha_claims"].append(
+            copy.deepcopy(data["fixture_sha_claims"][0])
+        )
+    manifest_case(
+        "duplicate-fixture-claim", duplicate_fixture_claim,
+        "inventory/order differs",
+    )
+    def fixture_target_swap(data):
+        data["fixture_sha_claims"][0]["scenario"] = \
+            data["fixture_sha_claims"][1]["scenario"]
+        data["fixture_sha_claims"][0]["json_pointer"] = \
+            data["fixture_sha_claims"][1]["json_pointer"]
+    manifest_case("fixture-digest-target-swap", fixture_target_swap)
+    manifest_case(
+        "boolean-as-integer",
+        lambda d: next(
+            x for x in d["scenarios"]
+            if x["id"] == "P22-PCX-18-one-pass-many-actions"
+        )["metrics"].update(graph_enumerations=True),
+        "exact nonnegative integer",
+    )
+    cases.append((
+        "duplicate-json-key",
+        evidence.replace(
+            b'{"aliases":', b'{"schema":"duplicate","aliases":', 1
+        ),
+        readme,
+        "duplicate JSON key",
+    ))
+    cases.append((
+        "noncanonical-json-ordering",
+        (json.dumps(expected, indent=2, sort_keys=True)+"\n").encode(),
+        readme,
+        "not canonical",
+    ))
+    cases.append((
+        "utf8-bom", b"\xef\xbb\xbf" + evidence, readme, "invalid JSON"
+    ))
+    cases.append((
+        "crlf-json", evidence.replace(b"\n", b"\r\n"), readme,
+        "not canonical",
+    ))
+    cases.append((
+        "missing-final-newline", evidence.rstrip(b"\n"), readme,
+        "not canonical",
+    ))
+    results = []
+    for name, damaged_evidence, damaged_readme, expected_failure in cases:
+        failures = audit_artifacts(
+            damaged_evidence, damaged_readme, expected
+        )
+        matched = any(expected_failure in failure for failure in failures)
+        results.append({
+            "damage": name,
+            "expected_failure": expected_failure,
+            "observed_failure": failures[0] if failures else None,
+            "status": "OBSERVED_RED" if matched else "FALSE_GREEN",
+        })
+    return {"audit_damage": "PASS" if all(x["status"] == "OBSERVED_RED" for x in results) else "FAIL",
+            "cases": results, "observed_red": sum(x["status"] == "OBSERVED_RED" for x in results), "total": len(results)}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stream", required=True, type=Path)
+    parser.add_argument("--compare", type=Path)
+    parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--damage-test", action="store_true")
+    here = Path(__file__).resolve().parent
+    parser.add_argument("--evidence", type=Path, default=here / "evidence.json")
+    parser.add_argument("--readme", type=Path, default=here / "README.md")
+    args = parser.parse_args(argv)
+    try:
+        first = Stream(args.stream)
+        expected = manifest_from_stream(first)
+        if args.generate:
+            args.evidence.write_bytes(canonical_bytes(expected))
+            args.readme.write_bytes(render_readme(expected))
+        failures = audit_artifacts(args.evidence.read_bytes(), args.readme.read_bytes(), expected)
+        comparison = None
+        if args.compare:
+            second = Stream(args.compare)
+            second_manifest = manifest_from_stream(second)
+            comparison = stream_differences(first, second)
+            comparison["manifest_equal"] = expected == second_manifest
+            if not (comparison["raw_equal"] and comparison["canonical_equal"] and comparison["manifest_equal"] and comparison["differing_records"] == 0 and comparison["differing_fields"] == 0):
+                failures.append("compared streams are not byte/semantic equal")
+        result = {"aliases": len(expected["aliases"]), "audit": "PASS" if not failures else "FAIL",
+                  "comparison": comparison, "controls": len(expected["controls"]),
+                  "evidence_sha256": digest_bytes(canonical_bytes(expected)),
+                  "failures": failures, "fixture_sha_claims": len(expected["fixture_sha_claims"]),
+                  "inputs": len(expected["inputs"]), "scenarios": len(expected["scenarios"])}
+        print(json.dumps(result, sort_keys=True))
+        if args.damage_test:
+            damaged = damage_matrix(expected)
+            print(json.dumps(damaged, sort_keys=True))
+            if damaged["audit_damage"] != "PASS":
+                failures.append("audit damage matrix false-greened")
+        return int(bool(failures))
+    except (EvidenceError, OSError, KeyError, TypeError, IndexError) as error:
         print(json.dumps({"audit": "FAIL", "failures": [str(error)]}, sort_keys=True))
         return 1
-    print(json.dumps(result, sort_keys=True))
-    passed = result["audit"] == "PASS"
-    if arguments.damage_control:
-        passed = passed and result["observed_red"]["audit_damage_control"] == "PASS"
-    return 0 if passed else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
