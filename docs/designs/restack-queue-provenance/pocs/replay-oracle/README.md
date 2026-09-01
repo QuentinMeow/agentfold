@@ -59,10 +59,17 @@ Captured stderr:
 replay-oracle self-test: 7/7 scenarios passed
 ```
 
-**VERIFIED — observed red:** a scratch copy changed only X3's authoritative expected
-verdict from `finding` to `no-finding`. Running that copy exited 1 with:
+**VERIFIED — observed red:** three scratch copies changed one authoritative expected
+verdict each. All three assertions were observed by the same `--self-test` entry point:
 
 ```text
+X1 `no-finding` -> `finding`:
+replay-oracle self-test failed: X1 authoritative no-finding verdict drifted
+
+X2 `no-finding` -> `finding`:
+replay-oracle self-test failed: X2 authoritative no-finding verdict drifted
+
+X3 `finding` -> `no-finding`:
 replay-oracle self-test failed: X3 authoritative live-action-loss verdict drifted
 ```
 
@@ -111,9 +118,23 @@ miss a genuine live-action loss.
 ## Cost and operator effect
 
 **VERIFIED — measured process counts.** Each JSON line reports the total processes used to
-construct and diagnose its fixture. This run observed 37–56 Git processes per scenario and
-18–27 read-only inspection processes. The count intentionally includes fixture construction,
-so it is a reproducibility cost, not a production benchmark.
+construct and diagnose its fixture. The exact Python 3.14.7/Git 2.55.0 run above captured:
+
+| Scenario | All Git processes | Read-only inspections | Tree or patch queries |
+|---|---:|---:|---:|
+| S1-valid-base-resolution | 40 | 19 | 5 |
+| S2-invalid-base-deletion | 37 | 18 | 5 |
+| S3-branch-owned-action-loss | 44 | 22 | 6 |
+| S7-unrelated-restack | 37 | 18 | 5 |
+| X1-conflict-adjusted-replay | 44 | 22 | 10 |
+| X2-independent-patch-collision | 42 | 21 | 8 |
+| X3-merge-commit-only-action | 56 | 28 | 8 |
+
+The captured ranges are therefore 37–56 total Git processes and 18–28 read-only
+inspections. Counts differ because each DAG has a different commit count and some cases run
+extra conflict, full-history, or comparison probes. They include fixture construction and
+describe this code revision only; adding a diagnostic or changing a fixture can change the
+counts, so they are reproducibility evidence rather than a production benchmark or API.
 
 **INFERENCE — asymptotic diagnostic cost.** With `k_old` and `k_new` non-merge commits and
 `P` total patch bytes, this implementation performs `O(k_old + k_new)` external Git calls

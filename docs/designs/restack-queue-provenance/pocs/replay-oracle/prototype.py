@@ -625,6 +625,9 @@ def validate_counterexamples(records: list[dict[str, Any]]) -> None:
     merge_only = by_id["X3-merge-commit-only-action"]
 
     assert (
+        conflict["authoritative_expected_verdict"] == "no-finding"
+    ), "X1 authoritative no-finding verdict drifted"
+    assert (
         conflict["heuristics"]["construction_cherry_pick_conflicted"] is True
     ), "X1 stopped producing a real construction conflict"
     assert (
@@ -637,6 +640,9 @@ def validate_counterexamples(records: list[dict[str, Any]]) -> None:
         conflict["heuristics"]["conflict_adjusted_patch_identity_lost"] is True
     ), "X1 no longer proves conflict adjustment loses exact patch identity"
 
+    assert (
+        collision["authoritative_expected_verdict"] == "no-finding"
+    ), "X2 authoritative no-finding verdict drifted"
     assert (
         collision["heuristics"]["distinct_commit_oids"] is True
     ), "X2 independent commits unexpectedly share an OID"
