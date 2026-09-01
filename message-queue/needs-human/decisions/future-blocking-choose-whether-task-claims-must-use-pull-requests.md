@@ -43,7 +43,7 @@ Answer in plain words — one sentence is enough. You never need to copy anythin
 <details>
 <summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting  
+**Status:** folding  
 **Filed:** 2026-08-31, by codex, from task `2026-08-03-plan-multi-worktree-safety-remediation`  
 **Full context:** `handbook/git-workflow.md`  
 **Resolution evidence:** `memory/decisions/2026-08-31-task-claim-publication.md`  
