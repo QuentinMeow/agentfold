@@ -11,11 +11,19 @@ import tempfile
 
 sys.dont_write_bytecode = True
 
-from prototype import DEFAULT_PATH, EVIDENCE_PATH, GitRepo
+from prototype import (
+    DEFAULT_PATH,
+    EVIDENCE_PATH,
+    GitRepo,
+    dag_occurrence_continuity_problem,
+)
 
 
 def action_text(status: str) -> str:
     return (
+        "Action-ID: Q\n"
+        "Evidence: docs/evidence.md\n"
+        "Payload: base obligation\n\n"
         "# Repair the source\n\n"
         f"**Status:** {status}\n"
         "**Filed:** 2026-08-31\n"
@@ -120,6 +128,131 @@ def probe_own_claim(root: Path, reconciler) -> dict[str, object]:
     }
 
 
+def probe_ambiguous_merge(root: Path, reconciler) -> dict[str, object]:
+    repo = GitRepo(root)
+    first_open = repo.commit(
+        "file shared occurrence",
+        {DEFAULT_PATH: action_text("open"), EVIDENCE_PATH: "evidence v0\n"},
+    )
+    shared_claim = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text("in-repair")},
+    )
+    repo.switch_new("parent-one", shared_claim)
+    parent_one = repo.commit("carry original occurrence", {"one.txt": "one\n"})
+    repo.switch_new("parent-two", shared_claim)
+    repo.commit("delete on second parent", {DEFAULT_PATH: None})
+    parent_two = repo.commit(
+        "recreate preclaimed on second parent",
+        {DEFAULT_PATH: action_text("in-repair"), "two.txt": "two\n"},
+    )
+    repo.switch("parent-one")
+    merged = repo.merge_commit(
+        "parent-two",
+        "merge ambiguous occurrence",
+        {},
+    )
+    deletion = repo.commit(
+        "delete ambiguous merged occurrence",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    reconciler.REPO = repo.root
+    raw_problem = reconciler.claimed_lifecycle_problem(
+        DEFAULT_PATH,
+        action_text("in-repair"),
+        merged,
+        "needs-agent",
+        "requests",
+    )
+    merged_action = repo.snapshot(merged)[DEFAULT_PATH]
+    guard_problem = dag_occurrence_continuity_problem(
+        repo,
+        merged,
+        merged_action.incarnation,
+        merged_action.action_id,
+    )
+    actual = (
+        "raw-accepted-guard-blocked"
+        if raw_problem is None and guard_problem is not None
+        else "unexpected"
+    )
+    return {
+        "scenario": "production-helper-ambiguous-merge-occurrence",
+        "first_open": first_open,
+        "shared_claim": shared_claim,
+        "parent_one": parent_one,
+        "parent_two": parent_two,
+        "merged": merged,
+        "deletion_candidate": deletion,
+        "raw_helper_result": "accepted" if raw_problem is None else "rejected",
+        "raw_helper_problem": raw_problem,
+        "guard_result": "blocked" if guard_problem is not None else "accepted",
+        "guard_problem": guard_problem,
+        "actual_result": actual,
+        "expected_result": "raw-accepted-guard-blocked",
+    }
+
+
+def probe_shared_merge(root: Path, reconciler) -> dict[str, object]:
+    repo = GitRepo(root)
+    repo.commit(
+        "file shared occurrence",
+        {DEFAULT_PATH: action_text("open"), EVIDENCE_PATH: "evidence v0\n"},
+    )
+    shared_claim = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text("in-repair")},
+    )
+    repo.switch_new("parent-one", shared_claim)
+    parent_one = repo.commit("carry on first parent", {"one.txt": "one\n"})
+    repo.switch_new("parent-two", shared_claim)
+    parent_two = repo.commit("carry on second parent", {"two.txt": "two\n"})
+    repo.switch("parent-one")
+    merged = repo.merge_commit(
+        "parent-two",
+        "merge shared occurrence",
+        {},
+    )
+    deletion = repo.commit(
+        "delete shared merged occurrence",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    reconciler.REPO = repo.root
+    raw_problem = reconciler.claimed_lifecycle_problem(
+        DEFAULT_PATH,
+        action_text("in-repair"),
+        merged,
+        "needs-agent",
+        "requests",
+    )
+    merged_action = repo.snapshot(merged)[DEFAULT_PATH]
+    guard_problem = dag_occurrence_continuity_problem(
+        repo,
+        merged,
+        merged_action.incarnation,
+        merged_action.action_id,
+    )
+    actual = (
+        "raw-accepted-guard-accepted"
+        if raw_problem is None and guard_problem is None
+        else "unexpected"
+    )
+    return {
+        "scenario": "production-helper-shared-merge-occurrence",
+        "shared_claim": shared_claim,
+        "parent_one": parent_one,
+        "parent_two": parent_two,
+        "merged": merged,
+        "deletion_candidate": deletion,
+        "raw_helper_result": "accepted" if raw_problem is None else "rejected",
+        "raw_helper_problem": raw_problem,
+        "guard_result": "accepted" if guard_problem is None else "blocked",
+        "guard_problem": guard_problem,
+        "actual_result": actual,
+        "expected_result": "raw-accepted-guard-accepted",
+    }
+
+
 def main() -> int:
     reconciler = load_reconciler()
     try:
@@ -130,6 +263,8 @@ def main() -> int:
             records = [
                 probe_cross_boundary(base / "cross-boundary", reconciler),
                 probe_own_claim(base / "own-claim", reconciler),
+                probe_ambiguous_merge(base / "ambiguous-merge", reconciler),
+                probe_shared_merge(base / "shared-merge", reconciler),
             ]
     finally:
         reconciler.close_git_cat_file()

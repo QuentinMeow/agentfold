@@ -2,13 +2,14 @@
 
 ## Result
 
-**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 16
-additional merge, incarnation, object-boundary, and cost attacks: 28 of 28 expected
+**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 19
+additional merge, incarnation, object-boundary, and cost attacks: 31 of 31 expected
 verdicts matched. It correctly accepted a legitimate linear resolution and an inherited
 resolution behind a merge, while it blocked an invalid base deletion, a genuine old-tip
 loss, mixed valid/invalid supplier edges, delete/recreate/delete ambiguity, merge-only
 action creation, byte-identical old-side delete/recreate, cross-occurrence claim reuse,
-duplicate rename state, criss-cross history, and incomplete objects.
+ambiguous merge provenance, post-witness reintroduction, duplicate rename state,
+criss-cross history, and incomplete objects.
 
 A fresh verifier rejected the earlier 23/23 version because it compared only the common
 and old-tip snapshots. A branch could delete the action and recreate identical bytes
@@ -24,17 +25,27 @@ prototype now walks backward only through the occurrence continuously present at
 deletion parent and stops at absence, recreation, another incarnation, or ambiguous
 identity.
 
+A third fresh verifier rejected the repaired 28/28 version because its bounded walk
+still accepted a claim from any merge parent. One parent continuously carried the
+claimed occurrence; another deleted it and recreated byte-identical `in-repair` bytes
+without a claim. The merge looked identical, and the first parent's receipt excused the
+second parent's reincarnation. The prototype now requires every carrying parent lineage
+to reach one shared claim edge, and it requires a witnessed absence to stay absent on
+every descendant path to `N`.
+
 The safe rule is narrower than “find any valid deletion.” It is:
 
 1. establish that the old task lineage left one exact action incarnation unchanged;
 2. prove that incarnation stayed present, unique, and byte-stable on every old-only
    parent edge;
 3. inspect every parent edge in candidate-only history;
-4. validate the concrete deletion edge against a claim inside the continuously present
-   occurrence ending at that edge's parent, plus changed non-queue evidence;
-5. collapse a merge's synthetic parent deletion only when an absent sibling contains a
+4. prove every carrying parent of the deletion-parent occurrence reaches the same claim
+   edge without absence, recreation, mutation, duplicate identity, or ambiguous rename;
+5. validate the concrete deletion edge against changed non-queue evidence;
+6. prove the action stays absent on every descendant path from that witness to `N`;
+7. collapse a merge's synthetic parent deletion only when an absent sibling contains a
    prior validated deletion in its ancestry; and
-6. accept only one unambiguous effective witness.
+8. accept only one unambiguous effective witness.
 
 This POC deliberately fails closed on a merge commit that authors a deletion relative to
 two carrying parents, even if both parent edges validate. That conservative result is a
@@ -57,7 +68,10 @@ binding, and payload; status is mutable. The classifier:
 - follows an incarnation across an unambiguous rename;
 - bounds claim discovery to the exact continuously present occurrence at the deletion
   parent, then requires a committed `open -> in-repair` edge inside that occurrence and
-  evidence bytes changed on the real deletion edge; and
+  evidence bytes changed on the real deletion edge;
+- recursively proves all carrying merge parents converge on one shared claim source;
+- invalidates a witness if the action reappears anywhere on a descendant path to `N`;
+  and
 - prints one JSON line per scenario with full `C`, `O`, `M`, and `N` OIDs,
   edge OIDs, witness cardinality, evidence verdict, expected result, measured work, and
   a human explanation.
@@ -75,14 +89,14 @@ Environment and source:
 ```text
 Python 3.14.7
 git version 2.55.0
-97514ef1e7fa6c3cd087b1873d1970a2f4c927ebb82f11aeb04a80bd4a8415e8  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
-dff402923be21f1c90cb9936611e39ed5b0be68ad670f2337ff9d65fc7393949  docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_helper_probe.py
+2d2125cb540036b3413537fa86340b7a815faae711cfcaf09da012ce4e9f8d43  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+e2e52d9d73f2b137339268e5dfd220c4e704dbad88435f1dc341cee962f56212  docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_helper_probe.py
 ```
 
-The clean run printed 28 scenario JSON objects and ended exactly with:
+The clean run printed 31 scenario JSON objects and ended exactly with:
 
 ```json
-{"failed": 0, "git": "git version 2.55.0", "passed": 28, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 28}
+{"failed": 0, "git": "git version 2.55.0", "passed": 31, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 31}
 ```
 
 Exit status: `0`.
@@ -109,6 +123,9 @@ The common matrix produced these outcomes:
 | A8 old duplicate/collapse | finding | 0 | restoring one path does not erase earlier ambiguity |
 | A9 cross-occurrence claim reuse | finding | 1 invalid | a prior occurrence's claim cannot authorize this deletion |
 | A10 recreated occurrence own claim | no finding | 1 valid | a claim after recreation authorizes only the current occurrence |
+| A11 ambiguous merge occurrence | finding | 1 invalid | one carrying parent's claim cannot authorize a reincarnated sibling |
+| A12 shared occurrence merge | no finding | 1 valid | both carrying parents converge on the same claim edge |
+| A13 post-witness reintroduction | finding | 2, first invalid | the first absence did not remain continuous to `N` |
 
 The important S12 OIDs and edge result were:
 
@@ -159,11 +176,29 @@ It changed A9 from the expected `finding` to `actual_result=no-finding`, then en
 Exit status: `1`. This is the observed-red proof that the current-occurrence boundary,
 not merely the scenario expectation, prevents cross-boundary claim reuse.
 
+The third run-scratch driver disables only `dag_occurrence_continuity_problem` and runs
+only A11:
+
+```sh
+python3 /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/merge-incarnation-poc/merge_negative_control.py \
+  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+```
+
+The unchanged bounded any-parent lookup borrowed parent one's claim, changed A11 from
+the expected `finding` to `actual_result=no-finding`, and ended:
+
+```json
+{"failed": 1, "git": "git version 2.55.0", "passed": 0, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 1}
+```
+
+Exit status: `1`. This proves the DAG-wide shared-occurrence guard, rather than the
+linear occurrence boundary, blocks the ambiguous merge.
+
 ### Production-helper probe
 
-The standalone model's rejected global scan is not the current production helper.
-This command constructs the same production-shaped occurrence boundary and invokes
-`claimed_lifecycle_problem` from the reconciler without changing it:
+This command invokes the unchanged production `claimed_lifecycle_problem` on both the
+linear and ambiguous-merge attacks, then applies the POC's new DAG guard to the two merge
+fixtures:
 
 ```sh
 python3 docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_helper_probe.py
@@ -172,19 +207,46 @@ python3 docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_
 It ended exactly with:
 
 ```json
-{"failed": 0, "passed": 2, "summary": "production-claim-helper-probe", "total": 2}
+{"failed": 0, "passed": 4, "summary": "production-claim-helper-probe", "total": 4}
 ```
 
 Exit status: `0`. **VERIFIED:** the production helper rejected the already-claimed
 recreation with `no committed one-line open -> in-repair claim transition exists`, and
-accepted the control whose recreated occurrence had its own claim. Therefore this
-counterexample reveals an insufficiency in the earlier independent POC, not in that
-production helper. Production integration must call the helper at the concrete deletion
-parent, preserve its exact-path/one-parent-rename occurrence boundary, and must not
-replace it with a repository-wide fingerprint search. This probe does not verify the
-surrounding production restack attribution path.
+accepted the control whose recreated occurrence had its own claim. But the raw helper
+also **accepted the ambiguous merge attack**: it borrowed the continuously carrying
+parent's claim and ignored the sibling's delete/recreate boundary. The new guard blocked
+that same fixture; both helper and guard accepted the shared-occurrence merge control.
+
+Therefore the raw production helper is necessary but insufficient for merge provenance.
+Production integration must wrap it with an all-carrying-parent shared-occurrence proof,
+or fix the helper to provide that proof itself, and must also verify post-witness absence
+continuity to `N`. This probe does not claim the surrounding production restack path has
+either guard today.
 
 ## Strongest counterexamples
+
+### A merge needs one claim shared by every carrying parent
+
+**VERIFIED:** Q was claimed, then forked. Parent one continuously carried that
+occurrence. Parent two deleted it and recreated byte-identical `in-repair` bytes without
+its own claim. The merge carried Q, and a later commit changed evidence and deleted it.
+An any-parent walk accepted parent one's receipt; the DAG guard rejected parent two's
+unclaimed boundary:
+
+```text
+shared claim=98c78762d2e4a3e02cd038bf7874ca7672637ba1
+parent one=48ce8253c26ecfcb0e92a41cda69a6d2067bdbed
+parent two=94ec28b3d90ec297842cc3d4c6279f643e7f8875
+C=48297b46a0e8a3681644f3ed4cb27855cd05f362
+O=16920ae68ebbbe034d9a19131ae25d58367d29af
+M=db9a4ce826e9fe47916b2a23b5ee8f123971aa23
+N=f268f32f6978b6ca033b8cdc26d974f189932ab7
+result=finding: merge occurrence has a carrying parent without one claim source
+```
+
+Disabling only the DAG guard made those same OIDs false-green. A12 is the positive
+control: both carrying parents remained continuous from the same claim and the deletion
+stayed valid.
 
 ### A claim receipt belongs to one continuously present occurrence
 
@@ -228,13 +290,20 @@ With the guard disabled, the same OIDs produced `actual_result=no-finding` again
 
 ### Any-valid-witness is unsafe
 
-**VERIFIED:** delete/recreate/delete produced two independently valid deletion edges for
-the same byte-identical fingerprint. Accepting because at least one valid edge exists
-would allow an older resolution to excuse a later incarnation. The exact record was:
+**VERIFIED:** delete/recreate/delete produced two deletion edges for the same
+byte-identical fingerprint. The later edge validated; the earlier edge was invalidated
+because its absence did not remain continuous. Accepting because at least one reachable
+valid edge exists would let an older resolution excuse a later incarnation. The exact
+record was:
 
 ```json
-{"C": "547e3492f1cd1090959668805b9df6e8d0ca490c", "M": "bee01bc98754157028b6b77026f8cf4ceda22f63", "N": "d912b50f5d97175444e459d1526534af2775f372", "O": "d762fd79f0f6a9d4e08d84511b86a359e2b4c63b", "actual_result": "finding", "authoring_lineage": "candidate resolution is absent or ambiguous", "classification": "finding", "evidence_verdict": "ambiguous: 2 valid of 2 witnesses", "expected_result": "finding", "scenario": "A3-delete-recreate-delete", "witness_cardinality": 2}
+{"C": "547e3492f1cd1090959668805b9df6e8d0ca490c", "M": "bee01bc98754157028b6b77026f8cf4ceda22f63", "N": "d912b50f5d97175444e459d1526534af2775f372", "O": "d762fd79f0f6a9d4e08d84511b86a359e2b4c63b", "actual_result": "finding", "authoring_lineage": "candidate resolution is absent or ambiguous", "classification": "finding", "evidence_verdict": "ambiguous: 1 valid of 2 witnesses", "expected_result": "finding", "scenario": "A3-delete-recreate-delete", "witness_cardinality": 2}
 ```
+
+**VERIFIED post-witness case:** A13 made a valid deletion, then a merge reintroduced the
+action before a final deletion. The first edge was explicitly invalidated with `action
+reappears after the deletion witness`; an earlier reachable valid edge therefore cannot
+serve as authority unless its absence stays continuous to `N`.
 
 ### Parent-edge cardinality can be conservatively noisy
 
@@ -258,12 +327,12 @@ final-tree equality, and a content hash alone are therefore insufficient.
 
 ## Cost
 
-The small S12 merge case used 28 Git processes and 7 cached queue-tree reads. The
-128-unrelated-commit probe used 406 Git processes and 133 cached queue-tree reads, taking
-1955.146 ms in the recorded run:
+The small S12 merge case used 29 Git processes and 7 cached queue-tree reads. The
+128-unrelated-commit probe used 407 Git processes and 133 cached queue-tree reads, taking
+1710.173 ms in the recorded run:
 
 ```json
-{"actual_result": "no-finding", "elapsed_ms": 1955.146, "git_processes": 406, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
+{"actual_result": "no-finding", "elapsed_ms": 1710.173, "git_processes": 407, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
 ```
 
 **INFERENCE:** the prototype is linear in old and candidate history for one item, but its
@@ -292,9 +361,12 @@ Observed summaries:
 replay-oracle self-test: 7/7 scenarios passed
 ```
 
-**VERIFIED:** the production-shaped edge-witness POC and this independent model agree on
-S1/S2/S3/S5/S7/S8/S9/S10 and repeated-incarnation fail-closed behavior. This POC adds
-the merge-parent, S6, S11, S12, competing-supplier, criss-cross, and longer cost attacks.
+**VERIFIED:** the earlier production-shaped edge-witness POC and this independent model
+agree on S1/S2/S3/S5/S7/S8/S9/S10. Its recorded 16/16 run is not sufficient evidence for
+the newly found merge-reintroduction case: a fresh verifier showed that accepting any
+reachable valid edge without proving absence through `N` is unsafe. This POC now adds
+that post-witness guard alongside the merge-parent, S6, S11, S12, competing-supplier,
+criss-cross, and longer cost attacks.
 
 **VERIFIED negative control:** the replay oracle showed both S1 and S2 replay cleanly and
 match their candidate trees even though their evidence verdicts differ. It also showed
@@ -307,9 +379,10 @@ operator diagnosis, not resolution authority.
 edge-witness approach augmented with this POC's incarnation cardinality and merge-sibling
 rules. It has stronger fidelity to AgentFold's actual parser and lifecycle validator than
 this standalone model and measured fewer Git processes on its shorter long-history case.
-The verified production-helper probe means claim validation should be reused, not
-rewritten; the integration work belongs around it: select the causal deletion parent,
-prove old-side continuity, and retain witness cardinality.
+The verified production-helper probe means its linear occurrence boundary remains
+useful, but its any-parent merge result is not sufficient. Integration must wrap or fix
+it with the shared-claim DAG proof, then select the causal deletion parent, prove
+old-side continuity, prove post-witness absence, and retain witness cardinality.
 
 **PROPOSAL:** production return values should be explicit:
 
@@ -338,6 +411,6 @@ actionable than always accusing the restacked task.
   history intentionally fail closed here.
 - The merge-only deletion false positive is not resolved. Grouping multiple parent edges
   into one event requires a separately proven authority rule.
-- The 28/28 self-test is POC evidence only. It does not establish integration with
+- The 31/31 self-test is POC evidence only. It does not establish integration with
   `check_queue_resolution`, production regression discovery, full-suite correctness,
   cold-clone behavior, or acceptable production performance.

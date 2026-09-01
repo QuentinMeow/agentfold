@@ -308,6 +308,10 @@ class GitRepo:
 def parse_action(path: str, raw: str) -> Action:
     fields: dict[str, str] = {}
     for line in raw.splitlines():
+        bold = re.fullmatch(r"\*\*([A-Za-z][A-Za-z -]*):\*\*\s*(.*)", line)
+        if bold:
+            fields[bold.group(1)] = bold.group(2)
+            continue
         if ": " in line:
             key, value = line.split(": ", 1)
             fields[key] = value
@@ -349,7 +353,133 @@ def same_id(snapshot: dict[str, Action], action_id: str) -> list[Action]:
 
 
 def normalize_action_status(raw: str) -> str:
-    return re.sub(r"^Status:.*$", "Status: <claim-status>", raw, flags=re.M)
+    normalized = re.sub(
+        r"^Status:.*$",
+        "Status: <claim-status>",
+        raw,
+        flags=re.M,
+    )
+    return re.sub(
+        r"^(\*\*Status:\*\*)[ \t]*.*$",
+        r"\1 <claim-status>",
+        normalized,
+        flags=re.M,
+    )
+
+
+def dag_occurrence_continuity_problem(
+    repo: GitRepo,
+    deletion_parent: str,
+    incarnation: str,
+    action_id: str,
+) -> str | None:
+    """Require every carrying parent lineage to reach one shared claim edge."""
+
+    ClaimEdge = tuple[str, str]
+    memo: dict[str, tuple[frozenset[ClaimEdge] | None, str | None]] = {}
+
+    def prove(child: str) -> tuple[frozenset[ClaimEdge] | None, str | None]:
+        if child in memo:
+            return memo[child]
+        child_snapshot = repo.snapshot(child)
+        child_matches = occurrences(child_snapshot, incarnation)
+        child_same_id = same_id(child_snapshot, action_id)
+        if len(child_matches) != 1 or len(child_same_id) != 1:
+            result = (None, f"merge occurrence is ambiguous at {child}")
+            memo[child] = result
+            return result
+        child_action = child_matches[0]
+        parents = repo.parents(child)
+        lineage_sources: list[frozenset[ClaimEdge]] = []
+        carrying_parents = 0
+        for parent in parents:
+            parent_snapshot = repo.snapshot(parent)
+            parent_matches = occurrences(parent_snapshot, incarnation)
+            parent_same_id = same_id(parent_snapshot, action_id)
+            if len(parent_matches) > 1 or len(parent_same_id) > 1:
+                result = (
+                    None,
+                    f"merge occurrence has duplicate ancestry at {parent}",
+                )
+                memo[child] = result
+                return result
+            if not parent_matches:
+                if parent_same_id:
+                    result = (
+                        None,
+                        "merge occurrence crosses another incarnation on edge "
+                        f"{parent}->{child}",
+                    )
+                    memo[child] = result
+                    return result
+                continue
+            if len(parent_same_id) != 1:
+                result = (
+                    None,
+                    f"merge occurrence identity is unreadable at {parent}",
+                )
+                memo[child] = result
+                return result
+            carrying_parents += 1
+            parent_action = parent_matches[0]
+            if parent_action.path != child_action.path:
+                if len(parents) != 1 or parent_action.path in child_snapshot:
+                    result = (
+                        None,
+                        "merge occurrence has ambiguous rename provenance on edge "
+                        f"{parent}->{child}",
+                    )
+                    memo[child] = result
+                    return result
+            if (
+                normalize_action_status(parent_action.raw)
+                != normalize_action_status(child_action.raw)
+            ):
+                result = (
+                    None,
+                    "merge occurrence mutated outside status on edge "
+                    f"{parent}->{child}",
+                )
+                memo[child] = result
+                return result
+            if (
+                parent_action.status == "open"
+                and child_action.status == "in-repair"
+            ):
+                lineage_sources.append(frozenset({(parent, child)}))
+                continue
+            parent_sources, problem = prove(parent)
+            if problem is not None or parent_sources is None:
+                result = (None, problem or "merge occurrence proof is unavailable")
+                memo[child] = result
+                return result
+            lineage_sources.append(parent_sources)
+        if carrying_parents == 0:
+            # This is the occurrence boundary. The linear bounded-claim check
+            # decides whether it is a legal new occurrence; the DAG guard only
+            # adds the stronger all-carrying-parent requirement at merges.
+            result = (frozenset(), None)
+        elif carrying_parents > 1 and any(
+            len(source) != 1 for source in lineage_sources
+        ):
+            result = (
+                None,
+                "merge occurrence has a carrying parent without one claim source",
+            )
+        else:
+            sources = frozenset().union(*lineage_sources)
+            if carrying_parents > 1 and len(sources) != 1:
+                result = (
+                    None,
+                    f"merge occurrence has {len(sources)} competing claim sources",
+                )
+            else:
+                result = (sources, None)
+        memo[child] = result
+        return result
+
+    _sources, problem = prove(deletion_parent)
+    return problem
 
 
 def bounded_claim_transition_problem(
@@ -427,6 +557,15 @@ def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
     if action.status != "in-repair":
         edge.problem = "action was not committed as in-repair before deletion"
         return
+    occurrence_problem = dag_occurrence_continuity_problem(
+        repo,
+        edge.parent,
+        incarnation,
+        action.action_id,
+    )
+    if occurrence_problem is not None:
+        edge.problem = occurrence_problem
+        return
     claim_problem = bounded_claim_transition_problem(
         repo,
         edge.parent,
@@ -443,6 +582,31 @@ def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
         return
     edge.valid = True
     edge.problem = "lifecycle and deletion-edge evidence are valid"
+
+
+def post_witness_absence_problem(
+    repo: GitRepo,
+    edge: Edge,
+    new_head: str,
+    incarnation: str,
+    action_id: str,
+) -> str | None:
+    """Require the witnessed absence to stay continuous through N."""
+
+    descendants = repo.revisions(
+        "--topo-order",
+        new_head,
+        "--ancestry-path",
+        f"{edge.child}..{new_head}",
+    )
+    for revision in descendants:
+        snapshot = repo.snapshot(revision)
+        if occurrences(snapshot, incarnation) or same_id(snapshot, action_id):
+            return (
+                "action reappears after the deletion witness at "
+                f"{revision}"
+            )
+    return None
 
 
 def old_lineage_continuity_problem(
@@ -591,6 +755,17 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
 
         for edge in edges:
             validate_edge(repo, edge, incarnation)
+            if edge.valid:
+                absence_problem = post_witness_absence_problem(
+                    repo,
+                    edge,
+                    new_head,
+                    incarnation,
+                    old_action.action_id,
+                )
+                if absence_problem is not None:
+                    edge.valid = False
+                    edge.problem = absence_problem
 
         # A merge result may appear to delete relative to one parent even though an
         # absent sibling supplies a prior, real deletion.  Ignore only when that
@@ -1307,6 +1482,132 @@ def scenario_recreated_occurrence_own_claim(root: Path) -> dict[str, object]:
     return record
 
 
+def scenario_ambiguous_merge_occurrence(root: Path) -> dict[str, object]:
+    repo, first_open = base_repo(root)
+    claimed = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("parent-one", claimed)
+    parent_one = repo.commit("carry original occurrence", {"one.txt": "one\n"})
+    repo.switch_new("parent-two", claimed)
+    repo.commit("delete on second parent", {DEFAULT_PATH: None})
+    parent_two = repo.commit(
+        "recreate preclaimed on second parent",
+        {DEFAULT_PATH: action_text(status="in-repair"), "two.txt": "two\n"},
+    )
+    repo.switch("parent-one")
+    common = repo.merge_commit(
+        "parent-two",
+        "merge ambiguous occurrence",
+        {},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    new_base = repo.commit(
+        "delete ambiguous merged occurrence",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    record = make_record(
+        "A11-ambiguous-merge-occurrence",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record.update({
+        "first_open": first_open,
+        "shared_claim": claimed,
+        "merge_parent_one": parent_one,
+        "merge_parent_two": parent_two,
+    })
+    return record
+
+
+def scenario_shared_occurrence_merge(root: Path) -> dict[str, object]:
+    repo, _first_open = base_repo(root)
+    claimed = repo.commit(
+        "claim shared occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("parent-one", claimed)
+    parent_one = repo.commit("carry on first parent", {"one.txt": "one\n"})
+    repo.switch_new("parent-two", claimed)
+    parent_two = repo.commit("carry on second parent", {"two.txt": "two\n"})
+    repo.switch("parent-one")
+    common = repo.merge_commit(
+        "parent-two",
+        "merge shared occurrence",
+        {},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    new_base = repo.commit(
+        "delete continuously shared occurrence",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    record = make_record(
+        "A12-shared-occurrence-merge",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+    record.update({
+        "shared_claim": claimed,
+        "merge_parent_one": parent_one,
+        "merge_parent_two": parent_two,
+    })
+    return record
+
+
+def scenario_post_witness_merge_reintroduction(root: Path) -> dict[str, object]:
+    repo, _first_open = base_repo(root)
+    common = repo.commit(
+        "claim occurrence before fork",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("resolved", common)
+    first_deletion = repo.commit(
+        "first deletion",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    repo.switch_new("carrier", common)
+    carrier = repo.commit("carry occurrence", {"carrier.txt": "carry\n"})
+    repo.switch("resolved")
+    reintroduction = repo.merge_commit(
+        "carrier",
+        "merge reintroduces occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    new_base = repo.commit(
+        "final deletion",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v2\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    record = make_record(
+        "A13-post-witness-merge-reintroduction",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    if not any(
+        edge["problem"].startswith("action reappears after the deletion witness")
+        for edge in record["edges"]
+    ):
+        raise AssertionError("A13 did not collect post-witness absence continuity")
+    record.update({
+        "first_deletion": first_deletion,
+        "carrier": carrier,
+        "reintroduction": reintroduction,
+    })
+    return record
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -1440,6 +1741,9 @@ INITIAL_SCENARIOS = (
     scenario_old_duplicate_then_collapses,
     scenario_cross_boundary_claim_reuse,
     scenario_recreated_occurrence_own_claim,
+    scenario_ambiguous_merge_occurrence,
+    scenario_shared_occurrence_merge,
+    scenario_post_witness_merge_reintroduction,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
