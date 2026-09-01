@@ -244,7 +244,7 @@ PCX-05's recorded OIDs make the competing events reproducible:
 C   d297f8d7d5f3557c94f944194e6da99c1c092c81
 O   39f138bf6fdf1db76fe12a652664dbdd3fcb33e6
 M   6bc1b1aa685794aa4f4c17625c59319fe8264ec1
-N   e0953c49e5c671bf03901dbba0ee002e66e12e99
+N   5cc308cff656d4866cfd255d968e65ee17b58271
 D1  d9b25781fbe23756d17ddd9c6e6f9c80167642ec
 D2  80c729b26bdc5c57e7fd7fc3c1416edb84ebbeb9
 ```
@@ -467,10 +467,10 @@ does not block lifecycle-valid direct or supplier deletion.
 | Case | C / O / K / D / M / N | Observed result |
 |---|---|---|
 | `R8-direct-human-response-conflict` | `92c80d9c65c7be349d0a6c663a6a2ea9c3c2397c` / `1dc4f0dc77aae1eefaef0bb443ec187ff1efb23d` / `986f7667dcc5b01542c1194c72cc446c4c45e5ae` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `2b7dacb87e24c729b4948de47f6d473c153fc210` / `cb29049ff107a9a11a4ec7babbdee21819518dd6` | `invalid direct`; `O=reject`, authority parent `approve`; blocking |
-| `R8-direct-human-response-identical` | `2b79814b0bce6f1556c0b2724ade9d7bbb4bf939` / `b3879039d6d7168e89d3046e6e60e056460907c1` / `3a37fb283da1ae126bf4f24c7d08215f30d88bc5` / `f345727f01fdf252be3f622bac93c727f2c24605` / `f345727f01fdf252be3f622bac93c727f2c24605` / `2c2289035cfc91c73564f6a97b326ebca02be132` | `valid direct`; identical `approve`; no finding |
+| `R8-direct-human-response-identical` | `2b79814b0bce6f1556c0b2724ade9d7bbb4bf939` / `b3879039d6d7168e89b3046e6e60e056460907c1` / `3a37fb283da1ae126bf4f24c7d08215f30d88bc5` / `f345727f01fdf252be3f622bac93c727f2c24605` / `f345727f01fdf252be3f622bac93c727f2c24605` / `2c2289035cfc91c73564f6a97b326ebca02be132` | `valid direct`; identical `approve`; no finding |
 | `R8-supplier-human-response-conflict` | `255e448f3c735fefdcee3c07071c3d6bb6abb312` / `27927fe11bdeee043660e700c81e8cb3853c56bf` / `9d999de926a3b726c4f17fa4c1aa5f0ae1a9d036` / `d3616075eb04bd2c9b5208aceb05ca8e0b3e78c7` / `04af3169e321f7615236785dd2834296aff6748b` / `1fb9fc40da2d44e839830611cc20d0aee23c560e` | `invalid supplier`; `O=reject`, authority parent `approve`; blocking |
 | `R8-supplier-human-response-identical` | `800658fac71a8c7fbc2d257bde57964cc96dcef9` / `f33b095abbf3c3e3225e0fbfc663b0a7f52d312b` / `80a4c49c8bc87882eaf02fc3e5b5a82dd2aac42e` / `da001fa3334685155798eb17efdee7b17ff02ae9` / `08a3ec18a07b71e5aa95e1651ae93ce0f0e6a8d7` / `e94946d2990fe3c67bc61676f66f90fab1b7a26a` | `valid supplier`; identical `approve`; no finding |
-| `R8-review-binding-divergent` | `88a9702f01a58999b6f2f478ea10e5ef5af5e209` / `95130080a2bb5f8cb89aef0d0539463363ea28fe` / `9018e72a02b3c162fcff7af51d563db268cda17d` / `2a6c2321461290fc4bb951597345981dc90c5987` / `2a6c2321461290fc4bb951597345981dc90c5987` / `86f1bc4f1ad2993bff8c4e9f247b30f726071435` | `invalid direct`; same response, different target and content revision; blocking |
+| `R8-review-binding-divergent` | `9b4889771f49a83cd02600a2de58fc5e6e8b8259` / `e3c594800cfe94f4f23c58060ae4ab31f50c078c` / `f78c058e2bf8e307365640a89d8dee7aaac1ae22` / `8f4cb69d5a3f4eac8d69165b54f73f45e53d1f98` / `8f4cb69d5a3f4eac8d69165b54f73f45e53d1f98` / `dc70864ec5e13a399d4966356b9803075681a0e6` | `invalid direct`; same response, different target and content revision; blocking |
 | `R8-review-binding-identical` | `45b7550dbdc799efed73af109da57c6906d428a0` / `a3f97a3b22945e663eb10180bde5de3b7bf790fa` / `aeef03ecb0d57aac9c9d323ed80d7c4552c1b1be` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `92295fde0ac2b1fed4b26a6efbc0cbae86e81411` / `b2dbe65f89982fb586b0fb5349454d80c7c53310` | `valid direct`; identical target, revision, and approval; no finding |
 | `R8-review-binding-terminal-conflict` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `f56e612abf60bdf946f45bb1e7e1454c59aa0956` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `invalid direct`; same response/target/revisions, but concrete `O` outcome `rejected` versus candidate `approved`; blocking |
 
@@ -661,6 +661,24 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` |
 | `broad-review-pending-normalization` | blocking -> no finding | `OBSERVED_RED` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` |
 
+## Evidence audit
+
+The r11 evidence pass pinned one fresh 95-line deterministic self-test stream:
+84 scenario records, one alias inventory, nine control records, and one summary.
+Its SHA-256 is
+`97f4b2da465498bb3789a20e3b144403982c8c1190b0e5fc34212955367e3df5`.
+A from-scratch temporary audit mapped every README Git OID to its named
+scenario/control region, checked every scenario/control table row against the
+matching JSON record, compared result words and measured counters, and refused
+unmapped values. The temporary script was deliberately not added to this POC;
+the repair remains README-only. No historical-OID exemption was needed: every
+control OID maps to one of the nine pinned control records, and every scenario
+OID maps to current output. Its final output was:
+
+```json
+{"audit": "PASS", "counter_checks": 23, "failures": [], "oid_occurrences": 295, "pinned_controls": 9, "pinned_scenarios": 84, "record_rows": 64, "region_oid_claims": 295, "semantic_row_checks": 79, "sha256_claims": 7, "unique_oids": 255}
+```
+
 ## Commands run
 
 ```sh
@@ -676,6 +694,10 @@ PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/re
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test > /tmp/production-contract-r11-selftest.jsonl
+python3 /tmp/production_contract_readme_audit.py docs/designs/restack-queue-provenance/pocs/production-contract/README.md /tmp/production-contract-r11-selftest.jsonl
+shasum -a 256 /tmp/production-contract-r11-selftest.jsonl
+python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
 ```
 
@@ -686,6 +708,8 @@ findings and six pre-existing advisories about frozen human-action records. The
 first commit hook selected no repository test files because this directory is a
 design record path. A commit-message-only amend then selected the full lane
 because its staged diff was empty; all 16/16 repository test files passed.
+The r11 evidence pass explicitly reran that full lane; 16/16 files passed in
+54.80 seconds.
 
 ## Nonclaims and tests not run
 
