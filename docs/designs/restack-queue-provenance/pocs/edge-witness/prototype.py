@@ -462,6 +462,25 @@ def fixture_claimed_tip_laundering(root: Path) -> Fixture:
     )
 
 
+def fixture_independent_identical_incarnation(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo)
+    repo.branch("old", C)
+    repo.write(evidence_path("independent"), "# Evidence independent: pending\n")
+    repo.write(queue_path("independent"), action_text("independent"))
+    O = repo.commit("old tip authors independent action")
+    repo.branch("candidate", C)
+    repo.write(evidence_path("independent"), "# Evidence independent: pending\n")
+    repo.write(queue_path("independent"), action_text("independent"))
+    repo.commit("candidate independently authors byte-identical action")
+    M = claim(repo, "independent")
+    N = resolve(repo, "independent")
+    return Fixture(
+        "independent-byte-identical-incarnation", repo, C, O, M, N,
+        "blocking-finding", (queue_path("independent"),),
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -512,6 +531,7 @@ BASE_FIXTURES = (
     fixture_compact_valid_at_n,
     fixture_activation_laundering,
     fixture_claimed_tip_laundering,
+    fixture_independent_identical_incarnation,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -632,6 +652,11 @@ def classification_reason(items, fast_forward=False):
             parts.append(f"{path} remains live at the candidate tip")
         elif verdict.startswith("invalid-real-edge"):
             parts.append(f"{path} has a real deletion edge but it is unauthorized: {item['problem']}")
+        elif verdict == "different-incarnation-witness":
+            parts.append(
+                f"{path} has a valid candidate-side deletion edge for byte-identical "
+                "content, but the old-tip action was authored after the shared boundary"
+            )
         elif verdict == "ambiguous-real-edges":
             parts.append(f"{path} has multiple matching deletion edges, so the prototype fails closed")
         elif verdict == "rewritten-live-action":
@@ -641,7 +666,7 @@ def classification_reason(items, fast_forward=False):
     return "; ".join(parts) + "."
 
 
-def classify(fixture: Fixture):
+def classify(fixture: Fixture, enforce_incarnation_provenance=True):
     metrics = Metrics()
     items = {}
     with reconciler_repository(fixture.repo.root), count_reconciler_git(metrics):
@@ -731,9 +756,19 @@ def classify(fixture: Fixture):
                 )
                 valid = [witness for witness in witnesses if witness["problem"] is None]
                 if len(witnesses) == 1 and len(valid) == 1:
-                    verdict = "valid-real-edge"
-                    problem = None
-                    finding = False
+                    if enforce_incarnation_provenance and lineage != (
+                        "inherited-unchanged-on-old-tip"
+                    ):
+                        verdict = "different-incarnation-witness"
+                        problem = (
+                            "old-tip action was authored or changed after every "
+                            "shared merge boundary"
+                        )
+                        finding = True
+                    else:
+                        verdict = "valid-real-edge"
+                        problem = None
+                        finding = False
                 elif len(witnesses) > 1:
                     verdict = "ambiguous-real-edges"
                     problem = "multiple matching deletion witnesses"
@@ -830,6 +865,14 @@ def verify_result(fixture: Fixture, result):
             problems.append("synthetic O->N control no longer demonstrates laundering")
         if "not committed as in-repair" not in str(item["problem"]):
             problems.append("real candidate deletion edge did not reject laundering")
+    if fixture.scenario_id == "independent-byte-identical-incarnation":
+        item = result["items"][queue_path("independent")]
+        if item["authoring_lineage"] != "old-tip-authored":
+            problems.append("independent old-tip action was not attributed after C")
+        if item["evidence_verdict"] != "different-incarnation-witness":
+            problems.append("byte-identical candidate incarnation borrowed authorization")
+        if len(item["witnesses"]) != 1 or item["witnesses"][0]["problem"] is not None:
+            problems.append("independent candidate lifecycle was not actually valid")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
@@ -838,8 +881,81 @@ def verify_result(fixture: Fixture, result):
         raise AssertionError(f"{fixture.scenario_id}: " + "; ".join(problems))
 
 
+def replay_tree_signature(fixture: Fixture):
+    probes = {
+        "old_queue_delta_empty": (fixture.C, fixture.O, "message-queue"),
+        "replay_queue_delta_empty": (fixture.M, fixture.N, "message-queue"),
+    }
+    signature = {}
+    for name, (before, after, path) in probes.items():
+        result = fixture.repo.run(
+            "--no-replace-objects", "diff", "--quiet", before, after,
+            "--", path, check=False,
+        )
+        if result.returncode not in (0, 1):
+            raise AssertionError(f"replay control could not compare {name}")
+        signature[name] = result.returncode == 0
+    path = queue_path("s1") if fixture.scenario_id.startswith("S1-") else queue_path("s2")
+    absent = fixture.repo.run(
+        "--no-replace-objects", "ls-tree", fixture.N, "--", path
+    )
+    signature["candidate_path_absent"] = not absent.stdout.strip()
+    return signature
+
+
+def executable_controls(fixtures, results):
+    controls = []
+
+    independent = fixtures["independent-byte-identical-incarnation"]
+    damaged = classify(independent, enforce_incarnation_provenance=False)
+    if damaged["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged incarnation control did not reproduce the false negative"
+        )
+    controls.append({
+        "control": "observed-red-incarnation-provenance",
+        "damaged_classification": damaged["classification"],
+        "expected": independent.expected_verdict,
+        "status": "OBSERVED_RED",
+    })
+
+    s2 = fixtures["S2-invalid-base-deletion"]
+    with reconciler_repository(s2.repo.root):
+        accepts_bad = RECONCILE.candidate_paths_match_other_parent(
+            s2.O, s2.N, (queue_path("s2"),)
+        )
+    if not accepts_bad:
+        raise AssertionError(
+            "candidate_paths_match_other_parent no longer accepts the S2 control"
+        )
+    controls.append({
+        "accepted_evidence_free_deletion": accepts_bad,
+        "control": "production-other-parent-is-evidence-blind",
+        "real_edge_problem": results["S2-invalid-base-deletion"]["items"][
+            queue_path("s2")
+        ]["problem"],
+        "status": "PASS",
+    })
+
+    s1 = fixtures["S1-valid-base-resolution"]
+    s1_signature = replay_tree_signature(s1)
+    s2_signature = replay_tree_signature(s2)
+    if s1_signature != s2_signature:
+        raise AssertionError("S1 and S2 replay/tree signatures unexpectedly differ")
+    controls.append({
+        "control": "replay-tree-cannot-authorize",
+        "s1_evidence": results["S1-valid-base-resolution"]["evidence_verdict"],
+        "s2_evidence": results["S2-invalid-base-deletion"]["evidence_verdict"],
+        "signature": s1_signature,
+        "status": "PASS",
+    })
+    return controls
+
+
 def run_self_test(fixtures_root: Path, factories=BASE_FIXTURES):
     results = []
+    fixtures = {}
+    results_by_scenario = {}
     for factory in factories:
         scenario_root = fixtures_root / factory.__name__
         fixture = factory(scenario_root)
@@ -847,10 +963,18 @@ def run_self_test(fixtures_root: Path, factories=BASE_FIXTURES):
         verify_result(fixture, result)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         results.append(result)
+        fixtures[fixture.scenario_id] = fixture
+        results_by_scenario[fixture.scenario_id] = result
+    controls = executable_controls(fixtures, results_by_scenario)
+    for control in controls:
+        print(json.dumps(control, sort_keys=True, separators=(",", ":")))
     summary = {
         "summary": "PASS",
         "passed": len(results),
         "total": len(results),
+        "controls_passed": len(controls),
+        "controls_total": len(controls),
+        "observed_red": 1,
         "git": REAL_RUN(
             ["git", "--version"],
             text=True,
