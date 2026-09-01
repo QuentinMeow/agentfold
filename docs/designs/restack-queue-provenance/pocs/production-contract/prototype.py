@@ -107,6 +107,8 @@ class Event:
     absent_parents: list[str]
     reason_code: str
     reason: str
+    causal_roots: list[dict] = dataclasses.field(default_factory=list)
+    reason_records: list[dict] = dataclasses.field(default_factory=list)
 
 
 def is_git_command(command) -> bool:
@@ -734,17 +736,20 @@ class Classifier:
             if not carrying or absent:
                 continue
             if duplicate:
+                event = Event(
+                    "ambiguous",
+                    "direct",
+                    child,
+                    [],
+                    [],
+                    neutral,
+                    [],
+                    "direct-parent-multiplicity",
+                    "a carrying parent has duplicate exact identities",
+                )
                 events.append(
-                    Event(
-                        "ambiguous",
-                        "direct",
-                        child,
-                        [],
-                        [],
-                        neutral,
-                        [],
-                        "direct-parent-multiplicity",
-                        "a carrying parent has duplicate exact identities",
+                    self.attach_causal_metadata(
+                        event, [self.synthetic_causal_root(event)]
                     )
                 )
                 continue
@@ -787,17 +792,20 @@ class Classifier:
                     f"all {len(selected)} carrying parent edge(s) passed "
                     "production deletion authority"
                 )
+            event = Event(
+                status,
+                "direct",
+                child,
+                edges,
+                [],
+                neutral,
+                [],
+                code,
+                reason,
+            )
             events.append(
-                Event(
-                    status,
-                    "direct",
-                    child,
-                    edges,
-                    [],
-                    neutral,
-                    [],
-                    code,
-                    reason,
+                self.attach_causal_metadata(
+                    event, self.direct_causal_roots(event)
                 )
             )
         return events
@@ -817,11 +825,17 @@ class Classifier:
                 else None
             )
             if post:
+                prior = event.reason_records
                 event = dataclasses.replace(
                     event,
                     status="invalid",
                     reason_code="post-event-reintroduction",
                     reason="post-event absence is not continuous: " + post,
+                )
+                event = self.attach_causal_metadata(
+                    event,
+                    self.retag_roots(event.causal_roots, "invalid"),
+                    prior,
                 )
             events.append(event)
         return events
@@ -837,6 +851,88 @@ class Classifier:
 
     def causal_source_key(self, event: Event):
         return (event.child, event.status, self.event_key(event))
+
+    @staticmethod
+    def causal_root_key(root: dict):
+        return (
+            root["status"],
+            root["root_child"],
+            tuple(
+                (edge["parent"], edge["child"])
+                for edge in root["component_edges"]
+            ),
+        )
+
+    def direct_causal_roots(self, event: Event) -> list[dict]:
+        return [
+            {
+                "status": event.status,
+                "root_child": event.child,
+                "component_edges": [
+                    {"parent": parent, "child": child}
+                    for parent, child in self.event_key(event)
+                ],
+            }
+        ]
+
+    def stable_roots(self, roots):
+        ordered = {}
+        for root in roots:
+            ordered.setdefault(self.causal_root_key(root), root)
+        return list(ordered.values())
+
+    def retag_roots(self, roots, status: str):
+        return self.stable_roots(
+            {
+                **root,
+                "status": status,
+            }
+            for root in roots
+        )
+
+    @staticmethod
+    def stable_reason_records(records):
+        ordered = {}
+        for record in records:
+            key = (
+                record["reason_code"],
+                record["source_child"],
+                record["reason"],
+                json.dumps(record["root_keys"], sort_keys=True),
+            )
+            ordered.setdefault(key, record)
+        return list(ordered.values())
+
+    def attach_causal_metadata(
+        self,
+        event: Event,
+        roots,
+        prior_records=(),
+    ) -> Event:
+        event.causal_roots = self.stable_roots(roots)
+        root_keys = [
+            list(self.causal_root_key(root))
+            for root in event.causal_roots
+        ]
+        event.reason_records = self.stable_reason_records(
+            [*prior_records]
+            + [
+                {
+                    "reason_code": event.reason_code,
+                    "source_child": event.child,
+                    "reason": event.reason,
+                    "root_keys": root_keys,
+                }
+            ]
+        )
+        return event
+
+    def synthetic_causal_root(self, event: Event) -> dict:
+        return {
+            "status": event.status,
+            "root_child": event.child,
+            "component_edges": [],
+        }
 
     @staticmethod
     def stable_edges(edges):
@@ -882,16 +978,9 @@ class Classifier:
         """Build nested supplier events while preserving original authority."""
         assert self.graph is not None
         raw_direct = self.raw_direct_events(identity)
-        direct_sources = [
-            event
-            for event in raw_direct
-            if event.status == "valid"
-        ]
-        sources = list(direct_sources)
+        sources = [event for event in raw_direct if event.status == "valid"]
         observed_sources = [
-            event
-            for event in raw_direct
-            if event.authority_edges
+            event for event in raw_direct if event.causal_roots
         ]
         results = []
         for child in self.graph.order:
@@ -926,6 +1015,9 @@ class Classifier:
                     "supplier-parent-multiplicity",
                     "a supplier merge parent has duplicate identities",
                 )
+                result = self.attach_causal_metadata(
+                    result, [self.synthetic_causal_root(result)]
+                )
                 observed_sources.append(result)
                 results.append(result)
                 continue
@@ -940,7 +1032,7 @@ class Classifier:
                 ),
                 None,
             )
-            per_absent: list[dict[tuple, Event]] = []
+            per_absent: list[list[Event]] = []
             for absent_parent in absent:
                 traceable = [
                     source
@@ -962,29 +1054,45 @@ class Classifier:
                         for other in traceable
                     )
                 ]
-                per_absent.append(
-                    {
-                        self.causal_source_key(source): source
-                        for source in closest_sources
-                    }
-                )
+                per_absent.append(closest_sources)
+            per_absent_root_keys = [
+                {
+                    self.causal_root_key(root)
+                    for source in candidates
+                    for root in source.causal_roots
+                }
+                for candidates in per_absent
+            ]
             common = (
                 set.intersection(
-                    *(set(candidates) for candidates in per_absent)
+                    *per_absent_root_keys
                 )
-                if per_absent
+                if per_absent_root_keys
                 else set()
             )
-            ordered_union = {}
+            ordered_sources = {}
+            ordered_roots = {}
             for candidates in per_absent:
-                for key, source in candidates.items():
-                    ordered_union.setdefault(key, source)
-            participating = list(ordered_union.values())
+                for source in candidates:
+                    ordered_sources.setdefault(
+                        self.causal_source_key(source), source
+                    )
+                    for root in source.causal_roots:
+                        ordered_roots.setdefault(
+                            self.causal_root_key(root), root
+                        )
+            participating = list(ordered_sources.values())
+            causal_roots = list(ordered_roots.values())
             unique_authorizing = bool(
-                len(participating) == 1
+                len(causal_roots) == 1
                 and len(common) == 1
-                and participating[0].status == "valid"
-                and participating[0] in sources
+                and next(iter(common)) in ordered_roots
+                and causal_roots[0]["status"] == "valid"
+                and participating
+                and all(
+                    source.status == "valid" and source in sources
+                    for source in participating
+                )
             )
             borrowed_event = None
             if (
@@ -1007,9 +1115,16 @@ class Classifier:
                         "damaged-propagation-borrow",
                         "DAMAGED: propagation borrowed lifecycle authority",
                     )
-                    key = self.causal_source_key(borrowed_event)
+                    borrowed_event = self.attach_causal_metadata(
+                        borrowed_event,
+                        self.direct_causal_roots(borrowed_event),
+                    )
+                    key = self.causal_root_key(
+                        borrowed_event.causal_roots[0]
+                    )
                     common = {key}
                     participating = [borrowed_event]
+                    causal_roots = borrowed_event.causal_roots
                     unique_authorizing = True
             authority_edges = self.stable_edges(
                 edge
@@ -1040,6 +1155,11 @@ class Classifier:
                 ]
                 + absent
             )
+            prior_records = self.stable_reason_records(
+                record
+                for source in participating
+                for record in source.reason_records
+            )
             if not participating:
                 result = Event(
                     "invalid",
@@ -1052,8 +1172,11 @@ class Classifier:
                     "competing-or-missing-supplier",
                     "no causal supplier source reaches every absent parent",
                 )
+                result = self.attach_causal_metadata(
+                    result, [self.synthetic_causal_root(result)]
+                )
                 observed_sources.append(result)
-            elif len(participating) != 1 or len(common) != 1:
+            elif len(causal_roots) != 1 or len(common) != 1:
                 result = Event(
                     "ambiguous",
                     "supplier",
@@ -1064,7 +1187,7 @@ class Classifier:
                     accumulated_absent,
                     "competing-causal-suppliers",
                     (
-                        f"{len(participating)} causal sources compete at "
+                        f"{len(causal_roots)} canonical roots compete at "
                         f"adoption {child}: "
                         + "; ".join(
                             f"{source.reason_code}@{source.child}: "
@@ -1072,6 +1195,9 @@ class Classifier:
                             for source in participating
                         )
                     ),
+                )
+                result = self.attach_causal_metadata(
+                    result, causal_roots, prior_records
                 )
                 observed_sources.append(result)
             elif carry_problem:
@@ -1090,10 +1216,19 @@ class Classifier:
                     "invalid-supplier-carrier",
                     f"{carry_problem}; causal sources: {source_lineage}",
                 )
+                result = self.attach_causal_metadata(
+                    result,
+                    self.retag_roots(causal_roots, "invalid"),
+                    prior_records,
+                )
                 observed_sources.append(result)
             else:
-                source = participating[0]
-                if source.status == "invalid":
+                root_status = causal_roots[0]["status"]
+                source_lineage = "; ".join(
+                    f"{source.reason_code}@{source.child}: {source.reason}"
+                    for source in participating
+                )
+                if root_status == "invalid":
                     result = Event(
                         "invalid",
                         "supplier",
@@ -1104,10 +1239,13 @@ class Classifier:
                         accumulated_absent,
                         "upstream-invalid-supplier",
                         (
-                            f"upstream {source.reason_code}@{source.child}: "
-                            f"{source.reason}; invalid "
+                            f"upstream invalid root via {source_lineage}; "
+                            f"invalid "
                             f"supplier ancestry adopted at {child}"
                         ),
+                    )
+                    result = self.attach_causal_metadata(
+                        result, causal_roots, prior_records
                     )
                     observed_sources.append(result)
                 elif not unique_authorizing:
@@ -1121,15 +1259,20 @@ class Classifier:
                         accumulated_absent,
                         "upstream-ambiguous-supplier",
                         (
-                            f"upstream {source.reason_code}@{source.child}: "
-                            f"{source.reason}; ambiguous supplier ancestry "
+                            f"upstream causal source via {source_lineage}; "
+                            f"ambiguous supplier ancestry "
                             f"adopted at {child}"
                         ),
+                    )
+                    result = self.attach_causal_metadata(
+                        result,
+                        self.retag_roots(causal_roots, "ambiguous"),
+                        prior_records,
                     )
                     observed_sources.append(result)
                 else:
                     conflict = self.response_conflict(
-                        identity, source.authority_edges, carrying
+                        identity, authority_edges, carrying
                     )
                     if conflict:
                         result = Event(
@@ -1142,6 +1285,11 @@ class Classifier:
                             accumulated_absent,
                             "conflicting-human-response",
                             conflict,
+                        )
+                        result = self.attach_causal_metadata(
+                            result,
+                            self.retag_roots(causal_roots, "invalid"),
+                            prior_records,
                         )
                         observed_sources.append(result)
                     else:
@@ -1169,6 +1317,9 @@ class Classifier:
                                 )
                             ),
                         )
+                        result = self.attach_causal_metadata(
+                            result, causal_roots, prior_records
+                        )
                         sources.append(result)
                         observed_sources.append(result)
             results.append(result)
@@ -1189,11 +1340,17 @@ class Classifier:
                 else None
             )
             if post:
+                prior = event.reason_records
                 event = dataclasses.replace(
                     event,
                     status="invalid",
                     reason_code="post-supplier-reintroduction",
                     reason="post-adoption absence is not continuous: " + post,
+                )
+                event = self.attach_causal_metadata(
+                    event,
+                    self.retag_roots(event.causal_roots, "invalid"),
+                    prior,
                 )
             results.append(event)
         return results
@@ -1225,7 +1382,7 @@ class Classifier:
                 )
             return chosen
         if len(valid) > 1:
-            return Event(
+            result = Event(
                 "ambiguous",
                 "ambiguous",
                 None,
@@ -1243,6 +1400,19 @@ class Classifier:
                 [],
                 "competing-events",
                 f"{len(valid)} causal events compete",
+            )
+            return self.attach_causal_metadata(
+                result,
+                (
+                    root
+                    for event in valid
+                    for root in event.causal_roots
+                ),
+                (
+                    record
+                    for event in valid
+                    for record in event.reason_records
+                ),
             )
         if events:
             ambiguous = [
@@ -1289,6 +1459,8 @@ class Classifier:
             "propagation_edges": [],
             "neutral_parents": [],
             "absent_parents": [],
+            "causal_roots": [],
+            "reason_records": [],
             "event_mode": "none",
             "reason_code": "none",
         }
@@ -1394,6 +1566,8 @@ class Classifier:
             "propagation_edges": event.propagation_edges,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
+            "causal_roots": event.causal_roots,
+            "reason_records": event.reason_records,
             "event_child": event.child,
             "reason_code": event.reason_code,
             "reason": event.reason,
@@ -2846,6 +3020,312 @@ def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
     )
 
 
+def r4_supplier_wrapper(
+    repo: GitRepository,
+    *,
+    C: str,
+    R: str,
+    path: str,
+    absent_parents: Iterable[str],
+    suffix: str,
+) -> dict:
+    repo.branch(f"{suffix}-carrier", C)
+    carrier = feature(repo, f"{suffix}-carrier")
+    repo.branch(f"{suffix}-neutral", R)
+    neutral = feature(repo, f"{suffix}-neutral")
+    adoption = repo.merge_commit(
+        (*absent_parents, carrier, neutral),
+        f"{suffix} adopt supplier envelope",
+        removes=(path,),
+    )
+    return {
+        "adoption": adoption,
+        "carrier": carrier,
+        "neutral": neutral,
+    }
+
+
+def r4_final_wrapper(
+    repo: GitRepository,
+    *,
+    C: str,
+    R: str,
+    path: str,
+    absent_parents: Iterable[str],
+    suffix: str,
+) -> dict:
+    repo.branch(f"{suffix}-carrier", C)
+    carrier = feature(repo, f"{suffix}-carrier")
+    repo.branch(f"{suffix}-neutral", R)
+    neutral = feature(repo, f"{suffix}-neutral")
+    adoption = repo.merge_commit(
+        (*absent_parents, carrier, neutral),
+        f"{suffix} merge supplier envelopes",
+        removes=(path,),
+    )
+    return {
+        "adoption": adoption,
+        "carrier": carrier,
+        "neutral": neutral,
+    }
+
+
+def r4_same_root_diamond(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create same-root diamond pre-C root")
+    label = "r4-same-root-diamond"
+    path = add_agent(repo, label)
+    C = repo.commit("create same-root diamond action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r4-same-root-diamond-old")
+    repo.branch("r4-shared-valid-root", C)
+    claim(repo, (path,), "claim shared diamond root")
+    valid_root = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve shared diamond root",
+    )
+    first = r4_supplier_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(valid_root,),
+        suffix="r4-same-first",
+    )
+    second = r4_supplier_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(valid_root,),
+        suffix="r4-same-second",
+    )
+    final = r4_final_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(first["adoption"], second["adoption"]),
+        suffix="r4-same-final",
+    )
+    M = final["adoption"]
+    N = feature(repo, "r4-same-root-diamond-old")
+    return Fixture(
+        "R4-01-same-root-valid-diamond",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "authority_events": [valid_root],
+            "root_statuses": ["valid"],
+            "carriers": [
+                first["carrier"],
+                second["carrier"],
+                final["carrier"],
+            ],
+            "adoptions": [
+                first["adoption"],
+                second["adoption"],
+                M,
+            ],
+            "neutral_parents": [
+                first["neutral"],
+                second["neutral"],
+                final["neutral"],
+            ],
+            "absent_sources": [
+                valid_root,
+                first["adoption"],
+                second["adoption"],
+            ],
+            "reason_children": [
+                valid_root,
+                first["adoption"],
+                second["adoption"],
+                M,
+            ],
+        },
+    )
+
+
+def r4_distinct_root_diamond(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create distinct-root diamond pre-C root")
+    label = "r4-distinct-root-diamond"
+    path = add_agent(repo, label)
+    C = repo.commit("create distinct-root diamond action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r4-distinct-root-diamond-old")
+    valid_roots = []
+    wrappers = []
+    for index in (1, 2):
+        repo.branch(f"r4-distinct-valid-root-{index}", C)
+        claim(repo, (path,), f"claim distinct diamond root {index}")
+        valid_root = delete_with_evidence(
+            repo,
+            ((label, path),),
+            f"resolve distinct diamond root {index}",
+        )
+        valid_roots.append(valid_root)
+        wrappers.append(
+            r4_supplier_wrapper(
+                repo,
+                C=C,
+                R=R,
+                path=path,
+                absent_parents=(valid_root,),
+                suffix=f"r4-distinct-{index}",
+            )
+        )
+    final = r4_final_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=tuple(
+            wrapper["adoption"] for wrapper in wrappers
+        ),
+        suffix="r4-distinct-final",
+    )
+    M = final["adoption"]
+    N = feature(repo, "r4-distinct-root-diamond-old")
+    return Fixture(
+        "R4-02-distinct-valid-root-diamond",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_events": valid_roots,
+            "root_statuses": ["valid", "valid"],
+            "carriers": [
+                wrappers[0]["carrier"],
+                wrappers[1]["carrier"],
+                final["carrier"],
+            ],
+            "adoptions": [
+                wrappers[0]["adoption"],
+                wrappers[1]["adoption"],
+                M,
+            ],
+            "neutral_parents": [
+                wrappers[0]["neutral"],
+                wrappers[1]["neutral"],
+                final["neutral"],
+            ],
+            "absent_sources": [
+                valid_roots[0],
+                valid_roots[1],
+                wrappers[0]["adoption"],
+                wrappers[1]["adoption"],
+            ],
+            "reason_children": [
+                valid_roots[0],
+                wrappers[0]["adoption"],
+                valid_roots[1],
+                wrappers[1]["adoption"],
+                M,
+            ],
+        },
+    )
+
+
+def r4_equal_root_plus_invalid(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create mixed diamond pre-C root")
+    label = "r4-equal-root-plus-invalid"
+    path = add_agent(repo, label)
+    C = repo.commit("create mixed diamond action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r4-equal-root-plus-invalid-old")
+    repo.branch("r4-equal-valid-root", C)
+    claim(repo, (path,), "claim equal diamond root")
+    valid_root = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve equal diamond root",
+    )
+    repo.branch("r4-additional-invalid-root", C)
+    repo.remove(path)
+    invalid_root = repo.commit("delete additional root without authority")
+    first = r4_supplier_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(valid_root,),
+        suffix="r4-equal-first",
+    )
+    second = r4_supplier_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(valid_root, invalid_root),
+        suffix="r4-equal-second",
+    )
+    final = r4_final_wrapper(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        absent_parents=(first["adoption"], second["adoption"]),
+        suffix="r4-equal-final",
+    )
+    M = final["adoption"]
+    N = feature(repo, "r4-equal-root-plus-invalid-old")
+    return Fixture(
+        "R4-03-equal-root-plus-invalid-diamond",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_events": [valid_root, invalid_root],
+            "root_statuses": ["valid", "invalid"],
+            "carriers": [
+                first["carrier"],
+                second["carrier"],
+                final["carrier"],
+            ],
+            "adoptions": [
+                first["adoption"],
+                second["adoption"],
+                M,
+            ],
+            "neutral_parents": [
+                first["neutral"],
+                second["neutral"],
+                final["neutral"],
+            ],
+            "absent_sources": [
+                valid_root,
+                invalid_root,
+                first["adoption"],
+                second["adoption"],
+            ],
+            "reason_children": [
+                valid_root,
+                first["adoption"],
+                invalid_root,
+                second["adoption"],
+                M,
+            ],
+        },
+    )
+
+
 def generated_retry(repo: GitRepository, bad_path: str):
     finding = RECONCILE.Finding(
         "queue-name", Path(bad_path), "bad name", "rename it"
@@ -3451,6 +3931,9 @@ def scenario_builders():
         r3_two_invalid_sources,
         r3_invalid_valid_competition,
         r3_unrelated_invalid_does_not_poison,
+        r4_same_root_diamond,
+        r4_distinct_root_diamond,
+        r4_equal_root_plus_invalid,
     ]
 
 
@@ -3981,6 +4464,90 @@ def validate_result(result: dict):
                 char not in "0123456789abcdef" for char in oid
             ):
                 errors.append("R3-03 emitted a non-full causal OID")
+    if scenario.startswith("R4-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        expected_propagation = list(
+            zip(details["carriers"], details["adoptions"], strict=True)
+        )
+        propagation_sequence = [
+            (edge["parent"], edge["child"])
+            for edge in result["propagation_edges"]
+        ]
+        authority_events = [
+            edge["child"] for edge in result["authority_edges"]
+        ]
+        roots = action["causal_roots"] if action is not None else []
+        root_children = [root["root_child"] for root in roots]
+        root_statuses = [root["status"] for root in roots]
+        reason_children = [
+            record["source_child"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        ]
+        all_oids = (
+            details["authority_events"]
+            + details["carriers"]
+            + details["adoptions"]
+            + details["neutral_parents"]
+            + details["absent_sources"]
+            + details["reason_children"]
+        )
+        if (
+            action is None
+            or result["event_mode"] != "supplier"
+            or propagation_sequence != expected_propagation
+            or action["neutral_parents"] != details["neutral_parents"]
+            or action["absent_parents"] != details["absent_sources"]
+            or authority_events != details["authority_events"]
+            or root_children != details["authority_events"]
+            or root_statuses != details["root_statuses"]
+            or reason_children != details["reason_children"]
+        ):
+            errors.append("R4 diamond lost a canonical-root envelope")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in all_oids
+        ):
+            errors.append("R4 diamond emitted a non-full causal OID")
+    if scenario == "R4-01-same-root-valid-diamond":
+        if (
+            status != "valid"
+            or len(authority) != 1
+            or len(propagation) != 3
+            or action is None
+            or action["reason_code"] != "valid-supplier-authority"
+        ):
+            errors.append("R4-01 falsely blocked the equal-root diamond")
+    if scenario == "R4-02-distinct-valid-root-diamond":
+        if (
+            status != "ambiguous"
+            or len(authority) != 2
+            or len(propagation) != 3
+            or action is None
+            or action["reason_code"] != "competing-causal-suppliers"
+            or not all(
+                adoption in action["reason"]
+                for adoption in details["adoptions"][:2]
+            )
+        ):
+            errors.append("R4-02 collapsed distinct valid roots")
+    if scenario == "R4-03-equal-root-plus-invalid-diamond":
+        invalid_edges = [
+            edge for edge in result["authority_edges"] if edge["problem"]
+        ]
+        if (
+            status != "ambiguous"
+            or len(authority) != 2
+            or len(invalid_edges) != 1
+            or len(propagation) != 3
+            or action is None
+            or action["reason_code"] != "competing-causal-suppliers"
+            or details["authority_events"][1] not in action["reason"]
+        ):
+            errors.append("R4-03 hid the additional invalid root")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")

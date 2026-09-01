@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, three mixed-causal-source regressions, and all five damaged-mode
+scenarios, six causal-source regressions, and all five damaged-mode
 controls, without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -27,7 +27,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 52, "python": "3.14.7", "summary": "PASS", "total": 52}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 55, "python": "3.14.7", "summary": "PASS", "total": 55}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -56,19 +56,23 @@ The two event modes are disjoint:
 Nested supplier events retain the original authority event and stable-deduplicate
 the prior plus current propagation, neutral, and absent parent lists. Later
 adoption cannot erase ancestry evidence recorded by an earlier adoption. For
-each absent parent, the classifier records a stable ordered union of its closest
-causal sources, keyed by source event child and tagged with the source verdict.
-A sole common valid source with no competitor may authorize. A sole common
-invalid source stays invalid. Multiple valid sources, multiple invalid sources,
-or mixed valid and invalid sources are ambiguous and retain every participating
-source's edges, parent ancestry, reason code, reason chain, and full source-child
-OID. Invalid and ambiguous descendants remain traceable for later evidence but
-never enter the authorization set.
+each absent parent, the classifier first locates its closest causal-source
+wrappers, then intersects and unions the wrappers' canonical root keys. A direct
+root key contains the tagged verdict, deletion child, and complete authority-edge
+component. A valid supplier wrapper inherits that root unchanged; its adoption
+child is evidence metadata, not a new root. Equal root keys arriving through
+multiple wrappers merge every wrapper's ordered propagation, neutral/absent
+ancestry, and reason/source-child records. A sole common valid root with no
+competitor may authorize. A sole common invalid root stays invalid. Multiple
+valid roots, multiple invalid roots, or mixed valid and invalid roots are
+ambiguous. Invalid and ambiguous descendants remain traceable for later evidence
+but never enter the authorization set.
 
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
 full `C/O/M/N` OIDs, the production identity tuple, endpoint paths and
 multiplicity, event OID, authority-edge validator results, propagation edges,
-neutral and absent parents, reason code, and measured counters.
+neutral and absent parents, canonical roots, stable reason/source-child records,
+reason code, and measured counters.
 
 ### Worked supplier example
 
@@ -92,7 +96,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 52.
+scenario total remains 55.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -267,6 +271,48 @@ The unrelated-source positive selected supplier
 though the invalid commit is reachable from `N` and its production authority
 verdict was evaluated.
 
+### Canonical-root diamond regressions
+
+The r4 fixtures distinguish one deletion root wrapped twice from two genuinely
+different roots:
+
+| Case | Observed result |
+|---|---|
+| `R4-01-same-root-valid-diamond` | valid supplier; one root and one authority edge, with three ordered propagation edges and both wrapper envelopes retained |
+| `R4-02-distinct-valid-root-diamond` | ambiguous; two valid roots and both complete envelopes remain visible |
+| `R4-03-equal-root-plus-invalid-diamond` | ambiguous; the shared valid root collapses across wrappers, while the additional invalid root remains distinct with its failing production verdict |
+
+The positive diamond produced these full OIDs:
+
+```text
+C           4e831314d34c2897a072cca5b58303d8fd0e7ddd
+O           2ae7f29324bd8d6b29c1f7640602fe7ec9193b1e
+M           01eb3e5ec92cb370e449ab8788842c6da54c8c80
+N           a7bbf4b40d0a3322205e3d8407eee73b9b11ccc9
+root        0d870542d2a2a42b5093b146d2245740fa456437
+adoption1   05eb28ca77abe9062af6b586812bf1d5826523e6
+adoption2   2e9c1be263ae8ef2e8a8b2d0aea9f9280688c3f8
+carrier1    d70acd9d9fbb16b7690db3870d991831ac7c4471
+carrier2    0126791301359b150774ad66054cab13f133d7b3
+carrier3    5c1cf625b6c4b9894b0d9c32dec182853253961b
+neutral1    de6e2d9ee44f6cb1603502078b88542ee4c2cdd7
+neutral2    3a89de69ac2eb966fa10f51c60f10a98b64f34d2
+neutral3    f855f6e72bab04fdd85ba2f25a4a76c7a1a966ac
+```
+
+Its single emitted `causal_roots` record is tagged `valid`, names `root`, and
+contains the root's authority component. Its stable `reason_records` name
+`[root, adoption1, adoption2, M]`. The absent ancestry is `[root, adoption1,
+adoption2]`; propagation is `carrier1 -> adoption1`, `carrier2 -> adoption2`,
+then `carrier3 -> M`.
+
+The distinct-root negative retained valid roots
+`294a23354c2b7009f017a0853af22b10223a9336` and
+`7fc7a0d2d0d55eb62722301bd958f574d41347b2`. The mixed negative retained
+valid root `c7e6eed4001a36d03480ed64b6cb67c3bbbe7e76` and invalid root
+`94140cd414a88d470dba443360d8b55c35f02844`, including the production
+validator's missing-claim problem for the invalid authority edge.
+
 ## Cost and budget evidence
 
 The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
@@ -353,7 +399,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 52/52
+The installer and bytecode compilation exited `0`. The self-test passed 55/55
 scenarios, 4/4 executable aliases, and 5/5 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
