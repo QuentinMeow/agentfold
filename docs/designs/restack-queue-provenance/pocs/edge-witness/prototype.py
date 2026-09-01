@@ -218,6 +218,9 @@ class Fixture:
     conflicting_parent: str | None = None
     shared_origin: str | None = None
     disconnected_origins: tuple[str, ...] = ()
+    merge_parents: tuple[str, ...] = ()
+    invalid_parent: str | None = None
+    claim_commit: str | None = None
 
 
 def queue_path(label: str) -> str:
@@ -811,6 +814,133 @@ def fixture_shared_continuous_parent_origin(root: Path) -> Fixture:
     )
 
 
+def three_parent_deletion_merge(
+    repo: GitRepository,
+    label: str,
+    parents: tuple[str, str, str],
+    message: str,
+):
+    repo.branch(f"{label}-merge-staging", parents[0])
+    repo.write(evidence_path(label), f"# Evidence {label}: repaired\n")
+    repo.remove(queue_path(label))
+    repo.run("add", "-A")
+    tree = repo.run("write-tree").stdout.strip()
+    return repo.commit_tree(tree, message, *parents)
+
+
+def fixture_three_parent_shared_component_deletion(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "three-parent-shared"
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    O = feature(repo, "three-parent-shared-old")
+
+    repo.branch("shared-claim", C)
+    K = claim(repo, label)
+    repo.branch("shared-parent-1", K)
+    P1 = feature(repo, "three-parent-shared-1")
+    repo.branch("shared-parent-2", K)
+    P2 = feature(repo, "three-parent-shared-2")
+    repo.branch("shared-parent-3", K)
+    P3 = feature(repo, "three-parent-shared-3")
+    parents = (P1, P2, P3)
+    M = three_parent_deletion_merge(
+        repo,
+        label,
+        parents,
+        "delete one shared claimed occurrence in a three-parent merge",
+    )
+    repo.branch("candidate", M)
+    N = feature(repo, "three-parent-shared-descendant")
+    return Fixture(
+        "three-parent-shared-component-deletion",
+        repo, C, O, M, N, "no-finding",
+        merge_commit=M,
+        shared_origin=C,
+        merge_parents=parents,
+        claim_commit=K,
+    )
+
+
+def fixture_three_parent_disconnected_component(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "three-parent-disconnected"
+    path = queue_path(label)
+    R = create_common(repo)
+
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(path, action_text(label))
+    C = repo.commit("create shared Q for two parents")
+    repo.branch("old", C)
+    O = feature(repo, "three-parent-disconnected-old")
+    repo.branch("shared-claim", C)
+    K = claim(repo, label)
+    repo.branch("shared-parent-1", K)
+    P1 = feature(repo, "three-parent-disconnected-1")
+    repo.branch("shared-parent-2", K)
+    P2 = feature(repo, "three-parent-disconnected-2")
+
+    repo.branch("independent-open", R)
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(path, action_text(label))
+    independent_origin = repo.commit("independently create byte-identical Q")
+    P3 = claim(repo, label)
+    parents = (P1, P2, P3)
+    M = three_parent_deletion_merge(
+        repo,
+        label,
+        parents,
+        "delete parents from two disconnected occurrence components",
+    )
+    repo.branch("candidate", M)
+    N = feature(repo, "three-parent-disconnected-descendant")
+    return Fixture(
+        "three-parent-two-shared-one-disconnected",
+        repo, C, O, M, N, "blocking-finding", (path,),
+        merge_commit=M,
+        shared_origin=C,
+        disconnected_origins=(C, independent_origin),
+        merge_parents=parents,
+        claim_commit=K,
+    )
+
+
+def fixture_three_parent_one_invalid_edge(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "three-parent-invalid-edge"
+    path = queue_path(label)
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    O = feature(repo, "three-parent-invalid-old")
+
+    repo.branch("shared-claim", C)
+    K = claim(repo, label)
+    repo.branch("valid-parent-1", K)
+    P1 = feature(repo, "three-parent-invalid-valid-1")
+    repo.branch("valid-parent-2", K)
+    P2 = feature(repo, "three-parent-invalid-valid-2")
+    repo.branch("invalid-open-parent", C)
+    P3 = feature(repo, "three-parent-invalid-open")
+    parents = (P1, P2, P3)
+    M = three_parent_deletion_merge(
+        repo,
+        label,
+        parents,
+        "delete one shared occurrence with one unclaimed parent edge",
+    )
+    repo.branch("candidate", M)
+    N = feature(repo, "three-parent-invalid-descendant")
+    return Fixture(
+        "three-parent-one-invalid-edge",
+        repo, C, O, M, N, "blocking-finding", (path,),
+        merge_commit=M,
+        shared_origin=C,
+        merge_parents=parents,
+        invalid_parent=P3,
+        claim_commit=K,
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -871,6 +1001,9 @@ BASE_FIXTURES = (
     fixture_witness_child_sibling_same_id_conflict,
     fixture_disconnected_identical_parent_origins,
     fixture_shared_continuous_parent_origin,
+    fixture_three_parent_shared_component_deletion,
+    fixture_three_parent_disconnected_component,
+    fixture_three_parent_one_invalid_edge,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -1602,6 +1735,97 @@ def deletion_witnesses(
     return witnesses
 
 
+def grouped_deletion_events(witnesses, group_component_edges: bool):
+    if not group_component_edges:
+        return [
+            {
+                "all_edges_valid": witness["problem"] is None,
+                "child": witness["child"],
+                "edge_parents": (witness["parent"],),
+                "edge_problems": ({
+                    "parent": witness["parent"],
+                    "problem": witness["problem"],
+                },),
+                "grouping_mode": "raw-parent-edge-cardinality",
+                "grouping_problem": None,
+                "origin_component": None,
+                "raw_edge_count": 1,
+                "witness_indexes": (index,),
+            }
+            for index, witness in enumerate(witnesses)
+        ]
+
+    indexes_by_child = {}
+    for index, witness in enumerate(witnesses):
+        indexes_by_child.setdefault(witness["child"], []).append(index)
+    events = []
+    for child, indexes in indexes_by_child.items():
+        edges = [witnesses[index] for index in indexes]
+        parents = tuple(edge["parent"] for edge in edges)
+        grouping_problem = None
+        origin_component = None
+        if len(edges) > 1:
+            proofs = []
+            for edge in edges:
+                edge_proofs = edge["witness_child_parent_origin_proofs"]
+                if len(edge_proofs) != 1:
+                    grouping_problem = (
+                        "a multi-parent deletion edge lacks exactly one origin proof"
+                    )
+                    break
+                proofs.append(edge_proofs[0])
+            if grouping_problem is None:
+                components = {
+                    tuple(proof["shared_origins"])
+                    for proof in proofs if proof["proven"]
+                }
+                if any(not proof["proven"] for proof in proofs) or len(
+                    components
+                ) != 1:
+                    grouping_problem = (
+                        "carrying parents do not prove one shared origin component"
+                    )
+                else:
+                    component = next(iter(components))
+                    if len(component) != 1:
+                        grouping_problem = (
+                            "the deletion event has zero or multiple origin components"
+                        )
+                    else:
+                        origin_component = component[0]
+            if grouping_problem is None:
+                edge_parent_set = set(parents)
+                for proof in proofs:
+                    proven_parents = {
+                        origin["oid"] for origin in proof["parent_origins"]
+                    }
+                    if proven_parents != edge_parent_set or any(
+                        origin["problem"] is not None
+                        or origin_component not in origin["origins"]
+                        for origin in proof["parent_origins"]
+                    ):
+                        grouping_problem = (
+                            "not every carrying parent belongs to the one proven component"
+                        )
+                        origin_component = None
+                        break
+        events.append({
+            "all_edges_valid": all(edge["problem"] is None for edge in edges),
+            "child": child,
+            "edge_parents": parents,
+            "edge_problems": tuple({
+                "parent": edge["parent"],
+                "problem": edge["problem"],
+            } for edge in edges),
+            "grouping_mode": "child-and-continuous-origin-component",
+            "grouping_problem": grouping_problem,
+            "origin_component": origin_component,
+            "raw_edge_count": len(edges),
+            "witness_indexes": tuple(indexes),
+        })
+    return events
+
+
 def classification_reason(items, fast_forward=False):
     if fast_forward:
         return "The displaced tip is an ancestor of the candidate; no divergent continuity edge exists."
@@ -1611,11 +1835,20 @@ def classification_reason(items, fast_forward=False):
     for path, item in sorted(items.items()):
         verdict = item["evidence_verdict"]
         if verdict == "valid-real-edge":
-            witness = item["witnesses"][0]
-            parts.append(
-                f"{path} is resolved by candidate-side edge "
-                f"{witness['parent']}->{witness['child']}, which passes the existing lifecycle/evidence validator"
-            )
+            event = item["deletion_events"][0]
+            if event["raw_edge_count"] == 1:
+                parts.append(
+                    f"{path} is resolved by candidate-side edge "
+                    f"{event['edge_parents'][0]}->{event['child']}, which "
+                    "passes the existing lifecycle/evidence validator"
+                )
+            else:
+                parts.append(
+                    f"{path} is resolved by one candidate-side deletion event "
+                    f"at {event['child']} across {event['raw_edge_count']} "
+                    "component-equivalent parent edges, all of which pass the "
+                    "existing lifecycle/evidence validator"
+                )
         elif verdict == "candidate-carries-action":
             parts.append(f"{path} remains live at the candidate tip")
         elif verdict.startswith("invalid-real-edge"):
@@ -1637,6 +1870,11 @@ def classification_reason(items, fast_forward=False):
                 "of the deletion commit carries a conflicting or unproven "
                 "incarnation"
             )
+        elif verdict == "invalid-deletion-event-component":
+            parts.append(
+                f"{path} has same-child deletion edges that cannot be proved "
+                "to belong to one continuous origin component"
+            )
         elif verdict == "different-incarnation-witness":
             parts.append(
                 f"{path} has a valid candidate-side deletion edge for byte-identical "
@@ -1644,7 +1882,10 @@ def classification_reason(items, fast_forward=False):
                 "incarnation from the shared boundary"
             )
         elif verdict == "ambiguous-real-edges":
-            parts.append(f"{path} has multiple matching deletion edges, so the prototype fails closed")
+            parts.append(
+                f"{path} has multiple causal deletion events, so the prototype "
+                "fails closed"
+            )
         elif verdict == "rewritten-live-action":
             parts.append(f"{path} remains at the candidate path with a different action identity")
         else:
@@ -1660,6 +1901,7 @@ def classify(
     enforce_pre_witness_occurrence=True,
     enforce_post_witness_continuity=True,
     enforce_shared_occurrence_origin=True,
+    group_component_equivalent_edges=True,
 ):
     metrics = Metrics()
     items = {}
@@ -1771,12 +2013,38 @@ def classify(
                 synthetic_edge_problem = RECONCILE.queue_deletion_problem(
                     path, old_text, fixture.O, fixture.N
                 )
-                valid = [witness for witness in witnesses if witness["problem"] is None]
-                if len(witnesses) == 1 and len(valid) == 1:
-                    witness = witnesses[0]
-                    if enforce_witness_child_parents and witness[
-                        "witness_child_parent_breaks"
-                    ]:
+                events = grouped_deletion_events(
+                    witnesses, group_component_equivalent_edges
+                )
+                if len(events) == 1:
+                    event = events[0]
+                    event_witnesses = [
+                        witnesses[index]
+                        for index in event["witness_indexes"]
+                    ]
+                    invalid_edges = [
+                        edge for edge in event["edge_problems"]
+                        if edge["problem"] is not None
+                    ]
+                    if invalid_edges:
+                        problem = (
+                            "one or more real parent-to-child deletion edges are "
+                            "unauthorized: "
+                            + "; ".join(
+                                f"{edge['parent']}: {edge['problem']}"
+                                for edge in invalid_edges
+                            )
+                        )
+                        verdict = "invalid-real-edge: " + problem
+                        finding = True
+                    elif event["grouping_problem"] is not None:
+                        verdict = "invalid-deletion-event-component"
+                        problem = event["grouping_problem"]
+                        finding = True
+                    elif enforce_witness_child_parents and any(
+                        witness["witness_child_parent_breaks"]
+                        for witness in event_witnesses
+                    ):
                         verdict = "invalid-witness-child-parent-ambiguity"
                         problem = (
                             "a deletion-commit parent carries the same logical "
@@ -1784,18 +2052,20 @@ def classify(
                             "or otherwise unproven occurrence"
                         )
                         finding = True
-                    elif enforce_pre_witness_occurrence and witness[
-                        "pre_witness_occurrence_breaks"
-                    ]:
+                    elif enforce_pre_witness_occurrence and any(
+                        witness["pre_witness_occurrence_breaks"]
+                        for witness in event_witnesses
+                    ):
                         verdict = "invalid-witness-occurrence-ambiguity"
                         problem = (
                             "the candidate deletion's claim receipt is ambiguous "
                             "across multiple parent occurrences"
                         )
                         finding = True
-                    elif enforce_post_witness_continuity and witness[
-                        "post_witness_breaks"
-                    ]:
+                    elif enforce_post_witness_continuity and any(
+                        witness["post_witness_breaks"]
+                        for witness in event_witnesses
+                    ):
                         verdict = "invalid-post-witness-continuity"
                         problem = (
                             "the candidate-side deletion does not remain causally "
@@ -1821,13 +2091,9 @@ def classify(
                         verdict = "valid-real-edge"
                         problem = None
                         finding = False
-                elif len(witnesses) > 1:
+                elif len(events) > 1:
                     verdict = "ambiguous-real-edges"
-                    problem = "multiple matching deletion witnesses"
-                    finding = True
-                elif witnesses:
-                    problem = witnesses[0]["problem"]
-                    verdict = "invalid-real-edge: " + str(problem)
+                    problem = "multiple causal deletion events"
                     finding = True
                 else:
                     verdict = "no-matching-witness"
@@ -1838,6 +2104,7 @@ def classify(
                     "endpoint_blob_equal": endpoint_blob_equal,
                     "endpoint_lineage": endpoint_lineage,
                     "evidence_verdict": verdict,
+                    "deletion_events": events,
                     "old_edge_breaks": old_edge_breaks,
                     "problem": problem,
                     "witnesses": witnesses,
@@ -2122,10 +2389,71 @@ def verify_result(fixture: Fixture, result):
                 problems.append("shared origin proof selected the wrong commit")
             if witness["pre_witness_occurrence_breaks"]:
                 problems.append("proven shared origin still emitted an ambiguity")
+    if fixture.scenario_id == "three-parent-shared-component-deletion":
+        path = queue_path("three-parent-shared")
+        item = result["items"][path]
+        if item["evidence_verdict"] != "valid-real-edge":
+            problems.append("component-equivalent parent edges remained overcounted")
+        if len(item["witnesses"]) != 3 or len(item["deletion_events"]) != 1:
+            problems.append("three raw edges did not become one deletion event")
+        else:
+            event = item["deletion_events"][0]
+            if event["raw_edge_count"] != 3 or tuple(
+                event["edge_parents"]
+            ) != fixture.merge_parents:
+                problems.append("grouped event lost a carrying parent edge")
+            if event["origin_component"] != fixture.shared_origin:
+                problems.append("grouped event selected the wrong origin component")
+            if event["grouping_problem"] is not None or not event[
+                "all_edges_valid"
+            ]:
+                problems.append("valid grouped event retained a false problem")
+            if any(
+                witness["problem"] is not None
+                or witness["witness_child_parent_breaks"]
+                or witness["pre_witness_occurrence_breaks"]
+                or witness["post_witness_breaks"]
+                for witness in item["witnesses"]
+            ):
+                problems.append("positive edge was not independently valid/continuous")
+    if fixture.scenario_id == "three-parent-two-shared-one-disconnected":
+        item = result["items"][fixture.expected_findings[0]]
+        if item["evidence_verdict"] != "invalid-deletion-event-component":
+            problems.append("disconnected third parent joined the shared component")
+        if len(item["deletion_events"]) != 1:
+            problems.append("disconnected negative did not remain one child event")
+        else:
+            event = item["deletion_events"][0]
+            if event["grouping_problem"] is None or event[
+                "origin_component"
+            ] is not None:
+                problems.append("disconnected event reported a proven component")
+            if not event["all_edges_valid"]:
+                problems.append("disconnected negative accidentally used an invalid edge")
+    if fixture.scenario_id == "three-parent-one-invalid-edge":
+        item = result["items"][fixture.expected_findings[0]]
+        if not item["evidence_verdict"].startswith("invalid-real-edge:"):
+            problems.append("invalid third parent edge was hidden by grouping")
+        if len(item["deletion_events"]) != 1:
+            problems.append("invalid-edge negative did not remain one child event")
+        else:
+            event = item["deletion_events"][0]
+            invalid = [
+                edge for edge in event["edge_problems"]
+                if edge["problem"] is not None
+            ]
+            if len(invalid) != 1 or invalid[0]["parent"] != (
+                fixture.invalid_parent
+            ):
+                problems.append("invalid lifecycle was attributed to the wrong edge")
+            if event["origin_component"] != fixture.shared_origin:
+                problems.append("invalid-edge negative did not prove shared origin")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
             problems.append("repeated-incarnation fixture did not produce two witnesses")
+        if len(item["deletion_events"]) != 2:
+            problems.append("different deletion children were incorrectly grouped")
     if problems:
         raise AssertionError(f"{fixture.scenario_id}: " + "; ".join(problems))
 
@@ -2303,6 +2631,60 @@ def executable_controls(fixtures, results):
         "merge_commit": disconnected.C,
         "origin_mode": origin_proofs[0]["mode"],
         "raw_production_problem": disconnected_witness["problem"],
+        "status": "OBSERVED_RED",
+    })
+
+    shared_three = fixtures["three-parent-shared-component-deletion"]
+    raw_cardinality = classify(
+        shared_three, group_component_equivalent_edges=False
+    )
+    shared_three_path = queue_path("three-parent-shared")
+    raw_item = raw_cardinality["items"][shared_three_path]
+    if raw_cardinality["classification"] != "blocking-finding" or raw_item[
+        "evidence_verdict"
+    ] != "ambiguous-real-edges":
+        raise AssertionError(
+            "raw parent-edge cardinality did not reproduce the positive false block"
+        )
+    grouped_item = results["three-parent-shared-component-deletion"]["items"][
+        shared_three_path
+    ]
+    disconnected_event_item = results[
+        "three-parent-two-shared-one-disconnected"
+    ]["items"][queue_path("three-parent-disconnected")]
+    invalid_event_item = results["three-parent-one-invalid-edge"]["items"][
+        queue_path("three-parent-invalid-edge")
+    ]
+    repeated_item = results["repeated-incarnation-ambiguity"]["items"][
+        queue_path("repeated")
+    ]
+    if not (
+        len(grouped_item["deletion_events"]) == 1
+        and grouped_item["evidence_verdict"] == "valid-real-edge"
+        and disconnected_event_item["evidence_verdict"]
+        == "invalid-deletion-event-component"
+        and invalid_event_item["evidence_verdict"].startswith(
+            "invalid-real-edge:"
+        )
+        and repeated_item["evidence_verdict"] == "ambiguous-real-edges"
+        and len(repeated_item["deletion_events"]) == 2
+    ):
+        raise AssertionError("event grouping weakened an ambiguous negative")
+    controls.append({
+        "control": "observed-red-raw-edge-cardinality",
+        "disconnected_component_verdict": disconnected_event_item[
+            "evidence_verdict"
+        ],
+        "green_classification": results[
+            "three-parent-shared-component-deletion"
+        ]["classification"],
+        "grouped_event_count": len(grouped_item["deletion_events"]),
+        "invalid_edge_verdict": invalid_event_item["evidence_verdict"],
+        "legacy_classification": raw_cardinality["classification"],
+        "legacy_event_count": len(raw_item["deletion_events"]),
+        "legacy_verdict": raw_item["evidence_verdict"],
+        "repeated_event_count": len(repeated_item["deletion_events"]),
+        "repeated_verdict": repeated_item["evidence_verdict"],
         "status": "OBSERVED_RED",
     })
 

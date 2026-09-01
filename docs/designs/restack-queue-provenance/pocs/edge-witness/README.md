@@ -8,10 +8,10 @@ Before this prototype, the continuity check saw only the synthetic displaced-tip
 candidate edge, so a legitimate base resolution and a lost action both looked like one
 path deletion. The prototype now finds the candidate-only parent/child edge that actually
 deleted the same action, then asks the reconciler (the script that checks repository
-invariants) to validate the claim and evidence on that real edge. Twenty-six real-Git
+invariants) to validate the claim and evidence on that real edge. Twenty-nine real-Git
 scenarios passed, including the reported good restack, three missing-history failures,
 deletion at the candidate head, activation laundering, and synthetic-edge evidence
-laundering. Eight executable controls also passed, including six observed-red reproductions
+laundering. Nine executable controls also passed, including seven observed-red reproductions
 of verifier-found incarnation bugs. The prototype deliberately fails closed on repeated
 incarnations, so it is evidence for a design direction rather than production code.
 
@@ -27,16 +27,16 @@ python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --s
 The command printed one JSON object per scenario, followed by this exact summary:
 
 ```json
-{"controls_passed":8,"controls_total":8,"git":"git version 2.55.0","observed_red":6,"passed":26,"python":"3.14.7","summary":"PASS","total":26}
+{"controls_passed":9,"controls_total":9,"git":"git version 2.55.0","observed_red":7,"passed":29,"python":"3.14.7","summary":"PASS","total":29}
 ```
 
-I also retained a fresh set of all 26 disposable repositories with this exact command:
+I also retained a fresh set of all 29 disposable repositories with this exact command:
 
 ```sh
-python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --self-test --fixtures-dir /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/edge-witness-poc/verified-26-scenarios
+python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --self-test --fixtures-dir /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/edge-witness-poc/verified-29-scenarios
 ```
 
-That retained run also ended with the same 26/26 and 8/8 summary. The scratch path is run
+That retained run also ended with the same 29/29 and 9/9 summary. The scratch path is run
 evidence, not a durable PR artifact; a reviewer can regenerate the deterministic object IDs
 with the first command.
 
@@ -92,6 +92,9 @@ Every row below is **VERIFIED** by an executable assertion in `--self-test`.
 | witness-child sibling with conflicting same ID | blocking finding | the claimed parent resolves A, but another parent of the deletion commit contributes different B under the same logical ID |
 | disconnected byte-identical parent origins | blocking finding | equal path/bytes from independently created A and B have disjoint continuous origins |
 | shared continuous parent origin | no finding | both carrying parents trace without interruption to the same earlier occurrence |
+| three-parent shared-component deletion | no finding | three valid parent edges into one deletion child share exactly one continuous origin, so they form one causal event |
+| three-parent disconnected component | blocking finding | two parents share one origin but the third is independent, so no single event component is proven |
+| three-parent invalid edge | blocking finding | all parents share the origin, but one parent never committed the required claim |
 | repeated incarnation | blocking finding | two valid deletion edges match, so the prototype refuses to pick one |
 | 35-commit candidate history | no finding | one valid witness survives a multi-commit rewrite |
 
@@ -251,6 +254,37 @@ carrying parents. Pre-witness traversal cannot stop at byte-equal merge boundari
 deletion, post-witness continuity remains stricter: every relevant parent and result must be
 absent, so a carrying parent is never made safe merely by sharing an origin.
 
+The latest positive counterexample showed why raw parent-edge cardinality is also too
+conservative. Q is created at `C`, claimed once at common commit `K`, and carried unchanged
+through three forks. A three-parent merge `M` deletes Q and changes its declared evidence.
+All three real parent-to-`M` edges independently pass the current lifecycle/evidence
+validator, and each parent traces to the same continuous origin `C`. Those are three edge
+observations of one causal deletion event, not three competing events:
+
+```text
+C 09c120b6af1878f676db2e7f1098bf37c992909d (shared origin)
+K b6cadf1e8197a8c56f38dcb692ef0894254594bb (common claim)
+P fe54887592b6e964b26feba9be1de859fd1b39e3
+  0e188be74cc8fa9c9fc83213b307d452c2a16b0a
+  0b48e5771d65e6eb5b0092027dd2dab247c45eea
+M 1e777dee4d59f3baa1238bda3787073e35aac639 (one deletion child)
+N 7d7c52c833a5c31ed2e7b976b8b1e5750026e053
+real-edge problems: null, null, null
+shared continuous origins: C, C, C
+raw parent-edge verdict: blocking finding (ambiguous-real-edges)
+grouped causal-event verdict: no finding (valid-real-edge)
+```
+
+The grouping key is the deletion child plus exactly one proven continuous-origin component.
+It is admitted only when every carrying parent belongs to that component and every real
+parent-to-child lifecycle/evidence check passes. Two executable negatives keep those
+conditions sharp. With two C-origin parents plus one independently created occurrence, all
+three edge validators return `null`, but the shared-origin intersection is empty and the
+verdict is `invalid-deletion-event-component`. With three C-origin parents but one unclaimed
+parent (`5316e913dd17da4d14dfcd6a166adbd048b659d8`), the component is proven but that edge's
+real validator reports `agent action was not committed as in-repair before deletion`.
+Repeated deletion children remain two events and therefore remain ambiguous.
+
 ## Executable negative controls
 
 These controls run inside `--self-test`; they do not rely on another POC's summary.
@@ -303,20 +337,29 @@ helper still returns `null`, and the disconnected negative becomes false-green:
 {"control":"observed-red-disconnected-identical-parent-origins","damaged_classification":"no-finding","disconnected_origins":["f6127dd2a049c78f5b0a026e0e9d41f957826d39","eb5d36f7f9ce0760079e52823ea566b1d4c7bf76"],"expected":"blocking-finding","merge_commit":"8f56fe726c9d9a363dfd700bb34e3eaf0a04df1a","origin_mode":"endpoint-equality-only-disabled-guard","raw_production_problem":null,"status":"OBSERVED_RED"}
 ```
 
-The seventh calls the current production `candidate_paths_match_other_parent` helper against
+The seventh restores the old raw-edge cardinality rule. It false-blocks the valid
+three-parent fixture as three ambiguous witnesses. The corrected grouping admits exactly
+one event, while the disconnected-component, invalid-edge, and repeated-incarnation
+negatives remain blocked:
+
+```json
+{"control":"observed-red-raw-edge-cardinality","disconnected_component_verdict":"invalid-deletion-event-component","green_classification":"no-finding","grouped_event_count":1,"invalid_edge_verdict":"invalid-real-edge: one or more real parent-to-child deletion edges are unauthorized: 5316e913dd17da4d14dfcd6a166adbd048b659d8: agent action was not committed as in-repair before deletion","legacy_classification":"blocking-finding","legacy_event_count":3,"legacy_verdict":"ambiguous-real-edges","repeated_event_count":2,"repeated_verdict":"ambiguous-real-edges","status":"OBSERVED_RED"}
+```
+
+The eighth calls the current production `candidate_paths_match_other_parent` helper against
 S2. The helper accepts the evidence-free supplied deletion, while real-edge validation names
 the missing claim:
 
 ```json
-{"accepted_evidence_free_deletion":true,"control":"production-other-parent-is-evidence-blind","real_edge_problem":"agent action was not committed as in-repair before deletion","status":"PASS"}
+{"accepted_evidence_free_deletion":true,"control":"production-other-parent-is-evidence-blind","real_edge_problem":"one or more real parent-to-child deletion edges are unauthorized: bc2947eb5f97a3f68ac286a7e685883fd2936b66: agent action was not committed as in-repair before deletion","status":"PASS"}
 ```
 
-The eighth computes its own queue-tree replay signature for S1 and S2. Both old deltas avoid
+The ninth computes its own queue-tree replay signature for S1 and S2. Both old deltas avoid
 the queue, both replay deltas avoid the queue, and both candidates omit the path; only the
 real-edge evidence verdict distinguishes them:
 
 ```json
-{"control":"replay-tree-cannot-authorize","s1_evidence":{"message-queue/needs-agent/requests/non-blocking-s1.md":"valid-real-edge"},"s2_evidence":{"message-queue/needs-agent/requests/non-blocking-s2.md":"invalid-real-edge: agent action was not committed as in-repair before deletion"},"signature":{"candidate_path_absent":true,"old_queue_delta_empty":true,"replay_queue_delta_empty":true},"status":"PASS"}
+{"control":"replay-tree-cannot-authorize","s1_evidence":{"message-queue/needs-agent/requests/non-blocking-s1.md":"valid-real-edge"},"s2_evidence":{"message-queue/needs-agent/requests/non-blocking-s2.md":"invalid-real-edge: one or more real parent-to-child deletion edges are unauthorized: bc2947eb5f97a3f68ac286a7e685883fd2936b66: agent action was not committed as in-repair before deletion"},"signature":{"candidate_path_absent":true,"old_queue_delta_empty":true,"replay_queue_delta_empty":true},"status":"PASS"}
 ```
 
 ## Cost
@@ -334,17 +377,21 @@ classification; fixture construction is excluded.
 | witness-child same-ID conflict | 1 / 1 | 4 / 5 | 2 | 2 / 2 | 0 / 0 | 1 / 1 | 33 | 46 |
 | disconnected parent origins | 1 / 1 | 3 / 3 | 1 | 2 / 3 | 2 / 2 | 1 / 1 | 34 | 56 |
 | shared continuous origin | 1 / 1 | 3 / 3 | 1 | 3 / 3 | 3 / 2 | 1 / 1 | 36 | 60 |
+| three-parent shared event | 1 / 1 | 6 / 8 | 9 | 9 / 6 | 15 / 12 | 3 / 3 | 124 | 142 |
+| three-parent disconnected | 1 / 1 | 7 / 9 | 9 | 8 / 8 | 18 / 18 | 3 / 3 | 148 | 166 |
+| three-parent invalid edge | 1 / 1 | 6 / 8 | 9 | 8 / 5 | 15 / 12 | 3 / 3 | 122 | 140 |
 | long history, one action | 1 / 1 | 35 / 35 | 1 | 34 / 33 | 0 / 0 | 1 / 1 | 150 | 168 |
 
-**VERIFIED:** these numbers came from the JSON emitted by the retained 26/26 run. Here `c/e`
+**VERIFIED:** these numbers came from the JSON emitted by the retained 29/29 run. Here `c/e`
 means commits/parent edges scanned in that phase. **INFERENCE:** this straightforward
 prototype costs `O(B + Hc + Q*(Ec + Eo + Ew + Epre + Eorigin + Epost))` logical reads, where
 `B` is merge bases, `Hc` is candidate-only commits, `Q` is disappeared actions, and the `E`
 terms are candidate, old, witness-child, pre-witness, origin-proof, and post-witness parent
-edges. The process count is linear in the histories but repeats ancestry scans per candidate
-witness. A production
-implementation should enumerate commit/parent pairs once and cache immutable `(commit, path)`
-entries; this POC did not measure that optimized form.
+edges. The process count is linear in the histories but repeats pre-witness and origin scans
+for each carrying parent edge, which is visible in the three-parent rows. Grouping itself is
+in-memory and adds no Git child process. A production implementation should enumerate
+commit/parent pairs once and share cached immutable `(commit, path)` entries and origin sets
+across all edges of one deletion child; this POC did not measure that optimized form.
 
 ## Strongest self-counterexample
 
@@ -377,8 +424,12 @@ the same explicit logical ID, even though the current production deletion helper
 `null`. The POC's `Action-ID` is experimental evidence, not an accepted queue schema. It
 distinguishes disconnected byte-identical parents from a positive merge whose parents share
 one earlier continuously carried origin; both comparisons cross the old/new merge boundary.
-It never unions origin components merely because the merge result's bytes match. It
-imports the current `queue_deletion_problem` authority instead of paraphrasing its lifecycle
+It never unions origin components merely because the merge result's bytes match. It also
+distinguishes three component-equivalent parent edges into one deletion child from three
+edges split across disconnected origins or containing one unauthorized lifecycle. The
+positive is admitted as one causal event only after all three real edge checks pass; the two
+negatives and the repeated-incarnation control remain blocking. It imports the current
+`queue_deletion_problem` authority instead of paraphrasing its lifecycle
 and evidence rules. It emits full `C`, `O`, `M`, and `N` OIDs, every candidate witness, old
 continuity edge, deletion-child parent, pre-witness parent occurrence, recursive origin proof,
 and post-witness parent edge, plus the evidence verdict, expected verdict, human-readable
@@ -387,9 +438,10 @@ reason, and measured cost as JSON lines. Any mismatch exits nonzero.
 **INFERENCE:** an exact candidate-side witness is a smaller and safer production boundary
 than replay, patch similarity, or direct-parent state because it explains the result from
 immutable Git objects and reuses the repository's existing authority. Confidence is high
-for the linear scenarios, four exact two-parent merge attacks, and one positive shared-origin
-merge; general merge causality remains unknown because I did not measure criss-cross merges
-or multiple merge bases here.
+for the linear scenarios, four exact two-parent merge attacks, one positive shared-origin
+merge, and the focused three-parent comparison. General merge causality remains unknown
+because one positive and two negative three-parent fixtures are not a proof for arbitrary
+octopus, criss-cross, or multiple-merge-base histories.
 
 **PROPOSAL:** a production helper should validate object availability, require the old-tip
 action/path identity to match every shared boundary and remain uninterrupted over every
@@ -397,8 +449,11 @@ old-only parent edge, enumerate every candidate-only parent edge, match the comp
 action incarnation, force the existing validator over the causal deletion edge even before
 schema activation, inspect every parent of the deletion commit and reject conflicting or
 unproven logical IDs, and prove the witness parent has one occurrence lineage across every
-ancestor merge. Multiple carrying parents are one occurrence only when recursive continuous
-origin sets intersect before the merge; equal child bytes never join disconnected sets. After
+ancestor merge. Count causal deletion events, not raw parent edges: edges into the same child
+may form one event only when every carrying parent belongs to exactly one shared continuous
+origin component and every real edge independently passes lifecycle/evidence validation.
+Any missing, conflicting, disconnected, or invalid parent fails closed. Equal child bytes
+never join disconnected sets. After
 the deletion, the occurrence must remain absent on every descendant result and every parent
 of descendant merges through `N`. The helper should return a structured witness for
 the human-facing finding and fail closed on unreadable, ambiguous, or unproven history.
@@ -410,10 +465,11 @@ merge/incarnation POC plus fresh-context review before implementation starts.
 - It does not alter or test the production continuity call site.
 - It proves a rename away and back fails closed; it does not prove an authorized one-way
   timing-prefix move.
-- It proves one merge-parent survival attack fails closed; it does not prove merge-only
-  deletion, criss-cross, octopus, or multiple-merge-base behavior.
-- It proves origin intersection for two-parent merges only; it does not establish a complete
-  occurrence algebra for octopus or criss-cross histories.
+- It proves one merge-parent survival attack fails closed and one exact three-parent
+  merge-only deletion works; it does not prove arbitrary octopus, criss-cross, or
+  multiple-merge-base behavior.
+- It proves origin intersection for focused two- and three-parent fixtures; it does not
+  establish a complete occurrence algebra for arbitrary merge histories.
 - It uses an experimental `Action-ID` field to expose cross-path payload conflicts; it does
   not establish that field's schema, allocation, uniqueness, or migration rules.
 - It does not choose the correct witness across repeated action incarnations.
@@ -422,5 +478,5 @@ merge/incarnation POC plus fresh-context review before implementation starts.
 - It does not benchmark a production cache or representative large repository.
 - It proves structural claim/evidence transitions, not the truth of evidence prose.
 
-Before production implementation, a fresh verifier must reproduce this 26/26 command and all
-eight controls, then attack the repeated-incarnation false positive and broader merge cases.
+Before production implementation, a fresh verifier must reproduce this 29/29 command and all
+nine controls, then attack the repeated-incarnation false positive and broader merge cases.
