@@ -15,15 +15,17 @@ from prototype import (
     DEFAULT_PATH,
     EVIDENCE_PATH,
     GitRepo,
+    RENAMED_PATH,
     dag_occurrence_continuity_problem,
+    sibling_incarnation_problem,
 )
 
 
-def action_text(status: str) -> str:
+def action_text(status: str, payload: str = "base obligation") -> str:
     return (
         "Action-ID: Q\n"
         "Evidence: docs/evidence.md\n"
-        "Payload: base obligation\n\n"
+        f"Payload: {payload}\n\n"
         "# Repair the source\n\n"
         f"**Status:** {status}\n"
         "**Filed:** 2026-08-31\n"
@@ -253,6 +255,74 @@ def probe_shared_merge(root: Path, reconciler) -> dict[str, object]:
     }
 
 
+def probe_conflicting_sibling(root: Path, reconciler) -> dict[str, object]:
+    repo = GitRepo(root)
+    root_before_common = repo.commit(
+        "root without action",
+        {EVIDENCE_PATH: "evidence v0\n"},
+    )
+    common = repo.commit(
+        "common adds inherited action",
+        {DEFAULT_PATH: action_text("open", "inherited A")},
+    )
+    repo.switch_new("valid-parent", common)
+    valid_parent = repo.commit(
+        "claim inherited action",
+        {DEFAULT_PATH: action_text("in-repair", "inherited A")},
+    )
+    repo.switch_new("foreign-parent", root_before_common)
+    foreign_parent = repo.commit(
+        "independently add conflicting same-ID action",
+        {RENAMED_PATH: action_text("in-repair", "conflicting B")},
+    )
+    repo.switch("valid-parent")
+    merged = repo.merge_commit(
+        "foreign-parent",
+        "merge deletes inherited and conflicting actions",
+        {
+            DEFAULT_PATH: None,
+            RENAMED_PATH: None,
+            EVIDENCE_PATH: "evidence v1\n",
+        },
+    )
+    reconciler.REPO = repo.root
+    raw_problem = reconciler.claimed_lifecycle_problem(
+        DEFAULT_PATH,
+        action_text("in-repair", "inherited A"),
+        valid_parent,
+        "needs-agent",
+        "requests",
+    )
+    inherited = repo.snapshot(valid_parent)[DEFAULT_PATH]
+    candidate = repo.revisions("--topo-order", merged, "--not", common)
+    guard_problem = sibling_incarnation_problem(
+        repo,
+        candidate,
+        common,
+        inherited.incarnation,
+        inherited.action_id,
+    )
+    actual = (
+        "raw-accepted-sibling-guard-blocked"
+        if raw_problem is None and guard_problem is not None
+        else "unexpected"
+    )
+    return {
+        "scenario": "production-helper-conflicting-sibling-incarnation",
+        "root_before_C": root_before_common,
+        "common": common,
+        "valid_parent": valid_parent,
+        "foreign_parent": foreign_parent,
+        "merged": merged,
+        "raw_helper_result": "accepted" if raw_problem is None else "rejected",
+        "raw_helper_problem": raw_problem,
+        "guard_result": "blocked" if guard_problem is not None else "accepted",
+        "guard_problem": guard_problem,
+        "actual_result": actual,
+        "expected_result": "raw-accepted-sibling-guard-blocked",
+    }
+
+
 def main() -> int:
     reconciler = load_reconciler()
     try:
@@ -265,6 +335,7 @@ def main() -> int:
                 probe_own_claim(base / "own-claim", reconciler),
                 probe_ambiguous_merge(base / "ambiguous-merge", reconciler),
                 probe_shared_merge(base / "shared-merge", reconciler),
+                probe_conflicting_sibling(base / "conflicting-sibling", reconciler),
             ]
     finally:
         reconciler.close_git_cat_file()

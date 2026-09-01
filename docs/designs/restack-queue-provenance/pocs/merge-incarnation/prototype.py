@@ -548,7 +548,139 @@ def bounded_claim_transition_problem(
     return "no committed open-to-in-repair claim exists in the current occurrence"
 
 
-def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
+def sibling_incarnation_problem(
+    repo: GitRepo,
+    candidate: list[str],
+    boundary: str,
+    incarnation: str,
+    action_id: str,
+) -> str | None:
+    """Reject a same-ID sibling unless it shares C's continuous occurrence.
+
+    A deletion edge names only one parent, but a merge can delete another action
+    with the same Action-ID from a sibling parent.  Treat every candidate state and
+    every one of its direct parents as relevant.  An exact occurrence is inherited
+    only when its backwards chain of unique, byte-stable carries intersects the
+    backwards chain of the occurrence at C.  This permits an occurrence that forked
+    before C while rejecting an independently recreated byte-identical occurrence.
+    """
+
+    memo: dict[str, tuple[frozenset[str] | None, str | None]] = {}
+
+    def component(revision: str) -> tuple[frozenset[str] | None, str | None]:
+        if revision in memo:
+            return memo[revision]
+        snapshot = repo.snapshot(revision)
+        matches = occurrences(snapshot, incarnation)
+        identities = same_id(snapshot, action_id)
+        if len(identities) > 1:
+            result = (
+                None,
+                f"candidate occurrence duplicates Action-ID at {revision}",
+            )
+            memo[revision] = result
+            return result
+        if len(identities) != 1 or len(matches) != 1:
+            result = (
+                None,
+                f"candidate occurrence is not the inherited incarnation at {revision}",
+            )
+            memo[revision] = result
+            return result
+
+        action = matches[0]
+        parents = repo.parents(revision)
+        connected = {revision}
+        for parent in parents:
+            parent_snapshot = repo.snapshot(parent)
+            parent_matches = occurrences(parent_snapshot, incarnation)
+            parent_identities = same_id(parent_snapshot, action_id)
+            if len(parent_identities) > 1:
+                result = (
+                    None,
+                    f"candidate occurrence duplicates Action-ID at parent {parent}",
+                )
+                memo[revision] = result
+                return result
+            if not parent_identities:
+                continue
+            if len(parent_matches) != 1:
+                result = (
+                    None,
+                    "candidate parent carries conflicting same-ID incarnation on edge "
+                    f"{parent}->{revision}",
+                )
+                memo[revision] = result
+                return result
+            parent_action = parent_matches[0]
+            if parent_action.path != action.path:
+                if len(parents) != 1 or parent_action.path in snapshot:
+                    result = (
+                        None,
+                        "candidate occurrence has ambiguous rename provenance on edge "
+                        f"{parent}->{revision}",
+                    )
+                    memo[revision] = result
+                    return result
+            if (
+                normalize_action_status(parent_action.raw)
+                != normalize_action_status(action.raw)
+            ):
+                result = (
+                    None,
+                    "candidate occurrence mutated outside status on edge "
+                    f"{parent}->{revision}",
+                )
+                memo[revision] = result
+                return result
+            parent_component, problem = component(parent)
+            if problem is not None or parent_component is None:
+                result = (None, problem or "candidate occurrence proof is unavailable")
+                memo[revision] = result
+                return result
+            connected.update(parent_component)
+        result = (frozenset(connected), None)
+        memo[revision] = result
+        return result
+
+    boundary_component, boundary_problem = component(boundary)
+    if boundary_problem is not None or boundary_component is None:
+        return boundary_problem or "common occurrence proof is unavailable"
+
+    inspected = list(candidate)
+    for child in candidate:
+        inspected.extend(repo.parents(child))
+    inspected = list(dict.fromkeys(inspected))
+    for revision in inspected:
+        snapshot = repo.snapshot(revision)
+        identities = same_id(snapshot, action_id)
+        if not identities:
+            continue
+        if len(identities) > 1:
+            return f"candidate graph duplicates Action-ID at {revision}"
+        matches = occurrences(snapshot, incarnation)
+        if len(matches) != 1:
+            return (
+                "candidate graph contains conflicting same-ID incarnation at "
+                f"{revision}"
+            )
+        revision_component, problem = component(revision)
+        if problem is not None or revision_component is None:
+            return problem or f"candidate occurrence proof is unavailable at {revision}"
+        if boundary_component.isdisjoint(revision_component):
+            return (
+                "candidate same-ID action does not share the inherited occurrence at "
+                f"{revision}"
+            )
+    return None
+
+
+def validate_edge(
+    repo: GitRepo,
+    edge: Edge,
+    incarnation: str,
+    sibling_problem: str | None = None,
+) -> None:
     parent_actions = occurrences(repo.snapshot(edge.parent), incarnation)
     if len(parent_actions) != 1:
         edge.problem = "deletion parent does not carry one exact incarnation"
@@ -556,6 +688,9 @@ def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
     action = parent_actions[0]
     if action.status != "in-repair":
         edge.problem = "action was not committed as in-repair before deletion"
+        return
+    if sibling_problem is not None:
+        edge.problem = sibling_problem
         return
     occurrence_problem = dag_occurrence_continuity_problem(
         repo,
@@ -733,6 +868,13 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
 
         candidate = repo.revisions("--topo-order", new_head, "--not", old_tip)
         candidate_set = set(candidate)
+        sibling_problem = sibling_incarnation_problem(
+            repo,
+            candidate,
+            boundary,
+            incarnation,
+            old_action.action_id,
+        )
         edges: list[Edge] = []
         ambiguous_state = False
         identity_mutation = False
@@ -754,7 +896,7 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
                     )
 
         for edge in edges:
-            validate_edge(repo, edge, incarnation)
+            validate_edge(repo, edge, incarnation, sibling_problem)
             if edge.valid:
                 absence_problem = post_witness_absence_problem(
                     repo,
@@ -794,6 +936,17 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
         new_matches = occurrences(new_snapshot, incarnation)
         new_same_id = same_id(new_snapshot, old_action.action_id)
 
+        if sibling_problem is not None:
+            verdict = Verdict(
+                "finding",
+                "ambiguous candidate same-ID provenance",
+                f"invalid: {sibling_problem}",
+                len(effective),
+                "The candidate graph contains a same-ID state that cannot be proved "
+                f"to share the inherited occurrence: {sibling_problem}.",
+                edges,
+            )
+            return with_metrics(repo, verdict)
         if ambiguous_state or len(new_matches) > 1:
             verdict = Verdict(
                 "finding",
@@ -1608,6 +1761,62 @@ def scenario_post_witness_merge_reintroduction(root: Path) -> dict[str, object]:
     return record
 
 
+def scenario_conflicting_sibling_incarnation(root: Path) -> dict[str, object]:
+    repo, root_before_common = base_repo(root, live=False)
+    common = repo.commit(
+        "common adds inherited action",
+        {DEFAULT_PATH: action_text(payload="inherited A")},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+
+    repo.switch_new("valid-parent", common)
+    valid_parent = repo.commit(
+        "claim inherited action",
+        {
+            DEFAULT_PATH: action_text(
+                status="in-repair",
+                payload="inherited A",
+            )
+        },
+    )
+
+    repo.switch_new("foreign-parent", root_before_common)
+    foreign_parent = repo.commit(
+        "independently add conflicting same-ID action",
+        {
+            RENAMED_PATH: action_text(
+                status="in-repair",
+                payload="conflicting B",
+            )
+        },
+    )
+
+    repo.switch("valid-parent")
+    merged = repo.merge_commit(
+        "foreign-parent",
+        "merge deletes inherited and conflicting actions",
+        {
+            DEFAULT_PATH: None,
+            RENAMED_PATH: None,
+            EVIDENCE_PATH: "evidence v1\n",
+        },
+    )
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A14-conflicting-sibling-incarnation",
+        {"C": common, "O": old, "M": merged, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record.update({
+        "root_before_C": root_before_common,
+        "valid_parent": valid_parent,
+        "foreign_parent": foreign_parent,
+    })
+    return record
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -1744,6 +1953,7 @@ INITIAL_SCENARIOS = (
     scenario_ambiguous_merge_occurrence,
     scenario_shared_occurrence_merge,
     scenario_post_witness_merge_reintroduction,
+    scenario_conflicting_sibling_incarnation,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
