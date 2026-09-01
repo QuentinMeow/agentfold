@@ -964,3 +964,165 @@ GitHub adapter still waits for the bounded-fetch POC, installed fixture workflow
 live canaries; absent provider credentials keep that adapter unverified rather than
 weakening its contract. No remote required-check, cumulative-continuity, fork-authority, or
 automatic-publisher completion claim exists in this task.
+
+## 2026-09-01 correction amendment 3 — policy binding and closed provider procedure
+
+The review of `db720d3321ee25f09c82def46d77fd418735e904` stopped after a
+semantic acceptance and two independent blocks. This section supersedes evaluator-policy
+selection, trusted workflow identity, the PR matrix, fixture installation, canary
+authentication/discovery, and the abbreviated human lifecycle above. The intrinsic DAG,
+bounded execution, two-entrypoint library, and edge-only remote claim remain selected.
+
+### Authority-policy digest
+
+The classifier's executable authority surface is extracted completely from
+`reconcile.py` into a closed file manifest owned by `ref_update_core.py`. It includes the
+classifier, canonical result encoder, queue identity/mutation rules, explicit historical
+retry evaluators, support-certificate interpreter, and both CLI parsers. Integrated glue,
+provider adapters, ordinary checks, and writers cannot define or override an authority
+decision.
+
+`authority-policy/v1` hashes the fixed ordered path list and each exact byte payload with
+domain-separated, length-prefixed SHA-256. At every non-zero O/N update, including a
+fast-forward, the policy bytes at O,
+at N, and in the executing evaluator checkout must all exist and produce the same digest.
+Any missing file, extra authority import, digest mismatch, registry mismatch, or policy
+change is incomplete before graph or authority work. The running interpreter also hashes
+its own on-disk policy files and requires them to equal its checkout tree, preventing an
+uncommitted or substituted evaluator.
+
+The integrated and isolated entrypoints therefore execute the same policy digest for a
+given pair. A candidate that changes one collectable checker, evaluator,
+registry member, identity rule, or result encoder cannot use the old policy to authorize a
+deletion and cannot ask the old trusted evaluator to interpret new semantics; both honest
+entrypoints return the same canonical `policy-version-mismatch` incomplete result. Policy
+rollout occurs as its own reviewed fast-forward, whose continuity result is explicitly
+policy-version-mismatch, and becomes the baseline for later pairs after landing. The
+version-independent bootstrap parser and minimal incomplete envelope are frozen outside
+the policy surface; cross-version tests bind their bytes. Fast-forward updates do not
+suppress continuity Findings, and ordinary checks still run independently.
+
+Cross-version gates change each policy-surface file independently at N, change O alone,
+change the executing checkout alone, add an undeclared import, alter one collectable
+checker, and alter only ordinary/provider code. The first five shapes are byte-identical
+incomplete results from both entrypoints; ordinary/provider-only changes preserve the
+policy digest and classifier result. A build-time import audit rejects authority code that
+reaches outside the closed manifest except Python's pinned standard-library allowlist.
+
+### Authoritative pull-request event matrix
+
+Only `pull_request_target` with action `synchronize` may transport a PR O/N pair to the
+trusted historical entrypoint. Top-level non-zero `before` and `after` are mandatory;
+`after` must equal `pull_request.head.sha`; the head repository numeric ID/full name and
+head ref must be present; and the source repository must equal the event-named repository.
+Both exact O and N are fetched from that repository only. A mutable ref, merge ref, current
+PR API lookup, base ref, checkout HEAD, or another repository can never replace either
+endpoint. Missing/null fields, mismatch, ambiguous object format, or exact-fetch failure is
+coverage-unavailable exit 2.
+
+| PR cycle | Edge behavior |
+|---|---|
+| same-repository synchronize | trusted edge audit plus the independent push audit; results remain edge-scoped |
+| fork synchronize | trusted data-only edge audit when the exact payload and objects exist; otherwise unavailable |
+| conflicted fork synchronize | expected trusted data-only audit, but unverified until the live canary |
+| opened, edited, ready, review, assigned | no O/N pair; unprivileged ordinary candidate checks only |
+| closed or reopened | no reconstructed displaced pair; ordinary checks only and the closed-period gap remains |
+| force-push while fork PR is closed | uncovered edge; reopening cannot synthesize it |
+| stale rerun | original event O/N and evaluator SHA only; no current-ref substitution |
+| base advance or retarget | candidate-policy/ordinary input only; never O/N and no guaranteed new run |
+| multiple PRs for one head | each event may repeat the same edge audit, with separate ordinary ranges |
+| null/deleted head repository | unavailable; no fallback |
+
+The unprivileged `pull_request` lane accepts either direct N or the already specified exact
+two-parent synthetic checkout for ordinary candidate checks. It does not publish trusted
+continuity. Same-repository push remains the primary edge observation before, during, and
+after a PR. Fork and conflict results stay advisory; no required-check or cumulative claim
+is implied.
+
+### Trusted workflow identity
+
+For `pull_request_target`, evaluator authority always comes from the validated workflow
+repository, workflow path, default ref, and immutable `github.workflow_sha`. The PR's
+`base.ref` and `base.sha` are candidate-policy data and never executable trust roots,
+including when the PR targets a non-default branch. `github.workflow_ref` must name the
+expected base-repository workflow path at the repository's default ref, repository numeric
+IDs must match, and verified checkout HEAD must equal `github.workflow_sha`.
+
+The evaluator policy digest from that exact checkout must also equal the O/N policy digest
+for divergent classification. All job-isolation constraints from amendment 2 remain
+binding. A mismatch is incomplete, not a fallback to base, candidate, or current code.
+
+### Preinstalled fixture and cleanup capability
+
+The dedicated canary repository and separately owned fork have a reviewed workflow and
+evaluator preinstalled on the default branch as a prerequisite outside a scenario run.
+`provision` is read-only toward the default branch: it verifies repository numeric IDs,
+workflow path/ID, default ref, exact installed workflow/evaluator SHA, action pins, and
+policy digest before creating scenario refs. It never installs, updates, restores, or
+deletes default-branch content. A fixture upgrade has its own reviewed PR and exact lease,
+outside scenario cleanup.
+
+Provisioning creates a random 256-bit cleanup capability and stores it only in a
+mode-0600, git-ignored `tmp/canary/<scenario-id>/capability` file. It never enters an
+artifact, log, manifest, environment dump, or provider field. Canonical manifest bytes are
+authenticated with domain-separated HMAC-SHA-256 over the fixture IDs, nonce, created
+identities, and one cleanup epoch. Cleanup requires that external capability, verifies the
+HMAC and unused epoch, and then performs the earlier compare-and-delete checks. A copied or
+edited manifest with a freshly recomputed plain digest remains unauthorized. PR cleanup
+also verifies exact repository/base/head refs, PR/node ID, scenario nonce marker, and
+still-open state before closing; provider artifacts are never deleted from manifest claims.
+
+Cleanup takes an exclusive lock on the local capability state and atomically journals
+`open → in-progress → complete`; each exact mutation is durably recorded before the next.
+A crash in-progress can resume only the same authenticated epoch, while complete refuses
+replay. Loss of the
+capability leaves the narrow fixture identities for manual human review rather than
+broadening deletion authority.
+
+### Bounded run and artifact discovery
+
+The scenario ID and start time only bound enumeration; they are not event authority.
+Capture polls for at most 15 minutes, ten seconds per poll, ten pages, 100 workflow runs,
+eight artifacts per run, 64 MiB aggregate compressed bytes, 128 MiB aggregate extracted
+bytes, and 1 MiB per raw event record. It first filters the exact base repository numeric
+ID, workflow ID/SHA, event name, and scenario time window. It then downloads the pinned
+raw-event artifact and accepts exactly one complete repository/workflow/event/ref/N tuple
+for each expected case. Zero, duplicate, malformed, oversized, late, or ambiguous matches
+are unverified.
+
+`GH_CANARY_BASE_TOKEN` and `GH_CANARY_FORK_TOKEN` are separate least-privilege credentials.
+The base token is never placed in a fork remote, process, request, environment inherited by
+a fork command, credential helper, or log; the fork token cannot mutate the base fixture.
+The trusted workflow itself retains no credential after checkout. Tests inject paginated,
+duplicate, stalled, oversized, wrong-repository, wrong-N, and cross-token responses and
+prove bounded refusal plus authenticated cleanup.
+
+### Current manual human lifecycle
+
+Before a rewrite, the developer fetches the base and exact remote task ref, records O, and
+retains the local O object. The rewrite produces N; inspection and local O→N plus B...N
+classification precede publication. Publication uses the exact observed-O lease. A lease
+rejection stops without automatic refresh, force, or retry; a later attempt begins by
+observing a new O and repeats the full plan.
+
+After a published invalid/ambiguous edge, repair starts from the then-current exact remote
+N, produces N', runs local N→N' plus its ordinary range, and publishes with
+`--force-with-lease=<ref>:<N>`. Local success after remote coverage-unavailable is useful
+diagnosis only and never clears or replaces that remote O→N record.
+
+For a first publication, the currently supported manual effect is an explicit remote
+absence check followed by a normal create push; the check and push still have a race and no
+atomic enforcement is claimed. For retirement, the currently supported manual effect is
+an observed current tip followed by an exact expected-tip lease deletion; deletion runs no
+candidate continuity. Automatic create-if-absent, compare-and-delete, pre-push prevention,
+and multi-ref atomicity remain wholly owned by backlog task
+`2026-08-03-bind-task-branch-pushes-to-observed-tips`.
+
+### Gate restatement
+
+The core implementation gate is a fresh five-lens acceptance of the policy digest, closed
+event matrix, and prior semantic/budget contract. The adapter gate is the bounded-fetch POC
+plus the preinstalled-fixture live canaries. A reviewed core can complete independently
+while the optional GitHub adapter remains unimplemented or unverified; such a result makes
+no claim of remote cumulative protection, required checks, automatic publication, or
+provider-independent coverage debt.

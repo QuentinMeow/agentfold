@@ -27,3 +27,14 @@ The four-to-one panel rejected the revision. No production implementation began 
 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
+
+## Superseded edge-scoped design review
+
+**Reviewed revision:** `db720d3321ee25f09c82def46d77fd418735e904`
+
+- semantic/DAG / r18-semantic-design: `approve` — fresh fixtures matched the accepted POC and its complete 167/167 scenario, 34/34 damage-control, and 4/4 alias suite.
+- budgets/transaction/composition / receipt-contract: `block` — integrated candidate code and the pinned trusted evaluator did not bind one authority-policy version.
+- workflow/adapter/human / r18-workflow-design: `block` — default-branch workflow authority, a closed PR matrix, fixture installation, cleanup authentication, bounded run discovery, and the concrete manual lifecycle remained incomplete.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.

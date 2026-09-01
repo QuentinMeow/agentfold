@@ -112,3 +112,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   immutable trusted-code binding, collision-safe canary manifests, complete push tuples,
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Policy-version and provider-procedure correction (codex)
+
+- The next panel accepted semantic/DAG parity after rerunning all 167 scenarios and 34
+  damage controls, then exposed executable-policy drift between candidate N code and a
+  pinned trusted evaluator. It also rejected non-default PR base code as a trust root,
+  unsafe fixture installation/cleanup, unbounded run discovery, and the abbreviated human
+  lifecycle.
+- Appended a closed authority-policy digest binding O, N, and evaluator bytes; a complete
+  synchronize/fork/conflict/closed/stale matrix; default-branch `workflow_sha` evaluator
+  authority; a preinstalled immutable fixture; HMAC-authorized compare-and-delete cleanup;
+  bounded artifact discovery with separate credentials; and the exact manual rewrite,
+  lease-rejection, repair, first-publication, and retirement effects.
+- Production remains unopened pending a new full five-lens immutable-revision review.
