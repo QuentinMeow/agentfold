@@ -104,6 +104,7 @@ class Damage:
     skip_preserved_state_validation: bool = False
     skip_persisted_frozen_skeleton: bool = False
     skip_persisted_candidate_continuity: bool = False
+    skip_old_side_continuity: bool = False
 
 
 @dataclasses.dataclass
@@ -1300,12 +1301,10 @@ class Classifier:
         self,
         identity: tuple,
         old_state: ActionState,
-        new_state: ActionState,
+        new_state: ActionState | None,
     ) -> tuple[str | None, str, list[dict]]:
-        """Trace the one persisted C occurrence backward from N to C."""
+        """Trace the admitted occurrence from each implicated tip to C."""
         assert self.graph is not None
-        if self.damage.skip_persisted_candidate_continuity:
-            return None, "DAMAGED-skipped", []
 
         C_states = self.states(self.fixture.C, identity)
         if len(C_states) != 1:
@@ -1329,7 +1328,7 @@ class Classifier:
                 return memo[child]
             if child in visiting:
                 return fail(
-                    "persisted-cycle", f"candidate graph cycles at {child}"
+                    "persisted-cycle", f"post-C graph cycles at {child}"
                 )
             visiting.add(child)
             child_states = self.states(child, identity)
@@ -1359,7 +1358,7 @@ class Classifier:
             if duplicates:
                 result = fail(
                     "persisted-parent-multiplicity",
-                    f"candidate child {child} has duplicate C-rooted "
+                    f"post-C child {child} has duplicate C-rooted "
                     f"carriers {duplicates}",
                 )
                 visiting.remove(child)
@@ -1368,7 +1367,7 @@ class Classifier:
             if not carriers:
                 result = fail(
                     "persisted-delete-recreate",
-                    f"candidate child {child} carries the exact identity "
+                    f"post-C child {child} carries the exact identity "
                     "without any C-rooted carrying parent; absent C-rooted "
                     f"parents are {absent}",
                 )
@@ -1386,7 +1385,7 @@ class Classifier:
             if not parents_continuous:
                 result = fail(
                     "persisted-upstream-discontinuity",
-                    f"candidate child {child} descends from a carrying "
+                    f"post-C child {child} descends from a carrying "
                     "parent whose C-rooted occurrence is invalid",
                 )
                 visiting.remove(child)
@@ -1427,7 +1426,7 @@ class Classifier:
             if not compatible:
                 result = fail(
                     "persisted-merge-carrier-conflict",
-                    f"candidate child {child} has a carrying merge parent "
+                    f"post-C child {child} has a carrying merge parent "
                     "whose concrete state is incompatible with the child",
                 )
                 visiting.remove(child)
@@ -1437,11 +1436,42 @@ class Classifier:
             memo[child] = True
             return True
 
-        continuous = trace(self.fixture.N)
+        old_continuous = (
+            True
+            if self.damage.skip_old_side_continuity
+            else trace(self.fixture.O)
+        )
+        new_continuous = (
+            True
+            if new_state is None
+            or self.damage.skip_persisted_candidate_continuity
+            else trace(self.fixture.N)
+        )
+        continuous = old_continuous and new_continuous
         ordered_edges = self.stable_edges(edges)
         if not continuous:
             code, reason = failures[0]
             return reason, code, ordered_edges
+        C_state = C_states[0]
+        old_anchor_regression = (
+            RECONCILE.queue_parent_state_regression_problem(
+                C_state.text, old_state.text
+            )
+        )
+        old_anchor_binding = self.binding_subset_problem(
+            identity, C_state, old_state
+        )
+        if (
+            not self.damage.skip_old_side_continuity
+            and (old_anchor_regression or old_anchor_binding)
+        ):
+            return (
+                old_anchor_binding or old_anchor_regression,
+                "persisted-old-endpoint-regression",
+                ordered_edges,
+            )
+        if new_state is None or self.damage.skip_persisted_candidate_continuity:
+            return None, "persisted-old-C-rooted-continuity", ordered_edges
         endpoint_regression = RECONCILE.queue_parent_state_regression_problem(
             old_state.text, new_state.text
         )
@@ -2264,6 +2294,37 @@ class Classifier:
                     f"C carries exact identity multiplicity {len(C_states)}"
                 ),
             }
+        old_problem, old_code, old_mutation_edges = (
+            self.persisted_occurrence_problem(
+                identity, effective_old[0], None
+            )
+        )
+        if old_problem:
+            status = (
+                "ambiguous"
+                if old_code
+                in {
+                    "persisted-C-multiplicity",
+                    "persisted-intermediate-multiplicity",
+                    "persisted-parent-multiplicity",
+                    "persisted-delete-recreate",
+                    "persisted-upstream-discontinuity",
+                }
+                else "invalid"
+            )
+            return {
+                **base,
+                "status": status,
+                "finding": True,
+                "authoring_lineage": "old-side-discontinuous",
+                "mutation_edges": old_mutation_edges,
+                "reason_code": old_code,
+                "reason": (
+                    "the old tip identity does not retain one continuously "
+                    "valid C-rooted occurrence: "
+                    f"{old_problem}"
+                ),
+            }
         if self.damage.reopen_pre_c_genealogy:
             assert self.objects is not None
             parents = self.objects.commit_parents(self.fixture.C)
@@ -2300,6 +2361,7 @@ class Classifier:
             "event_mode": event.mode,
             "authority_edges": event.authority_edges,
             "propagation_edges": event.propagation_edges,
+            "mutation_edges": old_mutation_edges,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
             "causal_roots": event.causal_roots,
@@ -4175,6 +4237,17 @@ def r13_review_parent_binding(
     )
 
 
+def low_similarity_delivery_text(text: str, marker: str) -> str:
+    """Fixture helper retained for independent D+A endpoint probes."""
+    replacement = f"**Resolution evidence:** {marker * 4096}"
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("**Resolution evidence:**"):
+            lines[index] = replacement
+            return "\n".join(lines) + "\n"
+    raise RuntimeError("fixture has no Resolution evidence field")
+
+
 def r13_persisted_state(root: Path, variant: str) -> Fixture:
     """Check O/N mutable state without relying on Git rename similarity."""
     variants = {
@@ -4760,6 +4833,105 @@ def r8_adapter_M_variants(root: Path) -> Fixture:
             },
             "poc_changes_adapter": False,
         },
+    )
+
+
+def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
+    """Exercise occurrence integrity on the C-to-O side of the split."""
+    variants = {
+        "invalid-delete-recreate",
+        "valid-delete-recreate",
+        "human-binding-restore",
+        "hidden-bytes-restore",
+        "continuous-preserved",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r15-old-{variant}"
+
+    if variant == "human-binding-restore":
+        path = add_human(repo, label)
+        C = answer(repo, path, "approve")
+        original = repo.read(path)
+    else:
+        path = add_agent(repo, label)
+        if variant == "hidden-bytes-restore":
+            repo.write(path, repo.read(path) + "\n<!-- protected-A -->\n")
+        C = repo.commit("admit old-side continuity action at C")
+        original = repo.read(path)
+
+    repo.branch("old", C)
+    details: dict[str, Any] = {"path": path, "variant": variant}
+    if variant == "invalid-delete-recreate":
+        repo.remove(path)
+        details["gap"] = repo.commit("old side deletes without authority")
+        repo.write(path, original)
+        details["recreated"] = repo.commit(
+            "old side recreates identical occurrence"
+        )
+    elif variant == "valid-delete-recreate":
+        details["authority_parent"] = claim(
+            repo, (path,), "old side claims occurrence"
+        )
+        details["authority_child"] = delete_with_evidence(
+            repo,
+            ((label, path),),
+            "old side validly deletes claimed occurrence",
+        )
+        repo.write(path, original)
+        details["recreated"] = repo.commit(
+            "old side recreates after valid deletion"
+        )
+    elif variant == "human-binding-restore":
+        repo.write(
+            path,
+            original.replace("**Your answer:** approve", "**Your answer:** reject", 1),
+        )
+        details["bad"] = repo.commit("change concrete old-side answer")
+        repo.write(path, original)
+        details["restored"] = repo.commit("restore concrete old-side answer")
+    elif variant == "hidden-bytes-restore":
+        repo.write(path, original.replace("protected-A", "protected-B", 1))
+        details["bad"] = repo.commit("change protected old-side bytes")
+        repo.write(path, original)
+        details["restored"] = repo.commit("restore protected old-side bytes")
+    else:
+        details["old_step"] = feature(repo, f"{label}-old-step")
+    O = feature(repo, f"{label}-old-tip")
+
+    repo.branch("candidate", C)
+    M = feature(repo, f"{label}-candidate-base")
+    N = feature(repo, f"{label}-candidate-tip")
+    expected = "no-finding" if variant == "continuous-preserved" else "blocking-finding"
+    details["old_text_equals_C"] = (
+        repo.run("show", f"{C}:{path}").stdout
+        == repo.run("show", f"{O}:{path}").stdout
+    )
+    details["new_text_equals_C"] = (
+        repo.run("show", f"{C}:{path}").stdout
+        == repo.run("show", f"{N}:{path}").stdout
+    )
+    if variant == "valid-delete-recreate":
+        with reconciler_repository(repo.root):
+            details["deletion_problem"] = RECONCILE.queue_deletion_problem(
+                path,
+                repo.run(
+                    "show", f"{details['authority_parent']}:{path}"
+                ).stdout,
+                details["authority_parent"],
+                details["authority_child"],
+            )
+    return Fixture(
+        f"R15-old-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        expected,
+        details,
     )
 
 
@@ -6401,6 +6573,19 @@ def scenario_builders():
         lambda root: r14_persisted_merge_carriers(
             root, conflict=True
         ),
+        *[
+            (
+                lambda root, variant=variant:
+                r15_old_side_continuity(root, variant)
+            )
+            for variant in (
+                "invalid-delete-recreate",
+                "valid-delete-recreate",
+                "human-binding-restore",
+                "hidden-bytes-restore",
+                "continuous-preserved",
+            )
+        ],
         r8_adapter_M_variants,
         r8_adapter_M_endpoint_counterexample,
     ]
@@ -6421,6 +6606,7 @@ CONTROL_NAMES = (
     "omit-unanswered-published-review-binding",
     "skip-persisted-frozen-skeleton",
     "skip-persisted-candidate-continuity",
+    "skip-old-side-continuity",
 )
 
 
@@ -6560,7 +6746,12 @@ def validate_result(result: dict):
         if not any(len(action["paths"]["C"]) == 2 for action in actions):
             errors.append("P5 did not expose both C-root paths")
     if scenario.startswith("P6"):
-        if not any("discontinu" in action["reason"] for action in actions):
+        if not any(
+            action["reason_code"]
+            in {"persisted-delete-recreate", "post-event-reintroduction"}
+            or "discontinu" in action["reason"]
+            for action in actions
+        ):
             errors.append("P6 did not fail on occurrence discontinuity")
     if scenario == "P7-immutable-payload-change":
         if result["details"]["production_identity_equal"]:
@@ -7756,6 +7947,69 @@ def validate_result(result: dict):
             )
         ):
             errors.append("R14 persisted merge carrier compatibility drifted")
+    if scenario.startswith("R15-old-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        negative = details["variant"] != "continuous-preserved"
+        if (
+            action is None
+            or not details["old_text_equals_C"]
+            or not details["new_text_equals_C"]
+            or result["event_mode"] != "none"
+            or result["classification"]
+            != ("blocking-finding" if negative else "no-finding")
+        ):
+            errors.append("R15 old-side endpoint fixture drifted")
+        elif details["variant"] in {
+            "invalid-delete-recreate",
+            "valid-delete-recreate",
+        }:
+            causal_oid = details.get("gap", details.get("authority_child"))
+            if (
+                status != "ambiguous"
+                or action["reason_code"] != "persisted-delete-recreate"
+                or causal_oid not in action["reason"]
+                or details["recreated"] not in action["reason"]
+                or (
+                    details["variant"] == "valid-delete-recreate"
+                    and details["deletion_problem"] is not None
+                )
+            ):
+                errors.append("R15 old-side deletion/recreation false-greened")
+        elif details["variant"] == "human-binding-restore":
+            bad_edges = [
+                edge
+                for edge in action["mutation_edges"]
+                if edge["child"] == details["bad"]
+            ]
+            if (
+                status != "invalid"
+                or action["reason_code"] != "persisted-invalid-mutation"
+                or len(bad_edges) != 1
+                or not bad_edges[0]["problem"]
+            ):
+                errors.append("R15 old-side human binding restore false-greened")
+        elif details["variant"] == "hidden-bytes-restore":
+            bad_edges = [
+                edge
+                for edge in action["mutation_edges"]
+                if edge["child"] == details["bad"]
+            ]
+            if (
+                status != "invalid"
+                or action["reason_code"] != "persisted-invalid-mutation"
+                or len(bad_edges) != 1
+                or not bad_edges[0]["frozen_problem"]
+            ):
+                errors.append("R15 old-side hidden-byte restore false-greened")
+        elif (
+            status != "none"
+            or action["reason_code"] != "identity-preserved"
+            or any(edge["problem"] for edge in action["mutation_edges"])
+            or details["old_step"]
+            not in {edge["child"] for edge in action["mutation_edges"]}
+        ):
+            errors.append("R15 continuous old-side occurrence was blocked")
     if scenario == "R8-adapter-M-input-variants":
         details = result["details"]
         variants = result.get("adapter_input_evidence", {})
@@ -7981,6 +8235,12 @@ def control_builder(name: str, root: Path):
         return (
             r14_persisted_intermediate_claim(root),
             Damage(skip_persisted_candidate_continuity=True),
+            "no-finding",
+        )
+    if name == "skip-old-side-continuity":
+        return (
+            r15_old_side_continuity(root, "invalid-delete-recreate"),
+            Damage(skip_old_side_continuity=True),
             "no-finding",
         )
     raise ValueError(name)

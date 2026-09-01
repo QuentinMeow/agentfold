@@ -22,9 +22,154 @@ from typing import Any, Iterable
 
 OID_PATTERN = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])")
 FIXTURE_SHA_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
-EXPECTED_SCENARIOS = 117
-EXPECTED_CONTROLS = 14
+EXPECTED_SCENARIOS = 122
+EXPECTED_CONTROLS = 15
 EXPECTED_ALIASES = 4
+EXPECTED_AUDIT_CHECKS = 2070
+
+
+@dataclass(frozen=True)
+class NamedTableSchema:
+    name: str
+    start: str
+    end: str
+    header: str
+    header_index: int
+    row_names: tuple[str, ...]
+    oid_shape: str
+    records: str = "scenarios"
+
+
+P18_ROWS = tuple(
+    f"P18{letter}-{suffix}"
+    for letter, suffix in (
+        ("h", "missing-M"),
+        ("i", "noncommit-M-blob"),
+        ("j", "noncommit-M-tree"),
+        ("k", "noncommit-M-tag"),
+        ("l", "unrelated-M"),
+        ("m", "M-after-N"),
+        ("n", "M-equals-C"),
+        ("o", "M-equals-N"),
+    )
+)
+R3_ROWS = (
+    "R3-01-two-invalid-causal-sources",
+    "R3-02-invalid-valid-causal-competition",
+    "R3-03-unrelated-invalid-does-not-poison",
+)
+R4_ROWS = (
+    "R4-01-same-root-valid-diamond",
+    "R4-02-distinct-valid-root-diamond",
+    "R4-03-equal-root-plus-invalid-diamond",
+)
+R6_ROWS = (
+    "R6-01-valid-plus-invalid-all-absent",
+    "R6-02-valid-plus-ambiguous-all-absent",
+    "R6-03-two-invalid-all-absent",
+    "R6-04-same-valid-root-all-absent-wrappers",
+)
+R8_ROWS = (
+    "R8-direct-human-response-conflict",
+    "R8-direct-human-response-identical",
+    "R8-supplier-human-response-conflict",
+    "R8-supplier-human-response-identical",
+    "R8-review-binding-divergent",
+    "R8-review-binding-identical",
+    "R8-review-binding-terminal-conflict",
+)
+R9_ROWS = (
+    "R9-direct-review-target-pending-fill",
+    "R9-direct-review-revision-pending-fill",
+    "R9-supplier-review-target-pending-fill",
+    "R9-supplier-review-revision-pending-fill",
+)
+R10_ROWS = (
+    "R10-direct-review-target-backtick-dotless-rejected",
+    "R10-supplier-review-revision-generic-placeholder-rejected",
+)
+R13_BINDING_ROWS = (
+    "R13-direct-review-binding-identical",
+    "R13-direct-review-binding-target",
+    "R13-direct-review-binding-revision",
+    "R13-direct-review-binding-terminal",
+    "R13-supplier-review-binding-identical",
+    "R13-supplier-review-binding-target",
+    "R13-supplier-review-binding-revision",
+    "R13-supplier-review-binding-terminal",
+)
+R13_PERSISTED_ROWS = (
+    "R13-persisted-same-state",
+    "R13-persisted-response-removal",
+    "R13-persisted-response-change",
+    "R13-persisted-review-target-change",
+    "R13-persisted-review-revision-change",
+    "R13-persisted-review-outcome-change",
+    "R13-persisted-claim-loss",
+    "R13-persisted-pending-fill",
+    "R13-persisted-terminal-fill",
+)
+R14_BINDING_ROWS = (
+    "R14-direct-old-unanswered-carrier-same",
+    "R14-direct-old-unanswered-carrier-target",
+    "R14-supplier-old-answered-carrier-pending",
+    "R14-supplier-old-answered-carrier-same",
+    "R14-supplier-old-answered-carrier-target",
+    "R14-supplier-old-answered-carrier-revision",
+    "R14-supplier-old-unanswered-carrier-same",
+    "R14-supplier-old-unanswered-carrier-target",
+)
+R14_PERSISTED_ROWS = (
+    "R14-persisted-hidden-bytes-low-similarity",
+    "R14-persisted-intermediate-claim-regression",
+    "R14-persisted-intermediate-review-regression",
+    "R14-persisted-delete-recreate",
+    "R14-persisted-valid-review-retraction",
+    "R14-persisted-valid-first-response-low-similarity",
+    "R14-persisted-merge-carrier-pending",
+    "R14-persisted-merge-carrier-conflict",
+)
+R15_ROWS = (
+    "R15-old-invalid-delete-recreate",
+    "R15-old-valid-delete-recreate",
+    "R15-old-human-binding-restore",
+    "R15-old-hidden-bytes-restore",
+    "R15-old-continuous-preserved",
+)
+CONTROL_ROWS = (
+    "missing-all-parent-direct-validation",
+    "supplier-authority-borrowing",
+    "identity-multiplicity-collapsed-to-set",
+    "reopen-pre-C-genealogy",
+    "missing-post-event-continuity",
+    "sole-valid-ignores-invalid-root",
+    "omit-old-tip-human-binding",
+    "literal-review-pending-treated-concrete",
+    "broad-review-pending-normalization",
+    "omit-supplier-carrier-human-binding",
+    "skip-preserved-state-validation",
+    "omit-unanswered-published-review-binding",
+    "skip-persisted-frozen-skeleton",
+    "skip-persisted-candidate-continuity",
+    "skip-old-side-continuity",
+)
+
+
+EXACT_NAMED_TABLES = (
+    NamedTableSchema("P18 range base", "### Selected-range-base boundary regressions", "## PCX-01-PCX-20 attack coverage", "Case", 0, P18_ROWS, "C-O-M-N"),
+    NamedTableSchema("R3 causal sources", "### Mixed causal-source regressions", "### Canonical-root diamond regressions", "Case", 0, R3_ROWS, "none"),
+    NamedTableSchema("R4 canonical roots", "### Canonical-root diamond regressions", "### Reintroduced-occurrence history regressions", "Case", 0, R4_ROWS, "none"),
+    NamedTableSchema("R6 absent frontier", "### All-absent frontier regressions", "## O-anchored human binding and adapter input", "Case", 0, R6_ROWS, "none"),
+    NamedTableSchema("R8 old binding", "## O-anchored human binding and adapter input", "### Pending review target and revision", "Case", 0, R8_ROWS, "C-O-authority-M-N"),
+    NamedTableSchema("R9 pending binding", "### Pending review target and revision", "### Malformed review target and revision", "Case", 0, R9_ROWS, "C-O-authority-M-N"),
+    NamedTableSchema("R10 malformed binding", "### Malformed review target and revision", "### Implicated-parent and persisted-state regressions", "Case", 0, R10_ROWS, "C-O-authority-M-N"),
+    NamedTableSchema("R13 implicated binding", "### Implicated-parent and persisted-state regressions", "### Unanswered review and continuous persisted-state regressions", "Case", 0, R13_BINDING_ROWS, "C-O-M-N"),
+    NamedTableSchema("R13 persisted endpoint", "### Implicated-parent and persisted-state regressions", "### Unanswered review and continuous persisted-state regressions", "Case", 1, R13_PERSISTED_ROWS, "C-O-M-N"),
+    NamedTableSchema("R14 unanswered binding", "### Unanswered review and continuous persisted-state regressions", "### Old-side C-rooted occurrence regressions", "Case", 0, R14_BINDING_ROWS, "C-O-M-N"),
+    NamedTableSchema("R14 persisted continuity", "### Unanswered review and continuous persisted-state regressions", "### Old-side C-rooted occurrence regressions", "Case", 1, R14_PERSISTED_ROWS, "C-O-M-N"),
+    NamedTableSchema("R15 old-side continuity", "### Old-side C-rooted occurrence regressions", "`R8-adapter-M-input-variants` runs three classifiers", "Case", 0, R15_ROWS, "C-O-M-N"),
+    NamedTableSchema("damaged controls", "## Damaged-mode controls", "## Evidence audit", "Control", 0, CONTROL_ROWS, "C-O-M-N", "controls"),
+)
 
 
 @dataclass
@@ -127,6 +272,229 @@ def table_row(lines: list[str], label: str) -> tuple[int, str] | None:
     if len(matches) == 1:
         return matches[0]
     return None
+
+
+def first_table_cell(line: str) -> str | None:
+    if not line.startswith("|") or "|" not in line[1:]:
+        return None
+    cell = line[1:].split("|", 1)[0].strip()
+    if len(cell) >= 2 and cell.startswith("`") and cell.endswith("`"):
+        return cell[1:-1]
+    return cell
+
+
+def markdown_table_blocks(section: str, header: str) -> list[list[str]]:
+    lines = section.splitlines()
+    blocks: list[list[str]] = []
+    for index, line in enumerate(lines):
+        if first_table_cell(line) != header:
+            continue
+        block: list[str] = []
+        cursor = index + 1
+        if cursor < len(lines) and re.fullmatch(r"\|[-: |]+\|", lines[cursor]):
+            cursor += 1
+        while cursor < len(lines) and lines[cursor].startswith("|"):
+            block.append(lines[cursor])
+            cursor += 1
+        blocks.append(block)
+    return blocks
+
+
+def expected_row_oids(item: dict[str, Any], shape: str) -> list[str]:
+    if shape == "none":
+        return []
+    if shape == "C-O-M-N":
+        return [item[key] for key in ("C", "O", "M", "N")]
+    if shape == "C-O-authority-M-N":
+        details = item["details"]
+        return [
+            item["C"],
+            item["O"],
+            details["authority_parent"],
+            details["authority_child"],
+            item["M"],
+            item["N"],
+        ]
+    raise ValueError(f"unknown exact-table OID shape: {shape}")
+
+
+def audit_exact_named_tables(
+    readme: str,
+    scenarios: dict[str, dict[str, Any]],
+    controls: dict[str, dict[str, Any]],
+    checks: Checks,
+) -> tuple[int, int]:
+    schemas_by_section: dict[tuple[str, str, str], list[NamedTableSchema]] = {}
+    for schema in EXACT_NAMED_TABLES:
+        schemas_by_section.setdefault(
+            (schema.start, schema.end, schema.header), []
+        ).append(schema)
+
+    cached_blocks: dict[tuple[str, str, str], list[list[str]]] = {}
+    for key, schemas in schemas_by_section.items():
+        start, end, header = key
+        try:
+            begin, finish = heading_span(readme, start, end)
+        except ValueError as error:
+            checks.require(False, f"missing exact-table boundary: {error}")
+            cached_blocks[key] = []
+            continue
+        blocks = markdown_table_blocks(readme[begin:finish], header)
+        expected_blocks = max(schema.header_index for schema in schemas) + 1
+        checks.require(
+            len(blocks) == expected_blocks,
+            f"{start}: expected {expected_blocks} {header!r} table(s), got {len(blocks)}",
+        )
+        cached_blocks[key] = blocks
+
+    audited_rows = 0
+    semantic_rows = 0
+    for schema in EXACT_NAMED_TABLES:
+        key = (schema.start, schema.end, schema.header)
+        blocks = cached_blocks.get(key, [])
+        if schema.header_index >= len(blocks):
+            checks.require(False, f"missing exact table: {schema.name}")
+            continue
+        block = blocks[schema.header_index]
+        actual_names = tuple(
+            name
+            for line in block
+            if (name := first_table_cell(line)) is not None
+        )
+        checks.require(
+            actual_names == schema.row_names,
+            f"{schema.name}: row inventory differs; expected {schema.row_names}, got {actual_names}",
+        )
+        records = scenarios if schema.records == "scenarios" else controls
+        for name in schema.row_names:
+            matches = [line for line in block if first_table_cell(line) == name]
+            checks.require(
+                len(matches) == 1,
+                f"{schema.name}: expected exactly one row named {name}, got {len(matches)}",
+            )
+            checks.require(name in records, f"{schema.name}: stream has no record {name}")
+            if len(matches) != 1 or name not in records:
+                continue
+            row = matches[0]
+            item = records[name]
+            expected_oids = expected_row_oids(item, schema.oid_shape)
+            checks.require(
+                OID_PATTERN.findall(row) == expected_oids,
+                f"{schema.name}: ordered endpoint OIDs differ for {name}",
+            )
+            if schema.records == "controls":
+                checks.require(
+                    item["status"] in row,
+                    f"{schema.name}: control status differs for {name}",
+                )
+                baseline = friendly_classification(item["baseline_classification"])
+                damaged = friendly_classification(item["damaged_classification"])
+                checks.require(
+                    f"{baseline} -> {damaged}" in row.lower(),
+                    f"{schema.name}: control transition differs for {name}",
+                )
+            else:
+                semantic = (
+                    f"`{item['classification']}` / "
+                    f"`{item['evidence_verdict']['status']}` / "
+                    f"`{item['event_mode']}`"
+                )
+                checks.require(
+                    semantic in row,
+                    f"{schema.name}: classification/status/mode differs for {name}",
+                )
+            audited_rows += 1
+            semantic_rows += 1
+    return audited_rows, semantic_rows
+
+
+P_CONTRACT_SCENARIOS: dict[str, tuple[str, ...]] = {
+    "P1": ("P1-direct-linear-valid",),
+    "P2": ("P2-direct-linear-invalid",),
+    "P3": ("P3-genuine-old-loss",),
+    "P4": ("P4-pre-C-identical-origins",),
+    "P5": ("P5-duplicate-at-C",),
+    "P6": ("P6a-old-delete-recreate", "P6b-candidate-delete-recreate"),
+    "P7": ("P7-immutable-payload-change",),
+    "P8": ("P8-path-timing-move",),
+    "P9": ("P9-direct-two-parent-valid",),
+    "P10": ("P10-direct-invalid-parent",),
+    "P11": ("P11-direct-three-parent-valid",),
+    "P12": ("P12-merge-supplier-valid",),
+    "P13": ("P13-merge-supplier-invalid",),
+    "P14": ("P14-supplier-reintroduced",),
+    "P15": ("P15-competing-suppliers",),
+    "P16": ("P16-PCX-08-invalid-supplier-claimed-carrier",),
+    "P17": ("P17-post-event-reintroduction",),
+    "P18": (),
+    "P19": ("P19-production-identities",),
+    "P20": ("P20-lifecycle-types",),
+    "P21": ("P21-PCX-17c-squash-erasure",),
+    "P22": ("P22-PCX-18-one-pass-many-actions",),
+}
+
+
+def audit_plain_table_inventories(readme: str, checks: Checks) -> int:
+    schemas = (
+        (
+            "S alias",
+            "## S1/S2/S3/S12 executable aliases",
+            "## P1-P22 coverage",
+            "Alias",
+            ("S1", "S2", "S3", "S12"),
+        ),
+        (
+            "P contract",
+            "## P1-P22 coverage",
+            "### Selected-range-base boundary regressions",
+            "Contract",
+            tuple(P_CONTRACT_SCENARIOS),
+        ),
+        (
+            "PCX attack",
+            "## PCX-01-PCX-20 attack coverage",
+            "### Mixed causal-source regressions",
+            "Attack",
+            tuple(PCX_ROWS),
+        ),
+    )
+    audited = 0
+    for name, start, end, header, expected_names in schemas:
+        try:
+            begin, finish = heading_span(readme, start, end)
+        except ValueError as error:
+            checks.require(False, f"missing {name} table boundary: {error}")
+            continue
+        blocks = markdown_table_blocks(readme[begin:finish], header)
+        checks.require(len(blocks) == 1, f"{name}: expected exactly one table")
+        if len(blocks) != 1:
+            continue
+        rows = blocks[0]
+        actual_names = tuple(
+            row_name
+            for line in rows
+            if (row_name := first_table_cell(line)) is not None
+        )
+        checks.require(
+            actual_names == expected_names,
+            f"{name}: row inventory differs; expected {expected_names}, got {actual_names}",
+        )
+        if name == "P contract":
+            for contract, scenario_names in P_CONTRACT_SCENARIOS.items():
+                matches = [line for line in rows if first_table_cell(line) == contract]
+                checks.require(len(matches) == 1, f"P contract: duplicate/missing {contract}")
+                if len(matches) == 1:
+                    found_names = tuple(
+                        scenario
+                        for scenario in scenario_names
+                        if f"`{scenario}`" in matches[0]
+                    )
+                    checks.require(
+                        found_names == scenario_names,
+                        f"P contract: executable cases differ for {contract}",
+                    )
+        audited += len(expected_names)
+    return audited
 
 
 def audit_aliases(
@@ -356,6 +724,7 @@ def audit_costs(readme: str, scenarios: dict[str, dict[str, Any]], checks: Check
         "Object cache hits": many["metrics"]["object_cache_hits"],
         "Production identity calls": many["metrics"]["identity_calls"],
         "Production authority calls": many["metrics"]["authority_calls"],
+        "Production mutation calls": many["metrics"]["mutation_calls"],
         "`cat-file --batch` processes": many["metrics"]["batch_processes"],
         "Actual Git child processes, including production validator calls": many["metrics"]["git_processes"],
     }
@@ -404,9 +773,9 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     controls = stream.controls
     records = scenarios | controls
 
-    checks.require(len(stream.objects) == 133, "self-test stream is not 133 records")
-    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 117")
-    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 14")
+    checks.require(len(stream.objects) == 139, "self-test stream is not 139 records")
+    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 122")
+    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 15")
     summary_expected = {
         "aliases_passed": EXPECTED_ALIASES,
         "aliases_total": EXPECTED_ALIASES,
@@ -420,8 +789,8 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     for key, expected in summary_expected.items():
         checks.require(stream.summary.get(key) == expected, f"summary field {key} differs")
     for phrase in (
-        "49 prescribed real-Git scenarios, 68 focused contract regressions, and all fourteen damaged-mode controls",
-        "117/117 scenarios, 4/4 executable aliases, and 14/14 controls",
+        "49 prescribed real-Git scenarios, 73 focused contract regressions, and all fifteen damaged-mode controls",
+        "122/122 scenarios, 4/4 executable aliases, and 15/15 controls",
     ):
         checks.require(normalized(phrase) in normalized(readme), f"missing total claim: {phrase}")
 
@@ -517,8 +886,13 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
         ),
         (
             "### Unanswered review and continuous persisted-state regressions",
-            "`R8-adapter-M-input-variants` runs three classifiers",
+            "### Old-side C-rooted occurrence regressions",
             [name for name in scenarios if name.startswith("R14-")],
+        ),
+        (
+            "### Old-side C-rooted occurrence regressions",
+            "`R8-adapter-M-input-variants` runs three classifiers",
+            [name for name in scenarios if name.startswith("R15-")],
         ),
         (
             "`R8-adapter-M-input-variants` runs three classifiers",
@@ -562,6 +936,10 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     checks.require(not unmapped, f"unmapped README OID claims: {unmapped}")
 
     alias_rows = audit_aliases(readme, stream, checks)
+    plain_inventory_rows = audit_plain_table_inventories(readme, checks)
+    schema_rows, schema_semantic_rows = audit_exact_named_tables(
+        readme, scenarios, controls, checks
+    )
     row_checks, semantic_row_checks = audit_named_rows(lines, records, controls, checks)
     pcx_rows = audit_pcx_rows(lines, scenarios, checks)
     counter_checks = audit_costs(readme, scenarios, checks)
@@ -590,12 +968,13 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     normalized_readme = normalized(readme)
     for phrase in nonclaims:
         checks.require(normalized(phrase) in normalized_readme, f"missing nonclaim: {phrase}")
-    reported_total = checks.total + 1
     checks.require(
-        (
-            f'"audit": "PASS", "checks_passed": {reported_total}, '
-            f'"checks_total": {reported_total}'
-        )
+        checks.total + 2 == EXPECTED_AUDIT_CHECKS,
+        "auditor coverage-check topology changed without updating its pinned schema",
+    )
+    checks.require(
+        f'"audit": "PASS", "checks_passed": {EXPECTED_AUDIT_CHECKS}, '
+        f'"checks_total": {EXPECTED_AUDIT_CHECKS}'
         in readme,
         "README audit PASS/check-count transcript is missing or stale",
     )
@@ -614,9 +993,12 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
         "pcx_rows": pcx_rows,
         "pinned_controls": len(controls),
         "pinned_scenarios": len(scenarios),
+        "plain_inventory_rows": plain_inventory_rows,
         "raw_sha256": stream.raw_sha256(),
         "record_rows": row_checks,
         "region_oid_claims": region_oid_claims,
+        "schema_rows": schema_rows,
+        "schema_semantic_rows": schema_semantic_rows,
         "semantic_row_checks": semantic_row_checks,
         "unique_oids": len({match.group(0) for match in oid_occurrences}),
     }
@@ -675,7 +1057,7 @@ def compare_streams(left: Stream, right: Stream) -> dict[str, Any]:
 
 def damage_control(readme_path: Path, stream: Stream) -> dict[str, Any]:
     original = readme_path.read_text()
-    mutations = {
+    literal_mutations = {
         "readme-oid": (
             "3a01d100e676a9a20f8dc545fed19be3419fb759",
             "0000000000000000000000000000000000000000",
@@ -686,11 +1068,88 @@ def damage_control(readme_path: Path, stream: Stream) -> dict[str, Any]:
         ),
         "readme-counter": ("| Graph commits | 133 |", "| Graph commits | 134 |"),
     }
+    mutations: list[tuple[str, str, int]] = []
+    for name, (old, new) in literal_mutations.items():
+        mutations.append((name, original.replace(old, new, 1), original.count(old)))
+
+    r14_row = next(
+        line
+        for line in original.splitlines()
+        if first_table_cell(line) == "R14-direct-old-unanswered-carrier-target"
+    )
+    forged_real_oids = r14_row.replace(
+        "`R14-direct-old-unanswered-carrier-target`",
+        "`R14-invented-real-oids`",
+        1,
+    ).replace(
+        "`blocking-finding` / `invalid` / `direct`",
+        "`no-finding` / `valid` / `direct`",
+        1,
+    )
+    mutations.extend(
+        (
+            (
+                "invented-row-real-oids-false-verdict",
+                original.replace(r14_row, r14_row + "\n" + forged_real_oids, 1),
+                1,
+            ),
+            (
+                "invented-row-no-oids",
+                original.replace(
+                    r14_row,
+                    r14_row
+                    + "\n| `R14-invented-no-oids` | none | "
+                    + "`no-finding` / `valid` / `direct` |",
+                    1,
+                ),
+                1,
+            ),
+            (
+                "duplicate-real-row",
+                original.replace(r14_row, r14_row + "\n" + r14_row, 1),
+                1,
+            ),
+            (
+                "missing-real-row",
+                original.replace(r14_row + "\n", "", 1),
+                1,
+            ),
+        )
+    )
+    row_oids = OID_PATTERN.findall(r14_row)
+    swapped_row = r14_row.replace(row_oids[0], "OID_SWAP_SENTINEL", 1)
+    swapped_row = swapped_row.replace(row_oids[1], row_oids[0], 1)
+    swapped_row = swapped_row.replace("OID_SWAP_SENTINEL", row_oids[1], 1)
+    mutations.append(
+        (
+            "swapped-same-region-oids",
+            original.replace(r14_row, swapped_row, 1),
+            1,
+        )
+    )
+    transcript_match = re.search(
+        r'"checks_passed": (\d+), "checks_total": (\d+)', original
+    )
+    if transcript_match:
+        changed_transcript = (
+            f'"checks_passed": {int(transcript_match.group(1)) + 1}, '
+            f'"checks_total": {int(transcript_match.group(2)) + 1}'
+        )
+        mutations.append(
+            (
+                "changed-transcript-counts",
+                original[: transcript_match.start()]
+                + changed_transcript
+                + original[transcript_match.end() :],
+                1,
+            )
+        )
+    else:
+        mutations.append(("changed-transcript-counts", original, 0))
+
     results: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="production-contract-readme-audit-") as root:
-        for name, (old, new) in mutations.items():
-            occurrences = original.count(old)
-            damaged = original.replace(old, new, 1)
+        for name, damaged, occurrences in mutations:
             path = Path(root) / f"{name}.md"
             path.write_text(damaged)
             result = audit_readme(path, stream)
@@ -747,7 +1206,7 @@ def main() -> int:
     parser.add_argument(
         "--damage-control",
         action="store_true",
-        help="prove OID, result, and counter mutations fail the audit",
+        help="prove README schema and evidence mutations fail the audit",
     )
     arguments = parser.parse_args()
     try:
