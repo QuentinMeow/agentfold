@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 35 focused contract regressions, and all nine damaged-mode controls,
+scenarios, 52 focused contract regressions, and all eleven damaged-mode controls,
 without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -24,11 +24,13 @@ worktree's current `automation/reconcile/reconcile.py`:
   authority edge. The POC does not synthesize a claim, evidence, retry, pickup,
   or deletion verdict. A separate contract gate described below binds concrete
   old-tip human responses to those production-authorized edges.
+- `queue_parent_state_regression_problem(old_text, new_text)` validates mutable
+  lifecycle state when the exact production identity persists from `O` to `N`.
 
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 9, "controls_total": 9, "failures": [], "git": "git version 2.55.0", "passed": 84, "python": "3.14.7", "summary": "PASS", "total": 84}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 11, "controls_total": 11, "failures": [], "git": "git version 2.55.0", "passed": 101, "python": "3.14.7", "summary": "PASS", "total": 101}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -57,9 +59,11 @@ histories must remain absent from the chosen deletion through `N`. Missing Git
 objects, shallow required history, unrelated tips, and multiple merge bases
 return structured `unreadable` or `ambiguous` results rather than absence.
 
-When the old-tip occurrence at `O` has a concrete human response, every
-candidate authority parent must preserve every concrete response/binding field
-from `O`. For a decision this is the response field and value. For a review it
+When the old-tip occurrence at `O` has a concrete human response, every real
+carrying parent implicated in the event must preserve every concrete
+response/binding field from `O`. This includes each direct authority parent and
+both the authority and propagation parents of a supplier adoption. For a
+decision this is the response field and value. For a review it
 also includes the local review target and its content revision, plus the bound
 `Reviewed revision` and terminal `Review outcome` when those were already
 concrete at `O`. Fields that were still pending at `O` may be filled by the
@@ -69,13 +73,23 @@ explicit pending sentinel. Backticks, blank or generic placeholders, suffixes,
 and Unicode lookalikes are binding values and are preserved exactly. `Reviewed
 revision` and `Review outcome` retain the production lifecycle's existing
 pending/placeholder fill rules. The comparison is anchored to `O`, uses the same
-production identity, and runs after the production edge validator. A mismatch
-turns the event invalid while retaining the production edge verdict, full
-authority-parent and `O` OIDs, and both bindings. The gate is in raw
-direct-event construction, so supplier mode inherits it from the sole earlier
-authority event; a propagation edge cannot bypass it. An unanswered `O` has no
-concrete binding to copy and therefore does not prohibit a valid candidate-side
-response.
+production identity, and runs after the production edge validator. Candidate
+parents may add values only for fields pending at `O`, and all concrete
+candidate values must unify across the implicated parents. A mismatch turns the
+event invalid while retaining the production edge verdict, full parent and `O`
+OIDs, and both bindings. An unanswered carrying parent is neutral to this
+comparison; the authority parent must still pass the real production deletion
+validator. An unanswered `O` has no concrete binding to copy and therefore does
+not prohibit a valid candidate-side response.
+
+Endpoint preservation is checked separately from Git rename detection. If the
+same production identity remains at `N`, the classifier requires exactly one
+occurrence at `O` and `N` and calls the production
+`queue_parent_state_regression_problem` helper on those texts. A low-similarity
+move that Git reports as delete-plus-add therefore cannot erase or replace a
+concrete human response/review binding or regress an in-repair claim merely by
+keeping the same immutable identity. Production-valid pending fills and
+terminal transitions remain allowed; multiplicity fails closed.
 
 The two event modes are disjoint:
 
@@ -147,7 +161,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 84.
+scenario total remains 101.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -187,7 +201,7 @@ makes `--self-test` exit nonzero.
 | P16 | `P16-PCX-08-invalid-supplier-claimed-carrier` | invalid supplier; claimed carrier remains propagation |
 | P17 | `P17-post-event-reintroduction` | ambiguous discontinuity through `N` |
 | P18 | fifteen `P18a`-`P18o` cases | tip/history/object failures plus missing, non-commit, unrelated, and after-`N` `M` values fail structurally; `M=C` and `M=N` pass the range gate |
-| P19 | `P19-production-identities` | path-independent ordinary identity, payload distinction, typed generated retry, and multimap multiplicity asserted |
+| P19 | `P19-production-identities` | path-independent ordinary identity, payload distinction, typed generated retry, and duplicate multiplicity 2 emitted as blocking ambiguity |
 | P20 | `P20-lifecycle-types` | ordinary agent, human decision, generated retry, and task pickup use four production validator leaves |
 | P21 | `P21-PCX-17c-squash-erasure` | invalid; squash contains no surviving claim edge |
 | P22 | `P22-PCX-18-one-pass-many-actions` | 16 actions across 133 enumerated commits; one graph walk, eight valid and eight findings |
@@ -535,6 +549,46 @@ identity calls and two authority calls, and retained propagation
 `acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e`. Its concrete replacement revision
 was `sha256:62b8e9ca2b243a2fc6baf048001d518d73455c3829217d3703fede4cd2f524b9`.
 
+### Implicated-parent and persisted-state regressions
+
+Eight r13 review fixtures bind all concrete review fields across every parent
+that carries the occurrence into a direct deletion or supplier adoption. The
+three supplier negatives reproduce the independent target, revision, and
+terminal-outcome false greens: the source authority edge still has
+`problem: null`, but the propagation parent conflicts and the result is
+`invalid supplier`. The matching direct fixtures block through either the same
+O-anchored unification or the independently invalid production deletion edge.
+Both identical-binding fixtures remain valid.
+
+| Case | C / O / M / N | Classification / evidence / mode |
+|---|---|---|
+| `R13-direct-review-binding-identical` | `d6d18f0c56d196748c9a94adad1191e68722eb4a` / `7e0284f9a2354f44218502da59ca365cff918285` / `429a42042f2544e7c6a64e1cdd4085cd88f12118` / `88dc201a2aae2ad0b8984b58fff19f45c78d7859` | `no-finding` / `valid` / `direct` |
+| `R13-direct-review-binding-target` | `8454b9025487d126acbb3eb278584199e4d93bc2` / `75d9c282afe629e2fee58b878ffe93481926e719` / `550cce0661417e0b707d14904559142d585333fb` / `74f92dd03eaf05333a9e7168644bbae38b7bb50f` | `blocking-finding` / `invalid` / `direct` |
+| `R13-direct-review-binding-revision` | `f7d60f4ef43874a6e2045634265a8bb7968e07f4` / `e51c37206f2fa3f2d3a5ee9ff92aeaedc0aa431b` / `37fbca351cfb6d4d34d8fe2e8ad7c9a9e499cd5e` / `a4d2d52e8f40a5ba80cf350bd00db494c92c2eae` | `blocking-finding` / `invalid` / `direct` |
+| `R13-direct-review-binding-terminal` | `32a00d09012a40145f9abdaedea2734348c68e5f` / `d784ca71704ac0bd18e1a70b45c18d1994353eb9` / `9bb9aeeaf1479c58354889ebbc41eb7c6a61cb95` / `6677edfd8778a755904939d01b070af66f32bcaa` | `blocking-finding` / `invalid` / `direct` |
+| `R13-supplier-review-binding-identical` | `14976a93658e5bcfe9339368e77f82e77f31830d` / `ffc5d33bc00724fa377f13ce6ed824f6dc9fc02b` / `afc8edcc93e5de5da648126ad821357cd8500d2d` / `962821fb4d4faabe72c3b8e86823a5367aa3294f` | `no-finding` / `valid` / `supplier` |
+| `R13-supplier-review-binding-target` | `874d2e356033d133cd409bc9deb8e93198d0ec78` / `adf1ce7876b84e595992f5865f871b59ea892234` / `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` / `8c3e7d42c53baf018d30c895ecd64b799edb5d45` | `blocking-finding` / `invalid` / `supplier` |
+| `R13-supplier-review-binding-revision` | `52fe1848f1536143161e717bf436ee8c8b07df59` / `e7a884697094e9be1c876b78fc33d9e259d92149` / `200871b889045e16a784c3de722863123881f7af` / `8fd2e814f38bf145bd7c84d9e22a355056d40649` | `blocking-finding` / `invalid` / `supplier` |
+| `R13-supplier-review-binding-terminal` | `e93ff6925d5008e9c95866628b410dda5b293e91` / `60538a926a9acd01f898ba0371ad5249c912f7fc` / `128875ca6b9fff728b2f964bd81eb8841229bcdc` / `1031e6315881cdc99376df52bcddc86a4427e920` | `blocking-finding` / `invalid` / `supplier` |
+
+Nine more fixtures move one persisted identity to a low-similarity path. Every
+fixture's ordinary `git diff --name-status -M` reports separate add and delete
+records, while the real production identity remains equal. Mutable-state
+regressions block with no selected deletion event; unchanged state, a pending
+review fill, and a production-valid terminal transition remain clean.
+
+| Case | C / O / M / N | Classification / evidence / mode |
+|---|---|---|
+| `R13-persisted-same-state` | `34089c5a8bf0c393bdb911aea9ffcf69da495809` / `b73bd74bcba8fc1b97b8189e47cd78f51076722f` / `fa57286c31867077c78f2b1bfe0157729b752262` / `f73f8751a3165dc092e2af0dc8844f97aa247490` | `no-finding` / `none` / `none` |
+| `R13-persisted-response-removal` | `4bbbfeb373a3741e2b7c8139976a579fb7ff14e6` / `ff8f75e910fe1542181570bc8b343febf4c845ee` / `177053ea29f00bc407ab77b8c36287176f54c8c1` / `34841ac3ec6b3cb54ea6d0eb8876eed6a44df14e` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-response-change` | `04f3902eeabc87c4c9f17daf3306c4fcf17d2714` / `8720e7a22a48160e52897305fd8e86f995b72831` / `706355acc9f90b4ced0e69570b155d600bee6345` / `90d9b1acd598e21ecf50c31b3ea9f78846b655ab` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-target-change` | `4e9f8efea91eeb1f860446130f6dd083bd9590e2` / `943d76d2e2a865a542c2e426c2d7210d2a3c19ed` / `cb9160db1c76278bebe5a46f3799f7a55d2286b6` / `b4d0ba5d6cd0a18bc81690cf04a6afb320e8f9f4` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-revision-change` | `69f395ab3b14fccfb1734109b83207fc2cc7d380` / `41de4c761543359451ca75192de27a26626872bd` / `5156fda9fc8516c50494b28bcb7a3801c5279da1` / `30c990c8f63441403181e83d0af8df2827440f13` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-outcome-change` | `15998cacabae761751f450baa9bf5962dd2d515d` / `cbd0bc686b720013ba6dc6794e6efe6784b84e52` / `2e145664b26f06feefdd804efe1e7613af03488f` / `f22ced0892c43d768d89d90efca2074a3e0e9dd8` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-claim-loss` | `97642715dfd4580df8ea64fa678d3abe3bcb7007` / `c028d60de17177c721b6ef7d4dc71b07d2fc9b97` / `25b44dd4c97fcb60312c4a5398754863e74b74ed` / `4595f1a9fba7a6ddbe159d3c4a3fa5b50d4bfeb0` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-pending-fill` | `aebcd8d1b7a26e6faf6266b3257d0e26789fda56` / `9046cc7436d38fe27e9742474ca2f2a0f5ddeba2` / `c030064bf29ee5db19b2b9bf10d1e585aa0c1df4` / `a75533ee2e4fec8934262915491d5b19887dcfe6` | `no-finding` / `none` / `none` |
+| `R13-persisted-terminal-fill` | `fe8027f857ecc527c2f384bb6bea02bbecc3edf8` / `78b0bd0501691497767357e03ce00b0448603671` / `f78101217f5b6d54e602d599f7f509eb1ecbe846` / `ef7fbcec578ff440081586c956640ca1e4db39d4` | `no-finding` / `none` / `none` |
+
 `R8-adapter-M-input-variants` runs three classifiers over the same committed
 graph rather than changing the real adapter. Its OIDs are:
 
@@ -601,7 +655,7 @@ as valid and emitted eight findings. These are measured counts from that run:
 | Production identity calls | 32 |
 | Production authority calls | 32 |
 | `cat-file --batch` processes | 1 |
-| Git processes, including production validator calls | 267 |
+| Actual Git child processes, including production validator calls | 135 |
 
 The fixture OIDs were:
 
@@ -617,6 +671,15 @@ ceiling. At 10 graph commits, the classifier returned its normal valid verdict.
 At 11 graph commits with a limit of 10, it returned structured ambiguity,
 selected no event, and made zero identity or authority calls. The result carries
 `limit_is_launch_ceiling: false`; this POC does not guess a production ceiling.
+
+The zero `Per-action history walks` counter is scoped to POC-owned traversal;
+zero POC-owned per-action history walks is not a claim of zero total per-commit
+history queries. Independent OS-launch instrumentation observed the same 135 Git
+children: 132 `subprocess.run` launches and three `cat-file` processes. The 132
+include one graph enumeration, one merge-base query, one revision parse, and 129
+imported production `git rev-list --parents -n 1` queries. A production
+integration must reuse the enumerated parent cache, eliminate those queries, and
+set a measured process budget.
 
 PCX-19 temporarily removed loose blob
 `22c64f4979ae39fb51a881c576f38740bc78b7f3`. The first classification returned
@@ -647,6 +710,8 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
 ```
 
 | Control | Baseline -> damaged | Status | C / O / M / N |
@@ -660,33 +725,35 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `omit-old-tip-human-binding` | blocking -> no finding | `OBSERVED_RED` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` |
 | `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` |
 | `broad-review-pending-normalization` | blocking -> no finding | `OBSERVED_RED` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` |
+| `omit-supplier-carrier-human-binding` | blocking -> no finding | `OBSERVED_RED` | `874d2e356033d133cd409bc9deb8e93198d0ec78` / `adf1ce7876b84e595992f5865f871b59ea892234` / `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` / `8c3e7d42c53baf018d30c895ecd64b799edb5d45` |
+| `skip-preserved-state-validation` | blocking -> no finding | `OBSERVED_RED` | `97642715dfd4580df8ea64fa678d3abe3bcb7007` / `c028d60de17177c721b6ef7d4dc71b07d2fc9b97` / `25b44dd4c97fcb60312c4a5398754863e74b74ed` / `4595f1a9fba7a6ddbe159d3c4a3fa5b50d4bfeb0` |
 
 ## Evidence audit
 
 The committed [audit_readme.py](audit_readme.py) is a standard-library-only
 checker for this evidence. It reads a self-test JSONL stream and verifies all
-295 README Git OID occurrences against their named scenario/control regions,
+371 README Git OID occurrences against their named scenario/control regions,
 all seven fixture identity SHA claims, scenario and control result rows, the 20
 PCX attack rows, measured counters, totals, aliases, controls, and nonclaims.
 It rejects an OID that merely occurs in some unrelated record and rejects every
 unmapped README OID. No historical-OID exemption is used.
 
-Two fresh 95-record streams were generated in different scratch roots with
+Two fresh 114-record streams were generated in different scratch roots with
 `PYTHONHASHSEED=1` and `PYTHONHASHSEED=777`. They had zero differing records and
 zero differing fields. Their raw bytes happened to match in the tested macOS,
 Python 3.14.7, and Git 2.55.0 environment, at
-`f8d874824d4374ebbc779caeef0bc981f1cbe31b9f02a981c2a9a9368217a820`.
+`38089284c35b45d423b381a392e9af630759f54e608c6ca5d66724a8c096aa10`.
 That raw digest is an observed replay result, not a portable contract: the raw
 summary includes the Python and Git version strings. The auditor also defines
 a canonical semantic stream by removing only those two summary fields and
 canonicalizing JSON object serialization. It retains every Git OID, reason,
 path, result, edge, and metric. Canonical semantic SHA-256:
-`ad6d69bea355f93d06469e628991e12e75534b3137699310105b10f9d8f667cd`.
+`260df843ac7c9846aa20f132a79711a00d3a77511bdb82534cbc3f31ae79a3e8`.
 
 The ordinary two-stream audit output was:
 
 ```json
-{"audit": "PASS", "checks_passed": 1016, "checks_total": 1016, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 23, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 295, "pcx_rows": 20, "pinned_controls": 9, "pinned_scenarios": 84, "record_rows": 65, "region_oid_claims": 295, "semantic_row_checks": 92, "unique_oids": 255}
+{"audit": "PASS", "checks_passed": 1286, "checks_total": 1286, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 23, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 371, "pcx_rows": 20, "pinned_controls": 11, "pinned_scenarios": 101, "record_rows": 84, "region_oid_claims": 371, "semantic_row_checks": 131, "unique_oids": 323}
 ```
 
 The audit damage control makes three disposable README copies and changes one
@@ -694,8 +761,8 @@ current OID, the PCX-01 result, or the 133-commit counter. All three damaged
 copies returned audit `FAIL`. It also changes one semantic result field in a
 disposable comparison stream; strict comparison reports one differing record
 and one differing field. The wrapper returned `PASS` with four `OBSERVED_RED`
-records. These audit-only controls are separate from the nine classifier
-damaged-mode controls and do not change the 84-scenario/9-control self-test
+records. These audit-only controls are separate from the eleven classifier
+damaged-mode controls and do not change the 101-scenario/11-control self-test
 inventory.
 
 ## Commands run
@@ -714,25 +781,27 @@ PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/re
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
-root_a="$(mktemp -d /tmp/production-contract-r12-seed1.XXXXXX)"
-root_b="$(mktemp -d /tmp/production-contract-r12-seed777.XXXXXX)"
-PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r12-seed1.jsonl
-PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r12-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r12-seed1.jsonl --compare /tmp/production-contract-r12-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r12-seed1.jsonl --damage-control
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
+root_a="$(mktemp -d /tmp/production-contract-r13-seed1.XXXXXX)"
+root_b="$(mktemp -d /tmp/production-contract-r13-seed777.XXXXXX)"
+PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r13-seed1.jsonl
+PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r13-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r13-seed1.jsonl --compare /tmp/production-contract-r13-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r13-seed1.jsonl --damage-control
 python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 84/84
-scenarios, 4/4 executable aliases, and 9/9 controls. Each standalone control
+The installer and bytecode compilation exited `0`. The self-test passed 101/101
+scenarios, 4/4 executable aliases, and 11/11 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
 first commit hook selected no repository test files because this directory is a
 design record path. A commit-message-only amend then selected the full lane
 because its staged diff was empty; all 16/16 repository test files passed.
-The r12 evidence pass explicitly reran that full lane; 16/16 files passed in
-56.50 seconds.
+The r13 evidence pass explicitly reran that full lane; 16/16 files passed in
+55.79 seconds.
 
 ## Nonclaims and tests not run
 

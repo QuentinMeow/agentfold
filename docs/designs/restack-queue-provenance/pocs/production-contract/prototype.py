@@ -98,6 +98,8 @@ class Damage:
     omit_old_tip_human_binding: bool = False
     treat_review_pending_as_concrete: bool = False
     broad_review_pending_normalization: bool = False
+    omit_supplier_carrier_human_binding: bool = False
+    skip_preserved_state_validation: bool = False
 
 
 @dataclasses.dataclass
@@ -125,26 +127,18 @@ def is_git_command(command) -> bool:
 
 @contextlib.contextmanager
 def count_production_git(metrics: Metrics):
-    """Count Git children spawned by imported production helpers."""
-
-    def counted_run(command, *args, **kwargs):
-        if is_git_command(command):
-            metrics.git_processes += 1
-        return REAL_RUN(command, *args, **kwargs)
+    """Count each Git child spawned by imported production helpers once."""
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
             metrics.git_processes += 1
         return REAL_POPEN(command, *args, **kwargs)
 
-    original_run = subprocess.run
     original_popen = subprocess.Popen
-    subprocess.run = counted_run
     subprocess.Popen = counted_popen
     try:
         yield
     finally:
-        subprocess.run = original_run
         subprocess.Popen = original_popen
 
 
@@ -297,7 +291,7 @@ class GitRepository:
 
 
 def run_git(root: Path, metrics: Metrics, *arguments, check=True):
-    metrics.git_processes += 1
+    # count_production_git observes this subprocess at the Popen boundary.
     result = REAL_RUN(
         ["git", *arguments],
         cwd=root,
@@ -789,20 +783,30 @@ class Classifier:
             or normalized == "pending"
         )
 
-    def old_tip_human_binding_problem(
-        self, identity: tuple, authority_edges: list[dict]
+    def implicated_human_binding_problem(
+        self,
+        identity: tuple,
+        revisions: Iterable[str],
+        parent_role: str,
+        *,
+        ignore_unanswered: bool,
     ) -> str | None:
-        if self.damage.omit_old_tip_human_binding:
-            return None
         expected = self.human_response_binding(identity, self.fixture.O)
-        if expected is None:
+        if (
+            expected is None
+            and self.identity_view(identity)["actor"] != "needs-human"
+        ):
             return None
-        expected_fields = dict(expected)
-        for edge in authority_edges:
+        expected_fields = dict(expected or ())
+        observed_by_revision = {}
+        for revision in self.stable_oids(revisions):
             observed = self.human_response_binding(
-                identity, edge["parent"]
+                identity, revision
             )
+            if observed is None and ignore_unanswered:
+                continue
             observed_fields = dict(observed or ())
+            observed_by_revision[revision] = observed_fields
             mismatches = {
                 key: {
                     "expected": value,
@@ -813,7 +817,7 @@ class Classifier:
             }
             if mismatches:
                 return (
-                    f"authority parent {edge['parent']} does not preserve "
+                    f"{parent_role} parent {revision} does not preserve "
                     f"every concrete O-anchored human response/review "
                     f"binding field at "
                     f"O {self.fixture.O}: expected "
@@ -821,7 +825,57 @@ class Classifier:
                     f"observed {json.dumps(observed_fields, sort_keys=True)}, "
                     f"mismatches {json.dumps(mismatches, sort_keys=True)}"
                 )
+        field_values: dict[str, dict[str, list[str]]] = {}
+        for revision, observed_fields in observed_by_revision.items():
+            for key, value in observed_fields.items():
+                field_values.setdefault(key, {}).setdefault(
+                    value, []
+                ).append(revision)
+        conflicts = {
+            key: values
+            for key, values in field_values.items()
+            if len(values) > 1
+        }
+        if conflicts:
+            return (
+                f"{parent_role} parents do not unify concrete human "
+                f"response/review binding fields implicated in the event: "
+                f"O {self.fixture.O} expected "
+                f"{json.dumps(expected_fields, sort_keys=True)}, observed "
+                f"{json.dumps(observed_by_revision, sort_keys=True)}, "
+                f"conflicts {json.dumps(conflicts, sort_keys=True)}"
+            )
         return None
+
+    def old_tip_human_binding_problem(
+        self, identity: tuple, authority_edges: list[dict]
+    ) -> str | None:
+        if self.damage.omit_old_tip_human_binding:
+            return None
+        return self.implicated_human_binding_problem(
+            identity,
+            (edge["parent"] for edge in authority_edges),
+            "authority",
+            ignore_unanswered=False,
+        )
+
+    def supplier_carrier_human_binding_problem(
+        self,
+        identity: tuple,
+        authority_edges: list[dict],
+        propagation_edges: list[dict],
+    ) -> str | None:
+        revisions = [edge["parent"] for edge in authority_edges]
+        if not self.damage.omit_supplier_carrier_human_binding:
+            revisions.extend(
+                edge["parent"] for edge in propagation_edges
+            )
+        return self.implicated_human_binding_problem(
+            identity,
+            revisions,
+            "supplier authority/propagation",
+            ignore_unanswered=True,
+        )
 
     def parent_roles(self, identity: tuple, child: str):
         assert self.graph is not None
@@ -1074,33 +1128,6 @@ class Classifier:
     @staticmethod
     def stable_oids(oids):
         return list(dict.fromkeys(oids))
-
-    def response_conflict(
-        self,
-        identity: tuple,
-        authority_edges: list[dict],
-        carrying: list[str],
-    ) -> str | None:
-        if self.identity_view(identity)["actor"] != "needs-human":
-            return None
-        responses = set()
-        revisions = [
-            edge["parent"] for edge in authority_edges
-        ] + carrying
-        for revision in revisions:
-            states = self.states(revision, identity)
-            if len(states) != 1:
-                continue
-            fields = RECONCILE.human_response_fields(states[0].text)
-            key = RECONCILE.first_concrete_response(fields)
-            if key:
-                responses.add((key, fields[key]))
-        if len(responses) > 1:
-            return (
-                "carrying and supplier lineages contain conflicting concrete "
-                "human responses"
-            )
-        return None
 
     def supplier_base_events(self, identity: tuple) -> list[Event]:
         """Build nested supplier events while preserving original authority."""
@@ -1399,9 +1426,14 @@ class Classifier:
                     )
                     observed_sources.append(result)
                 else:
-                    conflict = self.response_conflict(
-                        identity, authority_edges, carrying
+                    binding_problem = (
+                        self.supplier_carrier_human_binding_problem(
+                            identity,
+                            authority_edges,
+                            propagation_edges,
+                        )
                     )
+                    conflict = binding_problem
                     if conflict:
                         result = Event(
                             "invalid",
@@ -1411,7 +1443,11 @@ class Classifier:
                             propagation_edges,
                             accumulated_neutral,
                             accumulated_absent,
-                            "conflicting-human-response",
+                            (
+                                "old-tip-human-binding-conflict"
+                                if binding_problem
+                                else "conflicting-human-response"
+                            ),
                             conflict,
                         )
                         result = self.attach_causal_metadata(
@@ -1804,22 +1840,47 @@ class Classifier:
         C_states = self.states(self.fixture.C, identity)
         N_states = self.states(self.fixture.N, identity)
         if N_states:
-            if len(N_states) == len(old_states):
+            if len(N_states) != len(old_states) or len(N_states) != 1:
                 return {
                     **base,
-                    "status": "none",
-                    "finding": False,
-                    "authoring_lineage": "preserved",
-                    "reason_code": "identity-preserved",
-                    "reason": "the exact production identity remains live",
+                    "status": "ambiguous",
+                    "finding": True,
+                    "authoring_lineage": "multiplicity-changed",
+                    "reason_code": "endpoint-multiplicity-change",
+                    "reason": (
+                        "persisted production identity does not have one "
+                        "unambiguous O-to-N occurrence"
+                    ),
+                }
+            state_problem = (
+                None
+                if self.damage.skip_preserved_state_validation
+                else RECONCILE.queue_parent_state_regression_problem(
+                    old_states[0].text, N_states[0].text
+                )
+            )
+            if state_problem:
+                return {
+                    **base,
+                    "status": "invalid",
+                    "finding": True,
+                    "authoring_lineage": "persisted-state-regression",
+                    "reason_code": "persisted-state-regression",
+                    "reason": (
+                        "the production identity remains live but its "
+                        f"O-anchored mutable state regressed: {state_problem}"
+                    ),
                 }
             return {
                 **base,
-                "status": "ambiguous",
-                "finding": True,
-                "authoring_lineage": "multiplicity-changed",
-                "reason_code": "endpoint-multiplicity-change",
-                "reason": "candidate multiplicity differs from the old tip",
+                "status": "none",
+                "finding": False,
+                "authoring_lineage": "preserved",
+                "reason_code": "identity-preserved",
+                "reason": (
+                    "the exact production identity and protected mutable "
+                    "state remain live"
+                ),
             }
         effective_old = (
             old_states[:1]
@@ -3632,6 +3693,287 @@ def r10_malformed_review_binding(
     )
 
 
+def r13_review_parent_binding(
+    root: Path, *, mode: str, variant: str
+) -> Fixture:
+    """Bind every direct/supplier carrying parent to O's concrete review."""
+    if mode not in {"direct", "supplier"}:
+        raise ValueError(mode)
+    if variant not in {"identical", "target", "revision", "terminal"}:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r13-{mode}-review-{variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create awaiting-artifact carrier-binding review")
+
+    response = "recorded review" if variant == "terminal" else "approve"
+    old_outcome = "approved"
+    concrete_terminal = variant in {"identical", "terminal"}
+    repo.branch("old", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, response)
+    if concrete_terminal:
+        claim_review(repo, path, outcome=old_outcome)
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("candidate-authority", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, response)
+    authority_parent = claim_review(
+        repo, path, outcome=old_outcome if concrete_terminal else "approved"
+    )
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve matching candidate review authority",
+    )
+
+    carrier_target = target_B if variant == "target" else target_A
+    carrier_revision = revision_B if variant in {"target", "revision"} else revision_A
+    carrier_outcome = "rejected" if variant == "terminal" else "approved"
+    repo.branch("candidate-carrier", C)
+    if variant == "revision":
+        repo.write(target_A, payload_B)
+    publish_review(repo, path, carrier_target, carrier_revision)
+    answer_review(repo, path, response)
+    if mode == "direct" or concrete_terminal:
+        carrier = claim_review(repo, path, outcome=carrier_outcome)
+    else:
+        carrier = feature(repo, f"{label}-live-carrier")
+
+    if mode == "direct":
+        M = repo.merge_commit(
+            (authority_parent, carrier),
+            "directly delete review from both carrying parents",
+            writes={
+                evidence_path(label): f"# Evidence {label}: resolved\n"
+            },
+            removes=(path,),
+        )
+    else:
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt review supplier absence with carrying parent",
+            removes=(path,),
+        )
+    N = feature(repo, f"{label}-new-tip")
+    conflict = variant != "identical"
+    changed_field = {
+        "identical": None,
+        "target": "Review target",
+        "revision": "Review revision",
+        "terminal": "Review outcome",
+    }[variant]
+    return Fixture(
+        f"R13-{mode}-review-binding-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "mode": mode,
+            "variant": variant,
+            "binding_conflict": conflict,
+            "changed_field": changed_field,
+            "response": response,
+            "old_binding": [
+                target_A,
+                revision_A,
+                revision_A if concrete_terminal else "pending",
+                old_outcome if concrete_terminal else "pending",
+            ],
+            "carrier_binding": [
+                carrier_target,
+                carrier_revision,
+                (
+                    carrier_revision
+                    if mode == "direct" or concrete_terminal
+                    else "pending"
+                ),
+                (
+                    carrier_outcome
+                    if mode == "direct" or concrete_terminal
+                    else "pending"
+                ),
+            ],
+            "authority_parent": authority_parent,
+            "authority_child": M if mode == "direct" else deletion,
+            "carrier": carrier,
+            "merge": M,
+        },
+    )
+
+
+def low_similarity_delivery_text(text: str, marker: str) -> str:
+    replacement = f"**If unanswered:** {marker * 4096}"
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("**If unanswered:**"):
+            lines[index] = replacement
+            return "\n".join(lines) + "\n"
+    raise RuntimeError("fixture has no If unanswered field")
+
+
+def r13_persisted_state(root: Path, variant: str) -> Fixture:
+    """Check O/N mutable state without relying on Git rename similarity."""
+    variants = {
+        "same-state",
+        "response-removal",
+        "response-change",
+        "review-target-change",
+        "review-revision-change",
+        "review-outcome-change",
+        "claim-loss",
+        "pending-fill",
+        "terminal-fill",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r13-persisted-{variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    if variant in {
+        "review-target-change",
+        "review-revision-change",
+        "pending-fill",
+    }:
+        repo.write(target_A, payload_A)
+        repo.write(target_B, payload_B)
+        path = add_review(
+            repo,
+            label,
+            status="awaiting-artifact",
+            target="pending",
+            revision="pending",
+        )
+    elif variant in {"review-outcome-change", "terminal-fill"}:
+        repo.write(target_A, payload_A)
+        path = add_review(
+            repo,
+            label,
+            status="waiting",
+            target=target_A,
+            revision=revision_A,
+        )
+    elif variant in {"response-removal", "response-change"}:
+        path = add_human(repo, label)
+    else:
+        path = add_agent(repo, label)
+    repo.write(
+        path,
+        low_similarity_delivery_text(repo.read(path), "old-state-"),
+    )
+    C = repo.commit(f"create persisted-state {variant} at C")
+
+    repo.branch("old", C)
+    if variant in {"response-removal", "response-change"}:
+        answer(repo, path, "approve")
+    elif variant == "review-target-change":
+        publish_review(repo, path, target_A, revision_A)
+        answer_review(repo, path, "approve")
+    elif variant == "review-revision-change":
+        publish_review(repo, path, target_A, revision_A)
+        answer_review(repo, path, "approve")
+    elif variant == "review-outcome-change":
+        answer_review(repo, path, "recorded review")
+        claim_review(repo, path, outcome="rejected")
+    elif variant == "claim-loss":
+        claim(repo, (path,), "claim persisted action on old tip")
+    elif variant == "terminal-fill":
+        answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old-tip")
+
+    repo.branch("candidate", C)
+    if variant == "response-change":
+        answer(repo, path, "reject")
+    elif variant == "review-target-change":
+        publish_review(repo, path, target_B, revision_B)
+        answer_review(repo, path, "approve")
+    elif variant == "review-revision-change":
+        repo.write(target_A, payload_B)
+        publish_review(repo, path, target_A, revision_B)
+        answer_review(repo, path, "approve")
+    elif variant == "review-outcome-change":
+        answer_review(repo, path, "recorded review")
+        claim_review(repo, path, outcome="approved")
+    elif variant == "pending-fill":
+        publish_review(repo, path, target_A, revision_A)
+    elif variant == "terminal-fill":
+        answer_review(repo, path, "approve")
+        claim_review(repo, path, outcome="approved")
+    moved = str(
+        Path(path).with_name(f"non-blocking-{label}-moved.md")
+    )
+    repo.move(path, moved)
+    repo.write(
+        moved,
+        low_similarity_delivery_text(repo.read(moved), "new-state-"),
+    )
+    M = repo.commit(f"move low-similarity persisted-state {variant}")
+    N = feature(repo, f"{label}-new-tip")
+
+    old_text = repo.run("show", f"{O}:{path}").stdout
+    new_text = repo.run("show", f"{N}:{moved}").stdout
+    identity_equal = RECONCILE.queue_action_identity(
+        path, old_text
+    ) == RECONCILE.queue_action_identity(moved, new_text)
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    expected_problem = variant in {
+        "response-removal",
+        "response-change",
+        "review-target-change",
+        "review-revision-change",
+        "review-outcome-change",
+        "claim-loss",
+    }
+    return Fixture(
+        f"R13-persisted-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if expected_problem else "no-finding",
+        {
+            "variant": variant,
+            "old_path": path,
+            "new_path": moved,
+            "production_identity_equal": identity_equal,
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+            "expected_state_problem": expected_problem,
+        },
+    )
+
+
 def r8_adapter_M_variants(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
@@ -4606,7 +4948,7 @@ def p19_identities(root: Path) -> Fixture:
         O,
         M,
         N,
-        "no-finding",
+        "blocking-finding",
         {
             "ordinary_identity_path_independent": (
                 ordinary_first == ordinary_second
@@ -5218,6 +5560,33 @@ def scenario_builders():
             malformed_value="______",
             slug="generic-placeholder",
         ),
+        *[
+            (
+                lambda root, mode=mode, variant=variant:
+                r13_review_parent_binding(
+                    root, mode=mode, variant=variant
+                )
+            )
+            for mode in ("direct", "supplier")
+            for variant in ("identical", "target", "revision", "terminal")
+        ],
+        *[
+            (
+                lambda root, variant=variant:
+                r13_persisted_state(root, variant)
+            )
+            for variant in (
+                "same-state",
+                "response-removal",
+                "response-change",
+                "review-target-change",
+                "review-revision-change",
+                "review-outcome-change",
+                "claim-loss",
+                "pending-fill",
+                "terminal-fill",
+            )
+        ],
         r8_adapter_M_variants,
         r8_adapter_M_endpoint_counterexample,
     ]
@@ -5233,6 +5602,8 @@ CONTROL_NAMES = (
     "omit-old-tip-human-binding",
     "literal-review-pending-treated-concrete",
     "broad-review-pending-normalization",
+    "omit-supplier-carrier-human-binding",
+    "skip-preserved-state-validation",
 )
 
 
@@ -5657,7 +6028,7 @@ def validate_result(result: dict):
             or status != "invalid"
             or result["event_mode"] != "supplier"
             or action["reason_code"] != "upstream-invalid-supplier"
-            or "conflicting-human-response" not in action["reason"]
+            or "old-tip-human-binding-conflict" not in action["reason"]
             or not all(
                 adoption in action["reason"]
                 for adoption in details["adoptions"]
@@ -5697,7 +6068,7 @@ def validate_result(result: dict):
             zip(details["carriers"], details["adoptions"], strict=True)
         )
         expected_reason_tokens = [
-            f"conflicting-human-response@{source}"
+            f"old-tip-human-binding-conflict@{source}"
             for source in details["source_children"]
         ]
         all_oids = (
@@ -5749,7 +6120,7 @@ def validate_result(result: dict):
             zip(details["carriers"], details["adoptions"], strict=True)
         )
         expected_reason_tokens = (
-            f"conflicting-human-response@{details['source_children'][0]}",
+            f"old-tip-human-binding-conflict@{details['source_children'][0]}",
             f"valid-direct-authority@{details['source_children'][1]}",
         )
         all_oids = (
@@ -6279,6 +6650,140 @@ def validate_result(result: dict):
             or not Classifier.broad_review_pending(details["old_value"])
         ):
             errors.append("R10 malformed review binding was normalized")
+    if scenario.startswith("R13-") and "review-binding" in scenario:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        expected_authority = 2 if details["mode"] == "direct" else 1
+        expected_propagation = 1 if details["mode"] == "supplier" else 0
+        authority_pairs = {
+            (edge["parent"], edge["child"])
+            for edge in result["authority_edges"]
+        }
+        authority_by_parent = {
+            edge["parent"]: edge for edge in result["authority_edges"]
+        }
+        source_edge = authority_by_parent.get(
+            details["authority_parent"]
+        )
+        carrier_edge = authority_by_parent.get(details["carrier"])
+        binding_reason = (
+            "old-tip-human-binding-conflict" in reason_codes
+        )
+        binding_reason_complete = (
+            result["O"] in action["reason"]
+            and details["changed_field"] in action["reason"]
+            and all(
+                value in action["reason"]
+                for value in (
+                    details["old_binding"]
+                    + details["carrier_binding"]
+                )
+                if value != "pending"
+            )
+        ) if action is not None and details["binding_conflict"] else True
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"]
+            != (
+                "blocking-finding"
+                if details["binding_conflict"]
+                else "no-finding"
+            )
+            or result["event_mode"] != details["mode"]
+            or len(authority) != expected_authority
+            or source_edge is None
+            or source_edge["problem"] is not None
+            or len(propagation) != expected_propagation
+            or (
+                details["authority_parent"],
+                details["authority_child"],
+            )
+            not in authority_pairs
+            or (
+                details["mode"] == "direct"
+                and (details["carrier"], details["merge"])
+                not in authority_pairs
+            )
+            or (
+                details["mode"] == "supplier"
+                and (details["carrier"], details["merge"])
+                not in propagation
+            )
+            or (
+                details["binding_conflict"]
+                and (
+                    (
+                        details["mode"] == "supplier"
+                        and not binding_reason
+                    )
+                    or (
+                        details["mode"] == "direct"
+                        and not binding_reason
+                        and (
+                            carrier_edge is None
+                            or carrier_edge["problem"] is None
+                        )
+                    )
+                    or (binding_reason and not binding_reason_complete)
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and (
+                    binding_reason
+                    or any(
+                        edge["problem"] is not None
+                        for edge in result["authority_edges"]
+                    )
+                )
+            )
+        ):
+            errors.append(
+                "R13 direct/supplier parent review binding drifted"
+            )
+    if scenario.startswith("R13-persisted-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        expected_problem = details["expected_state_problem"]
+        if (
+            action is None
+            or not details["production_identity_equal"]
+            or not details["low_similarity_delete_add"]
+            or action["paths"]["O"] != [details["old_path"]]
+            or action["paths"]["N"] != [details["new_path"]]
+            or action["multiplicity"]["O"] != 1
+            or action["multiplicity"]["N"] != 1
+            or authority
+            or propagation
+            or result["event_mode"] != "none"
+            or status != ("invalid" if expected_problem else "none")
+            or result["classification"]
+            != ("blocking-finding" if expected_problem else "no-finding")
+            or action["reason_code"]
+            != (
+                "persisted-state-regression"
+                if expected_problem
+                else "identity-preserved"
+            )
+            or (
+                expected_problem
+                and "O-anchored mutable state regressed"
+                not in action["reason"]
+            )
+        ):
+            errors.append(
+                "R13 persisted identity mutable-state gate drifted"
+            )
     if scenario == "R8-adapter-M-input-variants":
         details = result["details"]
         variants = result.get("adapter_input_evidence", {})
@@ -6467,6 +6972,20 @@ def control_builder(name: str, root: Path):
                 slug="backtick-dotless",
             ),
             Damage(broad_review_pending_normalization=True),
+            "no-finding",
+        )
+    if name == "omit-supplier-carrier-human-binding":
+        return (
+            r13_review_parent_binding(
+                root, mode="supplier", variant="target"
+            ),
+            Damage(omit_supplier_carrier_human_binding=True),
+            "no-finding",
+        )
+    if name == "skip-preserved-state-validation":
+        return (
+            r13_persisted_state(root, "claim-loss"),
+            Damage(skip_preserved_state_validation=True),
             "no-finding",
         )
     raise ValueError(name)

@@ -22,8 +22,8 @@ from typing import Any, Iterable
 
 OID_PATTERN = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])")
 FIXTURE_SHA_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
-EXPECTED_SCENARIOS = 84
-EXPECTED_CONTROLS = 9
+EXPECTED_SCENARIOS = 101
+EXPECTED_CONTROLS = 11
 EXPECTED_ALIASES = 4
 
 
@@ -357,7 +357,7 @@ def audit_costs(readme: str, scenarios: dict[str, dict[str, Any]], checks: Check
         "Production identity calls": many["metrics"]["identity_calls"],
         "Production authority calls": many["metrics"]["authority_calls"],
         "`cat-file --batch` processes": many["metrics"]["batch_processes"],
-        "Git processes, including production validator calls": many["metrics"]["git_processes"],
+        "Actual Git child processes, including production validator calls": many["metrics"]["git_processes"],
     }
     count = 0
     for label, value in expected_costs.items():
@@ -404,9 +404,9 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     controls = stream.controls
     records = scenarios | controls
 
-    checks.require(len(stream.objects) == 95, "self-test stream is not 95 records")
-    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 84")
-    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 9")
+    checks.require(len(stream.objects) == 114, "self-test stream is not 114 records")
+    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 101")
+    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 11")
     summary_expected = {
         "aliases_passed": EXPECTED_ALIASES,
         "aliases_total": EXPECTED_ALIASES,
@@ -420,8 +420,8 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     for key, expected in summary_expected.items():
         checks.require(stream.summary.get(key) == expected, f"summary field {key} differs")
     for phrase in (
-        "49 prescribed real-Git scenarios, 35 focused contract regressions, and all nine damaged-mode controls",
-        "84/84 scenarios, 4/4 executable aliases, and 9/9 controls",
+        "49 prescribed real-Git scenarios, 52 focused contract regressions, and all eleven damaged-mode controls",
+        "101/101 scenarios, 4/4 executable aliases, and 11/11 controls",
     ):
         checks.require(normalized(phrase) in normalized(readme), f"missing total claim: {phrase}")
 
@@ -507,8 +507,13 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
         ),
         (
             "### Malformed review target and revision",
-            "`R8-adapter-M-input-variants` runs three classifiers",
+            "### Implicated-parent and persisted-state regressions",
             [name for name in scenarios if name.startswith("R10-")],
+        ),
+        (
+            "### Implicated-parent and persisted-state regressions",
+            "`R8-adapter-M-input-variants` runs three classifiers",
+            [name for name in scenarios if name.startswith("R13-")],
         ),
         (
             "`R8-adapter-M-input-variants` runs three classifiers",
@@ -572,6 +577,8 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
         "no push-prevention claim is made.",
         "Squash remains unsupported.",
         "it must not automatically substitute either `O` or `N`.",
+        "zero POC-owned per-action history walks is not a claim of zero total per-commit history queries.",
+        "production integration must reuse the enumerated parent cache, eliminate those queries, and set a measured process budget.",
         "No production code, schema, task record, contract, dependency, adapter, or neighboring POC changed",
         "no branch was pushed or pull request opened.",
     )
