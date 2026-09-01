@@ -122,6 +122,7 @@ class Damage:
     first_parent_carry_only: bool = False
     skip_carry_compatibility: bool = False
     unmetered_cone_work: bool = False
+    reopen_outside_c_boundary_ancestry: bool = False
 
 
 @dataclasses.dataclass
@@ -543,6 +544,8 @@ class Graph:
         N: str,
         objects: ObjectDatabase,
         metrics: Metrics,
+        *,
+        reopen_outside_c_boundary_ancestry: bool = False,
     ):
         self.root = root
         self.O = O
@@ -584,17 +587,17 @@ class Graph:
         except Unreadable as error:
             raise Unreadable(f"derived C: {error}") from error
         metrics.graph_enumerations += 1
-        listing = run_git(
-            root,
-            metrics,
+        listing_arguments = [
             "--no-replace-objects",
             "rev-list",
             "--parents",
             "--topo-order",
             "--reverse",
-            O,
-            N,
-            f"^{self.C}",
+        ]
+        if not reopen_outside_c_boundary_ancestry:
+            listing_arguments.append("--ancestry-path")
+        listing = run_git(
+            root, metrics, *listing_arguments, O, N, f"^{self.C}"
         )
         self.order = [self.C]
         self.parents: dict[str, tuple[str, ...]] = {self.C: ()}
@@ -622,16 +625,21 @@ class Graph:
         if self.C not in self.old_nodes or self.C not in self.new_nodes:
             raise Unreadable("both tips must descend from C")
         self.c_descendants = self.descendants(self.C)
-        candidate_core = self.new_nodes.intersection(
+        self.intrinsic_candidate_nodes = self.new_nodes.intersection(
             self.c_descendants
         )
-        boundary_parents = {
+        self.boundary_parents = {
             parent
-            for child in candidate_core
+            for child in self.intrinsic_candidate_nodes
             for parent in self.parents.get(child, ())
             if parent not in self.c_descendants
         }
-        self.candidate_nodes = candidate_core.union(boundary_parents)
+        self.identity_nodes = (
+            self.intrinsic_candidate_nodes | self.boundary_parents
+        )
+        self.candidate_nodes = set(self.intrinsic_candidate_nodes)
+        if reopen_outside_c_boundary_ancestry:
+            self.candidate_nodes.update(self.boundary_parents)
 
     def ancestors(self, tip: str) -> set[str]:
         seen = set()
@@ -666,6 +674,11 @@ class Graph:
         """Return a commit set in the one enumerated topological order."""
         selected = set(commits)
         return [commit for commit in self.order if commit in selected]
+
+    def ordered_identity_nodes(self) -> list[str]:
+        """Enumerate intrinsic nodes, then immediate boundaries, never ancestors."""
+        intrinsic = self.ordered(self.intrinsic_candidate_nodes)
+        return intrinsic + sorted(self.boundary_parents)
 
 
 class Classifier:
@@ -3204,7 +3217,7 @@ class Classifier:
             return None
         candidate_states = [
             commit
-            for commit in self.graph.ordered(self.graph.candidate_nodes)
+            for commit in self.graph.ordered_identity_nodes()
             if self.states(commit, identity)
         ]
         if not candidate_states:
@@ -3270,6 +3283,9 @@ class Classifier:
                     fixture.N,
                     objects,
                     self.metrics,
+                    reopen_outside_c_boundary_ancestry=(
+                        self.damage.reopen_outside_c_boundary_ancestry
+                    ),
                 )
                 base["C"] = self.graph.C
                 if fixture.expected_C:
@@ -3334,9 +3350,7 @@ class Classifier:
                 ]
                 seen = set(old_snapshot)
                 candidate_identities = set()
-                for commit in self.graph.ordered(
-                    self.graph.candidate_nodes
-                ):
+                for commit in self.graph.ordered_identity_nodes():
                     candidate_identities.update(objects.snapshot(commit))
                 for identity in sorted(
                     candidate_identities - seen, key=repr
@@ -5936,44 +5950,67 @@ def r17_unreadable_boundary(root: Path) -> Fixture:
 def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
-    transient = "outside-only/transient.txt"
-    repo.write(transient, "must not be opened through a neutral boundary\n")
-    G = repo.commit("create outside-C ancestor with transient blob")
-    transient_blob = repo.tree_entry_oid(G, transient)
     label = "r17-unopened-outside-c-ancestor"
-    repo.branch("reviewed", G)
-    repo.remove(transient)
-    path = add_agent(repo, label)
-    C = repo.commit("create reviewed action after dropping transient blob")
+    R = repo.commit("create shared root")
+    repo.branch("outside", R)
+    outside_text = agent_text(label, status="blocked")
+    outside_path = add_agent(repo, label, text=outside_text)
+    G = repo.commit("create outside-C ancestor with matching identity")
+    ancestor_blob = repo.tree_entry_oid(G, outside_path)
+    repo.remove(outside_path)
+    F = repo.commit("drop matching identity before outside-C boundary")
+    repo.branch("reviewed", R)
+    c_text = agent_text(label)
+    path = add_agent(repo, label, text=c_text)
+    C = repo.commit("admit matching identity independently at C")
+    c_blob = repo.tree_entry_oid(C, path)
     repo.branch("old", C)
     O = feature(repo, f"{label}-task-patch")
-    repo.branch("outside", G)
-    repo.remove(transient)
-    F = feature(repo, f"{label}-outside-parent")
-    merge = repo.merge_commit(
+    P = repo.merge_commit(
         (C, F),
         "retain action across neutral outside-C boundary",
     )
-    repo.branch("candidate", merge)
-    claim(repo, (path,), "claim action after neutral boundary")
-    deletion = delete_with_evidence(
+    repo.branch("candidate", P)
+    K = claim(repo, (path,), "claim action after neutral boundary")
+    D = delete_with_evidence(
         repo, ((label, path),), "resolve action after neutral boundary"
     )
     N = feature(repo, f"{label}-task-patch")
-    hidden, _target = repo.hide_loose_object(transient_blob)
+    hidden, _target = repo.hide_loose_object(ancestor_blob)
     return Fixture(
         "R17-unreadable-outside-C-ancestor-stays-unopened",
         repo,
         C,
         O,
-        deletion,
+        D,
         N,
         "no-finding",
         {
+            "R": R,
             "G": G,
             "F": F,
-            "transient_blob": transient_blob,
+            "P": P,
+            "K": K,
+            "D": D,
+            "ancestor_blob": ancestor_blob,
+            "C_blob": c_blob,
+            "same_identity": (
+                RECONCILE.queue_action_identity(outside_path, outside_text)
+                == RECONCILE.queue_action_identity(path, c_text)
+            ),
+            "ancestor_blob_is_unique": ancestor_blob != c_blob,
             "hidden_ancestor_blob": hidden.relative_to(repo.root).as_posix(),
+            "attacker_reference_oids": {
+                "G": "b838a677f5753a45bff2d33f6e94b3a80cc92905",
+                "G_blob": "88ce173dddc1914b0e7ccd52f5b89fb4742a713d",
+                "C": "52c16e3ace5b2fb945b2e8fc42b7485536ea1a47",
+                "O": "5ff93e594d8689fe44774a9728a882c846e1833e",
+                "F": "4afa966344cb99e6a72a10997b10572072e7cccb",
+                "P": "6564e680097653cebcc008a0bfee8587c644057f",
+                "K": "245d7de3ef54645d32fbcf8bbda7d69f426ce6d2",
+                "D": "595acd03b0c0f5cee214599587247d1115b2fc40",
+                "N": "61d97651036a8cc9da10662ca7560bce14ce9ce5",
+            },
         },
     )
 
@@ -6767,7 +6804,11 @@ def r6_all_absent_roots(
         O,
         candidate_landmark,
         N,
-        "blocking-finding",
+        (
+            "no-finding"
+            if first_valid and second_kind == "ambiguous"
+            else "blocking-finding"
+        ),
         {
             "causal_events": roots,
             "causal_statuses": statuses,
@@ -6775,6 +6816,12 @@ def r6_all_absent_roots(
                 status != "valid" for status in statuses
             ),
             "legacy_sole_valid_false_green": first_valid,
+            "r17_disposition": (
+                "outside-C all-absent boundary is neutral at multiplicity "
+                "zero; its ambiguous ancestor root stays unopened"
+                if first_valid and second_kind == "ambiguous"
+                else None
+            ),
         },
     )
 
@@ -7991,6 +8038,7 @@ CONTROL_NAMES = (
     "first-parent-carry-proof",
     "skip-carry-compatibility",
     "unmetered-cone-work",
+    "reopen-outside-C-boundary-ancestry",
     "ignore-invalid-N-root",
     "missing-all-parent-direct-validation",
     "supplier-authority-borrowing",
@@ -8301,11 +8349,25 @@ def validate_result(result: dict):
         errors.append("R17 unreadable boundary returned partial results")
     if scenario == "R17-unreadable-outside-C-ancestor-stays-unopened":
         action = actions[0] if len(actions) == 1 else None
+        references = result["details"]["attacker_reference_oids"]
         if (
             status != "valid"
             or result["audit_exit"] != 0
             or action is None
             or result["details"]["F"] not in action["neutral_parents"]
+            or not result["details"]["same_identity"]
+            or not result["details"]["ancestor_blob_is_unique"]
+            or references != {
+                "G": "b838a677f5753a45bff2d33f6e94b3a80cc92905",
+                "G_blob": "88ce173dddc1914b0e7ccd52f5b89fb4742a713d",
+                "C": "52c16e3ace5b2fb945b2e8fc42b7485536ea1a47",
+                "O": "5ff93e594d8689fe44774a9728a882c846e1833e",
+                "F": "4afa966344cb99e6a72a10997b10572072e7cccb",
+                "P": "6564e680097653cebcc008a0bfee8587c644057f",
+                "K": "245d7de3ef54645d32fbcf8bbda7d69f426ce6d2",
+                "D": "595acd03b0c0f5cee214599587247d1115b2fc40",
+                "N": "61d97651036a8cc9da10662ca7560bce14ce9ce5",
+            }
         ):
             errors.append("R17 reopened an outside-C neutral ancestor")
     if scenario == "P2-direct-linear-invalid" and status != "invalid":
@@ -8889,9 +8951,19 @@ def validate_result(result: dict):
             errors.append(
                 "R5 reintroduction history lost a causal occurrence"
             )
+    if scenario == "R6-02-valid-plus-ambiguous-all-absent":
+        if (
+            result["classification"] != "no-finding"
+            or status != "valid"
+            or result["details"]["r17_disposition"]
+            != (
+                "outside-C all-absent boundary is neutral at multiplicity "
+                "zero; its ambiguous ancestor root stays unopened"
+            )
+        ):
+            errors.append("R6 outside-C zero boundary reopened ancestry")
     if scenario in {
         "R6-01-valid-plus-invalid-all-absent",
-        "R6-02-valid-plus-ambiguous-all-absent",
         "R6-03-two-invalid-all-absent",
     }:
         details = result["details"]
@@ -9806,7 +9878,10 @@ def control_builder(name: str, root: Path):
     if name == "restore-universal-ancestor-carry-scan":
         return (
             r17_outside_c_neutral_parent(root),
-            Damage(universal_ancestor_carry_scan=True),
+            Damage(
+                universal_ancestor_carry_scan=True,
+                reopen_outside_c_boundary_ancestry=True,
+            ),
             "blocking-finding",
         )
     if name == "ignore-outside-C-carrier":
@@ -9838,6 +9913,12 @@ def control_builder(name: str, root: Path):
             budget_fixture(root, overflow=True),
             Damage(unmetered_cone_work=True),
             "no-finding",
+        )
+    if name == "reopen-outside-C-boundary-ancestry":
+        return (
+            r17_unopened_outside_c_ancestor(root),
+            Damage(reopen_outside_c_boundary_ancestry=True),
+            "unreadable",
         )
     if name == "ignore-invalid-N-root":
         return (
