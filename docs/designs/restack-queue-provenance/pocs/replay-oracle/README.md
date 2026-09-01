@@ -59,8 +59,12 @@ Captured stderr:
 replay-oracle self-test: 7/7 scenarios passed
 ```
 
-**VERIFIED — observed red:** three scratch copies changed one authoritative expected
-verdict each. All three assertions were observed by the same `--self-test` entry point:
+### Observed-red drivers run independently
+
+**VERIFIED:** three separate scratch copies of the prototype bytes committed at `f3b366d`
+changed one authoritative expected verdict each. All three drivers were independently rerun
+in this unit with their own Python invocation and exited 1 through the same `--self-test`
+entry point:
 
 ```text
 X1 `no-finding` -> `finding`:
@@ -150,7 +154,25 @@ or “the replay needed conflict adjustment.” That reduces the amount of DAG i
 developer must do. It cannot explain whether a deletion satisfied AgentFold's claim and
 evidence contract; that still requires an exact real-edge authority check.
 
-## Inference, proposal, and non-claims
+## Not run
+
+The following checks were not run in this replay-oracle unit:
+
+- the full repository suite, `python3 automation/run_tests.py`;
+- the production reconciler queue tests, including
+  `python3 -m unittest automation.tests.test_reconcile_queue`;
+- the broader rename and action-incarnation scenario matrix (X3 covers one merge-only
+  action, not rename/recreate/incarnation ambiguity);
+- shallow-clone and missing-object scenarios;
+- provider and workflow projection tests, including GitHub push/PR event paths;
+- long-history or representative production-repository performance benchmarks; and
+- cold-clone, cross-vendor, and full fresh-context integration verification.
+
+The commit hook selected 0/0 repository test files because these design artifacts are outside
+test ownership. That empty selection is no test evidence; the declared POC self-test and the
+three independently rerun observed-red drivers are the unit's executable evidence.
+
+## Inference and proposal
 
 **INFERENCE:** replay diagnostics are most useful after an authoritative classifier has
 already decided the queue outcome. They help a person understand a finding or exemption,
@@ -161,6 +183,8 @@ not change the verdict.
 tree-ownership facts by default and make patch/range diagnostics an explicit offline command.
 Never parse range-diff prose inside the reconciler and never let a replay match suppress a
 continuity finding.
+
+## Non-establishment
 
 This POC does **not** establish production integration, queue lifecycle validity, rename or
 action-incarnation safety, shallow-object handling, provider behavior, performance on a long
