@@ -15,7 +15,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -98,6 +97,7 @@ class Damage:
     sole_valid_ignores_competitors: bool = False
     omit_old_tip_human_binding: bool = False
     treat_review_pending_as_concrete: bool = False
+    broad_review_pending_normalization: bool = False
 
 
 @dataclasses.dataclass
@@ -748,15 +748,18 @@ class Classifier:
                 "Review outcome",
             ):
                 value = fields[key]
-                explicit_pending = (
-                    key in {"Review target", "Review revision"}
-                    and self.explicit_review_pending(value)
-                )
-                if (
-                    explicit_pending
-                    and not self.damage.treat_review_pending_as_concrete
-                ):
-                    concrete = False
+                if key in {"Review target", "Review revision"}:
+                    pending = (
+                        self.broad_review_pending(value)
+                        if self.damage.broad_review_pending_normalization
+                        else self.explicit_review_pending(value)
+                    )
+                    concrete = not pending
+                    if (
+                        self.damage.treat_review_pending_as_concrete
+                        and self.explicit_review_pending(value)
+                    ):
+                        concrete = True
                 else:
                     concrete = (
                         RECONCILE.review_outcome_value(value) != "pending"
@@ -769,12 +772,16 @@ class Classifier:
 
     @staticmethod
     def explicit_review_pending(value: str) -> bool:
+        return (value or "").strip().lower() == "pending"
+
+    @staticmethod
+    def broad_review_pending(value: str) -> bool:
+        """Deliberately damaged normalizer used only by an observed-red."""
         value = (value or "").strip()
-        if value.casefold() == "pending":
-            return True
-        presented = re.fullmatch(r"(`+)pending(`+)", value, re.I)
-        return bool(
-            presented and presented.group(1) == presented.group(2)
+        normalized = value.strip("`").casefold().replace("\u0131", "i")
+        return (
+            not RECONCILE.has_concrete_value(value)
+            or normalized == "pending"
         )
 
     def old_tip_human_binding_problem(
@@ -2173,6 +2180,11 @@ def review_text(
     reviewed_revision: str = "______",
     outcome: str = "pending",
 ):
+    rendered_target = (
+        target
+        if Classifier.explicit_review_pending(target)
+        else f"`{target}`"
+    )
     return (
         f"# Review {label}\n\n"
         f"**Status:** {status}\n"
@@ -2182,7 +2194,7 @@ def review_text(
         f"**Resolution evidence:** `{evidence_path(label)}`\n"
         "**If unanswered:** keep the review live\n"
         f"**Your review:** {response}\n"
-        f"**Review target:** `{target}`\n"
+        f"**Review target:** {rendered_target}\n"
         f"**Review revision:** {revision}\n"
         f"**Reviewed revision:** {reviewed_revision}\n"
         f"**Review outcome:** {outcome}\n"
@@ -2288,7 +2300,7 @@ def publish_review(
         "**Status:** awaiting-artifact", "**Status:** waiting", 1
     )
     text = text.replace(
-        "**Review target:** `pending`",
+        "**Review target:** pending",
         f"**Review target:** `{target}`",
         1,
     )
@@ -2311,7 +2323,7 @@ def fill_review_pending(
 ):
     text = repo.read(path)
     if field == "Review target":
-        before = "**Review target:** `pending`"
+        before = "**Review target:** pending"
         after = f"**Review target:** `{target}`"
     elif field == "Review revision":
         before = "**Review revision:** pending"
@@ -2322,6 +2334,30 @@ def fill_review_pending(
         raise RuntimeError(f"missing expected pending field: {before}")
     repo.write(path, text.replace(before, after, 1))
     return repo.commit(f"fill pending {field.lower()}")
+
+
+def replace_review_binding(
+    repo: GitRepository,
+    path: str,
+    *,
+    field: str,
+    old_value: str,
+    target: str,
+    revision: str,
+):
+    text = repo.read(path)
+    if field == "Review target":
+        before = f"**Review target:** {old_value}"
+        after = f"**Review target:** `{target}`"
+    elif field == "Review revision":
+        before = f"**Review revision:** {old_value}"
+        after = f"**Review revision:** {revision}"
+    else:
+        raise ValueError(f"unsupported review binding field: {field}")
+    if before not in text:
+        raise RuntimeError(f"missing expected review field: {before}")
+    repo.write(path, text.replace(before, after, 1))
+    return repo.commit(f"replace malformed {field.lower()}")
 
 
 def claim_review(
@@ -3482,9 +3518,7 @@ def r9_review_pending_binding(
     else:
         M = deletion
     N = feature(repo, f"{label}-old")
-    old_pending_value = (
-        "`pending`" if pending_field == "Review target" else "pending"
-    )
+    old_pending_value = "pending"
     candidate_value = (
         f"`{target}`"
         if pending_field == "Review target"
@@ -3501,6 +3535,87 @@ def r9_review_pending_binding(
         {
             "pending_field": pending_field,
             "old_pending_value": old_pending_value,
+            "candidate_value": candidate_value,
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+            "mode": mode,
+        },
+    )
+
+
+def r10_malformed_review_binding(
+    root: Path,
+    *,
+    mode: str,
+    field: str,
+    malformed_value: str,
+    slug: str,
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    field_slug = "target" if field == "Review target" else "revision"
+    label = f"r10-{mode}-{field_slug}-{slug}"
+    target = f"docs/{label}-target.md"
+    payload = f"# {label} target\n"
+    repo.write(target, payload)
+    revision = review_revision(payload)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=malformed_value if field_slug == "target" else target,
+        revision=(
+            malformed_value if field_slug == "revision" else revision
+        ),
+    )
+    old_value = RECONCILE.human_response_fields(repo.read(path))[field]
+    C = repo.commit(f"create review with malformed {field_slug} at C")
+    repo.branch("old", C)
+    answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    replace_review_binding(
+        repo,
+        path,
+        field=field,
+        old_value=old_value,
+        target=target,
+        revision=revision,
+    )
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path)
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        f"resolve candidate review after replacing malformed {field_slug}",
+    )
+    carrier = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        carrier = feature(repo, f"{label}-carrier")
+        M = repo.merge_commit(
+            (deletion, carrier),
+            f"adopt malformed {field_slug} review supplier absence",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+    N = feature(repo, f"{label}-old")
+    candidate_value = (
+        f"`{target}`" if field == "Review target" else revision
+    )
+    return Fixture(
+        f"R10-{mode}-review-{field_slug}-{slug}-rejected",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "binding_field": field,
+            "old_value": old_value,
             "candidate_value": candidate_value,
             "authority_parent": authority_parent,
             "authority_child": deletion,
@@ -5076,6 +5191,20 @@ def scenario_builders():
         lambda root: r9_review_pending_binding(
             root, mode="supplier", pending_field="Review revision"
         ),
+        lambda root: r10_malformed_review_binding(
+            root,
+            mode="direct",
+            field="Review target",
+            malformed_value="pend\u0131ng",
+            slug="backtick-dotless",
+        ),
+        lambda root: r10_malformed_review_binding(
+            root,
+            mode="supplier",
+            field="Review revision",
+            malformed_value="______",
+            slug="generic-placeholder",
+        ),
         r8_adapter_M_variants,
         r8_adapter_M_endpoint_counterexample,
     ]
@@ -5090,6 +5219,7 @@ CONTROL_NAMES = (
     "sole-valid-ignores-invalid-root",
     "omit-old-tip-human-binding",
     "literal-review-pending-treated-concrete",
+    "broad-review-pending-normalization",
 )
 
 
@@ -6061,10 +6191,15 @@ def validate_result(result: dict):
         pending_presentations = (
             "pending",
             "PENDING",
-            "`pending`",
-            "``PENDING``",
+            " PeNdInG ",
         )
         concrete_or_invalid_values = (
+            "",
+            "______",
+            "`pending`",
+            "``PENDING``",
+            "pend\u0131ng",
+            "`pend\u0131ng`",
             "pending-extra",
             "`pending",
             "pending`",
@@ -6101,6 +6236,36 @@ def validate_result(result: dict):
             )
         ):
             errors.append("R9 review pending normalization drifted")
+    if scenario.startswith("R10-") and "review" in scenario:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        old_reason_token = json.dumps(details["old_value"])[1:-1]
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        if (
+            action is None
+            or status != "invalid"
+            or result["classification"] != "blocking-finding"
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or len(propagation)
+            != (1 if details["mode"] == "supplier" else 0)
+            or "old-tip-human-binding-conflict" not in reason_codes
+            or old_reason_token not in action["reason"]
+            or details["candidate_value"] not in action["reason"]
+            or Classifier.explicit_review_pending(details["old_value"])
+            or not Classifier.broad_review_pending(details["old_value"])
+        ):
+            errors.append("R10 malformed review binding was normalized")
     if scenario == "R8-adapter-M-input-variants":
         details = result["details"]
         variants = result.get("adapter_input_evidence", {})
@@ -6278,6 +6443,18 @@ def control_builder(name: str, root: Path):
             ),
             Damage(treat_review_pending_as_concrete=True),
             "blocking-finding",
+        )
+    if name == "broad-review-pending-normalization":
+        return (
+            r10_malformed_review_binding(
+                root,
+                mode="direct",
+                field="Review target",
+                malformed_value="pend\u0131ng",
+                slug="backtick-dotless",
+            ),
+            Damage(broad_review_pending_normalization=True),
+            "no-finding",
         )
     raise ValueError(name)
 

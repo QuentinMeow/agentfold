@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 33 focused contract regressions, and all eight damaged-mode controls,
+scenarios, 35 focused contract regressions, and all nine damaged-mode controls,
 without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -28,7 +28,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 8, "controls_total": 8, "failures": [], "git": "git version 2.55.0", "passed": 82, "python": "3.14.7", "summary": "PASS", "total": 82}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 9, "controls_total": 9, "failures": [], "git": "git version 2.55.0", "passed": 84, "python": "3.14.7", "summary": "PASS", "total": 84}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -64,9 +64,11 @@ also includes the local review target and its content revision, plus the bound
 `Reviewed revision` and terminal `Review outcome` when those were already
 concrete at `O`. Fields that were still pending at `O` may be filled by the
 candidate lifecycle. For `Review target` and `Review revision`, plain
-case-insensitive `pending` and the same token inside balanced backticks are
-explicitly pending; every other non-placeholder value remains concrete and is
-preserved exactly. The comparison is anchored to `O`, uses the same
+case-insensitive `pending`, after outer whitespace is stripped, is the only
+explicit pending sentinel. Backticks, blank or generic placeholders, suffixes,
+and Unicode lookalikes are binding values and are preserved exactly. `Reviewed
+revision` and `Review outcome` retain the production lifecycle's existing
+pending/placeholder fill rules. The comparison is anchored to `O`, uses the same
 production identity, and runs after the production edge validator. A mismatch
 turns the event invalid while retaining the production edge verdict, full
 authority-parent and `O` OIDs, and both bindings. The gate is in raw
@@ -145,7 +147,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 82.
+scenario total remains 84.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -493,9 +495,9 @@ for which `queue_deletion_problem` returns `problem: null`.
 
 | Case | C / O / K / D / M / N | Observed result |
 |---|---|---|
-| `R9-direct-review-target-pending-fill` | `af225d26a9e0900845d43f77e7d5a2c8d74470a6` / `5d7fd74bd601fc75a2464f3e8eccb968a61639dc` / `2da992c01f39964ebb036e1dd93db35047e07466` / `b6cc23e67371ec0a06339589965ab0b029bd0646` / `b6cc23e67371ec0a06339589965ab0b029bd0646` / `55a779ea573d0926ee92184afc8bb4987f4f1304` | backticked target `pending` -> concrete target; `valid direct`, no finding |
+| `R9-direct-review-target-pending-fill` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `2bcdbeb26265a2e08394d310b3a46a41833a5133` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` | plain target `pending` -> concrete target; `valid direct`, no finding |
 | `R9-direct-review-revision-pending-fill` | `323d65ca92bcab39b2c0612a27b148e391cce838` / `ea123742664bc85265ab6385a846c020a8ca3e8c` / `a9e99679ebb7750092bd7ca6cf2dad939a4c510b` / `310feea03d098ab049b5b5c0c781134aef3281b1` / `310feea03d098ab049b5b5c0c781134aef3281b1` / `6f11bd5de26dda0bbf565ba63d829a72ef51360b` | plain revision `pending` -> immutable sha256; `valid direct`, no finding |
-| `R9-supplier-review-target-pending-fill` | `2a6f2ef48cb9c201c0717372f0955b71bfb79c31` / `90785286726453ff8c4ed41f8f47da275ffa0e07` / `83c534a2182f63ca833d31dee202b62b5cb7dfe3` / `d96986f71dc20181cf2d950612308b49e0546a51` / `a9efdd76d4c15c346d0a859b9db3ea92b8182c8b` / `3c59beb74a93802374827acdf4f03abd682e760a` | backticked target `pending` -> concrete target; `valid supplier`, no finding |
+| `R9-supplier-review-target-pending-fill` | `a88ea4ed82ce9d444b54742625a56bdc9abad2ab` / `20cb6a6f44d996a53ee5b1885bc53f6ab176aa68` / `90de9bf54ef6fa4f307d424e1a40a3c730cb0a49` / `ec7e67775fd8b8569b164a34a42a6b8baefa8d82` / `7c9db45a3c694b3b6c80b01c1eec00d70a584caa` / `601d084d2fb4d533d8794dbfa14d530d1bd19dce` | plain target `pending` -> concrete target; `valid supplier`, no finding |
 | `R9-supplier-review-revision-pending-fill` | `fe04e4837703b729500127432fb439f8714c4f95` / `e76da4ccabd64cc1cfa96050fff7486272a3336e` / `949c4fd1f3f130306e4182946157bcf81d01849b` / `34c2c8878a6abcd9b06b183029e57a69b3bf9e81` / `da736296c1764ede66977136251d3e78dca23f5b` / `77cebbd7a8d42d98fdb88db9452ced1cd3a27bb5` | plain revision `pending` -> immutable sha256; `valid supplier`, no finding |
 
 Each direct cell enumerated eight commits and seven parent edges once, made five
@@ -507,11 +509,31 @@ revision values filled by the direct and supplier cells were respectively
 and
 `sha256:5706f8e796fc78b6bf7465c994523dec4fe9240309bbdb51c0bda69dfe0e5b70`.
 
-The executable assertions accept plain or balanced-backtick, case-insensitive
-`pending`, but reject partial backticks, suffixes, and unrelated invalid values
-as placeholder presentations. The pre-existing divergent target/revision and
-terminal-outcome fixtures still block, proving genuinely concrete old-tip bytes
-remain fail closed.
+The executable assertions accept only outer-trimmed plain, case-insensitive
+`pending`. They reject balanced or partial backticks, suffixes, blank/generic
+placeholders, dotless-i lookalikes, and unrelated invalid values. The
+pre-existing divergent target/revision and terminal-outcome fixtures still
+block, proving genuinely binding old-tip bytes remain fail closed.
+
+### Malformed review target and revision
+
+Two r10 real-Git negatives prove that the narrow production sentinel cannot be
+broadened. In both cases the deletion edge independently passed
+`queue_deletion_problem` with `problem: null`, but the old value was not the
+plain `pending` sentinel and therefore remained bound to `O`.
+
+| Case | C / O / K / D / M / N | Observed result |
+|---|---|---|
+| `R10-direct-review-target-backtick-dotless-rejected` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `0f7fa628b211648e7f8d22e11e753ffdfe26e3ab` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` | backticked `pendıng` (dotless i) -> concrete target; `invalid direct`, blocking |
+| `R10-supplier-review-revision-generic-placeholder-rejected` | `b13043f4864a963aee7af4e3e3a913313f9f7b19` / `9d96a7eecc2b34704ef588142e4b48111849f3a9` / `a4688c89cf2a68edd653dd3b8778713293d1c0b8` / `8b761c2ffd576357e869f02a2463d9b50f8f45dd` / `acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e` / `02371c1e8f0eebe4e567694cfe6677c8b872a7a8` | generic `______` revision -> immutable sha256; `invalid supplier`, blocking with one propagation edge |
+
+The direct case enumerated eight commits and seven parent edges once, made five
+production identity calls and two authority calls, and selected no propagation.
+The supplier case enumerated ten commits and ten parent edges once, made five
+identity calls and two authority calls, and retained propagation
+`d2692c17d6bd2be654ebea449d86a841a08ad86e` ->
+`acbdd1a98c4ab70bf53867515f0fb86a2e1b8b0e`. Its concrete replacement revision
+was `sha256:62b8e9ca2b243a2fc6baf048001d518d73455c3829217d3703fede4cd2f524b9`.
 
 `R8-adapter-M-input-variants` runs three classifiers over the same committed
 graph rather than changing the real adapter. Its OIDs are:
@@ -624,6 +646,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
 ```
 
 | Control | Baseline -> damaged | Status | C / O / M / N |
@@ -635,36 +658,40 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `missing-post-event-continuity` | blocking -> no finding | `OBSERVED_RED` | `ec84d0800c660f6379b21cfd721122fa06162999` / `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` / `5b3f0ee9f157786e8392185afa848583d9af19bc` / `258e858010ccd1e43716ab0269faa86ae08808a7` |
 | `sole-valid-ignores-invalid-root` | blocking -> no finding | `OBSERVED_RED` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` / `5dc5378fdc316aa30dce282d0388a438d755b067` / `c1d92f49ddecd5097d7db52863c2b8e990b43810` / `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` |
 | `omit-old-tip-human-binding` | blocking -> no finding | `OBSERVED_RED` | `cd64224f775f16bc2099816c594012a9592f8536` / `356f3f37cdffaf8f6c568a158a32c478f55a0e13` / `317ee20aba90b31295ed5626eb1bd37f1926a011` / `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` |
-| `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `af225d26a9e0900845d43f77e7d5a2c8d74470a6` / `5d7fd74bd601fc75a2464f3e8eccb968a61639dc` / `b6cc23e67371ec0a06339589965ab0b029bd0646` / `55a779ea573d0926ee92184afc8bb4987f4f1304` |
+| `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` |
+| `broad-review-pending-normalization` | blocking -> no finding | `OBSERVED_RED` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` |
 
 ## Commands run
 
 ```sh
 python3 automation/install.py
-PYTHONPYCACHEPREFIX=/private/tmp/production-contract-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-all-parent-direct-validation
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control supplier-authority-borrowing
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-all-parent-direct-validation
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control supplier-authority-borrowing
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 82/82
-scenarios, 4/4 executable aliases, and 8/8 controls. Each standalone control
+The installer and bytecode compilation exited `0`. The self-test passed 84/84
+scenarios, 4/4 executable aliases, and 9/9 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
-commit hook selected no repository test files because this directory is a design
-record path.
+first commit hook selected no repository test files because this directory is a
+design record path. A commit-message-only amend then selected the full lane
+because its staged diff was empty; all 16/16 repository test files passed.
 
 ## Nonclaims and tests not run
 
-- The pending-value normalizer exists only in this executable POC. It does not
-  change production review parsing, schemas, templates, or workflow behavior.
+- The exact pending comparison and its O-binding contract exist only in this
+  executable POC. They mirror the production schema's accepted sentinel but do
+  not change production review parsing, schemas, templates, or workflow behavior.
 - The POC does not change or claim parity with the production reconciler's staged
   index path. PCX-21 staged/committed parity and PCX-22 unmerged-index handling
   remain production-integration gates and were not run.
@@ -672,8 +699,8 @@ record path.
   remote status is post-push advisory, so no push-prevention claim is made.
 - Squash remains unsupported. P21 proves that a squash-erased lifecycle blocks;
   this POC does not invent a squash-stable receipt or patch-similarity authority.
-- The full repository test suite was not run. The pre-commit test selector ran
-  0/0 files because only this design POC was staged.
+- The pre-commit full repository lane ran 16/16 test files. No push lane,
+  platform matrix, or hosted integration suite was run.
 - No remote, hosted-provider, partial-clone, or production-scale performance test
   was run. The only cost claim is the measured 133-commit, 16-action fixture above.
 - No production code, schema, task record, contract, dependency, adapter, or
