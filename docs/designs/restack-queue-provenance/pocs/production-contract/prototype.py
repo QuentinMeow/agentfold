@@ -61,6 +61,10 @@ class Metrics:
     snapshot_cache_hits: int = 0
     identity_calls: int = 0
     authority_calls: int = 0
+    support_certificate_calls: int = 0
+    support_adoption_checks: int = 0
+    support_paths_checked: int = 0
+    mutation_calls: int = 0
     per_action_history_walks: int = 0
 
     def as_dict(self):
@@ -95,6 +99,16 @@ class Damage:
     reopen_pre_c_genealogy: bool = False
     enforce_post_event_absence: bool = True
     sole_valid_ignores_competitors: bool = False
+    omit_old_tip_human_binding: bool = False
+    treat_review_pending_as_concrete: bool = False
+    broad_review_pending_normalization: bool = False
+    omit_supplier_carrier_human_binding: bool = False
+    omit_unanswered_published_review_binding: bool = False
+    skip_preserved_state_validation: bool = False
+    skip_persisted_frozen_skeleton: bool = False
+    skip_persisted_candidate_continuity: bool = False
+    skip_old_side_continuity: bool = False
+    skip_supplier_support_certificate: bool = False
 
 
 @dataclasses.dataclass
@@ -110,6 +124,7 @@ class Event:
     reason: str
     causal_roots: list[dict] = dataclasses.field(default_factory=list)
     reason_records: list[dict] = dataclasses.field(default_factory=list)
+    support_checks: list[dict] = dataclasses.field(default_factory=list)
 
 
 def is_git_command(command) -> bool:
@@ -122,26 +137,18 @@ def is_git_command(command) -> bool:
 
 @contextlib.contextmanager
 def count_production_git(metrics: Metrics):
-    """Count Git children spawned by imported production helpers."""
-
-    def counted_run(command, *args, **kwargs):
-        if is_git_command(command):
-            metrics.git_processes += 1
-        return REAL_RUN(command, *args, **kwargs)
+    """Count each Git child spawned by imported production helpers once."""
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
             metrics.git_processes += 1
         return REAL_POPEN(command, *args, **kwargs)
 
-    original_run = subprocess.run
     original_popen = subprocess.Popen
-    subprocess.run = counted_run
     subprocess.Popen = counted_popen
     try:
         yield
     finally:
-        subprocess.run = original_run
         subprocess.Popen = original_popen
 
 
@@ -294,7 +301,7 @@ class GitRepository:
 
 
 def run_git(root: Path, metrics: Metrics, *arguments, check=True):
-    metrics.git_processes += 1
+    # count_production_git observes this subprocess at the Popen boundary.
     result = REAL_RUN(
         ["git", *arguments],
         cwd=root,
@@ -328,6 +335,7 @@ class ObjectDatabase:
         metrics.batch_processes += 1
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
+        self.flat_trees: dict[str, dict[str, tuple[str, str]]] = {}
         self.snapshots: dict[
             str | None, dict[tuple, tuple[ActionState, ...]]
         ] = {}
@@ -409,6 +417,47 @@ class ObjectDatabase:
             offset = nul + 1 + width
         self.trees[oid] = entries
         return entries
+
+    def flat_tree(self, commit: str) -> dict[str, tuple[str, str]]:
+        """Return every leaf path with its exact mode and object OID."""
+        root = self.commit_tree(commit)
+        if root in self.flat_trees:
+            self.metrics.object_cache_hits += 1
+            return self.flat_trees[root]
+        flattened: dict[str, tuple[str, str]] = {}
+
+        def walk(tree_oid: str, prefix: str):
+            for name, (mode, child) in sorted(
+                self.tree_entries(tree_oid).items()
+            ):
+                path = f"{prefix}/{name}" if prefix else name
+                if mode in {"40000", "040000"}:
+                    walk(child, path)
+                else:
+                    flattened[path] = (mode, child)
+
+        walk(root, "")
+        self.flat_trees[root] = flattened
+        return flattened
+
+    def path_entry(self, commit: str, path: str) -> dict:
+        """Return one typed exact tree entry or an explicit absence."""
+        entry = self.flat_tree(commit).get(path)
+        if entry is None:
+            return {"state": "absent"}
+        mode, oid = entry
+        if mode == "160000":
+            kind = "commit"
+        elif mode == "120000" or mode.startswith("100"):
+            kind = "blob"
+        else:
+            kind = "unknown"
+        return {
+            "state": "present",
+            "mode": mode,
+            "type": kind,
+            "oid": oid,
+        }
 
     def queue_tree(self, commit: str) -> str | None:
         root = self.commit_tree(commit)
@@ -590,6 +639,11 @@ class Graph:
     def between(self, start: str, end: str) -> set[str]:
         return self.descendants(start).intersection(self.ancestors(end))
 
+    def ordered(self, commits: Iterable[str]) -> list[str]:
+        """Return a commit set in the one enumerated topological order."""
+        selected = set(commits)
+        return [commit for commit in self.order if commit in selected]
+
 
 class Classifier:
     """In-memory provenance over one enumerated graph and cached snapshots."""
@@ -646,7 +700,7 @@ class Classifier:
         region = self.graph.ancestors(tip)
         if self.graph.C not in region:
             return f"carrying parent {tip} is not rooted at C"
-        for commit in region:
+        for commit in self.graph.ordered(region):
             multiplicity = len(self.states(commit, identity))
             if multiplicity != 1:
                 paths = [
@@ -665,7 +719,7 @@ class Classifier:
         region = self.graph.between(start, end)
         if not region:
             return f"{start} is not on an ancestry path to {end}"
-        for commit in region:
+        for commit in self.graph.ordered(region):
             multiplicity = len(self.states(commit, identity))
             if multiplicity:
                 return (
@@ -684,6 +738,185 @@ class Classifier:
                         f"into {commit}"
                     )
         return None
+
+    @staticmethod
+    def canonical_digest(domain: str, value: dict) -> str:
+        payload = json.dumps(
+            {"domain": domain, "value": value},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    def support_leaf_obligations(
+        self,
+        state: ActionState,
+        parent: str,
+        child: str,
+    ) -> tuple[list[dict], str | None]:
+        """Describe only production leaves this POC can certify completely."""
+        fields = RECONCILE.text_fields(state.text)
+        parts = Path(state.path).parts
+        actor = parts[1] if len(parts) > 1 else ""
+        leaf = parts[2] if len(parts) > 2 else ""
+        declared = sorted(set(RECONCILE.context_path_candidates(state.text)))
+        obligations: list[dict] = [
+            {
+                "kind": "production-deletion-postcondition",
+                "authority_parent": parent,
+                "authority_child": child,
+            }
+        ]
+        obligations.extend(
+            {"kind": "declared-path-anchor", "path": path}
+            for path in declared
+            if path != state.path
+        )
+        if actor == "needs-agent" and leaf == "requests":
+            if fields.get("Request kind", "").strip() == "task-pickup":
+                task_paths = [
+                    path for path in declared if path.startswith("tasks/")
+                ]
+                if len(task_paths) != 1:
+                    return obligations, "task pickup has no unique task path"
+                obligations.append(
+                    {
+                        "kind": "task-pickup-postcondition",
+                        "task_path": task_paths[0],
+                        "task_id": Path(task_paths[0]).parts[2],
+                        "pickup_path": state.path,
+                    }
+                )
+                return obligations, None
+            if fields.get("Status", "").strip() != "in-repair":
+                return obligations, "ordinary agent action is not in-repair"
+            obligations.append({"kind": "agent-evidence-lineage"})
+            return obligations, None
+        if actor == "needs-agent" and leaf == "retries":
+            item = self.fixture.repo.root / state.path
+            if not RECONCILE.reconciler_owned_retry(item, state.text):
+                return obligations, "retry is not a production-owned retry"
+            check = fields.get("Check", "").strip()
+            if check not in RECONCILE.CHECKS:
+                return obligations, "retry names an unknown checker"
+            obligations.append(
+                {
+                    "kind": "generated-retry-clear",
+                    "check": check,
+                    "subject": fields.get("Subject", "").strip(),
+                }
+            )
+            return obligations, None
+        if actor == "needs-human" and leaf in {
+            "decisions",
+            "clarifications",
+        }:
+            if fields.get("Status", "").strip() != "folding":
+                return obligations, "human action is not folding"
+            obligations.append({"kind": "terminal-human-response"})
+            return obligations, None
+        if actor == "needs-human" and leaf == "reviews":
+            outcome = fields.get("Review outcome", "").strip()
+            if outcome in (
+                set(RECONCILE.REVIEW_SUCCESSOR_OUTCOMES)
+                | set(RECONCILE.REVIEW_REASK_OUTCOMES)
+            ):
+                return (
+                    obligations,
+                    "review successor/reask support certificate is unsupported",
+                )
+            if RECONCILE.delivery_class(Path(state.path).name) != "non-blocking":
+                return obligations, "boundary review receipt is unsupported"
+            if outcome not in RECONCILE.REVIEW_TERMINAL_OUTCOMES:
+                return obligations, "review has no supported terminal outcome"
+            obligations.append(
+                {
+                    "kind": "terminal-review-binding",
+                    "outcome": outcome,
+                    "review_target": fields.get("Review target", "").strip(),
+                    "review_revision": fields.get(
+                        "Review revision", ""
+                    ).strip(),
+                }
+            )
+            return obligations, None
+        return obligations, f"unsupported authority leaf {actor}/{leaf}"
+
+    def build_support_certificate(
+        self,
+        identity: tuple,
+        state: ActionState,
+        parent: str,
+        child: str,
+    ) -> dict:
+        """Bind one real authority root to its complete support projection."""
+        assert self.objects is not None
+        self.metrics.support_certificate_calls += 1
+        before = self.objects.flat_tree(parent)
+        after = self.objects.flat_tree(child)
+        changed = sorted(
+            path
+            for path in set(before).union(after)
+            if before.get(path) != after.get(path) and path != state.path
+        )
+        referenced = sorted(
+            path
+            for path in set(RECONCILE.context_path_candidates(state.text))
+            if path != state.path
+        )
+        support_paths = sorted(set(changed).union(referenced))
+        raw_delta = [
+            {
+                "path": path,
+                "before": self.objects.path_entry(parent, path),
+                "after": self.objects.path_entry(child, path),
+            }
+            for path in changed
+        ]
+        anchors = [
+            {
+                "path": path,
+                "entry": self.objects.path_entry(child, path),
+                "changed_on_authority_edge": path in changed,
+            }
+            for path in support_paths
+        ]
+        obligations, incomplete = self.support_leaf_obligations(
+            state, parent, child
+        )
+        unknown_entry = next(
+            (
+                entry
+                for delta in raw_delta
+                for entry in (delta["before"], delta["after"])
+                if entry.get("type") == "unknown"
+            ),
+            None,
+        )
+        if unknown_entry is not None:
+            incomplete = "support projection contains an unknown object type"
+        body = {
+            "support_schema": "queue-supplier-support/v1",
+            "authority_parent": parent,
+            "authority_child": child,
+            "action": {
+                "identity": list(identity),
+                "path": state.path,
+                "blob_oid": state.blob_oid,
+            },
+            "raw_delta": raw_delta,
+            "support_paths": anchors,
+            "obligations": obligations,
+            "completeness": "complete" if incomplete is None else "incomplete",
+            "incomplete_reason": incomplete,
+        }
+        return {
+            **body,
+            "certificate_digest": self.canonical_digest(
+                "queue-supplier-support/v1", body
+            ),
+        }
 
     def authority_edge(
         self, identity: tuple, parent: str, child: str
@@ -714,12 +947,192 @@ class Classifier:
                 "production deletion authority could not read "
                 f"{parent}->{child}: {error}"
             ) from error
+        certificate = (
+            self.build_support_certificate(
+                identity, state, parent, child
+            )
+            if problem is None
+            else None
+        )
         return {
             "parent": parent,
             "child": child,
             "path": state.path,
             "problem": problem,
+            "support_certificate": certificate,
         }
+
+    def human_response_binding(
+        self, identity: tuple, revision: str
+    ) -> tuple[tuple[str, str], ...] | None:
+        states = self.states(revision, identity)
+        if len(states) != 1:
+            return None
+        return self.human_response_binding_for_state(identity, states[0])
+
+    def human_response_binding_for_state(
+        self, identity: tuple, state: ActionState
+    ) -> tuple[tuple[str, str], ...] | None:
+        if self.identity_view(identity)["actor"] != "needs-human":
+            return None
+        fields = RECONCILE.human_response_fields(state.text)
+        response_key = RECONCILE.first_concrete_response(fields)
+        binding = []
+        if self.identity_view(identity)["leaf"] == "reviews":
+            for key in ("Review target", "Review revision"):
+                value = fields[key]
+                pending = (
+                    self.broad_review_pending(value)
+                    if self.damage.broad_review_pending_normalization
+                    else self.explicit_review_pending(value)
+                )
+                concrete = not pending
+                if (
+                    self.damage.treat_review_pending_as_concrete
+                    and self.explicit_review_pending(value)
+                ):
+                    concrete = True
+                if concrete:
+                    binding.append((key, value))
+        if response_key is not None:
+            binding.extend(
+                (
+                    ("response_field", response_key),
+                    ("response", fields[response_key]),
+                )
+            )
+        if self.identity_view(identity)["leaf"] == "reviews":
+            for key in ("Reviewed revision", "Review outcome"):
+                value = fields[key]
+                concrete = (
+                    RECONCILE.review_outcome_value(value) != "pending"
+                    if key == "Review outcome"
+                    else RECONCILE.has_concrete_value(value)
+                )
+                if concrete:
+                    binding.append((key, value))
+        return tuple(binding) or None
+
+    @staticmethod
+    def explicit_review_pending(value: str) -> bool:
+        return (value or "").strip().lower() == "pending"
+
+    @staticmethod
+    def broad_review_pending(value: str) -> bool:
+        """Deliberately damaged normalizer used only by an observed-red."""
+        value = (value or "").strip()
+        normalized = value.strip("`").casefold().replace("\u0131", "i")
+        return (
+            not RECONCILE.has_concrete_value(value)
+            or normalized == "pending"
+        )
+
+    def implicated_human_binding_problem(
+        self,
+        identity: tuple,
+        revisions: Iterable[str],
+        parent_role: str,
+        *,
+        optional_revisions: Iterable[str] = (),
+    ) -> str | None:
+        expected = self.human_response_binding(identity, self.fixture.O)
+        if (
+            expected is None
+            and self.identity_view(identity)["actor"] != "needs-human"
+        ):
+            return None
+        expected_fields = dict(expected or ())
+        optional = set(optional_revisions)
+        observed_by_revision = {}
+        for revision in self.stable_oids(revisions):
+            observed = self.human_response_binding(
+                identity, revision
+            )
+            if observed is None and revision in optional:
+                continue
+            observed_fields = dict(observed or ())
+            observed_by_revision[revision] = observed_fields
+            mismatches = {
+                key: {
+                    "expected": value,
+                    "observed": observed_fields.get(key),
+                }
+                for key, value in expected_fields.items()
+                if observed_fields.get(key) != value
+                and not (
+                    revision in optional
+                    and key not in observed_fields
+                )
+            }
+            if mismatches:
+                return (
+                    f"{parent_role} parent {revision} does not preserve "
+                    f"every concrete O-anchored human response/review "
+                    f"binding field at "
+                    f"O {self.fixture.O}: expected "
+                    f"{json.dumps(expected_fields, sort_keys=True)}, "
+                    f"observed {json.dumps(observed_fields, sort_keys=True)}, "
+                    f"mismatches {json.dumps(mismatches, sort_keys=True)}"
+                )
+        field_values: dict[str, dict[str, list[str]]] = {}
+        for revision, observed_fields in observed_by_revision.items():
+            for key, value in observed_fields.items():
+                field_values.setdefault(key, {}).setdefault(
+                    value, []
+                ).append(revision)
+        conflicts = {
+            key: values
+            for key, values in field_values.items()
+            if len(values) > 1
+        }
+        if conflicts:
+            return (
+                f"{parent_role} parents do not unify concrete human "
+                f"response/review binding fields implicated in the event: "
+                f"O {self.fixture.O} expected "
+                f"{json.dumps(expected_fields, sort_keys=True)}, observed "
+                f"{json.dumps(observed_by_revision, sort_keys=True)}, "
+                f"conflicts {json.dumps(conflicts, sort_keys=True)}"
+            )
+        return None
+
+    def old_tip_human_binding_problem(
+        self, identity: tuple, authority_edges: list[dict]
+    ) -> str | None:
+        if self.damage.omit_old_tip_human_binding:
+            return None
+        return self.implicated_human_binding_problem(
+            identity,
+            (edge["parent"] for edge in authority_edges),
+            "authority",
+        )
+
+    def supplier_carrier_human_binding_problem(
+        self,
+        identity: tuple,
+        authority_edges: list[dict],
+        propagation_edges: list[dict],
+    ) -> str | None:
+        revisions = [edge["parent"] for edge in authority_edges]
+        optional_revisions = []
+        if not self.damage.omit_supplier_carrier_human_binding:
+            for edge in propagation_edges:
+                parent = edge["parent"]
+                observed = self.human_response_binding(identity, parent)
+                if (
+                    self.damage.omit_unanswered_published_review_binding
+                    and observed is not None
+                    and "response" not in dict(observed)
+                ):
+                    continue
+                revisions.append(parent)
+                optional_revisions.append(parent)
+        return self.implicated_human_binding_problem(
+            identity,
+            revisions,
+            "supplier authority/propagation",
+            optional_revisions=optional_revisions,
+        )
 
     def parent_roles(self, identity: tuple, child: str):
         assert self.graph is not None
@@ -793,6 +1206,9 @@ class Classifier:
                 None,
             )
             invalid = [edge for edge in edges if edge["problem"]]
+            old_human_problem = self.old_tip_human_binding_problem(
+                identity, edges
+            )
             if continuity:
                 status = "ambiguous"
                 code = "foreign-or-discontinuous-carrier"
@@ -804,6 +1220,10 @@ class Classifier:
                     f"{edge['parent']}: {edge['problem']}"
                     for edge in invalid
                 )
+            elif old_human_problem:
+                status = "invalid"
+                code = "old-tip-human-binding-conflict"
+                reason = old_human_problem
             else:
                 status = "valid"
                 code = "valid-direct-authority"
@@ -963,35 +1383,663 @@ class Classifier:
         )
 
     @staticmethod
-    def stable_oids(oids):
-        return list(dict.fromkeys(oids))
+    def stable_support_checks(checks):
+        ordered = {}
+        for check in checks:
+            key = (
+                check["certificate_digest"],
+                check["adoption_child"],
+                tuple(check["absent_source_parents"]),
+            )
+            ordered.setdefault(key, check)
+        return list(ordered.values())
 
-    def response_conflict(
+    def replay_support_postcondition(
+        self,
+        identity: tuple,
+        certificate: dict,
+        revision: str,
+    ) -> str | None:
+        """Re-evaluate the root action at one source/adoption projection."""
+        states = [
+            state
+            for state in self.states(
+                certificate["authority_parent"], identity
+            )
+            if state.path == certificate["action"]["path"]
+            and state.blob_oid == certificate["action"]["blob_oid"]
+        ]
+        if len(states) != 1:
+            return "authority root action bytes are not uniquely readable"
+        self.metrics.support_adoption_checks += 1
+        try:
+            return RECONCILE.queue_deletion_problem(
+                states[0].path,
+                states[0].text,
+                certificate["authority_parent"],
+                revision,
+            )
+        except (
+            RECONCILE.GitSnapshotError,
+            OSError,
+            ValueError,
+            UnicodeError,
+        ) as error:
+            raise Unreadable(
+                "supplier support postcondition could not read "
+                f"{certificate['authority_parent']}->{revision}: {error}"
+            ) from error
+
+    def evaluate_support_obligations(
+        self,
+        identity: tuple,
+        certificate: dict,
+        revision: str,
+    ) -> dict:
+        """Evaluate complete typed obligations; generic replay is diagnostic."""
+        states = [
+            state
+            for state in self.states(
+                certificate["authority_parent"], identity
+            )
+            if state.path == certificate["action"]["path"]
+            and state.blob_oid == certificate["action"]["blob_oid"]
+        ]
+        generic_problem = self.replay_support_postcondition(
+            identity, certificate, revision
+        )
+        if len(states) != 1:
+            return {
+                "revision": revision,
+                "generic_replay_problem": generic_problem,
+                "problem": "authority root action bytes are not unique",
+            }
+        state = states[0]
+        obligations = certificate["obligations"]
+        pickup = next(
+            (
+                item
+                for item in obligations
+                if item["kind"] == "task-pickup-postcondition"
+            ),
+            None,
+        )
+        retry = next(
+            (
+                item
+                for item in obligations
+                if item["kind"] == "generated-retry-clear"
+            ),
+            None,
+        )
+        problem = None
+        if pickup is not None:
+            try:
+                status, task = RECONCILE.task_status_at(
+                    revision, pickup["task_id"]
+                )
+            except (
+                RECONCILE.GitSnapshotError,
+                OSError,
+                ValueError,
+                UnicodeError,
+            ) as error:
+                raise Unreadable(
+                    "pickup support obligation could not read "
+                    f"{revision}: {error}"
+                ) from error
+            claimant = (task or {}).get("Claimed-by", "").strip()
+            queue_paths = RECONCILE.task_queue_paths(
+                (task or {}).get("Queue actions", "")
+            )
+            if (
+                status not in RECONCILE.RESOLVING_TASK_STATUSES
+                or not RECONCILE.has_concrete_value(claimant)
+                or claimant == "unclaimed"
+                or pickup["pickup_path"] in queue_paths
+            ):
+                problem = (
+                    "pickup task is not one uniquely claimed monotone "
+                    f"incarnation at {revision}"
+                )
+        elif retry is not None:
+            try:
+                clear = RECONCILE.generated_retry_clear(
+                    state.text, revision
+                )
+            except (
+                RECONCILE.GitSnapshotError,
+                OSError,
+                ValueError,
+                UnicodeError,
+            ) as error:
+                raise Unreadable(
+                    "retry support obligation could not read "
+                    f"{revision}: {error}"
+                ) from error
+            if not clear:
+                problem = (
+                    f"retry checker {retry['check']} still reports subject "
+                    f"{retry['subject']} at {revision}"
+                )
+        else:
+            problem = generic_problem
+        return {
+            "revision": revision,
+            "generic_replay_problem": generic_problem,
+            "problem": problem,
+        }
+
+    def dynamic_support_paths(
+        self, certificate: dict, revision: str
+    ) -> list[str]:
+        """Resolve typed monotone obligations to their current exact paths."""
+        paths = []
+        for obligation in certificate["obligations"]:
+            if obligation["kind"] == "task-pickup-postcondition":
+                try:
+                    incarnations = RECONCILE.task_incarnations_at(
+                        revision, obligation["task_id"]
+                    )
+                except (
+                    RECONCILE.GitSnapshotError,
+                    OSError,
+                    ValueError,
+                    UnicodeError,
+                ) as error:
+                    raise Unreadable(
+                        "pickup dynamic support projection could not read "
+                        f"{revision}: {error}"
+                    ) from error
+                paths.extend(incarnations)
+                assert self.objects is not None
+                tree_paths = self.objects.flat_tree(revision)
+                for task_path in incarnations:
+                    task_dir = Path(task_path).parent
+                    paths.extend(
+                        path
+                        for path in tree_paths
+                        if Path(path).parent == task_dir
+                        and Path(path).name
+                        in RECONCILE.TASK_ARTIFACT_NAMES
+                    )
+            elif obligation["kind"] == "generated-retry-clear":
+                subject = obligation["subject"].strip("`")
+                if RECONCILE.valid_queue_item_path(subject) or (
+                    subject
+                    and not subject.startswith("/")
+                    and ".." not in Path(subject).parts
+                ):
+                    paths.append(subject)
+        return sorted(set(paths))
+
+    def supplier_support_checks(
         self,
         identity: tuple,
         authority_edges: list[dict],
-        carrying: list[str],
-    ) -> str | None:
-        if self.identity_view(identity)["actor"] != "needs-human":
-            return None
-        responses = set()
-        revisions = [
-            edge["parent"] for edge in authority_edges
-        ] + carrying
-        for revision in revisions:
-            states = self.states(revision, identity)
-            if len(states) != 1:
-                continue
-            fields = RECONCILE.human_response_fields(states[0].text)
-            key = RECONCILE.first_concrete_response(fields)
-            if key:
-                responses.add((key, fields[key]))
-        if len(responses) > 1:
-            return (
-                "carrying and supplier lineages contain conflicting concrete "
-                "human responses"
+        absent_parents: list[str],
+        child: str,
+    ) -> tuple[list[dict], str | None]:
+        """Require adoption to copy each root's current source projection."""
+        assert self.objects is not None
+        if self.damage.skip_supplier_support_certificate:
+            return [], None
+        certificates = {
+            edge["support_certificate"]["certificate_digest"]: edge[
+                "support_certificate"
+            ]
+            for edge in authority_edges
+            if edge.get("support_certificate") is not None
+        }
+        checks = []
+        problems = []
+        if len(certificates) != len(
+            {
+                (edge["parent"], edge["child"])
+                for edge in authority_edges
+                if edge.get("problem") is None
+            }
+        ):
+            problems.append("a valid authority edge has no support certificate")
+        for digest, certificate in sorted(certificates.items()):
+            source_parents = sorted(set(absent_parents))
+            fixed_support_paths = [
+                anchor["path"] for anchor in certificate["support_paths"]
+            ]
+            support_paths = sorted(
+                set(fixed_support_paths).union(
+                    path
+                    for revision in [*source_parents, child]
+                    for path in self.dynamic_support_paths(
+                        certificate, revision
+                    )
+                )
             )
-        return None
+            source_projections = [
+                {
+                    "parent": parent,
+                    "entries": [
+                        {
+                            "path": path,
+                            "entry": self.objects.path_entry(parent, path),
+                        }
+                        for path in support_paths
+                    ],
+                }
+                for parent in source_parents
+            ]
+            child_projection = [
+                {
+                    "path": path,
+                    "entry": self.objects.path_entry(child, path),
+                }
+                for path in support_paths
+            ]
+            self.metrics.support_paths_checked += len(support_paths) * (
+                len(source_parents) + 1
+            )
+            agreed = bool(source_projections) and all(
+                projection["entries"] == source_projections[0]["entries"]
+                for projection in source_projections[1:]
+            )
+            copied = bool(source_projections) and (
+                child_projection == source_projections[0]["entries"]
+            )
+            replay = [
+                self.evaluate_support_obligations(
+                    identity, certificate, revision
+                )
+                for revision in [*source_parents, child]
+            ]
+            replay_valid = all(item["problem"] is None for item in replay)
+            complete = certificate["completeness"] == "complete"
+            local_problems = []
+            if not complete:
+                local_problems.append(
+                    "incomplete certificate: "
+                    + str(certificate["incomplete_reason"])
+                )
+            if not agreed:
+                local_problems.append(
+                    "absent source parents disagree on support projection"
+                )
+            if not copied:
+                local_problems.append(
+                    "supplier adoption did not copy source support projection"
+                )
+            if not replay_valid:
+                local_problems.append(
+                    "root deletion postcondition failed at source/adoption: "
+                    + "; ".join(
+                        f"{item['revision']}: {item['problem']}"
+                        for item in replay
+                        if item["problem"] is not None
+                    )
+                )
+            check = {
+                "support_schema": "queue-supplier-support/v1",
+                "certificate_digest": digest,
+                "authority_parent": certificate["authority_parent"],
+                "authority_child": certificate["authority_child"],
+                "adoption_child": child,
+                "absent_source_parents": source_parents,
+                "source_projections": source_projections,
+                "adoption_projection": child_projection,
+                "tree_projection_status": (
+                    "valid" if agreed and copied else "invalid"
+                ),
+                "postcondition_status": (
+                    "valid" if replay_valid else "invalid"
+                ),
+                "obligation_evaluations": replay,
+                "status": "valid" if not local_problems else "invalid",
+                "problem": (
+                    None if not local_problems else "; ".join(local_problems)
+                ),
+            }
+            checks.append(check)
+            problems.extend(local_problems)
+        if not certificates:
+            problems.append("supplier root has no support certificate")
+        return checks, (None if not problems else "; ".join(problems))
+
+    @staticmethod
+    def stable_oids(oids):
+        return list(dict.fromkeys(oids))
+
+    def frozen_skeleton_problem(
+        self, before: ActionState, after: ActionState
+    ) -> tuple[str | None, str | None]:
+        """Mirror the production frozen-byte complement for one real edge."""
+        if self.damage.skip_persisted_frozen_skeleton:
+            return None, "DAMAGED-skipped"
+        if RECONCILE.queue_frozen_skeleton(
+            before.path, before.text
+        ) == RECONCILE.queue_frozen_skeleton(after.path, after.text):
+            return None, None
+        if RECONCILE.introduces_final_retry_notes(
+            before.path, before.text, after.path, after.text
+        ):
+            return None, "final-retry-notes"
+        if RECONCILE.pure_first_human_response(
+            before.path, before.text, after.path, after.text
+        ):
+            return None, "pure-first-human-response"
+        return (
+            "protected queue bytes changed while the exact production "
+            "identity remained live",
+            None,
+        )
+
+    def binding_subset_problem(
+        self,
+        identity: tuple,
+        before: ActionState,
+        after: ActionState,
+    ) -> str | None:
+        """Require every concrete earlier human field in the later state."""
+        prior = dict(
+            self.human_response_binding_for_state(identity, before) or ()
+        )
+        current = dict(
+            self.human_response_binding_for_state(identity, after) or ()
+        )
+        mismatches = {
+            key: {"before": value, "after": current.get(key)}
+            for key, value in prior.items()
+            if current.get(key) != value
+        }
+        if not mismatches:
+            return None
+        return (
+            "concrete human response/review binding changed or disappeared: "
+            f"{json.dumps(mismatches, sort_keys=True)}"
+        )
+
+    def mutation_edge(
+        self,
+        identity: tuple,
+        parent: str,
+        child: str,
+        before: ActionState,
+        after: ActionState,
+    ) -> dict:
+        """Call both production mutation authorities for a real Git edge."""
+        self.metrics.mutation_calls += 1
+        try:
+            production_problem = RECONCILE.queue_mutation_problem(
+                before.path,
+                after.path,
+                before.text,
+                after.text,
+                parent,
+                child,
+            )
+            frozen_problem, frozen_exception = self.frozen_skeleton_problem(
+                before, after
+            )
+            regression_problem = (
+                RECONCILE.queue_parent_state_regression_problem(
+                    before.text, after.text
+                )
+            )
+        except (
+            RECONCILE.GitSnapshotError,
+            OSError,
+            ValueError,
+            UnicodeError,
+        ) as error:
+            raise Unreadable(
+                "production mutation authority could not read "
+                f"{parent}->{child}: {error}"
+            ) from error
+        binding_problem = self.binding_subset_problem(
+            identity, before, after
+        )
+        # Production mutation authority owns ordinary linear transitions,
+        # including its exact unanswered review retraction exception.  The
+        # subset comparison is evidence for O anchoring and for non-authoring
+        # merge carriers; it must not narrow a production-valid real edge.
+        full_problem = production_problem or frozen_problem
+        return {
+            "parent": parent,
+            "child": child,
+            "source_path": before.path,
+            "path": after.path,
+            "production_problem": production_problem,
+            "frozen_problem": frozen_problem,
+            "frozen_exception": frozen_exception,
+            "regression_problem": regression_problem,
+            "binding_problem": binding_problem,
+            "role": "unselected",
+            "problem": full_problem,
+        }
+
+    def merge_compatible_problem(
+        self,
+        identity: tuple,
+        edge: dict,
+        before: ActionState,
+        after: ActionState,
+    ) -> str | None:
+        """Validate a non-authoring merge carrier without borrowed mutation."""
+        if edge["regression_problem"]:
+            return edge["regression_problem"]
+        if edge["frozen_problem"]:
+            return edge["frozen_problem"]
+        if edge["binding_problem"]:
+            return edge["binding_problem"]
+        if edge["production_problem"] is None:
+            return None
+
+        # A merge may receive a production-valid review publication/fold from
+        # another live carrying parent.  A completely pending parent is
+        # compatible with that child, but it is never itself the authoring
+        # edge.  No other production mutation failure is waived.
+        identity_view = self.identity_view(identity)
+        prior_binding = self.human_response_binding_for_state(
+            identity, before
+        )
+        publication_gap = (
+            identity_view["actor"] == "needs-human"
+            and identity_view["leaf"] == "reviews"
+            and prior_binding is None
+            and edge["production_problem"].startswith(
+                "immutable review binding changed outside"
+            )
+        )
+        if publication_gap:
+            return None
+        return edge["production_problem"]
+
+    def persisted_occurrence_problem(
+        self,
+        identity: tuple,
+        old_state: ActionState,
+        new_state: ActionState | None,
+    ) -> tuple[str | None, str, list[dict]]:
+        """Trace the admitted occurrence from each implicated tip to C."""
+        assert self.graph is not None
+
+        C_states = self.states(self.fixture.C, identity)
+        if len(C_states) != 1:
+            return (
+                f"C carries exact identity multiplicity {len(C_states)}",
+                "persisted-C-multiplicity",
+                [],
+            )
+
+        memo: dict[str, bool] = {self.fixture.C: True}
+        visiting: set[str] = set()
+        edges: list[dict] = []
+        failures: list[tuple[str, str]] = []
+
+        def fail(code: str, reason: str) -> bool:
+            failures.append((code, reason))
+            return False
+
+        def trace(child: str) -> bool:
+            if child in memo:
+                return memo[child]
+            if child in visiting:
+                return fail(
+                    "persisted-cycle", f"post-C graph cycles at {child}"
+                )
+            visiting.add(child)
+            child_states = self.states(child, identity)
+            if len(child_states) != 1:
+                result = fail(
+                    "persisted-intermediate-multiplicity",
+                    f"persisted occurrence has multiplicity "
+                    f"{len(child_states)} at {child}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            after = child_states[0]
+            carriers: list[tuple[str, ActionState]] = []
+            duplicates: list[tuple[str, int]] = []
+            absent: list[str] = []
+            for parent in self.graph.parents.get(child, ()):
+                if not self.graph.reaches_C(parent):
+                    continue
+                parent_states = self.states(parent, identity)
+                if len(parent_states) == 1:
+                    carriers.append((parent, parent_states[0]))
+                elif len(parent_states) > 1:
+                    duplicates.append((parent, len(parent_states)))
+                else:
+                    absent.append(parent)
+            if duplicates:
+                result = fail(
+                    "persisted-parent-multiplicity",
+                    f"post-C child {child} has duplicate C-rooted "
+                    f"carriers {duplicates}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            if not carriers:
+                result = fail(
+                    "persisted-delete-recreate",
+                    f"post-C child {child} carries the exact identity "
+                    "without any C-rooted carrying parent; absent C-rooted "
+                    f"parents are {absent}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            parent_results = [trace(parent) for parent, _ in carriers]
+            parents_continuous = all(parent_results)
+            candidate_edges = [
+                self.mutation_edge(identity, parent, child, before, after)
+                for parent, before in carriers
+            ]
+            edges.extend(candidate_edges)
+            if not parents_continuous:
+                result = fail(
+                    "persisted-upstream-discontinuity",
+                    f"post-C child {child} descends from a carrying "
+                    "parent whose C-rooted occurrence is invalid",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            source_indices = [
+                index
+                for index, edge in enumerate(candidate_edges)
+                if edge["problem"] is None
+            ]
+            if not source_indices:
+                problems = [
+                    edge["problem"] for edge in candidate_edges
+                ]
+                result = fail(
+                    "persisted-invalid-mutation",
+                    f"no carrying edge into {child} passes production "
+                    f"mutation and frozen-byte authority: {problems}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            compatible = True
+            for index, ((_, before), edge) in enumerate(
+                zip(carriers, candidate_edges)
+            ):
+                if index in source_indices:
+                    edge["role"] = "source"
+                    continue
+                edge["role"] = "compatible-carrier"
+                edge["problem"] = self.merge_compatible_problem(
+                    identity, edge, before, after
+                )
+                if edge["problem"]:
+                    compatible = False
+            if not compatible:
+                result = fail(
+                    "persisted-merge-carrier-conflict",
+                    f"post-C child {child} has a carrying merge parent "
+                    "whose concrete state is incompatible with the child",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            visiting.remove(child)
+            memo[child] = True
+            return True
+
+        old_continuous = (
+            True
+            if self.damage.skip_old_side_continuity
+            else trace(self.fixture.O)
+        )
+        new_continuous = (
+            True
+            if new_state is None
+            or self.damage.skip_persisted_candidate_continuity
+            else trace(self.fixture.N)
+        )
+        continuous = old_continuous and new_continuous
+        ordered_edges = self.stable_edges(edges)
+        if not continuous:
+            code, reason = failures[0]
+            return reason, code, ordered_edges
+        C_state = C_states[0]
+        old_anchor_regression = (
+            RECONCILE.queue_parent_state_regression_problem(
+                C_state.text, old_state.text
+            )
+        )
+        old_anchor_binding = self.binding_subset_problem(
+            identity, C_state, old_state
+        )
+        if (
+            not self.damage.skip_old_side_continuity
+            and (old_anchor_regression or old_anchor_binding)
+        ):
+            return (
+                old_anchor_binding or old_anchor_regression,
+                "persisted-old-endpoint-regression",
+                ordered_edges,
+            )
+        if new_state is None or self.damage.skip_persisted_candidate_continuity:
+            return None, "persisted-old-C-rooted-continuity", ordered_edges
+        endpoint_regression = RECONCILE.queue_parent_state_regression_problem(
+            old_state.text, new_state.text
+        )
+        endpoint_binding = self.binding_subset_problem(
+            identity, old_state, new_state
+        )
+        if endpoint_regression or endpoint_binding:
+            return (
+                endpoint_binding or endpoint_regression,
+                "persisted-endpoint-regression",
+                ordered_edges,
+            )
+        return None, "persisted-C-rooted-continuity", ordered_edges
 
     def supplier_base_events(self, identity: tuple) -> list[Event]:
         """Build nested supplier events while preserving original authority."""
@@ -1179,6 +2227,19 @@ class Classifier:
                 for source in participating
                 for record in source.reason_records
             )
+            inherited_support_checks = self.stable_support_checks(
+                check
+                for source in participating
+                for check in source.support_checks
+            )
+            current_support_checks: list[dict] = []
+            support_problem = None
+            if unique_authorizing and borrowed_event is None:
+                current_support_checks, support_problem = (
+                    self.supplier_support_checks(
+                        identity, authority_edges, absent, child
+                    )
+                )
             if not participating:
                 result = Event(
                     "invalid",
@@ -1290,10 +2351,7 @@ class Classifier:
                     )
                     observed_sources.append(result)
                 else:
-                    conflict = self.response_conflict(
-                        identity, authority_edges, carrying
-                    )
-                    if conflict:
+                    if support_problem:
                         result = Event(
                             "invalid",
                             "supplier",
@@ -1302,8 +2360,8 @@ class Classifier:
                             propagation_edges,
                             accumulated_neutral,
                             accumulated_absent,
-                            "conflicting-human-response",
-                            conflict,
+                            "supplier-support-certificate-invalid",
+                            support_problem,
                         )
                         result = self.attach_causal_metadata(
                             result,
@@ -1312,35 +2370,67 @@ class Classifier:
                         )
                         observed_sources.append(result)
                     else:
-                        result = Event(
-                            "valid",
-                            "supplier",
-                            child,
-                            authority_edges,
-                            propagation_edges,
-                            accumulated_neutral,
-                            accumulated_absent,
-                            (
-                                "damaged-propagation-borrow"
-                                if borrowed_event
-                                else "valid-supplier-authority"
-                            ),
-                            (
-                                "DAMAGED: propagation borrowed lifecycle "
-                                "authority"
-                                if borrowed_event
-                                else (
-                                    "one prior real deletion event supplies "
-                                    "all absent parents; carrying edges only "
-                                    "propagate"
-                                )
-                            ),
+                        binding_problem = (
+                            self.supplier_carrier_human_binding_problem(
+                                identity,
+                                authority_edges,
+                                propagation_edges,
+                            )
                         )
-                        result = self.attach_causal_metadata(
-                            result, causal_roots, prior_records
-                        )
-                        sources.append(result)
-                        observed_sources.append(result)
+                        conflict = binding_problem
+                        if conflict:
+                            result = Event(
+                                "invalid",
+                                "supplier",
+                                child,
+                                authority_edges,
+                                propagation_edges,
+                                accumulated_neutral,
+                                accumulated_absent,
+                                "old-tip-human-binding-conflict",
+                                conflict,
+                            )
+                            result = self.attach_causal_metadata(
+                                result,
+                                self.retag_roots(
+                                    causal_roots, "invalid"
+                                ),
+                                prior_records,
+                            )
+                            observed_sources.append(result)
+                        else:
+                            result = Event(
+                                "valid",
+                                "supplier",
+                                child,
+                                authority_edges,
+                                propagation_edges,
+                                accumulated_neutral,
+                                accumulated_absent,
+                                (
+                                    "damaged-propagation-borrow"
+                                    if borrowed_event
+                                    else "valid-supplier-authority"
+                                ),
+                                (
+                                    "DAMAGED: propagation borrowed lifecycle "
+                                    "authority"
+                                    if borrowed_event
+                                    else (
+                                        "one prior real deletion event supplies "
+                                        "all absent parents; carrying edges only "
+                                        "propagate and copy its support projection"
+                                    )
+                                ),
+                            )
+                            result = self.attach_causal_metadata(
+                                result, causal_roots, prior_records
+                            )
+                            sources.append(result)
+                            observed_sources.append(result)
+            result.support_checks = self.stable_support_checks(
+                [*inherited_support_checks, *current_support_checks]
+            )
             results.append(result)
         return results
 
@@ -1399,8 +2489,8 @@ class Classifier:
             and event.child is not None
             and any(
                 commit != event.child and self.states(commit, identity)
-                for commit in self.graph.between(
-                    event.child, self.fixture.N
+                for commit in self.graph.ordered(
+                    self.graph.between(event.child, self.fixture.N)
                 )
             )
         )
@@ -1479,6 +2569,9 @@ class Classifier:
         prior_records = self.stable_reason_records(
             record for event in events for record in event.reason_records
         )
+        support_checks = self.stable_support_checks(
+            check for event in events for check in event.support_checks
+        )
         reintroduced = any(
             self.has_reintroduction(identity, event) for event in events
         )
@@ -1531,6 +2624,7 @@ class Classifier:
             absent_parents,
             reason_code,
             reason,
+            support_checks=support_checks,
         )
         return self.attach_causal_metadata(
             result, causal_roots, prior_records
@@ -1677,6 +2771,8 @@ class Classifier:
             },
             "authority_edges": [],
             "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
             "neutral_parents": [],
             "absent_parents": [],
             "causal_roots": [],
@@ -1695,22 +2791,65 @@ class Classifier:
         C_states = self.states(self.fixture.C, identity)
         N_states = self.states(self.fixture.N, identity)
         if N_states:
-            if len(N_states) == len(old_states):
+            if len(N_states) != len(old_states) or len(N_states) != 1:
                 return {
                     **base,
-                    "status": "none",
-                    "finding": False,
-                    "authoring_lineage": "preserved",
-                    "reason_code": "identity-preserved",
-                    "reason": "the exact production identity remains live",
+                    "status": "ambiguous",
+                    "finding": True,
+                    "authoring_lineage": "multiplicity-changed",
+                    "reason_code": "endpoint-multiplicity-change",
+                    "reason": (
+                        "persisted production identity does not have one "
+                        "unambiguous O-to-N occurrence"
+                    ),
+                }
+            if self.damage.skip_preserved_state_validation:
+                state_problem = None
+                state_code = "DAMAGED-skipped"
+                mutation_edges = []
+            else:
+                state_problem, state_code, mutation_edges = (
+                    self.persisted_occurrence_problem(
+                        identity, old_states[0], N_states[0]
+                    )
+                )
+            if state_problem:
+                status = (
+                    "ambiguous"
+                    if state_code
+                    in {
+                        "persisted-C-multiplicity",
+                        "persisted-intermediate-multiplicity",
+                        "persisted-parent-multiplicity",
+                        "persisted-delete-recreate",
+                        "persisted-upstream-discontinuity",
+                    }
+                    else "invalid"
+                )
+                return {
+                    **base,
+                    "status": status,
+                    "finding": True,
+                    "authoring_lineage": "persisted-state-regression",
+                    "mutation_edges": mutation_edges,
+                    "reason_code": state_code,
+                    "reason": (
+                        "the production identity remains live but its one "
+                        "C-rooted occurrence is not continuously valid: "
+                        f"{state_problem}"
+                    ),
                 }
             return {
                 **base,
-                "status": "ambiguous",
-                "finding": True,
-                "authoring_lineage": "multiplicity-changed",
-                "reason_code": "endpoint-multiplicity-change",
-                "reason": "candidate multiplicity differs from the old tip",
+                "status": "none",
+                "finding": False,
+                "authoring_lineage": "preserved",
+                "mutation_edges": mutation_edges,
+                "reason_code": "identity-preserved",
+                "reason": (
+                    "the exact production identity remains live through "
+                    "continuous C-rooted production-valid mutations"
+                ),
             }
         effective_old = (
             old_states[:1]
@@ -1746,6 +2885,37 @@ class Classifier:
                 "reason_code": "C-multiplicity",
                 "reason": (
                     f"C carries exact identity multiplicity {len(C_states)}"
+                ),
+            }
+        old_problem, old_code, old_mutation_edges = (
+            self.persisted_occurrence_problem(
+                identity, effective_old[0], None
+            )
+        )
+        if old_problem:
+            status = (
+                "ambiguous"
+                if old_code
+                in {
+                    "persisted-C-multiplicity",
+                    "persisted-intermediate-multiplicity",
+                    "persisted-parent-multiplicity",
+                    "persisted-delete-recreate",
+                    "persisted-upstream-discontinuity",
+                }
+                else "invalid"
+            )
+            return {
+                **base,
+                "status": status,
+                "finding": True,
+                "authoring_lineage": "old-side-discontinuous",
+                "mutation_edges": old_mutation_edges,
+                "reason_code": old_code,
+                "reason": (
+                    "the old tip identity does not retain one continuously "
+                    "valid C-rooted occurrence: "
+                    f"{old_problem}"
                 ),
             }
         if self.damage.reopen_pre_c_genealogy:
@@ -1784,6 +2954,8 @@ class Classifier:
             "event_mode": event.mode,
             "authority_edges": event.authority_edges,
             "propagation_edges": event.propagation_edges,
+            "mutation_edges": old_mutation_edges,
+            "support_checks": event.support_checks,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
             "causal_roots": event.causal_roots,
@@ -1802,7 +2974,7 @@ class Classifier:
             return None
         candidate_states = [
             commit
-            for commit in self.graph.candidate_nodes
+            for commit in self.graph.ordered(self.graph.candidate_nodes)
             if self.states(commit, identity)
         ]
         if not candidate_states:
@@ -1889,6 +3061,8 @@ class Classifier:
                         "event_mode": "none",
                         "authority_edges": [],
                         "propagation_edges": [],
+                        "mutation_edges": [],
+                        "support_checks": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -1919,6 +3093,8 @@ class Classifier:
                         "event_mode": "none",
                         "authority_edges": [],
                         "propagation_edges": [],
+                        "mutation_edges": [],
+                        "support_checks": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -1932,7 +3108,9 @@ class Classifier:
                 ]
                 seen = set(old_snapshot)
                 candidate_identities = set()
-                for commit in self.graph.candidate_nodes:
+                for commit in self.graph.ordered(
+                    self.graph.candidate_nodes
+                ):
                     candidate_identities.update(objects.snapshot(commit))
                 for identity in sorted(
                     candidate_identities - seen, key=repr
@@ -1989,6 +3167,16 @@ class Classifier:
                         for action in actions
                         for edge in action["propagation_edges"]
                     ],
+                    "mutation_edges": [
+                        edge
+                        for action in actions
+                        for edge in action["mutation_edges"]
+                    ],
+                    "support_checks": [
+                        check
+                        for action in actions
+                        for check in action["support_checks"]
+                    ],
                     "actions": actions,
                     "metrics": self.metrics.as_dict(),
                     "details": fixture.details,
@@ -2016,6 +3204,8 @@ class Classifier:
                 "event_mode": "none",
                 "authority_edges": [],
                 "propagation_edges": [],
+                "mutation_edges": [],
+                "support_checks": [],
                 "actions": [],
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
@@ -2066,6 +3256,41 @@ def human_text(label: str, status: str = "waiting", answer="______"):
     )
 
 
+def review_text(
+    label: str,
+    *,
+    status: str = "waiting",
+    response: str = "______",
+    target: str,
+    revision: str,
+    reviewed_revision: str = "______",
+    outcome: str = "pending",
+):
+    rendered_target = (
+        target
+        if Classifier.explicit_review_pending(target)
+        else f"`{target}`"
+    )
+    return (
+        f"# Review {label}\n\n"
+        f"**Status:** {status}\n"
+        "**Filed:** 2026-08-31\n"
+        f"**Action:** review {label}\n"
+        f"**Full context:** `{evidence_path(label)}`\n"
+        f"**Resolution evidence:** `{evidence_path(label)}`\n"
+        "**If unanswered:** keep the review live\n"
+        f"**Your review:** {response}\n"
+        f"**Review target:** {rendered_target}\n"
+        f"**Review revision:** {revision}\n"
+        f"**Reviewed revision:** {reviewed_revision}\n"
+        f"**Review outcome:** {outcome}\n"
+    )
+
+
+def review_revision(payload: str) -> str:
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def initialize(repo: GitRepository):
     repo.write("README.md", "# Disposable production-contract fixture\n")
     repo.write(
@@ -2094,6 +3319,28 @@ def add_human(repo: GitRepository, label: str):
     return path
 
 
+def add_review(
+    repo: GitRepository,
+    label: str,
+    *,
+    status: str,
+    target: str,
+    revision: str,
+):
+    path = queue_path(label, actor="needs-human", leaf="reviews")
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(
+        path,
+        review_text(
+            label,
+            status=status,
+            target=target,
+            revision=revision,
+        ),
+    )
+    return path
+
+
 def claim(repo: GitRepository, paths: Iterable[str], message="claim action"):
     for path in paths:
         text = repo.read(path)
@@ -2117,6 +3364,109 @@ def answer(repo: GitRepository, path: str, value: str):
         ),
     )
     return repo.commit(f"record human answer {value}")
+
+
+def answer_review(repo: GitRepository, path: str, value: str):
+    repo.write(
+        path,
+        repo.read(path).replace(
+            "**Your review:** ______",
+            f"**Your review:** {value}",
+            1,
+        ),
+    )
+    return repo.commit(f"record human review {value}")
+
+
+def publish_review(
+    repo: GitRepository, path: str, target: str, revision: str
+):
+    text = repo.read(path)
+    text = text.replace(
+        "**Status:** awaiting-artifact", "**Status:** waiting", 1
+    )
+    text = text.replace(
+        "**Review target:** pending",
+        f"**Review target:** `{target}`",
+        1,
+    )
+    text = text.replace(
+        "**Review revision:** pending",
+        f"**Review revision:** {revision}",
+        1,
+    )
+    repo.write(path, text)
+    return repo.commit(f"publish review target {target}")
+
+
+def fill_review_pending(
+    repo: GitRepository,
+    path: str,
+    *,
+    field: str,
+    target: str,
+    revision: str,
+):
+    text = repo.read(path)
+    if field == "Review target":
+        before = "**Review target:** pending"
+        after = f"**Review target:** `{target}`"
+    elif field == "Review revision":
+        before = "**Review revision:** pending"
+        after = f"**Review revision:** {revision}"
+    else:
+        raise ValueError(f"unsupported review pending field: {field}")
+    if before not in text:
+        raise RuntimeError(f"missing expected pending field: {before}")
+    repo.write(path, text.replace(before, after, 1))
+    return repo.commit(f"fill pending {field.lower()}")
+
+
+def replace_review_binding(
+    repo: GitRepository,
+    path: str,
+    *,
+    field: str,
+    old_value: str,
+    target: str,
+    revision: str,
+):
+    text = repo.read(path)
+    if field == "Review target":
+        before = f"**Review target:** {old_value}"
+        after = f"**Review target:** `{target}`"
+    elif field == "Review revision":
+        before = f"**Review revision:** {old_value}"
+        after = f"**Review revision:** {revision}"
+    else:
+        raise ValueError(f"unsupported review binding field: {field}")
+    if before not in text:
+        raise RuntimeError(f"missing expected review field: {before}")
+    repo.write(path, text.replace(before, after, 1))
+    return repo.commit(f"replace malformed {field.lower()}")
+
+
+def claim_review(
+    repo: GitRepository,
+    path: str,
+    *,
+    outcome: str = "approved",
+):
+    text = repo.read(path)
+    revision = RECONCILE.human_response_fields(text)["Review revision"]
+    text = text.replace("**Status:** waiting", "**Status:** folding", 1)
+    text = text.replace(
+        "**Reviewed revision:** ______",
+        f"**Reviewed revision:** {revision}",
+        1,
+    )
+    text = text.replace(
+        "**Review outcome:** pending",
+        f"**Review outcome:** {outcome}",
+        1,
+    )
+    repo.write(path, text)
+    return repo.commit(f"bind human review as {outcome}")
 
 
 def delete_with_evidence(
@@ -3029,6 +4379,1182 @@ def human_supplier_fixture(
     )
 
 
+def r8_human_response_binding(
+    root: Path, *, mode: str, conflict: bool
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    disposition = "conflict" if conflict else "identical"
+    label = f"r8-{mode}-{disposition}-response"
+    path = add_human(repo, label)
+    C = repo.commit("create unanswered human response at C")
+    repo.branch("old", C)
+    old_response = "reject" if conflict else "approve"
+    answer(repo, path, old_response)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate-authority", C)
+    answer(repo, path, "approve")
+    authority_parent = claim(
+        repo, (path,), "fold candidate human response"
+    )
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate human response",
+    )
+    carrier = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        carrier = feature(repo, f"{label}-carrier")
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt human response supplier absence",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        f"R8-{mode}-human-response-{disposition}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "old_response": old_response,
+            "candidate_response": "approve",
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+            "mode": mode,
+            "binding_conflict": conflict,
+        },
+    )
+
+
+def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    disposition = "divergent" if divergent else "identical"
+    label = f"r8-review-{disposition}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact" if divergent else "waiting",
+        target="pending" if divergent else target_A,
+        revision="pending" if divergent else revision_A,
+    )
+    C = repo.commit("create unanswered review at C")
+    repo.branch("old", C)
+    if divergent:
+        publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    if divergent:
+        publish_review(repo, path, target_B, revision_B)
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path)
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate human review",
+    )
+    M = deletion
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        f"R8-review-binding-{disposition}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if divergent else "no-finding",
+        {
+            "old_binding": [target_A, revision_A],
+            "candidate_binding": [
+                target_B if divergent else target_A,
+                revision_B if divergent else revision_A,
+            ],
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "binding_conflict": divergent,
+        },
+    )
+
+
+def r8_review_terminal_binding_conflict(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r8-review-terminal-conflict"
+    target = f"docs/{label}-target.md"
+    payload = f"# {label} target\n"
+    repo.write(target, payload)
+    revision = review_revision(payload)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=target,
+        revision=revision,
+    )
+    C = repo.commit("create unanswered terminal-binding review at C")
+    repo.branch("old", C)
+    answer_review(repo, path, "recorded review")
+    claim_review(repo, path, outcome="rejected")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    answer_review(repo, path, "recorded review")
+    authority_parent = claim_review(repo, path, outcome="approved")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve candidate terminal-binding review",
+    )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        "R8-review-binding-terminal-conflict",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        "blocking-finding",
+        {
+            "old_binding": [target, revision, revision, "rejected"],
+            "candidate_binding": [
+                target,
+                revision,
+                revision,
+                "approved",
+            ],
+            "old_terminal_fields": {
+                "Reviewed revision": revision,
+                "Review outcome": "rejected",
+            },
+            "candidate_terminal_fields": {
+                "Reviewed revision": revision,
+                "Review outcome": "approved",
+            },
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "binding_conflict": True,
+        },
+    )
+
+
+def r9_review_pending_binding(
+    root: Path, *, mode: str, pending_field: str
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    field_slug = (
+        "target" if pending_field == "Review target" else "revision"
+    )
+    label = f"r9-{mode}-{field_slug}-pending"
+    target = f"docs/{label}-target.md"
+    payload = f"# {label} target\n"
+    repo.write(target, payload)
+    revision = review_revision(payload)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target="pending" if field_slug == "target" else target,
+        revision="pending" if field_slug == "revision" else revision,
+    )
+    C = repo.commit(f"create review with pending {field_slug} at C")
+    repo.branch("old", C)
+    answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    fill_review_pending(
+        repo,
+        path,
+        field=pending_field,
+        target=target,
+        revision=revision,
+    )
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path)
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        f"resolve candidate review with filled {field_slug}",
+    )
+    carrier = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        carrier = feature(repo, f"{label}-carrier")
+        M = repo.merge_commit(
+            (deletion, carrier),
+            f"adopt review {field_slug} supplier absence",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+    N = feature(repo, f"{label}-old")
+    old_pending_value = "pending"
+    candidate_value = (
+        f"`{target}`"
+        if pending_field == "Review target"
+        else revision
+    )
+    return Fixture(
+        f"R9-{mode}-review-{field_slug}-pending-fill",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "pending_field": pending_field,
+            "old_pending_value": old_pending_value,
+            "candidate_value": candidate_value,
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+            "mode": mode,
+        },
+    )
+
+
+def r10_malformed_review_binding(
+    root: Path,
+    *,
+    mode: str,
+    field: str,
+    malformed_value: str,
+    slug: str,
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    field_slug = "target" if field == "Review target" else "revision"
+    label = f"r10-{mode}-{field_slug}-{slug}"
+    target = f"docs/{label}-target.md"
+    payload = f"# {label} target\n"
+    repo.write(target, payload)
+    revision = review_revision(payload)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=malformed_value if field_slug == "target" else target,
+        revision=(
+            malformed_value if field_slug == "revision" else revision
+        ),
+    )
+    old_value = RECONCILE.human_response_fields(repo.read(path))[field]
+    C = repo.commit(f"create review with malformed {field_slug} at C")
+    repo.branch("old", C)
+    answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    replace_review_binding(
+        repo,
+        path,
+        field=field,
+        old_value=old_value,
+        target=target,
+        revision=revision,
+    )
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path)
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        f"resolve candidate review after replacing malformed {field_slug}",
+    )
+    carrier = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        carrier = feature(repo, f"{label}-carrier")
+        M = repo.merge_commit(
+            (deletion, carrier),
+            f"adopt malformed {field_slug} review supplier absence",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+    N = feature(repo, f"{label}-old")
+    candidate_value = (
+        f"`{target}`" if field == "Review target" else revision
+    )
+    return Fixture(
+        f"R10-{mode}-review-{field_slug}-{slug}-rejected",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "binding_field": field,
+            "old_value": old_value,
+            "candidate_value": candidate_value,
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+            "mode": mode,
+        },
+    )
+
+
+def r13_review_parent_binding(
+    root: Path, *, mode: str, variant: str
+) -> Fixture:
+    """Bind every direct/supplier carrying parent to O's concrete review."""
+    if mode not in {"direct", "supplier"}:
+        raise ValueError(mode)
+    if variant not in {"identical", "target", "revision", "terminal"}:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r13-{mode}-review-{variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create awaiting-artifact carrier-binding review")
+
+    response = "recorded review" if variant == "terminal" else "approve"
+    old_outcome = "approved"
+    concrete_terminal = variant in {"identical", "terminal"}
+    repo.branch("old", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, response)
+    if concrete_terminal:
+        claim_review(repo, path, outcome=old_outcome)
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("candidate-authority", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, response)
+    authority_parent = claim_review(
+        repo, path, outcome=old_outcome if concrete_terminal else "approved"
+    )
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve matching candidate review authority",
+    )
+
+    carrier_target = target_B if variant == "target" else target_A
+    carrier_revision = revision_B if variant in {"target", "revision"} else revision_A
+    carrier_outcome = "rejected" if variant == "terminal" else "approved"
+    repo.branch("candidate-carrier", C)
+    if variant == "revision":
+        repo.write(target_A, payload_B)
+    publish_review(repo, path, carrier_target, carrier_revision)
+    answer_review(repo, path, response)
+    if mode == "direct" or concrete_terminal:
+        carrier = claim_review(repo, path, outcome=carrier_outcome)
+    else:
+        carrier = feature(repo, f"{label}-live-carrier")
+
+    if mode == "direct":
+        M = repo.merge_commit(
+            (authority_parent, carrier),
+            "directly delete review from both carrying parents",
+            writes={
+                evidence_path(label): f"# Evidence {label}: resolved\n"
+            },
+            removes=(path,),
+        )
+    else:
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt review supplier absence with carrying parent",
+            removes=(path,),
+        )
+    N = feature(repo, f"{label}-new-tip")
+    conflict = variant != "identical"
+    changed_field = {
+        "identical": None,
+        "target": "Review target",
+        "revision": "Review revision",
+        "terminal": "Review outcome",
+    }[variant]
+    return Fixture(
+        f"R13-{mode}-review-binding-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "mode": mode,
+            "variant": variant,
+            "binding_conflict": conflict,
+            "changed_field": changed_field,
+            "response": response,
+            "old_binding": [
+                target_A,
+                revision_A,
+                revision_A if concrete_terminal else "pending",
+                old_outcome if concrete_terminal else "pending",
+            ],
+            "carrier_binding": [
+                carrier_target,
+                carrier_revision,
+                (
+                    carrier_revision
+                    if mode == "direct" or concrete_terminal
+                    else "pending"
+                ),
+                (
+                    carrier_outcome
+                    if mode == "direct" or concrete_terminal
+                    else "pending"
+                ),
+            ],
+            "authority_parent": authority_parent,
+            "authority_child": M if mode == "direct" else deletion,
+            "carrier": carrier,
+            "merge": M,
+        },
+    )
+
+
+def low_similarity_delivery_text(text: str, marker: str) -> str:
+    """Fixture helper retained for independent D+A endpoint probes."""
+    replacement = f"**Resolution evidence:** {marker * 4096}"
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("**Resolution evidence:**"):
+            lines[index] = replacement
+            return "\n".join(lines) + "\n"
+    raise RuntimeError("fixture has no Resolution evidence field")
+
+
+def r13_persisted_state(root: Path, variant: str) -> Fixture:
+    """Check O/N mutable state without relying on Git rename similarity."""
+    variants = {
+        "same-state",
+        "response-removal",
+        "response-change",
+        "review-target-change",
+        "review-revision-change",
+        "review-outcome-change",
+        "claim-loss",
+        "pending-fill",
+        "terminal-fill",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r13-persisted-{variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} target A\n"
+    payload_B = f"# {label} target B\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    if variant in {
+        "review-target-change",
+        "review-revision-change",
+        "pending-fill",
+    }:
+        repo.write(target_A, payload_A)
+        repo.write(target_B, payload_B)
+        path = add_review(
+            repo,
+            label,
+            status="awaiting-artifact",
+            target="pending",
+            revision="pending",
+        )
+    elif variant in {"review-outcome-change", "terminal-fill"}:
+        repo.write(target_A, payload_A)
+        path = add_review(
+            repo,
+            label,
+            status="waiting",
+            target=target_A,
+            revision=revision_A,
+        )
+    elif variant in {"response-removal", "response-change"}:
+        path = add_human(repo, label)
+    else:
+        path = add_agent(repo, label)
+    decision_variant = variant in {"response-removal", "response-change"}
+    C = repo.commit(f"create persisted-state {variant} at C")
+
+    repo.branch("old", C)
+    if variant in {"response-removal", "response-change"}:
+        answer(repo, path, "old-response-" * 4096)
+    elif variant == "review-target-change":
+        publish_review(repo, path, target_A, revision_A)
+        answer_review(repo, path, "approve")
+    elif variant == "review-revision-change":
+        publish_review(repo, path, target_A, revision_A)
+        answer_review(repo, path, "approve")
+    elif variant == "review-outcome-change":
+        answer_review(repo, path, "recorded review")
+        claim_review(repo, path, outcome="rejected")
+    elif variant == "claim-loss":
+        claim(repo, (path,), "claim persisted action on old tip")
+    elif variant == "terminal-fill":
+        answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old-tip")
+
+    repo.branch("candidate", C)
+    if variant == "response-change":
+        answer(repo, path, "new-response-" * 4096)
+    elif variant == "review-target-change":
+        publish_review(repo, path, target_B, revision_B)
+        answer_review(repo, path, "approve")
+    elif variant == "review-revision-change":
+        repo.write(target_A, payload_B)
+        publish_review(repo, path, target_A, revision_B)
+        answer_review(repo, path, "approve")
+    elif variant == "review-outcome-change":
+        answer_review(repo, path, "recorded review")
+        claim_review(repo, path, outcome="approved")
+    elif variant == "pending-fill":
+        publish_review(repo, path, target_A, revision_A)
+    elif variant == "terminal-fill":
+        answer_review(repo, path, "approve")
+        claim_review(repo, path, outcome="approved")
+    moved = str(
+        Path(path).with_name(f"non-blocking-{label}-moved.md")
+    )
+    repo.move(path, moved)
+    M = repo.commit(f"move low-similarity persisted-state {variant}")
+    N = feature(repo, f"{label}-new-tip")
+
+    old_text = repo.run("show", f"{O}:{path}").stdout
+    new_text = repo.run("show", f"{N}:{moved}").stdout
+    identity_equal = RECONCILE.queue_action_identity(
+        path, old_text
+    ) == RECONCILE.queue_action_identity(moved, new_text)
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    expected_problem = variant in {
+        "response-removal",
+        "response-change",
+        "review-target-change",
+        "review-revision-change",
+        "review-outcome-change",
+        "claim-loss",
+    }
+    return Fixture(
+        f"R13-persisted-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if expected_problem else "no-finding",
+        {
+            "variant": variant,
+            "old_path": path,
+            "new_path": moved,
+            "production_identity_equal": identity_equal,
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+            "expected_low_similarity": decision_variant,
+            "expected_state_problem": expected_problem,
+        },
+    )
+
+
+def r14_review_carrier_binding(
+    root: Path,
+    *,
+    mode: str,
+    carrier_variant: str,
+    old_answered: bool,
+) -> Fixture:
+    """Exercise concrete published review state even when unanswered."""
+    if mode not in {"direct", "supplier"}:
+        raise ValueError(mode)
+    if carrier_variant not in {"pending", "same", "target", "revision"}:
+        raise ValueError(carrier_variant)
+    if mode == "direct" and carrier_variant not in {"same", "target"}:
+        raise ValueError("direct mode binds its one authority parent")
+
+    repo = GitRepository(root)
+    initialize(repo)
+    answered_slug = "answered" if old_answered else "unanswered"
+    label = f"r14-{mode}-{answered_slug}-{carrier_variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} A\n"
+    payload_B = f"# {label} B\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for unanswered binding matrix")
+
+    repo.branch("old", C)
+    publish_review(repo, path, target_A, revision_A)
+    if old_answered:
+        answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("candidate-authority", C)
+    authority_target = (
+        target_B
+        if mode == "direct" and carrier_variant == "target"
+        else target_A
+    )
+    authority_revision = (
+        revision_B
+        if mode == "direct" and carrier_variant == "target"
+        else revision_A
+    )
+    publish_review(repo, path, authority_target, authority_revision)
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path, outcome="approved")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve review authority for unanswered binding matrix",
+    )
+
+    carrier = None
+    carrier_binding = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        if carrier_variant == "pending":
+            carrier = feature(repo, f"{label}-pending-carrier")
+            carrier_binding = ["pending", "pending"]
+        else:
+            carrier_target = (
+                target_B if carrier_variant == "target" else target_A
+            )
+            carrier_revision = (
+                revision_B
+                if carrier_variant in {"target", "revision"}
+                else revision_A
+            )
+            carrier = publish_review(
+                repo, path, carrier_target, carrier_revision
+            )
+            carrier_binding = [carrier_target, carrier_revision]
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt absence with an unanswered published review carrier",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+        carrier_binding = [authority_target, authority_revision]
+    N = feature(repo, f"{label}-new")
+
+    conflict = carrier_variant in {"target", "revision"}
+    return Fixture(
+        f"R14-{mode}-old-{answered_slug}-carrier-{carrier_variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "mode": mode,
+            "old_answered": old_answered,
+            "variant": carrier_variant,
+            "binding_conflict": conflict,
+            "old_binding": [target_A, revision_A],
+            "carrier_binding": carrier_binding,
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+        },
+    )
+
+
+def r14_persisted_hidden_bytes(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-hidden-bytes"
+    path = add_human(repo, label)
+    hidden_A = "\n".join(
+        f"protected-A-{index:04d}" for index in range(512)
+    )
+    hidden_B = "\n".join(
+        f"protected-B-{index:04d}" for index in range(512)
+    )
+    original = repo.read(path) + f"\n<!--\n{hidden_A}\n-->\n"
+    repo.write(path, original)
+    C = repo.commit("create persisted action with protected hidden bytes")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.move(path, moved)
+    repo.write(moved, original.replace(hidden_A, hidden_B))
+    M = repo.commit("move action while replacing protected hidden bytes")
+    N = feature(repo, f"{label}-new")
+    before = repo.run("show", f"{O}:{path}").stdout
+    after = repo.run("show", f"{N}:{moved}").stdout
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    return Fixture(
+        "R14-persisted-hidden-bytes-low-similarity",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "old_path": path,
+            "new_path": moved,
+            "identity_equal": RECONCILE.queue_action_identity(
+                path, before
+            )
+            == RECONCILE.queue_action_identity(moved, after),
+            "frozen_equal": RECONCILE.queue_frozen_skeleton(
+                path, before
+            )
+            == RECONCILE.queue_frozen_skeleton(moved, after),
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+        },
+    )
+
+
+def r14_persisted_intermediate_claim(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-intermediate-claim"
+    path = add_agent(repo, label)
+    C = repo.commit("create action for intermediate claim regression")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,), "claim action in candidate history")
+    before_bad = repo.read(path)
+    repo.write(
+        path,
+        before_bad.replace("**Status:** in-repair", "**Status:** open", 1),
+    )
+    bad = repo.commit("regress candidate claim in intermediate commit")
+    repo.write(path, before_bad)
+    M = repo.commit("restore candidate claim before endpoint")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-intermediate-claim-regression",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"bad": bad, "expected_problem": "committed in-repair"},
+    )
+
+
+def r14_persisted_intermediate_review(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-intermediate-review"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# target A\n"
+    payload_B = "# target B\n"
+    revision_A = review_revision(payload_A)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=target_A,
+        revision=revision_A,
+    )
+    repo.commit("file concrete review")
+    answer_review(repo, path, "approve")
+    C = claim_review(repo, path, outcome="approved")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    original = repo.read(path)
+    repo.write(
+        path,
+        original.replace(
+            f"**Review target:** `{target_A}`",
+            f"**Review target:** `{target_B}`",
+            1,
+        ),
+    )
+    bad = repo.commit("mutate review binding in intermediate commit")
+    repo.write(path, original)
+    M = repo.commit("restore review binding before endpoint")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-intermediate-review-regression",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"bad": bad, "expected_problem": "immutable review binding"},
+    )
+
+
+def r14_persisted_delete_recreate(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-delete-recreate"
+    path = add_agent(repo, label)
+    original = repo.read(path)
+    C = repo.commit("create action for delete-recreate continuity")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    repo.remove(path)
+    gap = repo.commit("temporarily delete exact persisted identity")
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.write(moved, original)
+    M = repo.commit("recreate exact persisted identity")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-delete-recreate",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"gap": gap, "old_path": path, "new_path": moved},
+    )
+
+
+def r14_persisted_review_retraction(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-review-retraction"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# first artifact\n"
+    payload_B = "# replacement artifact\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for valid retraction")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    published_A = publish_review(repo, path, target_A, revision_A)
+    text = repo.read(path)
+    text = text.replace("**Status:** waiting", "**Status:** awaiting-artifact", 1)
+    text = text.replace(f"**Review target:** `{target_A}`", "**Review target:** pending", 1)
+    text = text.replace(f"**Review revision:** {revision_A}", "**Review revision:** pending", 1)
+    repo.write(path, text)
+    retracted = repo.commit("retract unanswered review publication")
+    published_B = publish_review(repo, path, target_B, revision_B)
+    M = published_B
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-valid-review-retraction",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "published_A": published_A,
+            "retracted": retracted,
+            "published_B": published_B,
+        },
+    )
+
+
+def r14_persisted_first_response_move(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-first-response-move"
+    path = add_human(repo, label)
+    C = repo.commit("create decision for low-similarity first response")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    answer_commit = answer(repo, path, "first-response-" * 4096)
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.move(path, moved)
+    M = repo.commit("move decision after valid first response")
+    N = feature(repo, f"{label}-new")
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    return Fixture(
+        "R14-persisted-valid-first-response-low-similarity",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "answer_commit": answer_commit,
+            "old_path": path,
+            "new_path": moved,
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+        },
+    )
+
+
+def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    slug = "conflict" if conflict else "pending"
+    label = f"r14-persisted-merge-{slug}-carrier"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# source artifact\n"
+    payload_B = "# carrier artifact\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for persisted merge carriers")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate-source", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, "approve")
+    source = claim_review(repo, path, outcome="approved")
+    source_text = repo.read(path)
+    repo.branch("candidate-carrier", C)
+    if conflict:
+        carrier = publish_review(repo, path, target_B, revision_B)
+    else:
+        carrier = feature(repo, f"{label}-pending")
+    M = repo.merge_commit(
+        (source, carrier),
+        "merge persisted source with compatible or conflicting carrier",
+        writes={path: source_text},
+    )
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        f"R14-persisted-merge-carrier-{slug}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {"source": source, "carrier": carrier, "merge": M, "conflict": conflict},
+    )
+
+
+def r8_adapter_M_variants(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r8-adapter-M-input"
+    path = add_agent(repo, label)
+    C = repo.commit("create adapter-input action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,), "claim adapter-input action")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve adapter-input action",
+    )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        "R8-adapter-M-input-variants",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        "no-finding",
+        {
+            "adapter_M_variants": {
+                "workflow_M_equals_O": O,
+                "explicit_candidate_M": deletion,
+                "endpoint_M_equals_N": N,
+            },
+            "poc_changes_adapter": False,
+        },
+    )
+
+
+def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
+    """Exercise occurrence integrity on the C-to-O side of the split."""
+    variants = {
+        "invalid-delete-recreate",
+        "valid-delete-recreate",
+        "human-binding-restore",
+        "hidden-bytes-restore",
+        "continuous-preserved",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r15-old-{variant}"
+
+    if variant == "human-binding-restore":
+        path = add_human(repo, label)
+        C = answer(repo, path, "approve")
+        original = repo.read(path)
+    else:
+        path = add_agent(repo, label)
+        if variant == "hidden-bytes-restore":
+            repo.write(path, repo.read(path) + "\n<!-- protected-A -->\n")
+        C = repo.commit("admit old-side continuity action at C")
+        original = repo.read(path)
+
+    repo.branch("old", C)
+    details: dict[str, Any] = {"path": path, "variant": variant}
+    if variant == "invalid-delete-recreate":
+        repo.remove(path)
+        details["gap"] = repo.commit("old side deletes without authority")
+        repo.write(path, original)
+        details["recreated"] = repo.commit(
+            "old side recreates identical occurrence"
+        )
+    elif variant == "valid-delete-recreate":
+        details["authority_parent"] = claim(
+            repo, (path,), "old side claims occurrence"
+        )
+        details["authority_child"] = delete_with_evidence(
+            repo,
+            ((label, path),),
+            "old side validly deletes claimed occurrence",
+        )
+        repo.write(path, original)
+        details["recreated"] = repo.commit(
+            "old side recreates after valid deletion"
+        )
+    elif variant == "human-binding-restore":
+        repo.write(
+            path,
+            original.replace("**Your answer:** approve", "**Your answer:** reject", 1),
+        )
+        details["bad"] = repo.commit("change concrete old-side answer")
+        repo.write(path, original)
+        details["restored"] = repo.commit("restore concrete old-side answer")
+    elif variant == "hidden-bytes-restore":
+        repo.write(path, original.replace("protected-A", "protected-B", 1))
+        details["bad"] = repo.commit("change protected old-side bytes")
+        repo.write(path, original)
+        details["restored"] = repo.commit("restore protected old-side bytes")
+    else:
+        details["old_step"] = feature(repo, f"{label}-old-step")
+    O = feature(repo, f"{label}-old-tip")
+
+    repo.branch("candidate", C)
+    M = feature(repo, f"{label}-candidate-base")
+    N = feature(repo, f"{label}-candidate-tip")
+    expected = "no-finding" if variant == "continuous-preserved" else "blocking-finding"
+    details["old_text_equals_C"] = (
+        repo.run("show", f"{C}:{path}").stdout
+        == repo.run("show", f"{O}:{path}").stdout
+    )
+    details["new_text_equals_C"] = (
+        repo.run("show", f"{C}:{path}").stdout
+        == repo.run("show", f"{N}:{path}").stdout
+    )
+    if variant == "valid-delete-recreate":
+        with reconciler_repository(repo.root):
+            details["deletion_problem"] = RECONCILE.queue_deletion_problem(
+                path,
+                repo.run(
+                    "show", f"{details['authority_parent']}:{path}"
+                ).stdout,
+                details["authority_parent"],
+                details["authority_child"],
+            )
+    return Fixture(
+        f"R15-old-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        expected,
+        details,
+    )
+
+
+def r8_adapter_M_endpoint_counterexample(root: Path) -> Fixture:
+    base = r3_unrelated_invalid_does_not_poison(root)
+    details = {
+        **base.details,
+        "adapter_M_variants": {
+            "explicit_candidate_M": base.M,
+            "endpoint_M_equals_N": base.N,
+        },
+        "poc_changes_adapter": False,
+        "automatic_M_equals_N_safe": False,
+    }
+    return dataclasses.replace(
+        base,
+        scenario="R8-adapter-M-N-frontier-counterexample",
+        details=details,
+    )
+
+
 def conflicting_human_source(
     repo: GitRepository,
     *,
@@ -3917,6 +6443,307 @@ def pcx16_task_pickup(root: Path) -> Fixture:
     )
 
 
+def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
+    """Exercise exact source support copying without carrier authority."""
+    variants = {
+        "forward": "no-finding",
+        "reverse-drop": "blocking-finding",
+        "reverse-preserved": "no-finding",
+        "invalid-source": "blocking-finding",
+        "source-evolution": "no-finding",
+        "adoption-drift": "blocking-finding",
+        "nested-drop": "blocking-finding",
+        "permutation-diamond": "no-finding",
+    }
+    if variant not in variants:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r16-support-{variant}"
+    path = add_agent(repo, label)
+    evidence = evidence_path(label)
+    C = repo.commit("create r16 supplier support action")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("support-source", C)
+    if variant == "invalid-source":
+        authority_parent = C
+        repo.remove(path)
+        authority_child = repo.commit("delete without production authority")
+    else:
+        authority_parent = claim(repo, (path,), "claim support source")
+        authority_child = delete_with_evidence(
+            repo, ((label, path),), "delete with support authority"
+        )
+    source_parent = authority_child
+    if variant == "source-evolution":
+        repo.write(evidence, f"# Evidence {label}: evolved-source\n")
+        source_parent = repo.commit("evolve support on absent source lineage")
+
+    repo.branch("support-carrier", C)
+    carrier = claim(repo, (path,), "overqualified support carrier")
+    resolved = f"# Evidence {label}: resolved\n"
+    if variant == "forward":
+        parents = (authority_child, carrier)
+        M = repo.merge_commit(
+            parents, "forward supplier support adoption", removes=(path,)
+        )
+    elif variant == "reverse-preserved":
+        parents = (carrier, authority_child)
+        M = repo.merge_commit(
+            parents,
+            "reverse supplier support adoption with projection",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+    elif variant == "source-evolution":
+        parents = (carrier, source_parent)
+        M = repo.merge_commit(
+            parents,
+            "copy evolved source support at adoption",
+            writes={
+                evidence: f"# Evidence {label}: evolved-source\n"
+            },
+            removes=(path,),
+        )
+    elif variant == "adoption-drift":
+        parents = (authority_child, carrier)
+        M = repo.merge_commit(
+            parents,
+            "invent support state in adoption commit",
+            writes={evidence: f"# Evidence {label}: adoption-drift\n"},
+            removes=(path,),
+        )
+    elif variant == "nested-drop":
+        first = repo.merge_commit(
+            (authority_child, carrier),
+            "first support-preserving adoption",
+            removes=(path,),
+        )
+        repo.branch("second-support-carrier", C)
+        second_carrier = claim(repo, (path,), "second support carrier")
+        M = repo.merge_commit(
+            (second_carrier, first),
+            "nested adoption drops source support",
+            removes=(path,),
+        )
+        parents = (second_carrier, first)
+    elif variant == "permutation-diamond":
+        first = repo.merge_commit(
+            (authority_child, carrier),
+            "first parent-order support adoption",
+            removes=(path,),
+        )
+        repo.branch("reverse-support-carrier", C)
+        reverse_carrier = claim(
+            repo, (path,), "reverse parent-order support carrier"
+        )
+        second = repo.merge_commit(
+            (reverse_carrier, authority_child),
+            "reverse parent-order support adoption",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+        repo.branch("diamond-support-carrier", C)
+        final_carrier = claim(
+            repo, (path,), "final diamond support carrier"
+        )
+        parents = (second, final_carrier, first)
+        M = repo.merge_commit(
+            parents,
+            "join equal support roots through both parent orders",
+            writes={evidence: resolved},
+            removes=(path,),
+        )
+    else:
+        parents = (carrier, authority_child)
+        M = repo.merge_commit(
+            parents,
+            "reverse supplier support adoption",
+            removes=(path,),
+        )
+    N = feature(repo, f"{label}-new")
+    with reconciler_repository(repo.root):
+        source_problem = RECONCILE.queue_deletion_problem(
+            path,
+            repo.run("show", f"{authority_parent}:{path}").stdout,
+            authority_parent,
+            authority_child,
+        )
+    return Fixture(
+        f"R16-support-{variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        variants[variant],
+        {
+            "variant": variant,
+            "authority_parent": authority_parent,
+            "authority_child": authority_child,
+            "source_parent": source_parent,
+            "carrier": carrier,
+            "merge_parents": list(parents),
+            "source_problem": source_problem,
+        },
+    )
+
+
+def r16_earlier_evidence_reversal(root: Path) -> Fixture:
+    """Prove generic root replay cannot authorize an evidence reversal."""
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r16-earlier-evidence-reversal"
+    path = queue_path(label, timing="blocking")
+    evidence = evidence_path(label)
+    task_id = "2026-08-31-r16-earlier-evidence"
+    task_path = f"tasks/1_in-progress/{task_id}/task.md"
+    repo.write(evidence, "# Evidence v0\n")
+    repo.write(
+        path,
+        "# Earlier evidence\n\n"
+        "**Status:** open\n"
+        "**Filed:** 2026-08-31\n"
+        "**Action:** repair earlier evidence\n"
+        f"**Full context:** `{evidence}`\n"
+        f"**Resolution evidence:** `{evidence}`\n"
+        "**Blocks now:** operation:release\n",
+    )
+    repo.write(
+        task_path,
+        "# Task\n\n"
+        "**Claimed-by:** r16-agent\n"
+        f"**Queue actions:** `{path}`\n",
+    )
+    repo.write(str(Path(task_path).with_name("plan.md")), "# Plan\n")
+    repo.write(str(Path(task_path).with_name("worklog.md")), "# Worklog\n")
+    C = repo.commit("create earlier evidence supplier root")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("earlier-evidence-source", C)
+    repo.write(evidence, "# Evidence v1\n")
+    repo.commit(f"repair evidence\n\ntask: {task_id}")
+    authority_parent = claim(repo, (path,), "claim earlier evidence action")
+    repo.remove(path)
+    authority_child = repo.commit("delete using admitted earlier evidence")
+    repo.branch("earlier-evidence-carrier", C)
+    carrier = claim(repo, (path,), "claim stale evidence carrier")
+    M = repo.merge_commit(
+        (carrier, authority_child),
+        "reverse adoption reverts earlier evidence",
+        removes=(path,),
+    )
+    N = feature(repo, f"{label}-new")
+    authority_text = repo.run(
+        "show", f"{authority_parent}:{path}"
+    ).stdout
+    with reconciler_repository(repo.root):
+        source_problem = RECONCILE.queue_deletion_problem(
+            path,
+            authority_text,
+            authority_parent,
+            authority_child,
+        )
+        replay_problem = RECONCILE.queue_deletion_problem(
+            path, authority_text, authority_parent, M
+        )
+    return Fixture(
+        "R16-earlier-landed-evidence-reversal",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_parent": authority_parent,
+            "authority_child": authority_child,
+            "source_problem": source_problem,
+            "replay_problem": replay_problem,
+            "expected_evidence": repo.tree_entry_oid(
+                authority_child, evidence
+            ),
+            "reverted_evidence": repo.tree_entry_oid(M, evidence),
+        },
+    )
+
+
+def r16_pickup_evolution(
+    root: Path, target_status: str, *, drop_artifact: bool = False
+) -> Fixture:
+    """Exercise typed monotone pickup support beyond 1_in-progress."""
+    allowed = {"2_blocked", "3_in-review", "4_done", "0_backlog"}
+    if target_status not in allowed:
+        raise ValueError(target_status)
+    if drop_artifact and target_status != "3_in-review":
+        raise ValueError("artifact-drop control uses the in-review receipt")
+    repo = GitRepository(root)
+    initialize(repo)
+    slug = target_status.replace("_", "-")
+    pickup, backlog, active = add_pickup(repo, f"r16-{slug}")
+    task_id = Path(backlog).parts[2]
+    C = repo.commit("create pickup evolution root")
+    repo.branch("old", C)
+    O = feature(repo, f"r16-pickup-{slug}-old")
+    repo.branch("pickup-source", C)
+    complete_pickup(repo, pickup, backlog, active)
+    authority_child = repo.commit("complete pickup authority edge")
+    destination = f"tasks/{target_status}/{task_id}/task.md"
+    repo.move(active, destination)
+    if target_status in {"3_in-review", "4_done"}:
+        repo.write(
+            str(Path(destination).with_name("verification.md")),
+            "# Verification\n",
+        )
+    source_parent = repo.commit("evolve picked-up task monotonically")
+    task_dir = Path(destination).parent
+    task_writes = {
+        path.relative_to(repo.root).as_posix(): path.read_text()
+        for path in sorted((repo.root / task_dir).iterdir())
+        if path.is_file()
+        and path.name in RECONCILE.TASK_ARTIFACT_NAMES
+    }
+    adoption_writes = dict(task_writes)
+    if drop_artifact:
+        adoption_writes.pop(
+            str(task_dir / "verification.md"), None
+        )
+    repo.branch("pickup-carrier", C)
+    carrier = feature(repo, f"r16-pickup-{slug}-carrier")
+    M = repo.merge_commit(
+        (carrier, source_parent),
+        "copy current pickup support projection",
+        writes=adoption_writes,
+        removes=(pickup, backlog, active),
+    )
+    N = feature(repo, f"r16-pickup-{slug}-new")
+    return Fixture(
+        f"R16-pickup-evolution-{slug}"
+        + ("-drop-artifact" if drop_artifact else ""),
+        repo,
+        C,
+        O,
+        M,
+        N,
+        (
+            "blocking-finding"
+            if target_status == "0_backlog" or drop_artifact
+            else "no-finding"
+        ),
+        {
+            "target_status": target_status,
+            "authority_child": authority_child,
+            "source_parent": source_parent,
+            "carrier": carrier,
+            "task_path": destination,
+            "task_artifacts": sorted(task_writes),
+            "drop_artifact": drop_artifact,
+        },
+    )
+
+
 def p19_identities(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
@@ -3950,7 +6777,7 @@ def p19_identities(root: Path) -> Fixture:
         O,
         M,
         N,
-        "no-finding",
+        "blocking-finding",
         {
             "ordinary_identity_path_independent": (
                 ordinary_first == ordinary_second
@@ -4033,7 +6860,9 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
     D = delete_with_evidence(repo, ((label, path),), "D deletion")
     repo.branch("candidate", C)
     if mode == "complete":
-        repo.run("cherry-pick", K, D)
+        repo.run(
+            "cherry-pick", K, D, env=repo._commit_environment()
+        )
         M = repo.oid("HEAD")
         expected = "no-finding"
     elif mode == "deletion-only":
@@ -4330,8 +7159,12 @@ def pcx19_missing_claim_blob(root: Path) -> Fixture:
         {
             "claim_commit": claim_commit,
             "missing_claim_blob_oid": blob,
-            "restore_hidden": str(hidden),
-            "restore_target": str(restored),
+            "restore_hidden": hidden.relative_to(
+                fixture.repo.root
+            ).as_posix(),
+            "restore_target": restored.relative_to(
+                fixture.repo.root
+            ).as_posix(),
         }
     )
     fixture.expected = "no-finding"
@@ -4488,6 +7321,38 @@ def scenario_builders():
         ),
         pcx15_generated_retry,
         pcx16_task_pickup,
+        *[
+            (
+                lambda root, variant=variant:
+                r16_supplier_support_fixture(root, variant)
+            )
+            for variant in (
+                "forward",
+                "reverse-drop",
+                "reverse-preserved",
+                "invalid-source",
+                "source-evolution",
+                "adoption-drift",
+                "nested-drop",
+                "permutation-diamond",
+            )
+        ],
+        lambda root: r16_pickup_evolution(
+            root, "3_in-review", drop_artifact=True
+        ),
+        r16_earlier_evidence_reversal,
+        *[
+            (
+                lambda root, target_status=target_status:
+                r16_pickup_evolution(root, target_status)
+            )
+            for target_status in (
+                "2_blocked",
+                "3_in-review",
+                "4_done",
+                "0_backlog",
+            )
+        ],
         lambda root: pcx17_cherry_pick(root, "complete"),
         lambda root: pcx17_cherry_pick(root, "deletion-only"),
         pcx19_missing_claim_blob,
@@ -4515,6 +7380,149 @@ def scenario_builders():
             root, first_valid=False, second_kind="invalid"
         ),
         r6_same_root_all_absent_wrappers,
+        lambda root: r8_human_response_binding(
+            root, mode="direct", conflict=True
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="direct", conflict=False
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="supplier", conflict=True
+        ),
+        lambda root: r8_human_response_binding(
+            root, mode="supplier", conflict=False
+        ),
+        lambda root: r8_review_binding(root, divergent=True),
+        lambda root: r8_review_binding(root, divergent=False),
+        r8_review_terminal_binding_conflict,
+        lambda root: r9_review_pending_binding(
+            root, mode="direct", pending_field="Review target"
+        ),
+        lambda root: r9_review_pending_binding(
+            root, mode="direct", pending_field="Review revision"
+        ),
+        lambda root: r9_review_pending_binding(
+            root, mode="supplier", pending_field="Review target"
+        ),
+        lambda root: r9_review_pending_binding(
+            root, mode="supplier", pending_field="Review revision"
+        ),
+        lambda root: r10_malformed_review_binding(
+            root,
+            mode="direct",
+            field="Review target",
+            malformed_value="pend\u0131ng",
+            slug="backtick-dotless",
+        ),
+        lambda root: r10_malformed_review_binding(
+            root,
+            mode="supplier",
+            field="Review revision",
+            malformed_value="______",
+            slug="generic-placeholder",
+        ),
+        *[
+            (
+                lambda root, mode=mode, variant=variant:
+                r13_review_parent_binding(
+                    root, mode=mode, variant=variant
+                )
+            )
+            for mode in ("direct", "supplier")
+            for variant in ("identical", "target", "revision", "terminal")
+        ],
+        *[
+            (
+                lambda root, variant=variant:
+                r13_persisted_state(root, variant)
+            )
+            for variant in (
+                "same-state",
+                "response-removal",
+                "response-change",
+                "review-target-change",
+                "review-revision-change",
+                "review-outcome-change",
+                "claim-loss",
+                "pending-fill",
+                "terminal-fill",
+            )
+        ],
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="direct",
+            carrier_variant="same",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="direct",
+            carrier_variant="target",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="pending",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="same",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="target",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="revision",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="same",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="target",
+            old_answered=False,
+        ),
+        r14_persisted_hidden_bytes,
+        r14_persisted_intermediate_claim,
+        r14_persisted_intermediate_review,
+        r14_persisted_delete_recreate,
+        r14_persisted_review_retraction,
+        r14_persisted_first_response_move,
+        lambda root: r14_persisted_merge_carriers(
+            root, conflict=False
+        ),
+        lambda root: r14_persisted_merge_carriers(
+            root, conflict=True
+        ),
+        *[
+            (
+                lambda root, variant=variant:
+                r15_old_side_continuity(root, variant)
+            )
+            for variant in (
+                "invalid-delete-recreate",
+                "valid-delete-recreate",
+                "human-binding-restore",
+                "hidden-bytes-restore",
+                "continuous-preserved",
+            )
+        ],
+        r8_adapter_M_variants,
+        r8_adapter_M_endpoint_counterexample,
     ]
 
 
@@ -4525,6 +7533,16 @@ CONTROL_NAMES = (
     "reopen-pre-C-genealogy",
     "missing-post-event-continuity",
     "sole-valid-ignores-invalid-root",
+    "omit-old-tip-human-binding",
+    "literal-review-pending-treated-concrete",
+    "broad-review-pending-normalization",
+    "omit-supplier-carrier-human-binding",
+    "skip-preserved-state-validation",
+    "omit-unanswered-published-review-binding",
+    "skip-persisted-frozen-skeleton",
+    "skip-persisted-candidate-continuity",
+    "skip-old-side-continuity",
+    "skip-supplier-support-certificate",
 )
 
 
@@ -4573,22 +7591,79 @@ SCENARIO_ALIASES = {
 
 
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
+    if "adapter_M_variants" in fixture.details:
+        if damage is not None:
+            raise ValueError("adapter-input fixture does not accept damage mode")
+        results = {}
+        for name, M in fixture.details["adapter_M_variants"].items():
+            variant = dataclasses.replace(fixture, M=M)
+            results[name] = Classifier(variant).run()
+        primary = results["explicit_candidate_M"]
+        primary["adapter_input_evidence"] = {
+            name: {
+                "C": result["C"],
+                "O": result["O"],
+                "M": result["M"],
+                "N": result["N"],
+                "classification": result["classification"],
+                "evidence_status": result["evidence_verdict"]["status"],
+                "event_mode": result["event_mode"],
+                "range_base_validation": result["range_base_validation"],
+                "authority_edges": result["authority_edges"],
+                "propagation_edges": result["propagation_edges"],
+                "support_checks": result["support_checks"],
+                "metrics": result["metrics"],
+            }
+            for name, result in results.items()
+        }
+        return primary
     if "restore_hidden" not in fixture.details:
         return Classifier(fixture, damage).run()
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
+    missing_oid = fixture.details["missing_claim_blob_oid"]
+    reader_metrics = Metrics()
+    reader = ObjectDatabase(fixture.repo.root, reader_metrics)
+    first_reader_reason = None
+    try:
+        reader.read(missing_oid)
+    except Unreadable as error:
+        first_reader_reason = str(error)
+    missing_cached = missing_oid in reader.objects
     first = Classifier(fixture).run()
-    hidden = Path(fixture.details["restore_hidden"])
-    target = Path(fixture.details["restore_target"])
+    hidden = fixture.repo.root / fixture.details["restore_hidden"]
+    target = fixture.repo.root / fixture.details["restore_target"]
     if hidden.is_file():
         hidden.rename(target)
+    try:
+        restored_kind, restored_payload = reader.read(missing_oid)
+        success_cached = missing_oid in reader.objects
+        cache_hits_before = reader_metrics.object_cache_hits
+        cached_kind, cached_payload = reader.read(missing_oid)
+        cache_hit_after_restore = (
+            reader_metrics.object_cache_hits == cache_hits_before + 1
+        )
+    finally:
+        reader.close()
     second = Classifier(fixture).run()
     second["recovery"] = {
         "first_status": first["evidence_verdict"]["status"],
         "first_reason": first["evidence_verdict"]["reason"],
         "second_status": second["evidence_verdict"]["status"],
         "same_process": True,
-        "missing_oid": fixture.details["missing_claim_blob_oid"],
+        "same_reader": True,
+        "first_reader_reason": first_reader_reason,
+        "missing_cached": missing_cached,
+        "restored_kind": restored_kind,
+        "restored_payload_size": len(restored_payload),
+        "success_cached": success_cached,
+        "cache_hit_after_restore": cache_hit_after_restore,
+        "cached_bytes_equal": (
+            cached_kind == restored_kind
+            and cached_payload == restored_payload
+        ),
+        "reader_metrics": dataclasses.asdict(reader_metrics),
+        "missing_oid": missing_oid,
     }
     return second
 
@@ -4639,7 +7714,12 @@ def validate_result(result: dict):
         if not any(len(action["paths"]["C"]) == 2 for action in actions):
             errors.append("P5 did not expose both C-root paths")
     if scenario.startswith("P6"):
-        if not any("discontinu" in action["reason"] for action in actions):
+        if not any(
+            action["reason_code"]
+            in {"persisted-delete-recreate", "post-event-reintroduction"}
+            or "discontinu" in action["reason"]
+            for action in actions
+        ):
             errors.append("P6 did not fail on occurrence discontinuity")
     if scenario == "P7-immutable-payload-change":
         if result["details"]["production_identity_equal"]:
@@ -4924,7 +8004,7 @@ def validate_result(result: dict):
             or status != "invalid"
             or result["event_mode"] != "supplier"
             or action["reason_code"] != "upstream-invalid-supplier"
-            or "conflicting-human-response" not in action["reason"]
+            or "old-tip-human-binding-conflict" not in action["reason"]
             or not all(
                 adoption in action["reason"]
                 for adoption in details["adoptions"]
@@ -4964,7 +8044,7 @@ def validate_result(result: dict):
             zip(details["carriers"], details["adoptions"], strict=True)
         )
         expected_reason_tokens = [
-            f"conflicting-human-response@{source}"
+            f"old-tip-human-binding-conflict@{source}"
             for source in details["source_children"]
         ]
         all_oids = (
@@ -5016,7 +8096,7 @@ def validate_result(result: dict):
             zip(details["carriers"], details["adoptions"], strict=True)
         )
         expected_reason_tokens = (
-            f"conflicting-human-response@{details['source_children'][0]}",
+            f"old-tip-human-binding-conflict@{details['source_children'][0]}",
             f"valid-direct-authority@{details['source_children'][1]}",
         )
         all_oids = (
@@ -5351,6 +8431,790 @@ def validate_result(result: dict):
             )
         ):
             errors.append("R6 equal-root wrappers emitted a non-full OID")
+    if scenario.startswith("R8-direct-human-response-") or scenario.startswith(
+        "R8-supplier-human-response-"
+    ):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        expected_classification = (
+            "blocking-finding"
+            if details["binding_conflict"]
+            else "no-finding"
+        )
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"] != expected_classification
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or len(propagation) != (1 if details["mode"] == "supplier" else 0)
+            or (
+                details["binding_conflict"]
+                and (
+                    "old-tip-human-binding-conflict" not in reason_codes
+                    or result["O"] not in action["reason"]
+                    or details["old_response"] not in action["reason"]
+                    or details["candidate_response"] not in action["reason"]
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and "old-tip-human-binding-conflict" in reason_codes
+            )
+        ):
+            errors.append("R8 O-anchored human response binding drifted")
+    if scenario.startswith("R8-review-binding-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        terminal_tokens = [
+            f'"{key}": "{value}"'
+            for fields in (
+                details.get("old_terminal_fields", {}),
+                details.get("candidate_terminal_fields", {}),
+            )
+            for key, value in fields.items()
+        ]
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"]
+            != (
+                "blocking-finding"
+                if details["binding_conflict"]
+                else "no-finding"
+            )
+            or result["event_mode"] != "direct"
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or (
+                details["binding_conflict"]
+                and (
+                    "old-tip-human-binding-conflict" not in reason_codes
+                    or not all(
+                        value in action["reason"]
+                        for value in (
+                            details["old_binding"]
+                            + details["candidate_binding"]
+                        )
+                    )
+                    or not all(
+                        token in action["reason"]
+                        for token in terminal_tokens
+                    )
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and (
+                    details["old_binding"] != details["candidate_binding"]
+                    or "old-tip-human-binding-conflict" in reason_codes
+                )
+            )
+        ):
+            errors.append("R8 O-anchored review binding drifted")
+    if scenario.startswith("R9-") and "review" in scenario:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        pending_presentations = (
+            "pending",
+            "PENDING",
+            " PeNdInG ",
+        )
+        concrete_or_invalid_values = (
+            "",
+            "______",
+            "`pending`",
+            "``PENDING``",
+            "pend\u0131ng",
+            "`pend\u0131ng`",
+            "pending-extra",
+            "`pending",
+            "pending`",
+            "`not-pending`",
+            "invalid-review-binding",
+        )
+        if (
+            action is None
+            or status != "valid"
+            or result["classification"] != "no-finding"
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or len(propagation)
+            != (1 if details["mode"] == "supplier" else 0)
+            or "old-tip-human-binding-conflict" in reason_codes
+            or not Classifier.explicit_review_pending(
+                details["old_pending_value"]
+            )
+            or Classifier.explicit_review_pending(
+                details["candidate_value"]
+            )
+            or not all(
+                Classifier.explicit_review_pending(value)
+                for value in pending_presentations
+            )
+            or any(
+                Classifier.explicit_review_pending(value)
+                for value in concrete_or_invalid_values
+            )
+        ):
+            errors.append("R9 review pending normalization drifted")
+    if scenario.startswith("R10-") and "review" in scenario:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        old_reason_token = json.dumps(details["old_value"])[1:-1]
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        if (
+            action is None
+            or status != "invalid"
+            or result["classification"] != "blocking-finding"
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["parent"]
+            != details["authority_parent"]
+            or result["authority_edges"][0]["child"]
+            != details["authority_child"]
+            or result["authority_edges"][0]["problem"] is not None
+            or len(propagation)
+            != (1 if details["mode"] == "supplier" else 0)
+            or "old-tip-human-binding-conflict" not in reason_codes
+            or old_reason_token not in action["reason"]
+            or details["candidate_value"] not in action["reason"]
+            or Classifier.explicit_review_pending(details["old_value"])
+            or not Classifier.broad_review_pending(details["old_value"])
+        ):
+            errors.append("R10 malformed review binding was normalized")
+    if scenario.startswith("R13-") and "review-binding" in scenario:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        expected_status = (
+            "invalid" if details["binding_conflict"] else "valid"
+        )
+        expected_authority = 2 if details["mode"] == "direct" else 1
+        expected_propagation = 1 if details["mode"] == "supplier" else 0
+        authority_pairs = {
+            (edge["parent"], edge["child"])
+            for edge in result["authority_edges"]
+        }
+        authority_by_parent = {
+            edge["parent"]: edge for edge in result["authority_edges"]
+        }
+        source_edge = authority_by_parent.get(
+            details["authority_parent"]
+        )
+        carrier_edge = authority_by_parent.get(details["carrier"])
+        binding_reason = (
+            "old-tip-human-binding-conflict" in reason_codes
+        )
+        binding_reason_complete = (
+            result["O"] in action["reason"]
+            and details["changed_field"] in action["reason"]
+            and all(
+                value in action["reason"]
+                for value in (
+                    details["old_binding"]
+                    + details["carrier_binding"]
+                )
+                if value != "pending"
+            )
+        ) if action is not None and details["binding_conflict"] else True
+        if (
+            action is None
+            or status != expected_status
+            or result["classification"]
+            != (
+                "blocking-finding"
+                if details["binding_conflict"]
+                else "no-finding"
+            )
+            or result["event_mode"] != details["mode"]
+            or len(authority) != expected_authority
+            or source_edge is None
+            or source_edge["problem"] is not None
+            or len(propagation) != expected_propagation
+            or (
+                details["authority_parent"],
+                details["authority_child"],
+            )
+            not in authority_pairs
+            or (
+                details["mode"] == "direct"
+                and (details["carrier"], details["merge"])
+                not in authority_pairs
+            )
+            or (
+                details["mode"] == "supplier"
+                and (details["carrier"], details["merge"])
+                not in propagation
+            )
+            or (
+                details["binding_conflict"]
+                and (
+                    (
+                        details["mode"] == "supplier"
+                        and not binding_reason
+                    )
+                    or (
+                        details["mode"] == "direct"
+                        and not binding_reason
+                        and (
+                            carrier_edge is None
+                            or carrier_edge["problem"] is None
+                        )
+                    )
+                    or (binding_reason and not binding_reason_complete)
+                )
+            )
+            or (
+                not details["binding_conflict"]
+                and (
+                    binding_reason
+                    or any(
+                        edge["problem"] is not None
+                        for edge in result["authority_edges"]
+                    )
+                )
+            )
+        ):
+            errors.append(
+                "R13 direct/supplier parent review binding drifted"
+            )
+    if scenario.startswith("R13-persisted-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        expected_problem = details["expected_state_problem"]
+        if (
+            action is None
+            or not details["production_identity_equal"]
+            or details["low_similarity_delete_add"]
+            != details["expected_low_similarity"]
+            or action["paths"]["O"] != [details["old_path"]]
+            or action["paths"]["N"] != [details["new_path"]]
+            or action["multiplicity"]["O"] != 1
+            or action["multiplicity"]["N"] != 1
+            or authority
+            or propagation
+            or not action["mutation_edges"]
+            or any(
+                edge["problem"] is not None
+                for edge in action["mutation_edges"]
+            )
+            or result["event_mode"] != "none"
+            or status != ("invalid" if expected_problem else "none")
+            or result["classification"]
+            != ("blocking-finding" if expected_problem else "no-finding")
+            or action["reason_code"]
+            != (
+                "persisted-endpoint-regression"
+                if expected_problem
+                else "identity-preserved"
+            )
+            or (
+                expected_problem
+                and "C-rooted occurrence is not continuously valid"
+                not in action["reason"]
+            )
+        ):
+            errors.append(
+                "R13 persisted identity mutable-state gate drifted"
+            )
+    if scenario.startswith("R14-") and "carrier-" in scenario \
+            and not scenario.startswith("R14-persisted-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        conflict = details["binding_conflict"]
+        if (
+            action is None
+            or status != ("invalid" if conflict else "valid")
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["problem"] is not None
+            or len(result["propagation_edges"])
+            != (1 if details["mode"] == "supplier" else 0)
+            or (
+                conflict
+                and "old-tip-human-binding-conflict" not in reason_codes
+            )
+            or (
+                not conflict
+                and "old-tip-human-binding-conflict" in reason_codes
+            )
+            or not all(
+                value in action["reason"]
+                for value in (
+                    details["old_binding"] + details["carrier_binding"]
+                )
+                if value != "pending"
+            )
+            and conflict
+        ):
+            errors.append(
+                "R14 unanswered published review carrier binding drifted"
+            )
+    if scenario.startswith("R14-persisted-"):
+        action = actions[0] if len(actions) == 1 else None
+        mutation_edges = action["mutation_edges"] if action else []
+        if action is None or not mutation_edges:
+            errors.append("R14 persisted fixture omitted mutation evidence")
+        elif any(
+            len(edge[key]) not in {40, 64}
+            or any(
+                char not in "0123456789abcdef" for char in edge[key]
+            )
+            for edge in mutation_edges
+            for key in ("parent", "child")
+        ):
+            errors.append("R14 persisted fixture emitted a non-full OID")
+    if scenario == "R14-persisted-hidden-bytes-low-similarity":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "invalid"
+            or action["reason_code"] != "persisted-invalid-mutation"
+            or not details["identity_equal"]
+            or details["frozen_equal"]
+            or not details["low_similarity_delete_add"]
+            or not any(
+                edge["frozen_problem"] for edge in action["mutation_edges"]
+            )
+        ):
+            errors.append("R14 hidden protected bytes false-greened")
+    if scenario in {
+        "R14-persisted-intermediate-claim-regression",
+        "R14-persisted-intermediate-review-regression",
+    }:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "invalid"
+            or action["reason_code"] != "persisted-invalid-mutation"
+            or not any(
+                edge["child"] == details["bad"]
+                and details["expected_problem"]
+                in (edge["production_problem"] or "")
+                for edge in action["mutation_edges"]
+            )
+        ):
+            errors.append("R14 transient candidate regression false-greened")
+    if scenario == "R14-persisted-delete-recreate":
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "ambiguous"
+            or action["reason_code"] != "persisted-delete-recreate"
+            or result["details"]["gap"] not in action["reason"]
+        ):
+            errors.append("R14 delete-recreate continuity false-greened")
+    if scenario == "R14-persisted-valid-review-retraction":
+        action = actions[0] if len(actions) == 1 else None
+        details = result["details"]
+        children = {
+            edge["child"] for edge in (action["mutation_edges"] if action else [])
+        }
+        if (
+            action is None
+            or status != "none"
+            or action["reason_code"] != "identity-preserved"
+            or {details["published_A"], details["retracted"], details["published_B"]}
+            - children
+            or any(edge["problem"] for edge in action["mutation_edges"])
+        ):
+            errors.append("R14 production-valid review retraction blocked")
+    if scenario == "R14-persisted-valid-first-response-low-similarity":
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "none"
+            or not result["details"]["low_similarity_delete_add"]
+            or not any(
+                edge["child"] == result["details"]["answer_commit"]
+                for edge in action["mutation_edges"]
+            )
+            or any(edge["problem"] for edge in action["mutation_edges"])
+        ):
+            errors.append("R14 valid low-similarity first response blocked")
+    if scenario in {
+        "R14-persisted-merge-carrier-pending",
+        "R14-persisted-merge-carrier-conflict",
+    }:
+        action = actions[0] if len(actions) == 1 else None
+        conflict = result["details"]["conflict"]
+        carrier_edges = [
+            edge
+            for edge in (action["mutation_edges"] if action else [])
+            if edge["child"] == result["details"]["merge"]
+            and edge["parent"] == result["details"]["carrier"]
+        ]
+        if (
+            action is None
+            or len(carrier_edges) != 1
+            or carrier_edges[0]["role"] != "compatible-carrier"
+            or bool(carrier_edges[0]["problem"]) != conflict
+            or status != ("invalid" if conflict else "none")
+            or action["reason_code"]
+            != (
+                "persisted-merge-carrier-conflict"
+                if conflict
+                else "identity-preserved"
+            )
+        ):
+            errors.append("R14 persisted merge carrier compatibility drifted")
+    if scenario.startswith("R15-old-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        negative = details["variant"] != "continuous-preserved"
+        if (
+            action is None
+            or not details["old_text_equals_C"]
+            or not details["new_text_equals_C"]
+            or result["event_mode"] != "none"
+            or result["classification"]
+            != ("blocking-finding" if negative else "no-finding")
+        ):
+            errors.append("R15 old-side endpoint fixture drifted")
+        elif details["variant"] in {
+            "invalid-delete-recreate",
+            "valid-delete-recreate",
+        }:
+            causal_oid = details.get("gap", details.get("authority_child"))
+            if (
+                status != "ambiguous"
+                or action["reason_code"] != "persisted-delete-recreate"
+                or causal_oid not in action["reason"]
+                or details["recreated"] not in action["reason"]
+                or (
+                    details["variant"] == "valid-delete-recreate"
+                    and details["deletion_problem"] is not None
+                )
+            ):
+                errors.append("R15 old-side deletion/recreation false-greened")
+        elif details["variant"] == "human-binding-restore":
+            bad_edges = [
+                edge
+                for edge in action["mutation_edges"]
+                if edge["child"] == details["bad"]
+            ]
+            if (
+                status != "invalid"
+                or action["reason_code"] != "persisted-invalid-mutation"
+                or len(bad_edges) != 1
+                or not bad_edges[0]["problem"]
+            ):
+                errors.append("R15 old-side human binding restore false-greened")
+        elif details["variant"] == "hidden-bytes-restore":
+            bad_edges = [
+                edge
+                for edge in action["mutation_edges"]
+                if edge["child"] == details["bad"]
+            ]
+            if (
+                status != "invalid"
+                or action["reason_code"] != "persisted-invalid-mutation"
+                or len(bad_edges) != 1
+                or not bad_edges[0]["frozen_problem"]
+            ):
+                errors.append("R15 old-side hidden-byte restore false-greened")
+        elif (
+            status != "none"
+            or action["reason_code"] != "identity-preserved"
+            or any(edge["problem"] for edge in action["mutation_edges"])
+            or details["old_step"]
+            not in {edge["child"] for edge in action["mutation_edges"]}
+        ):
+            errors.append("R15 continuous old-side occurrence was blocked")
+    if scenario.startswith("R16-support-"):
+        variant = result["details"]["variant"]
+        positive = variant in {
+            "forward",
+            "reverse-preserved",
+            "source-evolution",
+            "permutation-diamond",
+        }
+        support_checks = result["support_checks"]
+        if result["details"]["source_problem"] is not None and variant \
+                != "invalid-source":
+            errors.append("R16 fixture authority edge was not production-valid")
+        if variant == "invalid-source":
+            if (
+                status != "invalid"
+                or result["details"]["source_problem"] is None
+                or support_checks
+            ):
+                errors.append("R16 invalid source gained a certificate")
+        elif (
+            result["event_mode"] != "supplier"
+            or not support_checks
+            or any(
+                len(check["authority_parent"]) not in {40, 64}
+                or len(check["authority_child"]) not in {40, 64}
+                or len(check["adoption_child"]) not in {40, 64}
+                or not check["certificate_digest"].startswith("sha256:")
+                or len(check["certificate_digest"]) != 71
+                for check in support_checks
+            )
+            or (
+                positive
+                and (
+                    status != "valid"
+                    or any(
+                        check["status"] != "valid"
+                        for check in support_checks
+                    )
+                )
+            )
+            or (
+                not positive
+                and (
+                    status != "invalid"
+                    or not any(
+                        check["status"] == "invalid"
+                        for check in support_checks
+                    )
+                    or not any(
+                        action["reason_code"]
+                        == "supplier-support-certificate-invalid"
+                        for action in actions
+                    )
+                )
+            )
+        ):
+            errors.append("R16 supplier support certificate drifted")
+        if variant == "source-evolution" and (
+            result["details"]["source_parent"]
+            == result["details"]["authority_child"]
+        ):
+            errors.append("R16 source evolution fixture did not evolve")
+        if variant == "adoption-drift" and not any(
+            check["tree_projection_status"] == "invalid"
+            and check["postcondition_status"] == "valid"
+            for check in support_checks
+        ):
+            errors.append("R16 adoption drift did not isolate projection gate")
+        if variant == "permutation-diamond" and (
+            len(support_checks) != 3
+            or len(
+                {
+                    check["certificate_digest"]
+                    for check in support_checks
+                }
+            )
+            != 1
+            or len(
+                {check["adoption_child"] for check in support_checks}
+            )
+            != 3
+        ):
+            errors.append("R16 equal-root parent permutation drifted")
+    if scenario == "R16-earlier-landed-evidence-reversal":
+        support_checks = result["support_checks"]
+        if (
+            result["details"]["source_problem"] is not None
+            or result["details"]["replay_problem"] is not None
+            or result["details"]["expected_evidence"]
+            == result["details"]["reverted_evidence"]
+            or status != "invalid"
+            or not support_checks
+            or not any(
+                check["tree_projection_status"] == "invalid"
+                and check["postcondition_status"] == "valid"
+                for check in support_checks
+            )
+            or not any(
+                action["reason_code"]
+                == "supplier-support-certificate-invalid"
+                for action in actions
+            )
+        ):
+            errors.append("R16 replay-only evidence reversal false-greened")
+    if scenario.startswith("R16-pickup-evolution-"):
+        target_status = result["details"]["target_status"]
+        resolving = target_status in RECONCILE.RESOLVING_TASK_STATUSES
+        expected_valid = resolving and not result["details"]["drop_artifact"]
+        support_checks = result["support_checks"]
+        evaluations = [
+            evaluation
+            for check in support_checks
+            for evaluation in check["obligation_evaluations"]
+        ]
+        if (
+            not support_checks
+            or not evaluations
+            or (
+                expected_valid
+                and (
+                    status != "valid"
+                    or any(
+                        evaluation["problem"] is not None
+                        for evaluation in evaluations
+                    )
+                )
+            )
+            or (
+                not expected_valid
+                and not result["details"]["drop_artifact"]
+                and (
+                    status != "invalid"
+                    or not any(
+                        evaluation["problem"] is not None
+                        for evaluation in evaluations
+                    )
+                )
+            )
+            or (
+                result["details"]["drop_artifact"]
+                and (
+                    status != "invalid"
+                    or not any(
+                        check["tree_projection_status"] == "invalid"
+                        for check in support_checks
+                    )
+                )
+            )
+        ):
+            errors.append("R16 typed pickup status obligation drifted")
+        if target_status in {"3_in-review", "4_done"}:
+            verification = next(
+                (
+                    path for path in result["details"]["task_artifacts"]
+                    if path.endswith("/verification.md")
+                ),
+                None,
+            )
+            source_paths = {
+                entry["path"]
+                for check in support_checks
+                for projection in check["source_projections"]
+                for entry in projection["entries"]
+            }
+            adoption_paths = {
+                entry["path"]
+                for check in support_checks
+                for entry in check["adoption_projection"]
+            }
+            if (
+                verification is None
+                or verification not in source_paths
+                or verification not in adoption_paths
+                or (
+                    result["details"]["drop_artifact"]
+                    and not any(
+                        check["tree_projection_status"] == "invalid"
+                        for check in support_checks
+                    )
+                )
+            ):
+                errors.append("R16 pickup receipt projection is incomplete")
+    if scenario == "R8-adapter-M-input-variants":
+        details = result["details"]
+        variants = result.get("adapter_input_evidence", {})
+        workflow = variants.get("workflow_M_equals_O", {})
+        explicit = variants.get("explicit_candidate_M", {})
+        endpoint = variants.get("endpoint_M_equals_N", {})
+        same_graph = all(
+            variant.get(name) == result[name]
+            for variant in variants.values()
+            for name in ("C", "O", "N")
+        )
+        if (
+            details["poc_changes_adapter"]
+            or not same_graph
+            or workflow.get("M") != result["O"]
+            or workflow.get("classification") != "blocking-finding"
+            or workflow.get("evidence_status") != "ambiguous"
+            or workflow.get("event_mode") != "none"
+            or workflow.get("range_base_validation", {}).get("status")
+            != "ambiguous"
+            or workflow.get("authority_edges")
+            or workflow.get("propagation_edges")
+            or workflow.get("metrics", {}).get("identity_calls") != 0
+            or workflow.get("metrics", {}).get("authority_calls") != 0
+            or explicit.get("M")
+            != details["adapter_M_variants"]["explicit_candidate_M"]
+            or explicit.get("classification") != "no-finding"
+            or explicit.get("evidence_status") != "valid"
+            or explicit.get("event_mode") != "direct"
+            or len(explicit.get("authority_edges", [])) != 1
+            or endpoint.get("M") != result["N"]
+            or endpoint.get("classification") != "no-finding"
+            or endpoint.get("evidence_status") != "valid"
+            or endpoint.get("event_mode") != "direct"
+            or len(endpoint.get("authority_edges", [])) != 1
+        ):
+            errors.append("R8 adapter M-input evidence is incomplete")
+    if scenario == "R8-adapter-M-N-frontier-counterexample":
+        details = result["details"]
+        variants = result.get("adapter_input_evidence", {})
+        explicit = variants.get("explicit_candidate_M", {})
+        endpoint = variants.get("endpoint_M_equals_N", {})
+        if (
+            details["poc_changes_adapter"]
+            or details["automatic_M_equals_N_safe"]
+            or explicit.get("M") != result["M"]
+            or explicit.get("classification") != "no-finding"
+            or explicit.get("evidence_status") != "valid"
+            or endpoint.get("M") != result["N"]
+            or endpoint.get("range_base_validation", {}).get("status")
+            != "valid"
+            or endpoint.get("classification") != "blocking-finding"
+            or endpoint.get("evidence_status") != "ambiguous"
+        ):
+            errors.append("R8 automatic M=N frontier widening was not blocked")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
@@ -5394,6 +9258,14 @@ def validate_result(result: dict):
             recovery.get("first_status") != "unreadable"
             or recovery.get("second_status") != "valid"
             or not recovery.get("same_process")
+            or not recovery.get("same_reader")
+            or "missing" not in (recovery.get("first_reader_reason") or "")
+            or recovery.get("missing_cached")
+            or recovery.get("restored_kind") != "blob"
+            or recovery.get("restored_payload_size", 0) <= 0
+            or not recovery.get("success_cached")
+            or not recovery.get("cache_hit_after_restore")
+            or not recovery.get("cached_bytes_equal")
         ):
             errors.append("PCX-19 missing object recovery failed")
     if scenario == "PCX-20b-budget-overflow":
@@ -5458,6 +9330,81 @@ def control_builder(name: str, root: Path):
                 root, first_valid=True, second_kind="invalid"
             ),
             Damage(sole_valid_ignores_competitors=True),
+            "no-finding",
+        )
+    if name == "omit-old-tip-human-binding":
+        return (
+            r8_review_terminal_binding_conflict(root),
+            Damage(omit_old_tip_human_binding=True),
+            "no-finding",
+        )
+    if name == "literal-review-pending-treated-concrete":
+        return (
+            r9_review_pending_binding(
+                root, mode="direct", pending_field="Review target"
+            ),
+            Damage(treat_review_pending_as_concrete=True),
+            "blocking-finding",
+        )
+    if name == "broad-review-pending-normalization":
+        return (
+            r10_malformed_review_binding(
+                root,
+                mode="direct",
+                field="Review target",
+                malformed_value="pend\u0131ng",
+                slug="backtick-dotless",
+            ),
+            Damage(broad_review_pending_normalization=True),
+            "no-finding",
+        )
+    if name == "omit-supplier-carrier-human-binding":
+        return (
+            r13_review_parent_binding(
+                root, mode="supplier", variant="target"
+            ),
+            Damage(omit_supplier_carrier_human_binding=True),
+            "no-finding",
+        )
+    if name == "skip-preserved-state-validation":
+        return (
+            r13_persisted_state(root, "claim-loss"),
+            Damage(skip_preserved_state_validation=True),
+            "no-finding",
+        )
+    if name == "omit-unanswered-published-review-binding":
+        return (
+            r14_review_carrier_binding(
+                root,
+                mode="supplier",
+                carrier_variant="target",
+                old_answered=True,
+            ),
+            Damage(omit_unanswered_published_review_binding=True),
+            "no-finding",
+        )
+    if name == "skip-persisted-frozen-skeleton":
+        return (
+            r14_persisted_hidden_bytes(root),
+            Damage(skip_persisted_frozen_skeleton=True),
+            "no-finding",
+        )
+    if name == "skip-persisted-candidate-continuity":
+        return (
+            r14_persisted_intermediate_claim(root),
+            Damage(skip_persisted_candidate_continuity=True),
+            "no-finding",
+        )
+    if name == "skip-old-side-continuity":
+        return (
+            r15_old_side_continuity(root, "invalid-delete-recreate"),
+            Damage(skip_old_side_continuity=True),
+            "no-finding",
+        )
+    if name == "skip-supplier-support-certificate":
+        return (
+            r16_supplier_support_fixture(root, "reverse-drop"),
+            Damage(skip_supplier_support_certificate=True),
             "no-finding",
         )
     raise ValueError(name)
