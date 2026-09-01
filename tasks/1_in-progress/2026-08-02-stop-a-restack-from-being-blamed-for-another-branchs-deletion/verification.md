@@ -39,6 +39,17 @@ and no production implementation began from this revision.
 The panel stopped after two independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded per-event-lane design review
+
+**Reviewed revision:** `22e1c00ce0fcec05da9ea6842db9d31128e2571a`
+
+- semantic/DAG / r18-semantic-design: `approve` — two-arm, persisted/disappeared, fast-forward, policy mismatch, ordinary independence, and mixed-root results matched the accepted POC.
+- budgets/transaction/composition / receipt-contract: `block` — total hash +1 was unreachable, framing was not byte-canonical, creation lost root-range protection, and provider absence states were open.
+- workflow/adapter/human / r18-workflow-design: `block` — candidate-controlled push runs were called trusted, provider absence was mapped to impossible conclusions, and update/deletion refspecs were incomplete.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded edge-scoped design review
 
 **Reviewed revision:** `db720d3321ee25f09c82def46d77fd418735e904`

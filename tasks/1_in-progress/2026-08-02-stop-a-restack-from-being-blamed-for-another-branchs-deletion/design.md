@@ -1369,3 +1369,123 @@ The new immutable five-lens review remains the core gate. Adapter admission addi
 depends on observed provider-lane matrices, anonymous bounded fork transport, negative
 SHA-like coverage, and exact budget/canary results. No private-fork, creation-base,
 conflicted-ordinary, closed-fork, or cumulative protection is inferred from a missing lane.
+
+## 2026-09-01 correction amendment 6 — canonical framing and observable provider states
+
+The review of `22e1c00ce0fcec05da9ea6842db9d31128e2571a` accepted semantic/DAG
+behavior and blocked one budget format plus the trust/observability model of GitHub push
+runs. This section supersedes policy framing, creation ordinary coverage, push trust,
+provider-result states, and incomplete update/deletion commands above.
+
+### Canonical policy transcript
+
+Each of O, N, and evaluator independently hashes this exact byte transcript:
+
+```text
+ASCII("agentfold-authority-policy/v1") || 00 ||
+uint16_be(file_count) ||
+for each path in ascending UTF-8 byte order:
+  uint16_be(path_byte_length) || path_utf8 ||
+  uint64_be(payload_byte_length) || payload_bytes
+```
+
+The domain is exactly 30 bytes including its terminal NUL. The manifest contains 1–32
+unique normalized repository-relative UTF-8 paths, no empty/absolute/dot/dot-dot segment,
+and at most 8,192 path bytes per source. The path list repeats identically in each source;
+source labels are not hashed, so identical content has identical digests. File count and
+path length use unsigned big-endian 16-bit values; payload length uses unsigned big-endian
+64-bit values. There is no JSON, locale transform, platform separator, implicit newline,
+or additional delimiter.
+
+The exact reachable framing maximum is
+`3 × (30 + 2 + 32 × (2 + 8) + 8,192) = 25,632` bytes. The framing cap is therefore
+25,632, not 64 KiB. The payload cap remains 12,582,912 bytes. A derived
+`policy_total_hash_bytes` counter must equal their sum but has no independent gate, because
+a total-only +1 is unreachable when both components are capped. Exact/+1 tests separately
+reach maximum payload and maximum framing, then exceed only the selected component; the
+maximum combined transcript is 12,608,544 bytes and succeeds.
+
+### Candidate-controlled push evidence
+
+A GitHub push workflow executes the workflow bytes at candidate N. Its adapter is outside
+the authority-policy digest, so its presence, endpoint transport, and reported result are
+candidate-revision-controlled advisory evidence, conditional on the expected workflow
+actually running. It is not the primary trusted observation and cannot prove that a
+closed/no-PR update was audited. Pushes created with the repository `GITHUB_TOKEN`, deleted
+or invalid workflow files, provider suppression, and candidate tampering may produce no
+run.
+
+While a PR is open, trusted same-repository remote continuity comes from the default-branch
+`pull_request_target` synchronize lane. Trusted fork behavior remains as previously scoped.
+A same-repository push while the PR is closed, absent, or not synchronized is covered only
+by local evidence and any candidate-controlled push run; trusted remote continuity is
+uncovered. Canary damage cases delete the workflow, alter O/N transport, fabricate success,
+and push through `GITHUB_TOKEN`; none may become trusted or completed green evidence.
+
+### Domain state versus provider observation
+
+The domain state set is `success`, `blocking`, `unavailable`, `not-applicable`, and
+`no-observation`.
+
+- A completed classifier maps success to provider success and blocking/unavailable to
+  provider failure.
+- Not-applicable is an explicitly skipped provider lane only when the event workflow was
+  created and the input shape excludes that classifier.
+- No-observation means no trustworthy job result exists because the event/run/job was
+  suppressed, missing, cancelled, timed out, syntactically invalid, provider-failed, or
+  candidate-removed. It has no fabricated provider conclusion; external coverage is
+  unavailable.
+
+The two stable job names are promised only for workflow runs that are actually created.
+Creation/deletion may expose an explicit skipped lane; closed fork, SHA-like suppression,
+token recursion, deleted workflow, outage, cancellation, and timeout may expose no result.
+No missing or native non-success outcome is rewritten as a completed unavailable record or
+as green evidence.
+
+| Provider case | Continuity state | Ordinary state |
+|---|---|---|
+| candidate-controlled non-zero push run exists | completed advisory | completed candidate-controlled advisory `O...N` |
+| push run suppressed/removed | no-observation | no-observation |
+| branch creation run exists | not-applicable | completed bounded `root:N` |
+| branch deletion run exists | not-applicable | not-applicable |
+| open same-repository synchronize | completed trusted PRT edge | completed unprivileged PR range |
+| mergeable fork synchronize | completed trusted PRT edge when anonymously fetchable | completed unprivileged PR range |
+| conflicted fork synchronize | completed trusted PRT edge when anonymously fetchable | no-observation |
+| SHA-like fork synchronize | no-observation | completed only if unprivileged PR event runs |
+| closed fork update | no-observation | no-observation |
+
+Bounded `root:N` remains the immutable ordinary range for a branch creation and preserves
+the existing first-push queue-edge protection. It uses no mutable base fallback. Creation
+tests include an invalid deletion in the new history, long-history bounds already owned by
+ordinary checks, and independent continuity not-applicable state.
+
+### Exact manual refspecs
+
+Every non-zero normal update or repair uses the complete command:
+
+```sh
+git push \
+  --force-with-lease=refs/heads/<branch>:<O> \
+  origin <N>:refs/heads/<branch>
+```
+
+Exact-tip retirement uses:
+
+```sh
+git push \
+  --force-with-lease=refs/heads/<branch>:<O> \
+  origin :refs/heads/<branch>
+```
+
+The empty-expect creation command remains unchanged. All three commands name the remote,
+source OID, destination ref, and expected remote value; they do not depend on checkout,
+upstream, `push.default`, or `remote.*.push`. Tests install hostile upstream, multi-ref
+remote push rules, and push.default values and prove that only the named destination can
+move. Rejection always stops the attempt.
+
+### Gate boundary
+
+Core admission remains a fresh full five-lens acceptance. Adapter evidence additionally
+distinguishes trusted default-branch runs, candidate-controlled advice, explicit
+not-applicability, and absent observation. No candidate workflow or missing provider result
+can satisfy the trusted edge gate.

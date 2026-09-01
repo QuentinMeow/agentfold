@@ -113,6 +113,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Canonical policy and observable-provider correction (codex)
+
+- Semantic review accepted again. Budget review found that the aggregate hash +1 case was
+  mathematically unreachable and framing lacked exact bytes; workflow review showed that
+  candidate N controls push workflows, missing native runs have no provider conclusion,
+  and manual update/deletion commands still left refspec choice to Git configuration.
+- Appended a byte-canonical policy transcript with a derived reachable framing maximum;
+  restored bounded `root:N` creation checks; downgraded push workflows to conditional
+  candidate-controlled advice; separated completed, not-applicable, and no-observation
+  states; and wrote exact source/destination/lease refspecs with hostile-config gates.
+- Production remains unopened pending another full five-lens immutable-revision review.
+
 ## 2026-09-01 — Exact hash and provider-lane correction (codex)
 
 - The latest panel accepted semantic behavior, then found one exact-limit arithmetic error
