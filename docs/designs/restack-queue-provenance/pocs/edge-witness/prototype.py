@@ -52,6 +52,10 @@ class Metrics:
     old_parent_edges_scanned: int = 0
     candidate_commits: int = 0
     candidate_parent_edges: int = 0
+    pre_witness_commits_scanned: int = 0
+    pre_witness_parent_edges_scanned: int = 0
+    post_witness_commits_scanned: int = 0
+    post_witness_parent_edges_scanned: int = 0
     semantic_validation_calls: int = 0
     synthetic_control_calls: int = 0
 
@@ -206,6 +210,8 @@ class Fixture:
     expected_verdict: str
     expected_findings: tuple[str, ...] = ()
     old_resolution: str | None = None
+    side_resolution: str | None = None
+    merge_commit: str | None = None
 
 
 def queue_path(label: str) -> str:
@@ -574,6 +580,77 @@ def fixture_old_identity_mutation_round_trip(root: Path) -> Fixture:
     )
 
 
+def fixture_candidate_side_delete_merge_undo_mutate_delete(
+    root: Path,
+) -> Fixture:
+    repo = GitRepository(root)
+    label = "candidate-merge-undo"
+    path = queue_path(label)
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    O = feature(repo, "candidate-merge-undo-old")
+
+    repo.branch("candidate-main", C)
+    carrying_parent = feature(repo, "candidate-merge-undo-main")
+    repo.branch("candidate-side", C)
+    claim(repo, label)
+    side_resolution = resolve(repo, label)
+
+    carrying_tree = repo.oid(f"{carrying_parent}^{{tree}}")
+    merge_commit = repo.commit_tree(
+        carrying_tree,
+        "merge resolved side while retaining main action",
+        carrying_parent,
+        side_resolution,
+    )
+    repo.branch("candidate", merge_commit)
+    repo.write(
+        path,
+        action_text(label, action="resolve a mutated post-merge obligation"),
+    )
+    repo.commit("mutate the reintroduced candidate action")
+    repo.remove(path)
+    N = repo.commit("delete the mutated candidate action")
+    return Fixture(
+        "candidate-side-delete-merge-undo-mutate-delete",
+        repo, C, O, merge_commit, N, "blocking-finding", (path,),
+        side_resolution=side_resolution,
+        merge_commit=merge_commit,
+    )
+
+
+def fixture_candidate_merge_occurrence_ambiguity(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "candidate-merge-occurrence"
+    path = queue_path(label)
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    O = feature(repo, "candidate-merge-occurrence-old")
+
+    repo.branch("original-occurrence", C)
+    original_claim = claim(repo, label)
+    repo.branch("independent-occurrence-staging", C)
+    repo.write(path, action_text(label, status="in-repair"))
+    repo.run("add", "-A")
+    independent_tree = repo.run("write-tree").stdout.strip()
+    independent_occurrence = repo.commit_tree(
+        independent_tree, "create independent in-repair occurrence root"
+    )
+    merge_commit = repo.commit_tree(
+        independent_tree,
+        "merge two byte-identical in-repair occurrences",
+        independent_occurrence,
+        original_claim,
+    )
+    repo.branch("candidate", merge_commit)
+    N = resolve(repo, label)
+    return Fixture(
+        "candidate-merge-parent-occurrence-ambiguity",
+        repo, C, O, merge_commit, N, "blocking-finding", (path,),
+        merge_commit=merge_commit,
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -629,6 +706,8 @@ BASE_FIXTURES = (
     fixture_old_legal_resolve_recreate_identical,
     fixture_old_rename_round_trip,
     fixture_old_identity_mutation_round_trip,
+    fixture_candidate_side_delete_merge_undo_mutate_delete,
+    fixture_candidate_merge_occurrence_ambiguity,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -821,8 +900,168 @@ def candidate_commits(
     return commits
 
 
+def candidate_action_state(
+    repo: GitRepository,
+    revision: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    target_identity = action_identity(path, old_text)
+    current = text_at(revision, path, metrics)
+    alternates = alternate_lineage_paths(
+        repo, revision, path, old_text, metrics
+    )
+    if alternates:
+        state = "renamed" if current is None else "ambiguous"
+    elif current is None:
+        state = "absent"
+    elif action_identity(path, current) == target_identity:
+        state = "matching"
+    else:
+        state = "different"
+    return {"alternate_paths": alternates, "state": state}
+
+
+def pre_witness_occurrence_breaks(
+    repo: GitRepository,
+    witness_parent: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    breaks = []
+    revision = witness_parent
+    seen = set()
+    while revision not in seen:
+        seen.add(revision)
+        metrics.pre_witness_commits_scanned += 1
+        parents = RECONCILE.revision_parents(
+            revision, f"pre-witness parents of {revision}"
+        )
+        if not parents:
+            break
+        parent_occurrences = []
+        for parent in parents:
+            metrics.pre_witness_parent_edges_scanned += 1
+            state = candidate_action_state(
+                repo, parent, path, old_text, metrics
+            )
+            parent_occurrences.append({"oid": parent, **state})
+        matches = [
+            occurrence for occurrence in parent_occurrences
+            if occurrence["state"] in {"matching", "renamed", "ambiguous"}
+        ]
+        if len(matches) > 1:
+            breaks.append({
+                "child": revision,
+                "event": "multi-parent-occurrence-ambiguity",
+                "parent_occurrences": parent_occurrences,
+            })
+            break
+        if len(matches) == 1 and matches[0]["state"] != "matching":
+            breaks.append({
+                "child": revision,
+                "event": "pre-witness-rename-ambiguity",
+                "parent_occurrences": parent_occurrences,
+            })
+            break
+        if not matches:
+            break
+        revision = matches[0]["oid"]
+    return breaks
+
+
+def post_witness_event(parent_state, child_state, merge):
+    before = parent_state["state"]
+    after = child_state["state"]
+    if "renamed" in (before, after) or "ambiguous" in (before, after):
+        return "rename-ambiguity"
+    if merge and before != "absent":
+        return "merge-sibling-carries-action"
+    if after == "matching":
+        return (
+            "merge-result-reintroduction-or-survival"
+            if merge else "reintroduction-or-survival"
+        )
+    if after == "different":
+        return "identity-mutation-or-reintroduction"
+    if after == "absent" and before != "absent":
+        return "later-deletion"
+    return "post-witness-continuity-unknown"
+
+
+def post_witness_continuity_breaks(
+    repo: GitRepository,
+    witness_parent: str,
+    witness_child: str,
+    new_head: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    breaks = []
+    deletion_result = candidate_action_state(
+        repo, witness_child, path, old_text, metrics
+    )
+    if deletion_result["state"] != "absent":
+        breaks.append({
+            "after": deletion_result,
+            "before": candidate_action_state(
+                repo, witness_parent, path, old_text, metrics
+            ),
+            "child": witness_child,
+            "event": "deletion-result-rename-ambiguity",
+            "parent": witness_parent,
+        })
+
+    result = measured_git(
+        repo,
+        metrics,
+        "--no-replace-objects",
+        "rev-list",
+        "--reverse",
+        "--topo-order",
+        "--ancestry-path",
+        f"{witness_child}..{new_head}",
+    )
+    descendants = tuple(result.stdout.splitlines())
+    metrics.post_witness_commits_scanned += len(descendants)
+    for commit in descendants:
+        parents = RECONCILE.revision_parents(
+            commit, f"post-witness parents of {commit}"
+        )
+        child_state = candidate_action_state(
+            repo, commit, path, old_text, metrics
+        )
+        for parent in parents:
+            metrics.post_witness_parent_edges_scanned += 1
+            parent_state = candidate_action_state(
+                repo, parent, path, old_text, metrics
+            )
+            if parent_state["state"] == "absent" and child_state["state"] == (
+                "absent"
+            ):
+                continue
+            breaks.append({
+                "after": child_state,
+                "before": parent_state,
+                "child": commit,
+                "event": post_witness_event(
+                    parent_state, child_state, len(parents) > 1
+                ),
+                "parent": parent,
+            })
+    return breaks
+
+
 def deletion_witnesses(
-    commits: Iterable[str], path: str, old_text: str, metrics: Metrics
+    repo: GitRepository,
+    commits: Iterable[str],
+    new_head: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
 ):
     old_identity = action_identity(path, old_text)
     witnesses = []
@@ -840,8 +1079,22 @@ def deletion_witnesses(
             problem = RECONCILE.queue_deletion_problem(
                 path, before, parent, commit
             )
+            occurrence_breaks = pre_witness_occurrence_breaks(
+                repo, parent, path, old_text, metrics
+            )
+            continuity_breaks = post_witness_continuity_breaks(
+                repo, parent, commit, new_head, path, old_text, metrics
+            )
             witnesses.append(
-                {"parent": parent, "child": commit, "problem": problem}
+                {
+                    "causally_continuous_to_N": not continuity_breaks,
+                    "child": commit,
+                    "occurrence_unambiguous": not occurrence_breaks,
+                    "parent": parent,
+                    "post_witness_breaks": continuity_breaks,
+                    "pre_witness_occurrence_breaks": occurrence_breaks,
+                    "problem": problem,
+                }
             )
     return witnesses
 
@@ -864,6 +1117,17 @@ def classification_reason(items, fast_forward=False):
             parts.append(f"{path} remains live at the candidate tip")
         elif verdict.startswith("invalid-real-edge"):
             parts.append(f"{path} has a real deletion edge but it is unauthorized: {item['problem']}")
+        elif verdict == "invalid-post-witness-continuity":
+            parts.append(
+                f"{path} has a locally valid deletion edge, but a descendant "
+                "edge reintroduces, rewrites, renames, or deletes the action "
+                "before the candidate tip"
+            )
+        elif verdict == "invalid-witness-occurrence-ambiguity":
+            parts.append(
+                f"{path} has a locally valid deletion edge, but its claimed "
+                "occurrence is ambiguous across multiple merge parents"
+            )
         elif verdict == "different-incarnation-witness":
             parts.append(
                 f"{path} has a valid candidate-side deletion edge for byte-identical "
@@ -883,6 +1147,8 @@ def classify(
     fixture: Fixture,
     enforce_incarnation_provenance=True,
     enforce_old_edge_continuity=True,
+    enforce_pre_witness_occurrence=True,
+    enforce_post_witness_continuity=True,
 ):
     metrics = Metrics()
     items = {}
@@ -982,7 +1248,12 @@ def classify(
                         }
                     continue
                 witnesses = deletion_witnesses(
-                    commits, path, old_text, metrics
+                    fixture.repo,
+                    commits,
+                    fixture.N,
+                    path,
+                    old_text,
+                    metrics,
                 )
                 metrics.synthetic_control_calls += 1
                 synthetic_edge_problem = RECONCILE.queue_deletion_problem(
@@ -990,7 +1261,26 @@ def classify(
                 )
                 valid = [witness for witness in witnesses if witness["problem"] is None]
                 if len(witnesses) == 1 and len(valid) == 1:
-                    if enforce_incarnation_provenance and lineage != (
+                    witness = witnesses[0]
+                    if enforce_pre_witness_occurrence and witness[
+                        "pre_witness_occurrence_breaks"
+                    ]:
+                        verdict = "invalid-witness-occurrence-ambiguity"
+                        problem = (
+                            "the candidate deletion's claim receipt is ambiguous "
+                            "across multiple parent occurrences"
+                        )
+                        finding = True
+                    elif enforce_post_witness_continuity and witness[
+                        "post_witness_breaks"
+                    ]:
+                        verdict = "invalid-post-witness-continuity"
+                        problem = (
+                            "the candidate-side deletion does not remain causally "
+                            "absent through every descendant edge to N"
+                        )
+                        finding = True
+                    elif enforce_incarnation_provenance and lineage != (
                         "inherited-unchanged-on-old-tip"
                     ):
                         verdict = "different-incarnation-witness"
@@ -1176,6 +1466,57 @@ def verify_result(fixture: Fixture, result):
         item = result["items"][fixture.expected_findings[0]]
         if item["old_resolution_witness"]["problem"] is not None:
             problems.append("old-side resolve-before-recreate lifecycle was not valid")
+    if fixture.scenario_id == (
+        "candidate-side-delete-merge-undo-mutate-delete"
+    ):
+        item = result["items"][fixture.expected_findings[0]]
+        if item["evidence_verdict"] != "invalid-post-witness-continuity":
+            problems.append("non-causal candidate deletion was accepted")
+        if len(item["witnesses"]) != 1:
+            problems.append("merge-undo fixture did not isolate one deletion witness")
+        else:
+            witness = item["witnesses"][0]
+            if witness["child"] != fixture.side_resolution:
+                problems.append("scanner did not select the valid side deletion")
+            if witness["problem"] is not None:
+                problems.append("side deletion lifecycle was not locally valid")
+            if witness["causally_continuous_to_N"]:
+                problems.append("side deletion incorrectly remained causal to N")
+            events = {
+                event["event"] for event in witness["post_witness_breaks"]
+            }
+            expected_events = {
+                "merge-sibling-carries-action",
+                "merge-result-reintroduction-or-survival",
+                "identity-mutation-or-reintroduction",
+                "later-deletion",
+            }
+            if not expected_events.issubset(events):
+                problems.append("post-witness merge/rewrite/delete edges were missed")
+            if fixture.merge_commit not in {
+                event["child"] for event in witness["post_witness_breaks"]
+            }:
+                problems.append("merge result was not inspected after the witness")
+    if fixture.scenario_id == "candidate-merge-parent-occurrence-ambiguity":
+        item = result["items"][fixture.expected_findings[0]]
+        if item["evidence_verdict"] != "invalid-witness-occurrence-ambiguity":
+            problems.append("multi-parent occurrence ambiguity was accepted")
+        if len(item["witnesses"]) != 1:
+            problems.append("occurrence fixture did not isolate one deletion witness")
+        else:
+            witness = item["witnesses"][0]
+            if witness["problem"] is not None:
+                problems.append("raw production deletion helper did not false-green")
+            if witness["occurrence_unambiguous"]:
+                problems.append("merge parents were treated as one occurrence")
+            events = {
+                event["event"]
+                for event in witness["pre_witness_occurrence_breaks"]
+            }
+            if "multi-parent-occurrence-ambiguity" not in events:
+                problems.append("multi-parent occurrence event was not emitted")
+            if not witness["causally_continuous_to_N"]:
+                problems.append("occurrence fixture accidentally tested post-causality")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
@@ -1247,6 +1588,60 @@ def executable_controls(fixtures, results):
         "old_edge_events": [
             event["event"] for event in damaged_item["old_edge_breaks"]
         ],
+        "status": "OBSERVED_RED",
+    })
+
+    merge_undo = fixtures[
+        "candidate-side-delete-merge-undo-mutate-delete"
+    ]
+    damaged_post_witness = classify(
+        merge_undo, enforce_post_witness_continuity=False
+    )
+    merge_undo_path = queue_path("candidate-merge-undo")
+    if damaged_post_witness["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged post-witness control did not reproduce the false green"
+        )
+    damaged_witness = damaged_post_witness["items"][merge_undo_path][
+        "witnesses"
+    ][0]
+    controls.append({
+        "control": "observed-red-post-witness-continuity",
+        "damaged_classification": damaged_post_witness["classification"],
+        "expected": merge_undo.expected_verdict,
+        "merge_commit": merge_undo.merge_commit,
+        "post_witness_events": [
+            event["event"]
+            for event in damaged_witness["post_witness_breaks"]
+        ],
+        "status": "OBSERVED_RED",
+        "witness_child": damaged_witness["child"],
+    })
+
+    occurrence = fixtures["candidate-merge-parent-occurrence-ambiguity"]
+    damaged_occurrence = classify(
+        occurrence, enforce_pre_witness_occurrence=False
+    )
+    occurrence_path = queue_path("candidate-merge-occurrence")
+    if damaged_occurrence["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged occurrence control did not reproduce the merge false green"
+        )
+    occurrence_witness = damaged_occurrence["items"][occurrence_path][
+        "witnesses"
+    ][0]
+    controls.append({
+        "control": "observed-red-pre-witness-occurrence",
+        "damaged_classification": damaged_occurrence["classification"],
+        "expected": occurrence.expected_verdict,
+        "merge_commit": occurrence.merge_commit,
+        "occurrence_events": [
+            event["event"]
+            for event in occurrence_witness[
+                "pre_witness_occurrence_breaks"
+            ]
+        ],
+        "raw_production_problem": occurrence_witness["problem"],
         "status": "OBSERVED_RED",
     })
 
