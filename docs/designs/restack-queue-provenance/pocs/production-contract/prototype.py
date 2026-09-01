@@ -6613,9 +6613,25 @@ def r17_boundary_budget_fixture(
 
 
 def r17_graph_parent_tokens_exact(root: Path) -> Fixture:
-    return r17_boundary_budget_fixture(
+    fixture = r17_boundary_budget_fixture(
         root, counter="graph_parent_tokens", limit=68, exact=True
     )
+    fixture.scenario = "R17-graph-parent-tokens-exact"
+    fixture.details["typed_budget_counter"] = "graph_parent_tokens"
+    fixture.details["typed_budget_limit"] = 68
+    fixture.details["overflow_by_one"] = False
+    return fixture
+
+
+def r17_graph_parent_tokens_plus_one(root: Path) -> Fixture:
+    fixture = r17_boundary_budget_fixture(
+        root, counter="graph_parent_tokens", limit=67
+    )
+    fixture.scenario = "R17-graph-parent-tokens-plus-one-refused"
+    fixture.details["typed_budget_counter"] = "graph_parent_tokens"
+    fixture.details["typed_budget_limit"] = 67
+    fixture.details["overflow_by_one"] = True
+    return fixture
 
 
 def r17_graph_dimension_budget(
@@ -9075,6 +9091,7 @@ def scenario_builders():
         ],
         r17_boundary_budget_fixture,
         r17_graph_parent_tokens_exact,
+        r17_graph_parent_tokens_plus_one,
         *[
             (
                 lambda root, counter=counter, limit=limit, overflow=overflow:
@@ -9455,7 +9472,7 @@ def validate_result(result: dict):
             "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
         }:
             errors.append("R17 wide-boundary reviewer OIDs changed")
-    if scenario == "R17-wide-graph-graph_parent_tokens-exact":
+    if scenario == "R17-graph-parent-tokens-exact":
         details = result["details"]["budget_contract"]
         if (
             status != "none"
@@ -11056,6 +11073,7 @@ def validate_result(result: dict):
             "R17-dynamic-support-traversal-",
             "R17-graph-output-bytes-",
             "R17-graph-line-peak-bytes-",
+            "R17-graph-parent-tokens-",
         )
     ):
         counter = result["details"]["typed_budget_counter"]
