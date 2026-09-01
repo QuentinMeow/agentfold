@@ -56,7 +56,10 @@ Nested supplier events retain the original authority event and stable-deduplicat
 the prior plus current neutral and absent parent lists. Later adoption cannot
 erase ancestry evidence recorded by an earlier adoption. The same accumulation
 applies when a conflicting human response changes a source-derived event from
-valid to invalid.
+valid to invalid. Traceable invalid suppliers live in a causal-source collection
+separate from the valid sources that may authorize. The closest shared invalid
+source propagates its reason and complete ancestry to the next adoption, remains
+invalid, and is never added to the authorization set.
 
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
 full `C/O/M/N` OIDs, the production identity tuple, endpoint paths and
@@ -149,7 +152,7 @@ names.
 | PCX-10 transient multiplicity | ambiguous at multiplicity 2; both transient paths appear in the reason |
 | PCX-11 different payload, same path | Q-A supplier validates and distinct Q-B remains a separate finding |
 | PCX-12 timing rename | valid supplier by production identity, independent of the permitted path move |
-| PCX-13 conflicting human response | invalid supplier despite otherwise valid lifecycle authority |
+| PCX-13 conflicting human response | three-level invalid continuation retains the original conflict, one authority edge, three ordered propagation edges, and all neutral/absent ancestry |
 | PCX-14 valid human supplier | valid supplier through the production human validator |
 | PCX-15 generated retry | valid supplier through the generated-retry special authority |
 | PCX-16 task pickup | valid supplier through task-pickup special authority |
@@ -188,6 +191,32 @@ The final event's absent parents are the authority event then `adoption1`; its
 neutral parents are `neutral1` then `neutral2`. Its propagation edges are
 `carrier1 -> adoption1` and `carrier2 -> M`. Both authority edges share the one
 authority-event child above, and neither overlaps a propagation edge.
+
+PCX-13 exercises the invalid path through three supplier adoptions. Its final
+reason retains `conflicting-human-response` at `adoption1`, then names each
+later `upstream-invalid-supplier` adoption:
+
+```text
+C          58e15401aaba3e6f056f7dbaf6789c10d35ae553
+O          1e790e17e8d0ba21ab1a7213d6e0e0fa2d12f047
+M/adopt3   52419f64aecef7454ed6a37a29d085583ff75eaf
+N          14707f668aecd10bb531aa6fa0ec57700d26844b
+authority  bceaeebe51c25436265952f3b9afa6c9a7745a6c
+adoption1  8e72a13292b567ab5d5d8ece80c4c232f14d1899
+adoption2  819fc8dd0712aad77810b9ac82c7c1624214fd89
+carrier1   6a0d26ac7cf32e178357f6d85d49dd3981026b98
+carrier2   87e0359c1f7bb3578cf78ca24c42d0ea5b451244
+carrier3   6cb0a022a513d3c72d0df2d5f80352fbe71bb9d0
+neutral1   efed253a1c01456840b916c81818d8c08ad10399
+neutral2   aff11ce760bd2ec6d93cdeef39a450cc6998c48c
+neutral3   0cac705b7eb426e12e80d835cf76e71d75920851
+```
+
+The final invalid event emits absent sources `[authority, adoption1,
+adoption2]`, all three neutral parents, and propagation edges `carrier1 ->
+adoption1`, `carrier2 -> adoption2`, and `carrier3 -> M`. The original valid
+human deletion edge remains the only authority edge and cannot override the
+conflicting response carried by the invalid lineage.
 
 ## Cost and budget evidence
 
