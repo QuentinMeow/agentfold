@@ -22,8 +22,8 @@ from typing import Any, Iterable
 
 OID_PATTERN = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])")
 FIXTURE_SHA_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
-EXPECTED_SCENARIOS = 101
-EXPECTED_CONTROLS = 11
+EXPECTED_SCENARIOS = 117
+EXPECTED_CONTROLS = 14
 EXPECTED_ALIASES = 4
 
 
@@ -404,9 +404,9 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     controls = stream.controls
     records = scenarios | controls
 
-    checks.require(len(stream.objects) == 114, "self-test stream is not 114 records")
-    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 101")
-    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 11")
+    checks.require(len(stream.objects) == 133, "self-test stream is not 133 records")
+    checks.require(len(scenarios) == EXPECTED_SCENARIOS, "scenario inventory is not 117")
+    checks.require(len(controls) == EXPECTED_CONTROLS, "control inventory is not 14")
     summary_expected = {
         "aliases_passed": EXPECTED_ALIASES,
         "aliases_total": EXPECTED_ALIASES,
@@ -420,8 +420,8 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
     for key, expected in summary_expected.items():
         checks.require(stream.summary.get(key) == expected, f"summary field {key} differs")
     for phrase in (
-        "49 prescribed real-Git scenarios, 52 focused contract regressions, and all eleven damaged-mode controls",
-        "101/101 scenarios, 4/4 executable aliases, and 11/11 controls",
+        "49 prescribed real-Git scenarios, 68 focused contract regressions, and all fourteen damaged-mode controls",
+        "117/117 scenarios, 4/4 executable aliases, and 14/14 controls",
     ):
         checks.require(normalized(phrase) in normalized(readme), f"missing total claim: {phrase}")
 
@@ -512,8 +512,13 @@ def audit_readme(readme_path: Path, stream: Stream) -> dict[str, Any]:
         ),
         (
             "### Implicated-parent and persisted-state regressions",
-            "`R8-adapter-M-input-variants` runs three classifiers",
+            "### Unanswered review and continuous persisted-state regressions",
             [name for name in scenarios if name.startswith("R13-")],
+        ),
+        (
+            "### Unanswered review and continuous persisted-state regressions",
+            "`R8-adapter-M-input-variants` runs three classifiers",
+            [name for name in scenarios if name.startswith("R14-")],
         ),
         (
             "`R8-adapter-M-input-variants` runs three classifiers",

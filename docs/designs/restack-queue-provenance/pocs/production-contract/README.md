@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 52 focused contract regressions, and all eleven damaged-mode controls,
+scenarios, 68 focused contract regressions, and all fourteen damaged-mode controls,
 without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -26,11 +26,16 @@ worktree's current `automation/reconcile/reconcile.py`:
   old-tip human responses to those production-authorized edges.
 - `queue_parent_state_regression_problem(old_text, new_text)` validates mutable
   lifecycle state when the exact production identity persists from `O` to `N`.
+- `queue_mutation_problem(source, destination, before, after, parent, child)`
+  validates every real carrying edge of a persisted candidate occurrence.
+- `queue_frozen_skeleton`, `introduces_final_retry_notes`, and
+  `pure_first_human_response` apply the production frozen-byte complement to
+  those same edges.
 
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 11, "controls_total": 11, "failures": [], "git": "git version 2.55.0", "passed": 101, "python": "3.14.7", "summary": "PASS", "total": 101}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 14, "controls_total": 14, "failures": [], "git": "git version 2.55.0", "passed": 117, "python": "3.14.7", "summary": "PASS", "total": 117}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -77,19 +82,26 @@ production identity, and runs after the production edge validator. Candidate
 parents may add values only for fields pending at `O`, and all concrete
 candidate values must unify across the implicated parents. A mismatch turns the
 event invalid while retaining the production edge verdict, full parent and `O`
-OIDs, and both bindings. An unanswered carrying parent is neutral to this
-comparison; the authority parent must still pass the real production deletion
-validator. An unanswered `O` has no concrete binding to copy and therefore does
-not prohibit a valid candidate-side response.
+OIDs, and both bindings. An unanswered review parent is neutral only when its
+target and revision are still exactly production-pending. Once it publishes a
+concrete target or revision, those fields participate even without a response.
+An unanswered `O` likewise anchors any concrete published target and revision;
+an ordinary unanswered decision still has no binding to copy.
 
 Endpoint preservation is checked separately from Git rename detection. If the
 same production identity remains at `N`, the classifier requires exactly one
-occurrence at `O` and `N` and calls the production
-`queue_parent_state_regression_problem` helper on those texts. A low-similarity
-move that Git reports as delete-plus-add therefore cannot erase or replace a
-concrete human response/review binding or regress an in-repair claim merely by
-keeping the same immutable identity. Production-valid pending fills and
-terminal transitions remain allowed; multiplicity fails closed.
+occurrence at `C`, `O`, and `N`, then traces the live occurrence backward from
+`N` through every implicated candidate carrying parent to `C`. Every real edge
+calls `queue_mutation_problem` and the frozen-skeleton complement. A merge needs
+at least one independently valid source edge; its other live carrying parents
+must preserve protected bytes, committed state, and every concrete human review
+field, while a truly pending review parent may accept a lifecycle fill supplied
+by the valid source. A deleted gap, recreation, transient regression, conflicting
+merge carrier, or protected hidden-byte change blocks even when `O` and `N`
+look identical. The separate `O`-anchored comparison still prevents the
+candidate lineage from replacing old-tip committed state. Production-valid
+publication, retraction, pending fill, first response, and terminal transitions
+remain allowed; multiplicity fails closed.
 
 The two event modes are disjoint:
 
@@ -135,7 +147,8 @@ different occurrences can never authorize each other.
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
 full `C/O/M/N` OIDs, the `range_base_validation` verdict, the production
 identity tuple, endpoint paths and multiplicity, event OID, authority-edge
-validator results, propagation edges,
+validator results, propagation edges, persisted mutation edges with production
+and frozen-byte verdicts,
 neutral and absent parents, canonical roots, stable reason/source-child records,
 reason code, and measured counters.
 
@@ -161,7 +174,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 101.
+scenario total remains 117.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -571,23 +584,67 @@ Both identical-binding fixtures remain valid.
 | `R13-supplier-review-binding-revision` | `52fe1848f1536143161e717bf436ee8c8b07df59` / `e7a884697094e9be1c876b78fc33d9e259d92149` / `200871b889045e16a784c3de722863123881f7af` / `8fd2e814f38bf145bd7c84d9e22a355056d40649` | `blocking-finding` / `invalid` / `supplier` |
 | `R13-supplier-review-binding-terminal` | `e93ff6925d5008e9c95866628b410dda5b293e91` / `60538a926a9acd01f898ba0371ad5249c912f7fc` / `128875ca6b9fff728b2f964bd81eb8841229bcdc` / `1031e6315881cdc99376df52bcddc86a4427e920` | `blocking-finding` / `invalid` / `supplier` |
 
-Nine more fixtures move one persisted identity to a low-similarity path. Every
-fixture's ordinary `git diff --name-status -M` reports separate add and delete
-records, while the real production identity remains equal. Mutable-state
-regressions block with no selected deletion event; unchanged state, a pending
-review fill, and a production-valid terminal transition remain clean.
+Nine more fixtures move one persisted identity without relying on rename
+classification. The two response-removal/change negatives use large response
+fields and make ordinary `git diff --name-status -M` report separate add and
+delete records. The other fixtures use identity matching even when Git detects a
+rename. Every candidate carrying edge is production-valid; the six negatives
+block only at the independent `O` anchor. Unchanged state, pending review fill,
+and a production-valid terminal transition remain clean.
 
 | Case | C / O / M / N | Classification / evidence / mode |
 |---|---|---|
-| `R13-persisted-same-state` | `34089c5a8bf0c393bdb911aea9ffcf69da495809` / `b73bd74bcba8fc1b97b8189e47cd78f51076722f` / `fa57286c31867077c78f2b1bfe0157729b752262` / `f73f8751a3165dc092e2af0dc8844f97aa247490` | `no-finding` / `none` / `none` |
-| `R13-persisted-response-removal` | `4bbbfeb373a3741e2b7c8139976a579fb7ff14e6` / `ff8f75e910fe1542181570bc8b343febf4c845ee` / `177053ea29f00bc407ab77b8c36287176f54c8c1` / `34841ac3ec6b3cb54ea6d0eb8876eed6a44df14e` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-response-change` | `04f3902eeabc87c4c9f17daf3306c4fcf17d2714` / `8720e7a22a48160e52897305fd8e86f995b72831` / `706355acc9f90b4ced0e69570b155d600bee6345` / `90d9b1acd598e21ecf50c31b3ea9f78846b655ab` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-target-change` | `4e9f8efea91eeb1f860446130f6dd083bd9590e2` / `943d76d2e2a865a542c2e426c2d7210d2a3c19ed` / `cb9160db1c76278bebe5a46f3799f7a55d2286b6` / `b4d0ba5d6cd0a18bc81690cf04a6afb320e8f9f4` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-revision-change` | `69f395ab3b14fccfb1734109b83207fc2cc7d380` / `41de4c761543359451ca75192de27a26626872bd` / `5156fda9fc8516c50494b28bcb7a3801c5279da1` / `30c990c8f63441403181e83d0af8df2827440f13` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-review-outcome-change` | `15998cacabae761751f450baa9bf5962dd2d515d` / `cbd0bc686b720013ba6dc6794e6efe6784b84e52` / `2e145664b26f06feefdd804efe1e7613af03488f` / `f22ced0892c43d768d89d90efca2074a3e0e9dd8` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-claim-loss` | `97642715dfd4580df8ea64fa678d3abe3bcb7007` / `c028d60de17177c721b6ef7d4dc71b07d2fc9b97` / `25b44dd4c97fcb60312c4a5398754863e74b74ed` / `4595f1a9fba7a6ddbe159d3c4a3fa5b50d4bfeb0` | `blocking-finding` / `invalid` / `none` |
-| `R13-persisted-pending-fill` | `aebcd8d1b7a26e6faf6266b3257d0e26789fda56` / `9046cc7436d38fe27e9742474ca2f2a0f5ddeba2` / `c030064bf29ee5db19b2b9bf10d1e585aa0c1df4` / `a75533ee2e4fec8934262915491d5b19887dcfe6` | `no-finding` / `none` / `none` |
-| `R13-persisted-terminal-fill` | `fe8027f857ecc527c2f384bb6bea02bbecc3edf8` / `78b0bd0501691497767357e03ce00b0448603671` / `f78101217f5b6d54e602d599f7f509eb1ecbe846` / `ef7fbcec578ff440081586c956640ca1e4db39d4` | `no-finding` / `none` / `none` |
+| `R13-persisted-same-state` | `0d4f188e038977d78c48829a48b12354ffc8aa32` / `a3edb26d4a2069954d0459dd9ea503cc27833f61` / `6ed596b6e32ca919ed3622089a9a1217602659a5` / `edee50f1fe44db9136335db0de7e27ad442f4eca` | `no-finding` / `none` / `none` |
+| `R13-persisted-response-removal` | `49d500f64d51f720b0decb65db3ad5163d4f72e4` / `69bbf3a1bec29fcf92121c581925bb092d1535ab` / `d7c174ae5a575350b4c3fcc426a89ceb15119b69` / `24126e616db515f5ee1d08d4f2da297b50e02f3a` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-response-change` | `68dfa83702f8aa1a82181785ff40b9e0eb0f2958` / `af35b452b83aa6f8fee2d3dcf01a951a83cc0f19` / `69a46a9c107d10ae18cef7347e0f0f832a1bd7ef` / `464115d4c500dda036c5592c6c8f21fe9a959e15` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-target-change` | `de7f303a3f48d8d27eb65e7388d0f8dd934b4e96` / `2c37567f76cece330ee8c4997c96aa2bcd1764e0` / `73f686b71fc4503ed9319e814339a8f086c79c40` / `4f6be0576ef37c17b25b0268542bf4003a7b56bb` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-revision-change` | `952a03b6b34abb531365195232acd149ec51e221` / `cc3bf0c5664ca51a1c1df82759aaa607efd30550` / `eec9f2c2db8266f1f219bb1a656ebd3d9f01a11f` / `344c8d4e0333b14fb5b21550528242614812a55b` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-review-outcome-change` | `103fdd9bd623d90d09b2193e9272b3980c80906a` / `2c3f7acfeeb385de256074091a38c9953ce7f1f9` / `0c32f4efcc0c588a53c02e34064c1013163f2921` / `c8a8b37e924d1e18c54dd5bea09d07191b6b0be6` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-claim-loss` | `5604e77ef241630dd284448a224de046d2caf460` / `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` / `215f27a473f8476dc01cc01efe69516a76346385` / `8702850ba2e7f56c29b16557c496adcaa627829b` | `blocking-finding` / `invalid` / `none` |
+| `R13-persisted-pending-fill` | `6b710008b02a5c4b970a282ad2624b0384727292` / `5218487e636b8519c69f49d146acd9b7f8b25948` / `457f5f699f2bbe03994adec75f5a5bebca91125b` / `31a21eb1595bd8ebe46e55bb235d8d677edd6d58` | `no-finding` / `none` / `none` |
+| `R13-persisted-terminal-fill` | `ba73b784939318c875041e869d49a08cfd88f440` / `b5ea69a78713ea41e8229125a90fa2718088c6f9` / `3e711d2f2bb5de235a037e4675fe93f3d124c9d5` / `8250a2475da8b2c1a0dfffd5ecbe3e73fdd9b838` | `no-finding` / `none` / `none` |
+
+### Unanswered review and continuous persisted-state regressions
+
+The r14 review matrix treats concrete Review target/revision fields as binding
+even when the review response is still absent. A completely production-pending
+carrier stays compatible, as does an unanswered carrier that publishes the same
+binding. A different target or revision blocks. The independent 17-record r12
+oracle now reports 14 safe controls as `PASS` and all three former false greens
+as `NOT_REPRODUCED`; the independent six-case carrier oracle returns the expected
+three no-findings and three blocking findings.
+
+| Case | C / O / M / N | Classification / evidence / mode |
+|---|---|---|
+| `R14-direct-old-unanswered-carrier-same` | `c1a83b69fb7f04ea375aca7027b157dd9cc266ef` / `37d577cc2c265e8e7082bfd86dd156172db98c5c` / `23bfa540b7b2b710bc71dc8de3aa9cb7c8aeaeb7` / `ae63528ae1af829ced9c2f1b763cc6aeb8c054ec` | `no-finding` / `valid` / `direct` |
+| `R14-direct-old-unanswered-carrier-target` | `0f221025b8224d465679596d3dfd44b6023371ca` / `d39ee31be16db2789928827c2e132a31e22b828f` / `ff2c698bac44b2bfb79623769f79914b9bb74216` / `9c07f77ec2836ec0f4222313e315b3ddc31c4ccd` | `blocking-finding` / `invalid` / `direct` |
+| `R14-supplier-old-answered-carrier-pending` | `7f104616c4fd6c3d1f15d7467a7e0da9e164f6e7` / `6f1dba05d9dca3e3776da3c7005a83807190ae74` / `e3876d1bfc361db4849cbb0205ff484aa10633a2` / `0662f0827db1ad2e39f59626dd8d87f316b73421` | `no-finding` / `valid` / `supplier` |
+| `R14-supplier-old-answered-carrier-same` | `d87b23dffb37c46a64f0f37fd10db886fc100532` / `a6ff10d32896ec2d87dad1696b24e07cc73ead65` / `8765211171ea8284a872f854a9bed3268e0d60ab` / `9f1c795a2f4fd1450d4d524f3f7adbdf0c496c52` | `no-finding` / `valid` / `supplier` |
+| `R14-supplier-old-answered-carrier-target` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` / `8a2de576d9304a51988bfbd943749129f828f882` / `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` / `b952d0de4952cb720e3056abe78c7ad8ee52d50f` | `blocking-finding` / `invalid` / `supplier` |
+| `R14-supplier-old-answered-carrier-revision` | `9121f39bba512fa9fd762c3d07c93d1c11d5bc42` / `6d9c8b1bfed15a512d68db494efb71a2d0577f33` / `98e0e2378d9bb06282339cbc3a6a0e67c8154f53` / `0b0243e67b4d4635716eb2113f81419da982ba3c` | `blocking-finding` / `invalid` / `supplier` |
+| `R14-supplier-old-unanswered-carrier-same` | `186d0ffca8ab62c6de1677780cb4153eced4fe53` / `b6e124010b1f74882864bdc3dc1fbd289fd5305c` / `6a00e16a8416c1572149fd45d4102d87cea7832b` / `e9e33f66742ae613b738497753ffb4957610b85e` | `no-finding` / `valid` / `supplier` |
+| `R14-supplier-old-unanswered-carrier-target` | `9109e916c44dbeaa2bfe0e3b5497e9d98ef3e9a3` / `a09f2f2ed771008847609d177c72e0b1f62d8084` / `d76ee4b89ef81e391e3b7ce4265919166fe070f7` / `0c38b44e67a3ad27238aed8c8a667837aa7fc444` | `blocking-finding` / `invalid` / `supplier` |
+
+The eight persisted-state fixtures below prove that the classifier follows the
+live `C` occurrence through the candidate DAG rather than trusting endpoint
+identity. Every result emits the real mutation edges, production mutation
+verdict, frozen-byte verdict, roles, and full parent/child OIDs. The negative
+cases catch hidden protected bytes, transient claim/review regressions,
+delete/recreate, and conflicting merge carriers. The positives preserve the
+production-valid review retraction, large first response followed by a D+A path
+move, and a merge where another source supplies a pending carrier's lifecycle
+fill.
+
+| Case | C / O / M / N | Classification / evidence / mode |
+|---|---|---|
+| `R14-persisted-hidden-bytes-low-similarity` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` / `d115e7063e3ffad24a495c9ffae5d70ffaf81928` / `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` / `a47b7307d654cb07612ccd7b04f1c32ab874c475` | `blocking-finding` / `invalid` / `none` |
+| `R14-persisted-intermediate-claim-regression` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` / `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` / `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` / `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` | `blocking-finding` / `invalid` / `none` |
+| `R14-persisted-intermediate-review-regression` | `5fe7bc2ba01136ca7e91068de3c21394628d8616` / `ceeb45bc58cb8e6726517130e20fff034db993f3` / `6937469bf807de32150751925eab9747c97b9801` / `b7e814f11797fcf8cc10f0a41b0dd8f0849718cc` | `blocking-finding` / `invalid` / `none` |
+| `R14-persisted-delete-recreate` | `32c778b5ec16afe676bcd2ce898c89388b28ea0e` / `68f01125491f31f259d6cc636bc2f818c9529571` / `e7d51374356e1865109e6556047a4bb02919e46e` / `0d272d85cea3703f4fdc3aedfa7e821374de51ab` | `blocking-finding` / `ambiguous` / `none` |
+| `R14-persisted-valid-review-retraction` | `58a66e99ff34cdfa5e2bd150d68d5d6121b0cd71` / `03f6cd5ee859d98e6110b2554606ba655ea9b66c` / `ba95216a82bb0d53f1116f7e57f6f1499459a40c` / `75f7c3689154b3ecf8e5c67d467e338ab24a47cb` | `no-finding` / `none` / `none` |
+| `R14-persisted-valid-first-response-low-similarity` | `b14ffe7afbd09ecdcf3fcdecbf99fcd42e5f9e59` / `dafb69000967fde6234bce7999767113def81c5c` / `44680a86ed369e379a1cd20eb759c8fa1005e019` / `690a6c7b5a5425bcd8a3abfa90b75c77ecbde966` | `no-finding` / `none` / `none` |
+| `R14-persisted-merge-carrier-pending` | `01b493c655badddcf6641e8a7d21d3594a0cb5c3` / `74442946b6639f57e7167838a13cc286f39d3519` / `d9dd6fac07cb976806b98aa75b872664d32c899b` / `ca8939b406b7b2323fd08b044625639f5e80cb6b` | `no-finding` / `none` / `none` |
+| `R14-persisted-merge-carrier-conflict` | `00a09440e320c344f9840d7939f97b5a72654aa1` / `521e76aa7253b7dc1214c2bbdca5c788a601e21d` / `efba97f7919902dbe9b3c7ffc9550918dae871a6` / `e2f3eacb8b4a86f383f8a76be26dac7e4966edad` | `blocking-finding` / `invalid` / `none` |
 
 `R8-adapter-M-input-variants` runs three classifiers over the same committed
 graph rather than changing the real adapter. Its OIDs are:
@@ -647,11 +704,11 @@ as valid and emitted eight findings. These are measured counts from that run:
 | Graph parent edges | 132 |
 | Graph enumerations | 1 |
 | Per-action history walks | 0 |
-| Queue snapshots requested | 10,892 |
-| Snapshot cache hits | 10,889 |
+| Queue snapshots requested | 10,924 |
+| Snapshot cache hits | 10,921 |
 | Distinct queue subtree reads | 3 |
 | Git object reads | 297 |
-| Object cache hits | 21,531 |
+| Object cache hits | 21,595 |
 | Production identity calls | 32 |
 | Production authority calls | 32 |
 | `cat-file --batch` processes | 1 |
@@ -712,6 +769,9 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-unanswered-published-review-binding
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-frozen-skeleton
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-candidate-continuity
 ```
 
 | Control | Baseline -> damaged | Status | C / O / M / N |
@@ -726,34 +786,37 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `literal-review-pending-treated-concrete` | no finding -> blocking | `OBSERVED_RED` | `a4262ccefc9ede4932475bc002285d2a50c8ad90` / `a7ca8baea31e18d5a66c9866590838aa61b01c76` / `b55151e1a8c959e07397fd35006ab4b98e466972` / `7406c126a4a04f22492f7e1677d05be0f2c5951f` |
 | `broad-review-pending-normalization` | blocking -> no finding | `OBSERVED_RED` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` / `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` / `32c6405daf9887441afff5bc7ec846e3fb3e2096` / `ba4edb8f323adba9645e47c2536f2b621bed7855` |
 | `omit-supplier-carrier-human-binding` | blocking -> no finding | `OBSERVED_RED` | `874d2e356033d133cd409bc9deb8e93198d0ec78` / `adf1ce7876b84e595992f5865f871b59ea892234` / `d1e6f44ef7736fc9d695c8f5a4339e71216270d7` / `8c3e7d42c53baf018d30c895ecd64b799edb5d45` |
-| `skip-preserved-state-validation` | blocking -> no finding | `OBSERVED_RED` | `97642715dfd4580df8ea64fa678d3abe3bcb7007` / `c028d60de17177c721b6ef7d4dc71b07d2fc9b97` / `25b44dd4c97fcb60312c4a5398754863e74b74ed` / `4595f1a9fba7a6ddbe159d3c4a3fa5b50d4bfeb0` |
+| `skip-preserved-state-validation` | blocking -> no finding | `OBSERVED_RED` | `5604e77ef241630dd284448a224de046d2caf460` / `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` / `215f27a473f8476dc01cc01efe69516a76346385` / `8702850ba2e7f56c29b16557c496adcaa627829b` |
+| `omit-unanswered-published-review-binding` | blocking -> no finding | `OBSERVED_RED` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` / `8a2de576d9304a51988bfbd943749129f828f882` / `d5e3f69c296bcc8b6e99aefd9590e8012b85b37e` / `b952d0de4952cb720e3056abe78c7ad8ee52d50f` |
+| `skip-persisted-frozen-skeleton` | blocking -> no finding | `OBSERVED_RED` | `e56fb481facaa08ac78bd0bcf41f2efdf4cf90db` / `d115e7063e3ffad24a495c9ffae5d70ffaf81928` / `9d5788eb19005f0df4a1314b8ce08d5733b7a4cb` / `a47b7307d654cb07612ccd7b04f1c32ab874c475` |
+| `skip-persisted-candidate-continuity` | blocking -> no finding | `OBSERVED_RED` | `f98b12c5dbde687aeea147aa84dcf928b4bb53ea` / `a87ecb2becd5e7dab28fbdeb8b0a6f76a6a1cc2f` / `d5fff1649859ee16ec88b1c71a4b8a1cade69e03` / `7b384e9882bd9f54be16ef63d18dd3bd1ebe736f` |
 
 ## Evidence audit
 
 The committed [audit_readme.py](audit_readme.py) is a standard-library-only
 checker for this evidence. It reads a self-test JSONL stream and verifies all
-371 README Git OID occurrences against their named scenario/control regions,
+447 README Git OID occurrences against their named scenario/control regions,
 all seven fixture identity SHA claims, scenario and control result rows, the 20
 PCX attack rows, measured counters, totals, aliases, controls, and nonclaims.
 It rejects an OID that merely occurs in some unrelated record and rejects every
 unmapped README OID. No historical-OID exemption is used.
 
-Two fresh 114-record streams were generated in different scratch roots with
+Two fresh 133-record streams were generated in different scratch roots with
 `PYTHONHASHSEED=1` and `PYTHONHASHSEED=777`. They had zero differing records and
 zero differing fields. Their raw bytes happened to match in the tested macOS,
 Python 3.14.7, and Git 2.55.0 environment, at
-`38089284c35b45d423b381a392e9af630759f54e608c6ca5d66724a8c096aa10`.
+`f6bfffe4c8e5abb46c1532d421d349d7eea4e81c113907f46bcf866abf550dea`.
 That raw digest is an observed replay result, not a portable contract: the raw
 summary includes the Python and Git version strings. The auditor also defines
 a canonical semantic stream by removing only those two summary fields and
 canonicalizing JSON object serialization. It retains every Git OID, reason,
 path, result, edge, and metric. Canonical semantic SHA-256:
-`260df843ac7c9846aa20f132a79711a00d3a77511bdb82534cbc3f31ae79a3e8`.
+`4aa6bd1a62537a8bbea28ec2f27730778b523a342af6ea917ed9a47d6c04e2c0`.
 
 The ordinary two-stream audit output was:
 
 ```json
-{"audit": "PASS", "checks_passed": 1286, "checks_total": 1286, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 23, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 371, "pcx_rows": 20, "pinned_controls": 11, "pinned_scenarios": 101, "record_rows": 84, "region_oid_claims": 371, "semantic_row_checks": 131, "unique_oids": 323}
+{"audit": "PASS", "checks_passed": 1552, "checks_total": 1552, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 23, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 447, "pcx_rows": 20, "pinned_controls": 14, "pinned_scenarios": 117, "record_rows": 103, "region_oid_claims": 447, "semantic_row_checks": 168, "unique_oids": 387}
 ```
 
 The audit damage control makes three disposable README copies and changes one
@@ -761,8 +824,8 @@ current OID, the PCX-01 result, or the 133-commit counter. All three damaged
 copies returned audit `FAIL`. It also changes one semantic result field in a
 disposable comparison stream; strict comparison reports one differing record
 and one differing field. The wrapper returned `PASS` with four `OBSERVED_RED`
-records. These audit-only controls are separate from the eleven classifier
-damaged-mode controls and do not change the 101-scenario/11-control self-test
+records. These audit-only controls are separate from the fourteen classifier
+damaged-mode controls and do not change the 117-scenario/14-control self-test
 inventory.
 
 ## Commands run
@@ -783,25 +846,28 @@ PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/re
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-supplier-carrier-human-binding
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-preserved-state-validation
-root_a="$(mktemp -d /tmp/production-contract-r13-seed1.XXXXXX)"
-root_b="$(mktemp -d /tmp/production-contract-r13-seed777.XXXXXX)"
-PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r13-seed1.jsonl
-PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r13-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r13-seed1.jsonl --compare /tmp/production-contract-r13-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r13-seed1.jsonl --damage-control
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-unanswered-published-review-binding
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-frozen-skeleton
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control skip-persisted-candidate-continuity
+root_a="$(mktemp -d /tmp/production-contract-r14-seed1.XXXXXX)"
+root_b="$(mktemp -d /tmp/production-contract-r14-seed777.XXXXXX)"
+PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r14-seed1.jsonl
+PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r14-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r14-seed1.jsonl --compare /tmp/production-contract-r14-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r14-seed1.jsonl --damage-control
 python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 101/101
-scenarios, 4/4 executable aliases, and 11/11 controls. Each standalone control
+The installer and bytecode compilation exited `0`. The self-test passed 117/117
+scenarios, 4/4 executable aliases, and 14/14 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
 first commit hook selected no repository test files because this directory is a
 design record path. A commit-message-only amend then selected the full lane
 because its staged diff was empty; all 16/16 repository test files passed.
-The r13 evidence pass explicitly reran that full lane; 16/16 files passed in
-55.79 seconds.
+The r14 evidence pass explicitly reran that full lane; 16/16 files passed in
+48.24 seconds.
 
 ## Nonclaims and tests not run
 

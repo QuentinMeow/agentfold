@@ -61,6 +61,7 @@ class Metrics:
     snapshot_cache_hits: int = 0
     identity_calls: int = 0
     authority_calls: int = 0
+    mutation_calls: int = 0
     per_action_history_walks: int = 0
 
     def as_dict(self):
@@ -99,7 +100,10 @@ class Damage:
     treat_review_pending_as_concrete: bool = False
     broad_review_pending_normalization: bool = False
     omit_supplier_carrier_human_binding: bool = False
+    omit_unanswered_published_review_binding: bool = False
     skip_preserved_state_validation: bool = False
+    skip_persisted_frozen_skeleton: bool = False
+    skip_persisted_candidate_continuity: bool = False
 
 
 @dataclasses.dataclass
@@ -726,48 +730,53 @@ class Classifier:
     def human_response_binding(
         self, identity: tuple, revision: str
     ) -> tuple[tuple[str, str], ...] | None:
-        if self.identity_view(identity)["actor"] != "needs-human":
-            return None
         states = self.states(revision, identity)
         if len(states) != 1:
             return None
-        fields = RECONCILE.human_response_fields(states[0].text)
-        response_key = RECONCILE.first_concrete_response(fields)
-        if response_key is None:
+        return self.human_response_binding_for_state(identity, states[0])
+
+    def human_response_binding_for_state(
+        self, identity: tuple, state: ActionState
+    ) -> tuple[tuple[str, str], ...] | None:
+        if self.identity_view(identity)["actor"] != "needs-human":
             return None
-        binding = [
-            ("response_field", response_key),
-            ("response", fields[response_key]),
-        ]
+        fields = RECONCILE.human_response_fields(state.text)
+        response_key = RECONCILE.first_concrete_response(fields)
+        binding = []
         if self.identity_view(identity)["leaf"] == "reviews":
-            for key in (
-                "Review target",
-                "Review revision",
-                "Reviewed revision",
-                "Review outcome",
-            ):
+            for key in ("Review target", "Review revision"):
                 value = fields[key]
-                if key in {"Review target", "Review revision"}:
-                    pending = (
-                        self.broad_review_pending(value)
-                        if self.damage.broad_review_pending_normalization
-                        else self.explicit_review_pending(value)
-                    )
-                    concrete = not pending
-                    if (
-                        self.damage.treat_review_pending_as_concrete
-                        and self.explicit_review_pending(value)
-                    ):
-                        concrete = True
-                else:
-                    concrete = (
-                        RECONCILE.review_outcome_value(value) != "pending"
-                        if key == "Review outcome"
-                        else RECONCILE.has_concrete_value(value)
-                    )
+                pending = (
+                    self.broad_review_pending(value)
+                    if self.damage.broad_review_pending_normalization
+                    else self.explicit_review_pending(value)
+                )
+                concrete = not pending
+                if (
+                    self.damage.treat_review_pending_as_concrete
+                    and self.explicit_review_pending(value)
+                ):
+                    concrete = True
                 if concrete:
                     binding.append((key, value))
-        return tuple(binding)
+        if response_key is not None:
+            binding.extend(
+                (
+                    ("response_field", response_key),
+                    ("response", fields[response_key]),
+                )
+            )
+        if self.identity_view(identity)["leaf"] == "reviews":
+            for key in ("Reviewed revision", "Review outcome"):
+                value = fields[key]
+                concrete = (
+                    RECONCILE.review_outcome_value(value) != "pending"
+                    if key == "Review outcome"
+                    else RECONCILE.has_concrete_value(value)
+                )
+                if concrete:
+                    binding.append((key, value))
+        return tuple(binding) or None
 
     @staticmethod
     def explicit_review_pending(value: str) -> bool:
@@ -789,7 +798,7 @@ class Classifier:
         revisions: Iterable[str],
         parent_role: str,
         *,
-        ignore_unanswered: bool,
+        optional_revisions: Iterable[str] = (),
     ) -> str | None:
         expected = self.human_response_binding(identity, self.fixture.O)
         if (
@@ -798,12 +807,13 @@ class Classifier:
         ):
             return None
         expected_fields = dict(expected or ())
+        optional = set(optional_revisions)
         observed_by_revision = {}
         for revision in self.stable_oids(revisions):
             observed = self.human_response_binding(
                 identity, revision
             )
-            if observed is None and ignore_unanswered:
+            if observed is None and revision in optional:
                 continue
             observed_fields = dict(observed or ())
             observed_by_revision[revision] = observed_fields
@@ -814,6 +824,10 @@ class Classifier:
                 }
                 for key, value in expected_fields.items()
                 if observed_fields.get(key) != value
+                and not (
+                    revision in optional
+                    and key not in observed_fields
+                )
             }
             if mismatches:
                 return (
@@ -856,7 +870,6 @@ class Classifier:
             identity,
             (edge["parent"] for edge in authority_edges),
             "authority",
-            ignore_unanswered=False,
         )
 
     def supplier_carrier_human_binding_problem(
@@ -866,15 +879,24 @@ class Classifier:
         propagation_edges: list[dict],
     ) -> str | None:
         revisions = [edge["parent"] for edge in authority_edges]
+        optional_revisions = []
         if not self.damage.omit_supplier_carrier_human_binding:
-            revisions.extend(
-                edge["parent"] for edge in propagation_edges
-            )
+            for edge in propagation_edges:
+                parent = edge["parent"]
+                observed = self.human_response_binding(identity, parent)
+                if (
+                    self.damage.omit_unanswered_published_review_binding
+                    and observed is not None
+                    and "response" not in dict(observed)
+                ):
+                    continue
+                revisions.append(parent)
+                optional_revisions.append(parent)
         return self.implicated_human_binding_problem(
             identity,
             revisions,
             "supplier authority/propagation",
-            ignore_unanswered=True,
+            optional_revisions=optional_revisions,
         )
 
     def parent_roles(self, identity: tuple, child: str):
@@ -1128,6 +1150,311 @@ class Classifier:
     @staticmethod
     def stable_oids(oids):
         return list(dict.fromkeys(oids))
+
+    def frozen_skeleton_problem(
+        self, before: ActionState, after: ActionState
+    ) -> tuple[str | None, str | None]:
+        """Mirror the production frozen-byte complement for one real edge."""
+        if self.damage.skip_persisted_frozen_skeleton:
+            return None, "DAMAGED-skipped"
+        if RECONCILE.queue_frozen_skeleton(
+            before.path, before.text
+        ) == RECONCILE.queue_frozen_skeleton(after.path, after.text):
+            return None, None
+        if RECONCILE.introduces_final_retry_notes(
+            before.path, before.text, after.path, after.text
+        ):
+            return None, "final-retry-notes"
+        if RECONCILE.pure_first_human_response(
+            before.path, before.text, after.path, after.text
+        ):
+            return None, "pure-first-human-response"
+        return (
+            "protected queue bytes changed while the exact production "
+            "identity remained live",
+            None,
+        )
+
+    def binding_subset_problem(
+        self,
+        identity: tuple,
+        before: ActionState,
+        after: ActionState,
+    ) -> str | None:
+        """Require every concrete earlier human field in the later state."""
+        prior = dict(
+            self.human_response_binding_for_state(identity, before) or ()
+        )
+        current = dict(
+            self.human_response_binding_for_state(identity, after) or ()
+        )
+        mismatches = {
+            key: {"before": value, "after": current.get(key)}
+            for key, value in prior.items()
+            if current.get(key) != value
+        }
+        if not mismatches:
+            return None
+        return (
+            "concrete human response/review binding changed or disappeared: "
+            f"{json.dumps(mismatches, sort_keys=True)}"
+        )
+
+    def mutation_edge(
+        self,
+        identity: tuple,
+        parent: str,
+        child: str,
+        before: ActionState,
+        after: ActionState,
+    ) -> dict:
+        """Call both production mutation authorities for a real Git edge."""
+        self.metrics.mutation_calls += 1
+        try:
+            production_problem = RECONCILE.queue_mutation_problem(
+                before.path,
+                after.path,
+                before.text,
+                after.text,
+                parent,
+                child,
+            )
+            frozen_problem, frozen_exception = self.frozen_skeleton_problem(
+                before, after
+            )
+            regression_problem = (
+                RECONCILE.queue_parent_state_regression_problem(
+                    before.text, after.text
+                )
+            )
+        except (
+            RECONCILE.GitSnapshotError,
+            OSError,
+            ValueError,
+            UnicodeError,
+        ) as error:
+            raise Unreadable(
+                "production mutation authority could not read "
+                f"{parent}->{child}: {error}"
+            ) from error
+        binding_problem = self.binding_subset_problem(
+            identity, before, after
+        )
+        # Production mutation authority owns ordinary linear transitions,
+        # including its exact unanswered review retraction exception.  The
+        # subset comparison is evidence for O anchoring and for non-authoring
+        # merge carriers; it must not narrow a production-valid real edge.
+        full_problem = production_problem or frozen_problem
+        return {
+            "parent": parent,
+            "child": child,
+            "source_path": before.path,
+            "path": after.path,
+            "production_problem": production_problem,
+            "frozen_problem": frozen_problem,
+            "frozen_exception": frozen_exception,
+            "regression_problem": regression_problem,
+            "binding_problem": binding_problem,
+            "role": "unselected",
+            "problem": full_problem,
+        }
+
+    def merge_compatible_problem(
+        self,
+        identity: tuple,
+        edge: dict,
+        before: ActionState,
+        after: ActionState,
+    ) -> str | None:
+        """Validate a non-authoring merge carrier without borrowed mutation."""
+        if edge["regression_problem"]:
+            return edge["regression_problem"]
+        if edge["frozen_problem"]:
+            return edge["frozen_problem"]
+        if edge["binding_problem"]:
+            return edge["binding_problem"]
+        if edge["production_problem"] is None:
+            return None
+
+        # A merge may receive a production-valid review publication/fold from
+        # another live carrying parent.  A completely pending parent is
+        # compatible with that child, but it is never itself the authoring
+        # edge.  No other production mutation failure is waived.
+        identity_view = self.identity_view(identity)
+        prior_binding = self.human_response_binding_for_state(
+            identity, before
+        )
+        publication_gap = (
+            identity_view["actor"] == "needs-human"
+            and identity_view["leaf"] == "reviews"
+            and prior_binding is None
+            and edge["production_problem"].startswith(
+                "immutable review binding changed outside"
+            )
+        )
+        if publication_gap:
+            return None
+        return edge["production_problem"]
+
+    def persisted_occurrence_problem(
+        self,
+        identity: tuple,
+        old_state: ActionState,
+        new_state: ActionState,
+    ) -> tuple[str | None, str, list[dict]]:
+        """Trace the one persisted C occurrence backward from N to C."""
+        assert self.graph is not None
+        if self.damage.skip_persisted_candidate_continuity:
+            return None, "DAMAGED-skipped", []
+
+        C_states = self.states(self.fixture.C, identity)
+        if len(C_states) != 1:
+            return (
+                f"C carries exact identity multiplicity {len(C_states)}",
+                "persisted-C-multiplicity",
+                [],
+            )
+
+        memo: dict[str, bool] = {self.fixture.C: True}
+        visiting: set[str] = set()
+        edges: list[dict] = []
+        failures: list[tuple[str, str]] = []
+
+        def fail(code: str, reason: str) -> bool:
+            failures.append((code, reason))
+            return False
+
+        def trace(child: str) -> bool:
+            if child in memo:
+                return memo[child]
+            if child in visiting:
+                return fail(
+                    "persisted-cycle", f"candidate graph cycles at {child}"
+                )
+            visiting.add(child)
+            child_states = self.states(child, identity)
+            if len(child_states) != 1:
+                result = fail(
+                    "persisted-intermediate-multiplicity",
+                    f"persisted occurrence has multiplicity "
+                    f"{len(child_states)} at {child}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            after = child_states[0]
+            carriers: list[tuple[str, ActionState]] = []
+            duplicates: list[tuple[str, int]] = []
+            absent: list[str] = []
+            for parent in self.graph.parents.get(child, ()):
+                if not self.graph.reaches_C(parent):
+                    continue
+                parent_states = self.states(parent, identity)
+                if len(parent_states) == 1:
+                    carriers.append((parent, parent_states[0]))
+                elif len(parent_states) > 1:
+                    duplicates.append((parent, len(parent_states)))
+                else:
+                    absent.append(parent)
+            if duplicates:
+                result = fail(
+                    "persisted-parent-multiplicity",
+                    f"candidate child {child} has duplicate C-rooted "
+                    f"carriers {duplicates}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            if not carriers:
+                result = fail(
+                    "persisted-delete-recreate",
+                    f"candidate child {child} carries the exact identity "
+                    "without any C-rooted carrying parent; absent C-rooted "
+                    f"parents are {absent}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            parent_results = [trace(parent) for parent, _ in carriers]
+            parents_continuous = all(parent_results)
+            candidate_edges = [
+                self.mutation_edge(identity, parent, child, before, after)
+                for parent, before in carriers
+            ]
+            edges.extend(candidate_edges)
+            if not parents_continuous:
+                result = fail(
+                    "persisted-upstream-discontinuity",
+                    f"candidate child {child} descends from a carrying "
+                    "parent whose C-rooted occurrence is invalid",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            source_indices = [
+                index
+                for index, edge in enumerate(candidate_edges)
+                if edge["problem"] is None
+            ]
+            if not source_indices:
+                problems = [
+                    edge["problem"] for edge in candidate_edges
+                ]
+                result = fail(
+                    "persisted-invalid-mutation",
+                    f"no carrying edge into {child} passes production "
+                    f"mutation and frozen-byte authority: {problems}",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+
+            compatible = True
+            for index, ((_, before), edge) in enumerate(
+                zip(carriers, candidate_edges)
+            ):
+                if index in source_indices:
+                    edge["role"] = "source"
+                    continue
+                edge["role"] = "compatible-carrier"
+                edge["problem"] = self.merge_compatible_problem(
+                    identity, edge, before, after
+                )
+                if edge["problem"]:
+                    compatible = False
+            if not compatible:
+                result = fail(
+                    "persisted-merge-carrier-conflict",
+                    f"candidate child {child} has a carrying merge parent "
+                    "whose concrete state is incompatible with the child",
+                )
+                visiting.remove(child)
+                memo[child] = result
+                return result
+            visiting.remove(child)
+            memo[child] = True
+            return True
+
+        continuous = trace(self.fixture.N)
+        ordered_edges = self.stable_edges(edges)
+        if not continuous:
+            code, reason = failures[0]
+            return reason, code, ordered_edges
+        endpoint_regression = RECONCILE.queue_parent_state_regression_problem(
+            old_state.text, new_state.text
+        )
+        endpoint_binding = self.binding_subset_problem(
+            identity, old_state, new_state
+        )
+        if endpoint_regression or endpoint_binding:
+            return (
+                endpoint_binding or endpoint_regression,
+                "persisted-endpoint-regression",
+                ordered_edges,
+            )
+        return None, "persisted-C-rooted-continuity", ordered_edges
 
     def supplier_base_events(self, identity: tuple) -> list[Event]:
         """Build nested supplier events while preserving original authority."""
@@ -1822,6 +2149,7 @@ class Classifier:
             },
             "authority_edges": [],
             "propagation_edges": [],
+            "mutation_edges": [],
             "neutral_parents": [],
             "absent_parents": [],
             "causal_roots": [],
@@ -1852,23 +2180,40 @@ class Classifier:
                         "unambiguous O-to-N occurrence"
                     ),
                 }
-            state_problem = (
-                None
-                if self.damage.skip_preserved_state_validation
-                else RECONCILE.queue_parent_state_regression_problem(
-                    old_states[0].text, N_states[0].text
+            if self.damage.skip_preserved_state_validation:
+                state_problem = None
+                state_code = "DAMAGED-skipped"
+                mutation_edges = []
+            else:
+                state_problem, state_code, mutation_edges = (
+                    self.persisted_occurrence_problem(
+                        identity, old_states[0], N_states[0]
+                    )
                 )
-            )
             if state_problem:
+                status = (
+                    "ambiguous"
+                    if state_code
+                    in {
+                        "persisted-C-multiplicity",
+                        "persisted-intermediate-multiplicity",
+                        "persisted-parent-multiplicity",
+                        "persisted-delete-recreate",
+                        "persisted-upstream-discontinuity",
+                    }
+                    else "invalid"
+                )
                 return {
                     **base,
-                    "status": "invalid",
+                    "status": status,
                     "finding": True,
                     "authoring_lineage": "persisted-state-regression",
-                    "reason_code": "persisted-state-regression",
+                    "mutation_edges": mutation_edges,
+                    "reason_code": state_code,
                     "reason": (
-                        "the production identity remains live but its "
-                        f"O-anchored mutable state regressed: {state_problem}"
+                        "the production identity remains live but its one "
+                        "C-rooted occurrence is not continuously valid: "
+                        f"{state_problem}"
                     ),
                 }
             return {
@@ -1876,10 +2221,11 @@ class Classifier:
                 "status": "none",
                 "finding": False,
                 "authoring_lineage": "preserved",
+                "mutation_edges": mutation_edges,
                 "reason_code": "identity-preserved",
                 "reason": (
-                    "the exact production identity and protected mutable "
-                    "state remain live"
+                    "the exact production identity remains live through "
+                    "continuous C-rooted production-valid mutations"
                 ),
             }
         effective_old = (
@@ -2059,6 +2405,7 @@ class Classifier:
                         "event_mode": "none",
                         "authority_edges": [],
                         "propagation_edges": [],
+                        "mutation_edges": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -2089,6 +2436,7 @@ class Classifier:
                         "event_mode": "none",
                         "authority_edges": [],
                         "propagation_edges": [],
+                        "mutation_edges": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -2161,6 +2509,11 @@ class Classifier:
                         for action in actions
                         for edge in action["propagation_edges"]
                     ],
+                    "mutation_edges": [
+                        edge
+                        for action in actions
+                        for edge in action["mutation_edges"]
+                    ],
                     "actions": actions,
                     "metrics": self.metrics.as_dict(),
                     "details": fixture.details,
@@ -2188,6 +2541,7 @@ class Classifier:
                 "event_mode": "none",
                 "authority_edges": [],
                 "propagation_edges": [],
+                "mutation_edges": [],
                 "actions": [],
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
@@ -3821,16 +4175,6 @@ def r13_review_parent_binding(
     )
 
 
-def low_similarity_delivery_text(text: str, marker: str) -> str:
-    replacement = f"**If unanswered:** {marker * 4096}"
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("**If unanswered:**"):
-            lines[index] = replacement
-            return "\n".join(lines) + "\n"
-    raise RuntimeError("fixture has no If unanswered field")
-
-
 def r13_persisted_state(root: Path, variant: str) -> Fixture:
     """Check O/N mutable state without relying on Git rename similarity."""
     variants = {
@@ -3882,15 +4226,12 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         path = add_human(repo, label)
     else:
         path = add_agent(repo, label)
-    repo.write(
-        path,
-        low_similarity_delivery_text(repo.read(path), "old-state-"),
-    )
+    decision_variant = variant in {"response-removal", "response-change"}
     C = repo.commit(f"create persisted-state {variant} at C")
 
     repo.branch("old", C)
     if variant in {"response-removal", "response-change"}:
-        answer(repo, path, "approve")
+        answer(repo, path, "old-response-" * 4096)
     elif variant == "review-target-change":
         publish_review(repo, path, target_A, revision_A)
         answer_review(repo, path, "approve")
@@ -3908,7 +4249,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
 
     repo.branch("candidate", C)
     if variant == "response-change":
-        answer(repo, path, "reject")
+        answer(repo, path, "new-response-" * 4096)
     elif variant == "review-target-change":
         publish_review(repo, path, target_B, revision_B)
         answer_review(repo, path, "approve")
@@ -3928,10 +4269,6 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         Path(path).with_name(f"non-blocking-{label}-moved.md")
     )
     repo.move(path, moved)
-    repo.write(
-        moved,
-        low_similarity_delivery_text(repo.read(moved), "new-state-"),
-    )
     M = repo.commit(f"move low-similarity persisted-state {variant}")
     N = feature(repo, f"{label}-new-tip")
 
@@ -3969,8 +4306,425 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
                 f"D\t{path}" in name_status
                 and f"A\t{moved}" in name_status
             ),
+            "expected_low_similarity": decision_variant,
             "expected_state_problem": expected_problem,
         },
+    )
+
+
+def r14_review_carrier_binding(
+    root: Path,
+    *,
+    mode: str,
+    carrier_variant: str,
+    old_answered: bool,
+) -> Fixture:
+    """Exercise concrete published review state even when unanswered."""
+    if mode not in {"direct", "supplier"}:
+        raise ValueError(mode)
+    if carrier_variant not in {"pending", "same", "target", "revision"}:
+        raise ValueError(carrier_variant)
+    if mode == "direct" and carrier_variant not in {"same", "target"}:
+        raise ValueError("direct mode binds its one authority parent")
+
+    repo = GitRepository(root)
+    initialize(repo)
+    answered_slug = "answered" if old_answered else "unanswered"
+    label = f"r14-{mode}-{answered_slug}-{carrier_variant}"
+    target_A = f"docs/{label}-target-a.md"
+    target_B = f"docs/{label}-target-b.md"
+    payload_A = f"# {label} A\n"
+    payload_B = f"# {label} B\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for unanswered binding matrix")
+
+    repo.branch("old", C)
+    publish_review(repo, path, target_A, revision_A)
+    if old_answered:
+        answer_review(repo, path, "approve")
+    O = feature(repo, f"{label}-old")
+
+    repo.branch("candidate-authority", C)
+    authority_target = (
+        target_B
+        if mode == "direct" and carrier_variant == "target"
+        else target_A
+    )
+    authority_revision = (
+        revision_B
+        if mode == "direct" and carrier_variant == "target"
+        else revision_A
+    )
+    publish_review(repo, path, authority_target, authority_revision)
+    answer_review(repo, path, "approve")
+    authority_parent = claim_review(repo, path, outcome="approved")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve review authority for unanswered binding matrix",
+    )
+
+    carrier = None
+    carrier_binding = None
+    if mode == "supplier":
+        repo.branch("candidate-carrier", C)
+        if carrier_variant == "pending":
+            carrier = feature(repo, f"{label}-pending-carrier")
+            carrier_binding = ["pending", "pending"]
+        else:
+            carrier_target = (
+                target_B if carrier_variant == "target" else target_A
+            )
+            carrier_revision = (
+                revision_B
+                if carrier_variant in {"target", "revision"}
+                else revision_A
+            )
+            carrier = publish_review(
+                repo, path, carrier_target, carrier_revision
+            )
+            carrier_binding = [carrier_target, carrier_revision]
+        M = repo.merge_commit(
+            (deletion, carrier),
+            "adopt absence with an unanswered published review carrier",
+            removes=(path,),
+        )
+    else:
+        M = deletion
+        carrier_binding = [authority_target, authority_revision]
+    N = feature(repo, f"{label}-new")
+
+    conflict = carrier_variant in {"target", "revision"}
+    return Fixture(
+        f"R14-{mode}-old-{answered_slug}-carrier-{carrier_variant}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {
+            "mode": mode,
+            "old_answered": old_answered,
+            "variant": carrier_variant,
+            "binding_conflict": conflict,
+            "old_binding": [target_A, revision_A],
+            "carrier_binding": carrier_binding,
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "carrier": carrier,
+        },
+    )
+
+
+def r14_persisted_hidden_bytes(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-hidden-bytes"
+    path = add_human(repo, label)
+    hidden_A = "\n".join(
+        f"protected-A-{index:04d}" for index in range(512)
+    )
+    hidden_B = "\n".join(
+        f"protected-B-{index:04d}" for index in range(512)
+    )
+    original = repo.read(path) + f"\n<!--\n{hidden_A}\n-->\n"
+    repo.write(path, original)
+    C = repo.commit("create persisted action with protected hidden bytes")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.move(path, moved)
+    repo.write(moved, original.replace(hidden_A, hidden_B))
+    M = repo.commit("move action while replacing protected hidden bytes")
+    N = feature(repo, f"{label}-new")
+    before = repo.run("show", f"{O}:{path}").stdout
+    after = repo.run("show", f"{N}:{moved}").stdout
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    return Fixture(
+        "R14-persisted-hidden-bytes-low-similarity",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "old_path": path,
+            "new_path": moved,
+            "identity_equal": RECONCILE.queue_action_identity(
+                path, before
+            )
+            == RECONCILE.queue_action_identity(moved, after),
+            "frozen_equal": RECONCILE.queue_frozen_skeleton(
+                path, before
+            )
+            == RECONCILE.queue_frozen_skeleton(moved, after),
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+        },
+    )
+
+
+def r14_persisted_intermediate_claim(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-intermediate-claim"
+    path = add_agent(repo, label)
+    C = repo.commit("create action for intermediate claim regression")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,), "claim action in candidate history")
+    before_bad = repo.read(path)
+    repo.write(
+        path,
+        before_bad.replace("**Status:** in-repair", "**Status:** open", 1),
+    )
+    bad = repo.commit("regress candidate claim in intermediate commit")
+    repo.write(path, before_bad)
+    M = repo.commit("restore candidate claim before endpoint")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-intermediate-claim-regression",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"bad": bad, "expected_problem": "committed in-repair"},
+    )
+
+
+def r14_persisted_intermediate_review(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-intermediate-review"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# target A\n"
+    payload_B = "# target B\n"
+    revision_A = review_revision(payload_A)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="waiting",
+        target=target_A,
+        revision=revision_A,
+    )
+    repo.commit("file concrete review")
+    answer_review(repo, path, "approve")
+    C = claim_review(repo, path, outcome="approved")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    original = repo.read(path)
+    repo.write(
+        path,
+        original.replace(
+            f"**Review target:** `{target_A}`",
+            f"**Review target:** `{target_B}`",
+            1,
+        ),
+    )
+    bad = repo.commit("mutate review binding in intermediate commit")
+    repo.write(path, original)
+    M = repo.commit("restore review binding before endpoint")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-intermediate-review-regression",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"bad": bad, "expected_problem": "immutable review binding"},
+    )
+
+
+def r14_persisted_delete_recreate(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-delete-recreate"
+    path = add_agent(repo, label)
+    original = repo.read(path)
+    C = repo.commit("create action for delete-recreate continuity")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    repo.remove(path)
+    gap = repo.commit("temporarily delete exact persisted identity")
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.write(moved, original)
+    M = repo.commit("recreate exact persisted identity")
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-delete-recreate",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {"gap": gap, "old_path": path, "new_path": moved},
+    )
+
+
+def r14_persisted_review_retraction(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-review-retraction"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# first artifact\n"
+    payload_B = "# replacement artifact\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for valid retraction")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    published_A = publish_review(repo, path, target_A, revision_A)
+    text = repo.read(path)
+    text = text.replace("**Status:** waiting", "**Status:** awaiting-artifact", 1)
+    text = text.replace(f"**Review target:** `{target_A}`", "**Review target:** pending", 1)
+    text = text.replace(f"**Review revision:** {revision_A}", "**Review revision:** pending", 1)
+    repo.write(path, text)
+    retracted = repo.commit("retract unanswered review publication")
+    published_B = publish_review(repo, path, target_B, revision_B)
+    M = published_B
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        "R14-persisted-valid-review-retraction",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "published_A": published_A,
+            "retracted": retracted,
+            "published_B": published_B,
+        },
+    )
+
+
+def r14_persisted_first_response_move(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r14-persisted-first-response-move"
+    path = add_human(repo, label)
+    C = repo.commit("create decision for low-similarity first response")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate", C)
+    answer_commit = answer(repo, path, "first-response-" * 4096)
+    moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
+    repo.move(path, moved)
+    M = repo.commit("move decision after valid first response")
+    N = feature(repo, f"{label}-new")
+    name_status = repo.run(
+        "diff", "--name-status", "-M", O, N, "--", path, moved
+    ).stdout.splitlines()
+    return Fixture(
+        "R14-persisted-valid-first-response-low-similarity",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "answer_commit": answer_commit,
+            "old_path": path,
+            "new_path": moved,
+            "git_name_status": name_status,
+            "low_similarity_delete_add": (
+                f"D\t{path}" in name_status
+                and f"A\t{moved}" in name_status
+            ),
+        },
+    )
+
+
+def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    slug = "conflict" if conflict else "pending"
+    label = f"r14-persisted-merge-{slug}-carrier"
+    target_A = f"docs/{label}-a.md"
+    target_B = f"docs/{label}-b.md"
+    payload_A = "# source artifact\n"
+    payload_B = "# carrier artifact\n"
+    revision_A = review_revision(payload_A)
+    revision_B = review_revision(payload_B)
+    repo.write(target_A, payload_A)
+    repo.write(target_B, payload_B)
+    path = add_review(
+        repo,
+        label,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
+    )
+    C = repo.commit("create pending review for persisted merge carriers")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("candidate-source", C)
+    publish_review(repo, path, target_A, revision_A)
+    answer_review(repo, path, "approve")
+    source = claim_review(repo, path, outcome="approved")
+    source_text = repo.read(path)
+    repo.branch("candidate-carrier", C)
+    if conflict:
+        carrier = publish_review(repo, path, target_B, revision_B)
+    else:
+        carrier = feature(repo, f"{label}-pending")
+    M = repo.merge_commit(
+        (source, carrier),
+        "merge persisted source with compatible or conflicting carrier",
+        writes={path: source_text},
+    )
+    N = feature(repo, f"{label}-new")
+    return Fixture(
+        f"R14-persisted-merge-carrier-{slug}",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding" if conflict else "no-finding",
+        {"source": source, "carrier": carrier, "merge": M, "conflict": conflict},
     )
 
 
@@ -5587,6 +6341,66 @@ def scenario_builders():
                 "terminal-fill",
             )
         ],
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="direct",
+            carrier_variant="same",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="direct",
+            carrier_variant="target",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="pending",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="same",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="target",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="revision",
+            old_answered=True,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="same",
+            old_answered=False,
+        ),
+        lambda root: r14_review_carrier_binding(
+            root,
+            mode="supplier",
+            carrier_variant="target",
+            old_answered=False,
+        ),
+        r14_persisted_hidden_bytes,
+        r14_persisted_intermediate_claim,
+        r14_persisted_intermediate_review,
+        r14_persisted_delete_recreate,
+        r14_persisted_review_retraction,
+        r14_persisted_first_response_move,
+        lambda root: r14_persisted_merge_carriers(
+            root, conflict=False
+        ),
+        lambda root: r14_persisted_merge_carriers(
+            root, conflict=True
+        ),
         r8_adapter_M_variants,
         r8_adapter_M_endpoint_counterexample,
     ]
@@ -5604,6 +6418,9 @@ CONTROL_NAMES = (
     "broad-review-pending-normalization",
     "omit-supplier-carrier-human-binding",
     "skip-preserved-state-validation",
+    "omit-unanswered-published-review-binding",
+    "skip-persisted-frozen-skeleton",
+    "skip-persisted-candidate-continuity",
 )
 
 
@@ -6758,32 +7575,187 @@ def validate_result(result: dict):
         if (
             action is None
             or not details["production_identity_equal"]
-            or not details["low_similarity_delete_add"]
+            or details["low_similarity_delete_add"]
+            != details["expected_low_similarity"]
             or action["paths"]["O"] != [details["old_path"]]
             or action["paths"]["N"] != [details["new_path"]]
             or action["multiplicity"]["O"] != 1
             or action["multiplicity"]["N"] != 1
             or authority
             or propagation
+            or not action["mutation_edges"]
+            or any(
+                edge["problem"] is not None
+                for edge in action["mutation_edges"]
+            )
             or result["event_mode"] != "none"
             or status != ("invalid" if expected_problem else "none")
             or result["classification"]
             != ("blocking-finding" if expected_problem else "no-finding")
             or action["reason_code"]
             != (
-                "persisted-state-regression"
+                "persisted-endpoint-regression"
                 if expected_problem
                 else "identity-preserved"
             )
             or (
                 expected_problem
-                and "O-anchored mutable state regressed"
+                and "C-rooted occurrence is not continuously valid"
                 not in action["reason"]
             )
         ):
             errors.append(
                 "R13 persisted identity mutable-state gate drifted"
             )
+    if scenario.startswith("R14-") and "carrier-" in scenario \
+            and not scenario.startswith("R14-persisted-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        reason_codes = {
+            record["reason_code"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        conflict = details["binding_conflict"]
+        if (
+            action is None
+            or status != ("invalid" if conflict else "valid")
+            or result["event_mode"] != details["mode"]
+            or len(result["authority_edges"]) != 1
+            or result["authority_edges"][0]["problem"] is not None
+            or len(result["propagation_edges"])
+            != (1 if details["mode"] == "supplier" else 0)
+            or (
+                conflict
+                and "old-tip-human-binding-conflict" not in reason_codes
+            )
+            or (
+                not conflict
+                and "old-tip-human-binding-conflict" in reason_codes
+            )
+            or not all(
+                value in action["reason"]
+                for value in (
+                    details["old_binding"] + details["carrier_binding"]
+                )
+                if value != "pending"
+            )
+            and conflict
+        ):
+            errors.append(
+                "R14 unanswered published review carrier binding drifted"
+            )
+    if scenario.startswith("R14-persisted-"):
+        action = actions[0] if len(actions) == 1 else None
+        mutation_edges = action["mutation_edges"] if action else []
+        if action is None or not mutation_edges:
+            errors.append("R14 persisted fixture omitted mutation evidence")
+        elif any(
+            len(edge[key]) not in {40, 64}
+            or any(
+                char not in "0123456789abcdef" for char in edge[key]
+            )
+            for edge in mutation_edges
+            for key in ("parent", "child")
+        ):
+            errors.append("R14 persisted fixture emitted a non-full OID")
+    if scenario == "R14-persisted-hidden-bytes-low-similarity":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "invalid"
+            or action["reason_code"] != "persisted-invalid-mutation"
+            or not details["identity_equal"]
+            or details["frozen_equal"]
+            or not details["low_similarity_delete_add"]
+            or not any(
+                edge["frozen_problem"] for edge in action["mutation_edges"]
+            )
+        ):
+            errors.append("R14 hidden protected bytes false-greened")
+    if scenario in {
+        "R14-persisted-intermediate-claim-regression",
+        "R14-persisted-intermediate-review-regression",
+    }:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "invalid"
+            or action["reason_code"] != "persisted-invalid-mutation"
+            or not any(
+                edge["child"] == details["bad"]
+                and details["expected_problem"]
+                in (edge["production_problem"] or "")
+                for edge in action["mutation_edges"]
+            )
+        ):
+            errors.append("R14 transient candidate regression false-greened")
+    if scenario == "R14-persisted-delete-recreate":
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "ambiguous"
+            or action["reason_code"] != "persisted-delete-recreate"
+            or result["details"]["gap"] not in action["reason"]
+        ):
+            errors.append("R14 delete-recreate continuity false-greened")
+    if scenario == "R14-persisted-valid-review-retraction":
+        action = actions[0] if len(actions) == 1 else None
+        details = result["details"]
+        children = {
+            edge["child"] for edge in (action["mutation_edges"] if action else [])
+        }
+        if (
+            action is None
+            or status != "none"
+            or action["reason_code"] != "identity-preserved"
+            or {details["published_A"], details["retracted"], details["published_B"]}
+            - children
+            or any(edge["problem"] for edge in action["mutation_edges"])
+        ):
+            errors.append("R14 production-valid review retraction blocked")
+    if scenario == "R14-persisted-valid-first-response-low-similarity":
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            action is None
+            or status != "none"
+            or not result["details"]["low_similarity_delete_add"]
+            or not any(
+                edge["child"] == result["details"]["answer_commit"]
+                for edge in action["mutation_edges"]
+            )
+            or any(edge["problem"] for edge in action["mutation_edges"])
+        ):
+            errors.append("R14 valid low-similarity first response blocked")
+    if scenario in {
+        "R14-persisted-merge-carrier-pending",
+        "R14-persisted-merge-carrier-conflict",
+    }:
+        action = actions[0] if len(actions) == 1 else None
+        conflict = result["details"]["conflict"]
+        carrier_edges = [
+            edge
+            for edge in (action["mutation_edges"] if action else [])
+            if edge["child"] == result["details"]["merge"]
+            and edge["parent"] == result["details"]["carrier"]
+        ]
+        if (
+            action is None
+            or len(carrier_edges) != 1
+            or carrier_edges[0]["role"] != "compatible-carrier"
+            or bool(carrier_edges[0]["problem"]) != conflict
+            or status != ("invalid" if conflict else "none")
+            or action["reason_code"]
+            != (
+                "persisted-merge-carrier-conflict"
+                if conflict
+                else "identity-preserved"
+            )
+        ):
+            errors.append("R14 persisted merge carrier compatibility drifted")
     if scenario == "R8-adapter-M-input-variants":
         details = result["details"]
         variants = result.get("adapter_input_evidence", {})
@@ -6986,6 +7958,29 @@ def control_builder(name: str, root: Path):
         return (
             r13_persisted_state(root, "claim-loss"),
             Damage(skip_preserved_state_validation=True),
+            "no-finding",
+        )
+    if name == "omit-unanswered-published-review-binding":
+        return (
+            r14_review_carrier_binding(
+                root,
+                mode="supplier",
+                carrier_variant="target",
+                old_answered=True,
+            ),
+            Damage(omit_unanswered_published_review_binding=True),
+            "no-finding",
+        )
+    if name == "skip-persisted-frozen-skeleton":
+        return (
+            r14_persisted_hidden_bytes(root),
+            Damage(skip_persisted_frozen_skeleton=True),
+            "no-finding",
+        )
+    if name == "skip-persisted-candidate-continuity":
+        return (
+            r14_persisted_intermediate_claim(root),
+            Damage(skip_persisted_candidate_continuity=True),
             "no-finding",
         )
     raise ValueError(name)
