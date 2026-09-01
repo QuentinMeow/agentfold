@@ -2,14 +2,15 @@
 
 ## Result
 
-**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 20
-additional merge, incarnation, object-boundary, and cost attacks: 32 of 32 expected
+**VERIFIED:** the supplier-witness shape survived the 12 common scenarios and 22
+additional merge, incarnation, object-boundary, and cost attacks: 34 of 34 expected
 verdicts matched. It correctly accepted a legitimate linear resolution and an inherited
 resolution behind a merge, while it blocked an invalid base deletion, a genuine old-tip
 loss, mixed valid/invalid supplier edges, delete/recreate/delete ambiguity, merge-only
 action creation, byte-identical old-side delete/recreate, cross-occurrence claim reuse,
 ambiguous merge provenance, a conflicting same-ID merge sibling, post-witness
-reintroduction, duplicate rename state, criss-cross history, and incomplete objects.
+reintroduction, disconnected byte-identical merge origins, duplicate rename state,
+criss-cross history, and incomplete objects.
 
 A fresh verifier rejected the earlier 23/23 version because it compared only the common
 and old-tip snapshots. A branch could delete the action and recreate identical bytes
@@ -41,6 +42,13 @@ The prototype now scans every candidate commit and every direct parent, includin
 a witness. Every same-ID state must belong to the continuously inherited occurrence;
 different content, duplication, recreation, or disconnected provenance fails closed.
 
+A fifth fresh verifier rejected the repaired 32/32 version because its continuous
+component builder unioned carrying parents at the merge child. Two branches independently
+created byte-identical Q from an action-free root; their merge became `C`, and `C` itself
+incorrectly made the origins appear connected. The prototype now preserves each carrying
+parent component separately and requires their intersection to be nonempty before any
+merge child can join them. A shared origin before the fork remains valid.
+
 The safe rule is narrower than “find any valid deletion.” It is:
 
 1. establish that the old task lineage left one exact action incarnation unchanged;
@@ -51,11 +59,13 @@ The safe rule is narrower than “find any valid deletion.” It is:
    the same continuously inherited occurrence or a real absence;
 5. prove every carrying parent of the deletion-parent occurrence reaches the same claim
    edge without absence, recreation, mutation, duplicate identity, or ambiguous rename;
-6. validate the concrete deletion edge against changed non-queue evidence;
-7. prove the action stays absent on every descendant path from that witness to `N`;
-8. collapse a merge's synthetic parent deletion only when an absent sibling contains a
+6. require every merge with multiple carrying parents to have a shared continuous origin
+   before the merge child;
+7. validate the concrete deletion edge against changed non-queue evidence;
+8. prove the action stays absent on every descendant path from that witness to `N`;
+9. collapse a merge's synthetic parent deletion only when an absent sibling contains a
    prior validated deletion in its ancestry; and
-9. accept only one unambiguous effective witness.
+10. accept only one unambiguous effective witness.
 
 This POC deliberately fails closed on a merge commit that authors a deletion relative to
 two carrying parents, even if both parent edges validate. That conservative result is a
@@ -80,6 +90,8 @@ binding, and payload; status is mutable. The classifier:
   parent, then requires a committed `open -> in-repair` edge inside that occurrence and
   evidence bytes changed on the real deletion edge;
 - recursively proves all carrying merge parents converge on one shared claim source;
+- keeps carrying-parent components separate and requires a nonempty pre-merge origin
+  intersection before unioning them at their child;
 - rejects a same-ID candidate or sibling state unless its continuous backwards component
   intersects the inherited occurrence at `C`;
 - invalidates a witness if the action reappears anywhere on a descendant path to `N`;
@@ -101,14 +113,14 @@ Environment and source:
 ```text
 Python 3.14.7
 git version 2.55.0
-b66cc1e26e14a57eca709dc35115bce710f0e435f4f480c523e99a627dbf75c3  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+8f3bd168f11caaae494620136aa64847c357d4745e259024a198974b65b3dce2  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
 8eab83888d7f614783213e57e182336c9eaa610965a538139a2883d0f3931361  docs/designs/restack-queue-provenance/pocs/merge-incarnation/production_helper_probe.py
 ```
 
-The clean run printed 32 scenario JSON objects and ended exactly with:
+The clean run printed 34 scenario JSON objects and ended exactly with:
 
 ```json
-{"failed": 0, "git": "git version 2.55.0", "passed": 32, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 32}
+{"failed": 0, "git": "git version 2.55.0", "passed": 34, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 34}
 ```
 
 Exit status: `0`.
@@ -139,6 +151,8 @@ The common matrix produced these outcomes:
 | A12 shared occurrence merge | no finding | 1 valid | both carrying parents converge on the same claim edge |
 | A13 post-witness reintroduction | finding | 2, first invalid | the first absence did not remain continuous to `N` |
 | A14 conflicting same-ID sibling | finding | 1 invalid | a claimed parent cannot hide a different sibling incarnation |
+| A15 disconnected identical origins | finding | 1 invalid | a merge child cannot invent occurrence identity |
+| A16 shared-origin boundary merge | no finding | 1 valid | carrying parents already intersect before their merge |
 
 The important S12 OIDs and edge result were:
 
@@ -225,6 +239,25 @@ the expected `finding` to `actual_result=no-finding`. It ended exactly with:
 Exit status: `1`. This proves the candidate-wide sibling-incarnation guard, not the
 claim, evidence, or witness-cardinality checks, blocks the counterexample.
 
+The fifth run-scratch driver disables only `disconnected_parent_origin_problem` and runs
+only A15:
+
+```sh
+python3 /Users/quentinmiao/code/agentfold/.git/agents/runs/2026-08-31-prove-the-correct-restack-queue-201c/scratch/merge-incarnation-poc/origin_negative_control.py \
+  docs/designs/restack-queue-provenance/pocs/merge-incarnation/prototype.py
+```
+
+The old union-at-child behavior changed A15 from the expected `finding` to
+`actual_result=no-finding`, with one valid witness. It ended exactly with:
+
+```json
+{"failed": 1, "git": "git version 2.55.0", "passed": 0, "python": "3.14.7", "summary": "merge-incarnation-poc", "total": 1}
+```
+
+Exit status: `1`. This isolates the pre-merge origin-intersection rule. A16 is the
+positive control: both carrying parents include one shared pre-fork origin and remain
+valid.
+
 ### Production-helper probe
 
 This command invokes the unchanged production `claimed_lifecycle_problem` on the linear,
@@ -256,6 +289,29 @@ proofs itself, and must also verify post-witness absence continuity to `N`. This
 does not claim the surrounding production restack path has any of those guards today.
 
 ## Strongest counterexamples
+
+### A merge child cannot invent identity for disconnected origins
+
+**VERIFIED:** `R` had no Q. Two branches independently created byte-identical Q at the
+same path, then merged into `C`. `O` descended from `C`; the candidate legally claimed
+the apparent Q, changed evidence, and deleted it. Endpoint bytes, path, status, and claim
+all looked valid, but the two carrying-parent components had no commit in common before
+`C`:
+
+```text
+R=9234a60704facc86562706d53e7c8e219b7dd130
+creator A=014983038b4df4ee3b88bb4c8a27edc75fd8f4f5
+creator B=4953acbb5a427c8fb6061fe07fc4bb450183873f
+C=6d84fd3a48e3e16c1c81afe86dcdc52f4de5fac7
+O=bef6620147db2a738536f155333d6a03479bba34
+M=538f58e30a9140354e879b5caff85afbe2a7bbb1
+N=6f508eb643651f4804ce36aaccd1af89615d8003
+result=finding: merge carrying parents have disconnected occurrence origins at C
+```
+
+Disabling only the origin guard restored the false exemption. A16 proves the rule is
+not simply “reject boundary merges”: two branches carrying one shared pre-fork occurrence
+intersected at that origin and their later resolution remained valid.
 
 ### A selected deletion parent cannot hide a conflicting sibling
 
@@ -296,11 +352,12 @@ C=48297b46a0e8a3681644f3ed4cb27855cd05f362
 O=16920ae68ebbbe034d9a19131ae25d58367d29af
 M=db9a4ce826e9fe47916b2a23b5ee8f123971aa23
 N=f268f32f6978b6ca033b8cdc26d974f189932ab7
-result=finding: merge occurrence has a carrying parent without one claim source
+result=finding: merge carrying parents have disconnected occurrence origins at C
 ```
 
-Disabling only the DAG guard made those same OIDs false-green. A12 is the positive
-control: both carrying parents remained continuous from the same claim and the deletion
+The current origin guard catches this case before claim lookup; disabling the enclosing
+DAG guard still made those same OIDs false-green. A12 is the positive control: both
+carrying parents remained continuous from the same origin and claim, so the deletion
 stayed valid.
 
 ### A claim receipt belongs to one continuously present occurrence
@@ -382,12 +439,12 @@ final-tree equality, and a content hash alone are therefore insufficient.
 
 ## Cost
 
-The small S12 merge case used 29 Git processes and 7 cached queue-tree reads. The
-128-unrelated-commit probe used 407 Git processes and 133 cached queue-tree reads, taking
-1749.303 ms in the recorded run:
+The small S12 merge case used 30 Git processes and 7 cached queue-tree reads. The
+128-unrelated-commit probe used 408 Git processes and 133 cached queue-tree reads, taking
+1719.274 ms in the recorded run:
 
 ```json
-{"actual_result": "no-finding", "elapsed_ms": 1749.303, "git_processes": 407, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
+{"actual_result": "no-finding", "elapsed_ms": 1719.274, "git_processes": 408, "history_commits": 128, "scenario": "P1-long-history-cost", "tree_reads": 133, "witness_cardinality": 1}
 ```
 
 **INFERENCE:** the prototype is linear in old and candidate history for one item, but its
@@ -436,9 +493,10 @@ rules. It has stronger fidelity to AgentFold's actual parser and lifecycle valid
 this standalone model and measured fewer Git processes on its shorter long-history case.
 The verified production-helper probe means its linear occurrence boundary remains
 useful, but its any-parent merge result and selected-parent scope are not sufficient.
-Integration must wrap or fix it with the shared-claim DAG proof and the candidate-wide
-same-ID sibling proof, then select the causal deletion parent, prove old-side continuity,
-prove post-witness absence, and retain witness cardinality.
+Integration must wrap or fix it with the shared-claim DAG proof, pre-merge origin
+intersection, and candidate-wide same-ID sibling proof, then select the causal deletion
+parent, prove old-side continuity, prove post-witness absence, and retain witness
+cardinality.
 
 **PROPOSAL:** production return values should be explicit:
 
@@ -467,6 +525,6 @@ actionable than always accusing the restacked task.
   history intentionally fail closed here.
 - The merge-only deletion false positive is not resolved. Grouping multiple parent edges
   into one event requires a separately proven authority rule.
-- The 32/32 self-test is POC evidence only. It does not establish integration with
+- The 34/34 self-test is POC evidence only. It does not establish integration with
   `check_queue_resolution`, production regression discovery, full-suite correctness,
   cold-clone behavior, or acceptable production performance.

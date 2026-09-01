@@ -367,13 +367,114 @@ def normalize_action_status(raw: str) -> str:
     )
 
 
+def disconnected_parent_origin_problem(
+    repo: GitRepo,
+    revisions: list[str],
+    incarnation: str,
+    action_id: str,
+) -> str | None:
+    """Require carrying merge parents to share an origin before their child.
+
+    A merge child is not evidence that two byte-identical actions are the same
+    occurrence.  Compute each carrying parent's continuous backwards component
+    separately.  Multiple carrying parents are compatible only when those
+    pre-merge components already intersect.
+    """
+
+    memo: dict[str, tuple[frozenset[str] | None, str | None]] = {}
+
+    def component(revision: str) -> tuple[frozenset[str] | None, str | None]:
+        if revision in memo:
+            return memo[revision]
+        snapshot = repo.snapshot(revision)
+        matches = occurrences(snapshot, incarnation)
+        identities = same_id(snapshot, action_id)
+        if len(matches) != 1 or len(identities) != 1:
+            result = (frozenset(), None)
+            memo[revision] = result
+            return result
+
+        action = matches[0]
+        parents = repo.parents(revision)
+        carrying_components: list[frozenset[str]] = []
+        for parent in parents:
+            parent_snapshot = repo.snapshot(parent)
+            parent_matches = occurrences(parent_snapshot, incarnation)
+            parent_identities = same_id(parent_snapshot, action_id)
+            if len(parent_matches) != 1 or len(parent_identities) != 1:
+                continue
+            parent_action = parent_matches[0]
+            if parent_action.path != action.path:
+                if len(parents) != 1 or parent_action.path in snapshot:
+                    result = (
+                        None,
+                        "merge origin has ambiguous rename provenance on edge "
+                        f"{parent}->{revision}",
+                    )
+                    memo[revision] = result
+                    return result
+            if (
+                normalize_action_status(parent_action.raw)
+                != normalize_action_status(action.raw)
+            ):
+                result = (
+                    None,
+                    "merge origin mutated outside status on edge "
+                    f"{parent}->{revision}",
+                )
+                memo[revision] = result
+                return result
+            parent_component, problem = component(parent)
+            if problem is not None or parent_component is None:
+                result = (None, problem or "merge origin proof is unavailable")
+                memo[revision] = result
+                return result
+            carrying_components.append(parent_component)
+
+        if len(carrying_components) > 1:
+            shared = set(carrying_components[0])
+            for parent_component in carrying_components[1:]:
+                shared.intersection_update(parent_component)
+            if not shared:
+                result = (
+                    None,
+                    "merge carrying parents have disconnected occurrence origins at "
+                    f"{revision}",
+                )
+                memo[revision] = result
+                return result
+
+        connected = {revision}
+        for parent_component in carrying_components:
+            connected.update(parent_component)
+        result = (frozenset(connected), None)
+        memo[revision] = result
+        return result
+
+    for revision in dict.fromkeys(revisions):
+        _component, problem = component(revision)
+        if problem is not None:
+            return problem
+    return None
+
+
 def dag_occurrence_continuity_problem(
     repo: GitRepo,
     deletion_parent: str,
     incarnation: str,
     action_id: str,
+    origin_revisions: list[str] | None = None,
 ) -> str | None:
     """Require every carrying parent lineage to reach one shared claim edge."""
+
+    origin_problem = disconnected_parent_origin_problem(
+        repo,
+        origin_revisions or [deletion_parent],
+        incarnation,
+        action_id,
+    )
+    if origin_problem is not None:
+        return origin_problem
 
     ClaimEdge = tuple[str, str]
     memo: dict[str, tuple[frozenset[ClaimEdge] | None, str | None]] = {}
@@ -680,6 +781,7 @@ def validate_edge(
     edge: Edge,
     incarnation: str,
     sibling_problem: str | None = None,
+    origin_revisions: list[str] | None = None,
 ) -> None:
     parent_actions = occurrences(repo.snapshot(edge.parent), incarnation)
     if len(parent_actions) != 1:
@@ -697,6 +799,7 @@ def validate_edge(
         edge.parent,
         incarnation,
         action.action_id,
+        origin_revisions,
     )
     if occurrence_problem is not None:
         edge.problem = occurrence_problem
@@ -866,8 +969,10 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
             )
             return with_metrics(repo, verdict)
 
+        old_only = repo.revisions("--topo-order", old_tip, "--not", boundary)
         candidate = repo.revisions("--topo-order", new_head, "--not", old_tip)
         candidate_set = set(candidate)
+        origin_revisions = [boundary, *old_only, *candidate]
         sibling_problem = sibling_incarnation_problem(
             repo,
             candidate,
@@ -896,7 +1001,13 @@ def classify(repo: GitRepo, old_tip: str, new_head: str, old_path: str) -> Verdi
                     )
 
         for edge in edges:
-            validate_edge(repo, edge, incarnation, sibling_problem)
+            validate_edge(
+                repo,
+                edge,
+                incarnation,
+                sibling_problem,
+                origin_revisions,
+            )
             if edge.valid:
                 absence_problem = post_witness_absence_problem(
                     repo,
@@ -1817,6 +1928,90 @@ def scenario_conflicting_sibling_incarnation(root: Path) -> dict[str, object]:
     return record
 
 
+def scenario_disconnected_identical_origins(root: Path) -> dict[str, object]:
+    repo, root_without_action = base_repo(root, live=False)
+    repo.switch_new("creator-a", root_without_action)
+    creator_a = repo.commit(
+        "independently create first identical action",
+        {DEFAULT_PATH: action_text()},
+    )
+    repo.switch_new("creator-b", root_without_action)
+    creator_b = repo.commit(
+        "independently create second identical action",
+        {DEFAULT_PATH: action_text()},
+    )
+    repo.switch("creator-a")
+    common = repo.merge_commit(
+        "creator-b",
+        "collapse disconnected identical origins",
+        {},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    repo.switch_new("new", common)
+    claim = repo.commit(
+        "claim ambiguous boundary action",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    deletion = repo.commit(
+        "delete after claim",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A15-disconnected-identical-origins-at-boundary",
+        {"C": common, "O": old, "M": deletion, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record.update({
+        "root_without_action": root_without_action,
+        "creator_a": creator_a,
+        "creator_b": creator_b,
+        "candidate_claim": claim,
+    })
+    return record
+
+
+def scenario_shared_origin_boundary_merge(root: Path) -> dict[str, object]:
+    repo, shared_origin = base_repo(root)
+    repo.switch_new("carrier-a", shared_origin)
+    carrier_a = repo.commit("carry shared occurrence A", {"a.txt": "a\n"})
+    repo.switch_new("carrier-b", shared_origin)
+    carrier_b = repo.commit("carry shared occurrence B", {"b.txt": "b\n"})
+    repo.switch("carrier-a")
+    common = repo.merge_commit(
+        "carrier-b",
+        "merge shared-origin occurrence",
+        {},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    repo.switch_new("new", common)
+    claim = repo.commit(
+        "claim shared-origin action",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    deletion = repo.commit(
+        "delete shared-origin action",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new head", {"new.txt": "new\n"})
+    record = make_record(
+        "A16-shared-origin-boundary-merge",
+        {"C": common, "O": old, "M": deletion, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+    record.update({
+        "shared_origin": shared_origin,
+        "carrier_a": carrier_a,
+        "carrier_b": carrier_b,
+        "candidate_claim": claim,
+    })
+    return record
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -1954,6 +2149,8 @@ INITIAL_SCENARIOS = (
     scenario_shared_occurrence_merge,
     scenario_post_witness_merge_reintroduction,
     scenario_conflicting_sibling_incarnation,
+    scenario_disconnected_identical_origins,
+    scenario_shared_origin_boundary_merge,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
