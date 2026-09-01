@@ -126,3 +126,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   bounded artifact discovery with separate credentials; and the exact manual rewrite,
   lease-rejection, repair, first-publication, and retirement effects.
 - Production remains unopened pending a new full five-lens immutable-revision review.
+
+## 2026-09-01 — Split-transaction and exact-provider correction (codex)
+
+- A new panel blocked fast-forward/policy transaction ambiguity, missing policy-bootstrap
+  budgets, fork source/base identity confusion, closed and SHA-like event gaps,
+  retention-overstated visibility, insufficient fork fixture proof, rerun-attempt aliasing,
+  and a race-prone manual first push.
+- Appended separate continuity and ordinary workflow transactions; exact fast-forward
+  ordering; deterministic three-source policy budgets; distinct base and head repository
+  identities; a closed action matrix; SHA-like negative canary; retention-bounded claims;
+  verified fork network/owner relationships; run-attempt identity; and the atomic empty-tip
+  lease for first publication.
+- Production remains unopened pending another full five-lens immutable-revision review.

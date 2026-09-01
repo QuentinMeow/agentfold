@@ -38,3 +38,14 @@ and no production implementation began from this revision.
 
 The panel stopped after two independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
+
+## Superseded policy-bound design review
+
+**Reviewed revision:** `0a488cc38bf772982d06a6519f828c6cc9bbd43f`
+
+- semantic/DAG / r18-semantic-design: `block` — fast-forward policy verification, clean return, and ordinary ownership had contradictory ordering.
+- budgets/transaction/composition / receipt-contract: `block` — policy mismatch starved ordinary checks and the policy bootstrap lacked logical-source budgets and parity counters.
+- workflow/adapter/human / r18-workflow-design: `block` — base/head repository identities, closed and SHA-like fork events, retention limits, fork fixture relationships, run attempts, and atomic first publication were incomplete.
+
+The panel stopped after three independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.

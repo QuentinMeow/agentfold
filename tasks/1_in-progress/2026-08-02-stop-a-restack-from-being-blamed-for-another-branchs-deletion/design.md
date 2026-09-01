@@ -1126,3 +1126,146 @@ plus the preinstalled-fixture live canaries. A reviewed core can complete indepe
 while the optional GitHub adapter remains unimplemented or unverified; such a result makes
 no claim of remote cumulative protection, required checks, automatic publication, or
 provider-independent coverage debt.
+
+## 2026-09-01 correction amendment 4 — split transactions and exact GitHub identities
+
+The review of `0a488cc38bf772982d06a6519f828c6cc9bbd43f` stopped after three
+blocks. This section supersedes fast-forward/policy transaction composition, policy
+budgets, GitHub repository identity and event rows, evidence durability, fixture
+relationship checks, run-attempt identity, and first-publication commands above.
+
+### Continuity and ordinary transactions
+
+Every non-zero O/N continuity invocation follows exactly this order:
+
+1. bounded authority-policy verification across O, N, and evaluator;
+2. on mismatch, one canonical incomplete result, exit 2, zero continuity Findings;
+3. on a matching policy with `O <= N`, one clean fast-forward result before graph or action
+   provenance;
+4. on matching divergent endpoints, the complete bounded two-sided classification.
+
+Continuity never reports a fast-forward queue mutation. Ordinary `B...N` checks own those
+mutations. An incomplete continuity transaction never runs ordinary checks or writers in
+the same invocation, preserving zero partial output and mutation.
+
+Every non-zero O/N workflow update therefore has two explicit, separately captured invocations: the
+read-only `ref_update.py` continuity transaction and `reconcile.py --check --range B...N`
+ordinary transaction. The ordinary invocation runs even when continuity returns exit 2;
+its result cannot clear, replace, or relabel the incomplete edge, and it has no writer
+flags. Local combined `reconcile.py --ref-update O N --range B...N` remains transactional:
+ordinary checks and writers run only after complete continuity. A developer who needs
+ordinary diagnostics after local incomplete provenance runs a second read-only range-only
+command.
+
+Admission includes same-policy fast-forward deletion (continuity clean, ordinary block),
+policy-changing fast-forward deletion (continuity exit 2, separate ordinary block), and
+policy-changing divergence. The workflow result presents both statuses without collapsing
+them into one exit code or summary.
+
+### Bounded policy bootstrap
+
+Policy verification has deterministic logical counters, independent of filesystem cache
+or object-reader implementation. O, N, and evaluator sources are always streamed in that
+fixed order and fully charged before comparison, so both entrypoints report identical
+counters even when the first mismatch appears early.
+
+| Policy dimension | Limit |
+|---|---:|
+| Logical policy sources | 3 exactly |
+| Manifest paths | 32 |
+| Manifest path bytes | 8 KiB |
+| Policy files per source | 32 |
+| Policy bytes per file | 1 MiB |
+| Policy bytes per source | 4 MiB |
+| Policy bytes all sources | 12 MiB |
+| Stream chunks / peak chunk | 6,144 / 64 KiB |
+| Hash input bytes | 12 MiB |
+| Import-audit nodes / edges | 128 / 512 |
+| Bootstrap diagnostic bytes | 64 KiB |
+
+Source count, path, file, byte, chunk, hash, import-node/edge, deadline, and diagnostic work
+is pre-charged. On-disk evaluator reads use the same streaming reader shape as committed
+blobs and do not add physical-cache counters. Exact/+1 gates damage O only, N only,
+evaluator only, the manifest, an import edge, and each byte/row/chunk limit; all assert the
+same result bytes/counters, child cleanup, and writer state from both entrypoints.
+
+### Base identity versus object-source identity
+
+The trusted workflow binds base identity independently:
+`github.repository_id == event.repository.id == pull_request.base.repo.id`, with matching
+base full name and validated workflow repository. Candidate object-source identity is
+`pull_request.head.repo.id/full_name`; O and N are fetched only from that nested head
+repository. A same-repository PR requires head ID equal base ID. A fork requires them to
+differ and satisfy the fixture/provider fork relationship. An identical OID deliberately
+present in both repositories still selects the head repository by numeric identity; object
+text never substitutes for repository provenance.
+
+The base credential is scoped only to the base host/repository. Fork fetches receive only
+the separately scoped fork credential in a scrubbed child environment. No credential
+helper, alternates file, redirect to another host/repository, or URL supplied by payload
+data is accepted.
+
+### Closed PR action matrix
+
+The exact configured `pull_request`/`pull_request_target` actions are `opened`, `edited`,
+`reopened`, `synchronize`, `ready_for_review`, `review_requested`,
+`review_request_removed`, `assigned`, `unassigned`, and `enqueued`. Only synchronize has
+continuity inputs. Reopened and the other non-synchronize actions may run ordinary
+candidate checks only when their required payload and exact candidate exist.
+
+`closed` is not a configured candidate-check action and has no general continuity or
+ordinary-check guarantee. A merged close is observed only through the resulting base push;
+an unmerged close, a fork close, an empty payload, or a vanished merge ref is unavailable
+for candidate checking. A force-push while closed remains an uncovered edge.
+
+GitHub suppresses `pull_request_target` for SHA-like head branch names. Such a fork update
+is an explicitly uncovered edge: no missing run becomes success and no base push exists.
+The negative live canary creates an exact SHA-like fork ref, triggers synchronize, polls
+within the bounded discovery window, records that no trusted tuple appeared, and emits the
+expected unavailable coverage record rather than a green classification.
+
+### Retention-bounded evidence
+
+An unavailable edge remains logically unresolved unless that exact pair is later audited
+successfully, but this adapter stores no durable debt. GitHub runs and artifacts are
+retention-bounded; after expiry the adapter cannot prove that the old observation is still
+visible. Every result and human guide therefore states that a later green edge establishes
+only its own pair and cannot establish prior coverage, whether the old run remains visible
+or has expired. Permanent visibility and cumulative completeness require the separately
+designed authenticated receipt/debt store.
+
+### Fork fixture relationship and workflow attempt
+
+Before any scenario mutation, fixture verification binds base and fork repository numeric
+IDs, distinct owner numeric IDs, `fork=true`, and `fork.parent.id` plus `fork.source.id`
+equal to the base/source fixture IDs. Each field has an independent damaged fixture test;
+an unrelated repository, same-owner repository, detached fork, or wrong network refuses
+before provisioning.
+
+Every provider execution identity is `(run_id, run_attempt)`. Manifest rows, raw-event
+artifacts, discovery tuples, URLs, artifact digests, stale-rerun assertions, and cleanup
+logs bind both values. Exactly one attempt may satisfy a case; mixed, duplicate, absent, or
+superseded-attempt artifacts are unverified. Rerun tests keep run_id fixed, increment
+run_attempt, and prove no bytes are combined across attempts.
+
+### Atomic manual first publication
+
+After local remote-absence observation, the supported manual creation effect is Git's empty
+expected-value lease:
+
+```sh
+git push \
+  --force-with-lease=refs/heads/<branch>: \
+  origin <N>:refs/heads/<branch>
+```
+
+This atomically rejects an existing ref. Rejection stops the attempt; it never refreshes
+and retries automatically. Automation and multi-ref enforcement remain in task
+`2026-08-03-bind-task-branch-pushes-to-observed-tips`.
+
+### Review and implementation boundary
+
+The implementation gate remains a new immutable five-lens acceptance. Core units stay
+closed before it. The optional adapter remains separately gated on bounded transport and
+live canaries, including SHA-like suppression and retention-limited evidence; no missing
+run, expired record, or later green edge is promoted into cumulative success.
