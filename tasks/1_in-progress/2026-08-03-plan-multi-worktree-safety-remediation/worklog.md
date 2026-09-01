@@ -70,3 +70,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   narrow direct-`main` exception or move to a PR/ref compare-and-swap protocol. Its worker
   must preserve genuine discarded-action detection while removing the inherited-base false
   accusation.
+
+## 2026-08-31 — final design evidence recorded (codex)
+
+- Repaired two fresh-context evidence blockers: source-linked every product maturity claim
+  and added a single-use controller challenge plus authenticated runner receipt so an older
+  success for the same candidate cannot be replayed.
+- Five new Sol xhigh reviewers independently accepted the bytes integrated at
+  `e0d2a70ef31efb09779ec5cb8f13686ffd22e6a9` across requirements, repository contract,
+  human workflow/product effect, evidence, and adversarial blast radius.
+- A no-local clean clone bound HEAD/tree to `e0d2a70ef31efb09779ec5cb8f13686ffd22e6a9`
+  / `bbd00d6de9ee62c4798af0eec86fea4c0489c495`; bootstrap passed, the reconciler had
+  0 blockers and 6 pre-existing advisories, and the full runner passed 16/16 files.
+- The cross-provider refuter did not run: the external-publication boundary rejected the
+  Claude invocation before execution, so no candidate bytes were sent and no cross-provider
+  diversity is claimed.
