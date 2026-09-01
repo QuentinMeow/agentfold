@@ -835,6 +835,22 @@ class Classifier:
             )
         )
 
+    def causal_source_key(self, event: Event):
+        return (event.child, event.status, self.event_key(event))
+
+    @staticmethod
+    def stable_edges(edges):
+        return list(
+            {
+                (edge["parent"], edge["child"]): edge
+                for edge in edges
+            }.values()
+        )
+
+    @staticmethod
+    def stable_oids(oids):
+        return list(dict.fromkeys(oids))
+
     def response_conflict(
         self,
         identity: tuple,
@@ -877,14 +893,6 @@ class Classifier:
             for event in raw_direct
             if event.authority_edges
         ]
-        qualified_sources = [
-            event
-            for event in observed_sources
-            if all(
-                edge["problem"] is None
-                for edge in event.authority_edges
-            )
-        ]
         results = []
         for child in self.graph.order:
             if (
@@ -918,6 +926,7 @@ class Classifier:
                     "supplier-parent-multiplicity",
                     "a supplier merge parent has duplicate identities",
                 )
+                observed_sources.append(result)
                 results.append(result)
                 continue
             carry_problem = next(
@@ -932,80 +941,56 @@ class Classifier:
                 None,
             )
             per_absent: list[dict[tuple, Event]] = []
-            observed_per_absent: list[dict[tuple, Event]] = []
-            qualified_per_absent: list[dict[tuple, Event]] = []
-            invalid_per_absent: list[dict[tuple, Event]] = []
             for absent_parent in absent:
-                candidates: dict[tuple, Event] = {}
-                for source in sources:
-                    if source.child is None:
-                        continue
-                    absence = self.absence_problem(
-                        identity, source.child, absent_parent
-                    )
-                    if absence is None:
-                        candidates[self.event_key(source)] = source
-                per_absent.append(candidates)
-                observed_candidates: dict[tuple, Event] = {}
-                for source in observed_sources:
-                    if source.child is None:
-                        continue
-                    absence = self.absence_problem(
-                        identity, source.child, absent_parent
-                    )
-                    if absence is None:
-                        observed_candidates[
-                            self.event_key(source)
-                        ] = source
-                observed_per_absent.append(observed_candidates)
-                qualified_candidates: dict[tuple, Event] = {}
-                for source in qualified_sources:
-                    if source.child is None:
-                        continue
-                    absence = self.absence_problem(
-                        identity, source.child, absent_parent
-                    )
-                    if absence is None:
-                        qualified_candidates[
-                            self.event_key(source)
-                        ] = source
-                qualified_per_absent.append(qualified_candidates)
-                traceable_invalid = [
+                traceable = [
                     source
                     for source in observed_sources
                     if (
-                        source.status == "invalid"
-                        and source.child is not None
+                        source.child is not None
                         and self.absence_problem(
                             identity, source.child, absent_parent
                         )
                         is None
                     )
                 ]
-                closest_invalid = [
+                closest_sources = [
                     source
-                    for source in traceable_invalid
+                    for source in traceable
                     if not any(
                         source.child != other.child
                         and source.child in self.graph.ancestors(other.child)
-                        for other in traceable_invalid
+                        for other in traceable
                     )
                 ]
-                invalid_per_absent.append(
+                per_absent.append(
                     {
-                        (source.child, self.event_key(source)): source
-                        for source in closest_invalid
+                        self.causal_source_key(source): source
+                        for source in closest_sources
                     }
                 )
-            shared = (
+            common = (
                 set.intersection(
                     *(set(candidates) for candidates in per_absent)
                 )
                 if per_absent
                 else set()
             )
+            ordered_union = {}
+            for candidates in per_absent:
+                for key, source in candidates.items():
+                    ordered_union.setdefault(key, source)
+            participating = list(ordered_union.values())
+            unique_authorizing = bool(
+                len(participating) == 1
+                and len(common) == 1
+                and participating[0].status == "valid"
+                and participating[0] in sources
+            )
             borrowed_event = None
-            if not shared and self.damage.allow_supplier_borrow:
+            if (
+                not unique_authorizing
+                and self.damage.allow_supplier_borrow
+            ):
                 borrowed = [
                     self.authority_edge(identity, parent, child)
                     for parent in carrying
@@ -1022,27 +1007,40 @@ class Classifier:
                         "damaged-propagation-borrow",
                         "DAMAGED: propagation borrowed lifecycle authority",
                     )
-                    shared = {self.event_key(borrowed_event)}
-                    per_absent = [
-                        {self.event_key(borrowed_event): borrowed_event}
-                        for _parent in absent
-                    ]
-                    observed_per_absent = list(per_absent)
-                    qualified_per_absent = list(per_absent)
-                    invalid_per_absent = [
-                        {} for _parent in absent
-                    ]
-            all_keys = set().union(
-                *(set(candidates) for candidates in qualified_per_absent)
-            ) if qualified_per_absent else set()
-            shared_invalid = (
-                set.intersection(
-                    *(set(candidates) for candidates in invalid_per_absent)
-                )
-                if invalid_per_absent
-                else set()
+                    key = self.causal_source_key(borrowed_event)
+                    common = {key}
+                    participating = [borrowed_event]
+                    unique_authorizing = True
+            authority_edges = self.stable_edges(
+                edge
+                for source in participating
+                for edge in source.authority_edges
             )
-            if carry_problem:
+            propagation_edges = self.stable_edges(
+                [
+                    edge
+                    for source in participating
+                    for edge in source.propagation_edges
+                ]
+                + propagation
+            )
+            accumulated_neutral = self.stable_oids(
+                [
+                    parent
+                    for source in participating
+                    for parent in source.neutral_parents
+                ]
+                + neutral
+            )
+            accumulated_absent = self.stable_oids(
+                [
+                    parent
+                    for source in participating
+                    for parent in source.absent_parents
+                ]
+                + absent
+            )
+            if not participating:
                 result = Event(
                     "invalid",
                     "supplier",
@@ -1051,161 +1049,128 @@ class Classifier:
                     propagation,
                     neutral,
                     absent,
-                    "invalid-supplier-carrier",
-                    carry_problem,
-                )
-            elif (
-                len(shared_invalid) == 1
-                and not self.damage.allow_supplier_borrow
-            ):
-                invalid_key = next(iter(shared_invalid))
-                source = invalid_per_absent[0][invalid_key]
-                result = Event(
-                    "invalid",
-                    "supplier",
-                    child,
-                    source.authority_edges,
-                    source.propagation_edges + propagation,
-                    list(
-                        dict.fromkeys(source.neutral_parents + neutral)
-                    ),
-                    list(
-                        dict.fromkeys(source.absent_parents + absent)
-                    ),
-                    "upstream-invalid-supplier",
-                    (
-                        f"upstream {source.reason_code} at {source.child}: "
-                        f"{source.reason}; invalid supplier ancestry adopted "
-                        f"at {child}"
-                    ),
+                    "competing-or-missing-supplier",
+                    "no causal supplier source reaches every absent parent",
                 )
                 observed_sources.append(result)
-            elif shared_invalid and not self.damage.allow_supplier_borrow:
-                invalid_sources = [
-                    invalid_per_absent[0][key]
-                    for key in sorted(shared_invalid, key=repr)
-                ]
+            elif len(participating) != 1 or len(common) != 1:
                 result = Event(
                     "ambiguous",
                     "supplier",
                     child,
-                    list(
-                        {
-                            (edge["parent"], edge["child"]): edge
-                            for source in invalid_sources
-                            for edge in source.authority_edges
-                        }.values()
-                    ),
-                    list(
-                        {
-                            (edge["parent"], edge["child"]): edge
-                            for source in invalid_sources
-                            for edge in (
-                                source.propagation_edges + propagation
-                            )
-                        }.values()
-                    ),
-                    list(
-                        dict.fromkeys(
-                            parent
-                            for source in invalid_sources
-                            for parent in (
-                                source.neutral_parents + neutral
-                            )
+                    authority_edges,
+                    propagation_edges,
+                    accumulated_neutral,
+                    accumulated_absent,
+                    "competing-causal-suppliers",
+                    (
+                        f"{len(participating)} causal sources compete at "
+                        f"adoption {child}: "
+                        + "; ".join(
+                            f"{source.reason_code}@{source.child}: "
+                            f"{source.reason}"
+                            for source in participating
                         )
-                    ),
-                    list(
-                        dict.fromkeys(
-                            parent
-                            for source in invalid_sources
-                            for parent in (
-                                source.absent_parents + absent
-                            )
-                        )
-                    ),
-                    "competing-invalid-suppliers",
-                    "multiple invalid supplier lineages reach adoption "
-                    f"{child}: "
-                    + "; ".join(
-                        f"{source.reason_code}@{source.child}"
-                        for source in invalid_sources
                     ),
                 )
-            elif len(shared) != 1:
+                observed_sources.append(result)
+            elif carry_problem:
+                source_lineage = "; ".join(
+                    f"{source.reason_code}@{source.child}: {source.reason}"
+                    for source in participating
+                )
                 result = Event(
-                    "ambiguous" if len(all_keys) != 0 else "invalid",
+                    "invalid",
                     "supplier",
                     child,
-                    [
-                        edge
-                        for candidates in observed_per_absent
-                        for source in candidates.values()
-                        for edge in source.authority_edges
-                    ],
-                    propagation,
-                    neutral,
-                    absent,
-                    "competing-or-missing-supplier",
-                    (
-                        f"absent parents trace {len(all_keys)} supplier "
-                        f"authority events with {len(shared)} shared"
-                    ),
+                    authority_edges,
+                    propagation_edges,
+                    accumulated_neutral,
+                    accumulated_absent,
+                    "invalid-supplier-carrier",
+                    f"{carry_problem}; causal sources: {source_lineage}",
                 )
+                observed_sources.append(result)
             else:
-                key = next(iter(shared))
-                source = (
-                    borrowed_event
-                    if borrowed_event is not None
-                    else per_absent[0][key]
-                )
-                conflict = self.response_conflict(
-                    identity, source.authority_edges, carrying
-                )
-                accumulated_neutral = list(
-                    dict.fromkeys(source.neutral_parents + neutral)
-                )
-                accumulated_absent = list(
-                    dict.fromkeys(source.absent_parents + absent)
-                )
-                if conflict:
+                source = participating[0]
+                if source.status == "invalid":
                     result = Event(
                         "invalid",
                         "supplier",
                         child,
-                        source.authority_edges,
-                        source.propagation_edges + propagation,
+                        authority_edges,
+                        propagation_edges,
                         accumulated_neutral,
                         accumulated_absent,
-                        "conflicting-human-response",
-                        conflict,
+                        "upstream-invalid-supplier",
+                        (
+                            f"upstream {source.reason_code}@{source.child}: "
+                            f"{source.reason}; invalid "
+                            f"supplier ancestry adopted at {child}"
+                        ),
+                    )
+                    observed_sources.append(result)
+                elif not unique_authorizing:
+                    result = Event(
+                        "ambiguous",
+                        "supplier",
+                        child,
+                        authority_edges,
+                        propagation_edges,
+                        accumulated_neutral,
+                        accumulated_absent,
+                        "upstream-ambiguous-supplier",
+                        (
+                            f"upstream {source.reason_code}@{source.child}: "
+                            f"{source.reason}; ambiguous supplier ancestry "
+                            f"adopted at {child}"
+                        ),
                     )
                     observed_sources.append(result)
                 else:
-                    result = Event(
-                        "valid",
-                        "supplier",
-                        child,
-                        source.authority_edges,
-                        source.propagation_edges + propagation,
-                        accumulated_neutral,
-                        accumulated_absent,
-                        (
-                            "damaged-propagation-borrow"
-                            if borrowed_event
-                            else "valid-supplier-authority"
-                        ),
-                        (
-                            "DAMAGED: propagation borrowed lifecycle authority"
-                            if borrowed_event
-                            else (
-                                "one prior real deletion event supplies all "
-                                "absent parents; carrying edges only propagate"
-                            )
-                        ),
+                    conflict = self.response_conflict(
+                        identity, source.authority_edges, carrying
                     )
-                    sources.append(result)
-                    observed_sources.append(result)
-                    qualified_sources.append(result)
+                    if conflict:
+                        result = Event(
+                            "invalid",
+                            "supplier",
+                            child,
+                            authority_edges,
+                            propagation_edges,
+                            accumulated_neutral,
+                            accumulated_absent,
+                            "conflicting-human-response",
+                            conflict,
+                        )
+                        observed_sources.append(result)
+                    else:
+                        result = Event(
+                            "valid",
+                            "supplier",
+                            child,
+                            authority_edges,
+                            propagation_edges,
+                            accumulated_neutral,
+                            accumulated_absent,
+                            (
+                                "damaged-propagation-borrow"
+                                if borrowed_event
+                                else "valid-supplier-authority"
+                            ),
+                            (
+                                "DAMAGED: propagation borrowed lifecycle "
+                                "authority"
+                                if borrowed_event
+                                else (
+                                    "one prior real deletion event supplies "
+                                    "all absent parents; carrying edges only "
+                                    "propagate"
+                                )
+                            ),
+                        )
+                        sources.append(result)
+                        observed_sources.append(result)
             results.append(result)
         return results
 
@@ -2631,6 +2596,256 @@ def human_supplier_fixture(
     )
 
 
+def conflicting_human_source(
+    repo: GitRepository,
+    *,
+    C: str,
+    R: str,
+    path: str,
+    label: str,
+    suffix: str,
+) -> dict:
+    """Create one real invalid human supplier with its own ancestry."""
+    repo.branch(f"{suffix}-supplier", C)
+    answer(repo, path, "approve")
+    claim(repo, (path,), f"{suffix} fold approved human action")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        f"{suffix} resolve approved human action",
+    )
+    repo.branch(f"{suffix}-carrier", C)
+    answer(repo, path, "reject")
+    carrier = feature(repo, f"{suffix}-carrier")
+    repo.branch(f"{suffix}-neutral", R)
+    neutral = feature(repo, f"{suffix}-neutral")
+    adoption = repo.merge_commit(
+        (deletion, carrier, neutral),
+        f"{suffix} adopt conflicting human supplier",
+        removes=(path,),
+    )
+    return {
+        "authority_event": deletion,
+        "carrier": carrier,
+        "neutral": neutral,
+        "adoption": adoption,
+    }
+
+
+def r3_two_invalid_sources(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create two-invalid pre-C root")
+    label = "r3-two-invalid"
+    path = add_human(repo, label)
+    C = repo.commit("create two-invalid human action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r3-two-invalid-old")
+    first = conflicting_human_source(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        label=label,
+        suffix="r3-invalid-one",
+    )
+    second = conflicting_human_source(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        label=label,
+        suffix="r3-invalid-two",
+    )
+    repo.branch("r3-two-invalid-final-carrier", C)
+    final_carrier = feature(repo, "r3-two-invalid-final-carrier")
+    repo.branch("r3-two-invalid-final-neutral", R)
+    final_neutral = feature(repo, "r3-two-invalid-final-neutral")
+    M = repo.merge_commit(
+        (
+            first["adoption"],
+            second["adoption"],
+            final_carrier,
+            final_neutral,
+        ),
+        "merge two independent invalid causal sources",
+        removes=(path,),
+    )
+    N = feature(repo, "r3-two-invalid-old")
+    return Fixture(
+        "R3-01-two-invalid-causal-sources",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_events": [
+                first["authority_event"],
+                second["authority_event"],
+            ],
+            "source_children": [first["adoption"], second["adoption"]],
+            "carriers": [
+                first["carrier"],
+                second["carrier"],
+                final_carrier,
+            ],
+            "adoptions": [first["adoption"], second["adoption"], M],
+            "neutral_parents": [
+                first["neutral"],
+                second["neutral"],
+                final_neutral,
+            ],
+            "absent_sources": [
+                first["authority_event"],
+                second["authority_event"],
+                first["adoption"],
+                second["adoption"],
+            ],
+        },
+    )
+
+
+def r3_invalid_valid_competition(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create mixed-source pre-C root")
+    label = "r3-invalid-valid"
+    path = add_human(repo, label)
+    C = repo.commit("create mixed-source human action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r3-invalid-valid-old")
+    invalid = conflicting_human_source(
+        repo,
+        C=C,
+        R=R,
+        path=path,
+        label=label,
+        suffix="r3-mixed-invalid",
+    )
+    repo.branch("r3-mixed-valid-supplier", C)
+    answer(repo, path, "approve")
+    claim(repo, (path,), "r3 mixed valid fold approved human action")
+    valid_deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "r3 mixed valid resolve approved human action",
+    )
+    repo.branch("r3-mixed-final-carrier", C)
+    final_carrier = feature(repo, "r3-mixed-final-carrier")
+    repo.branch("r3-mixed-final-neutral", R)
+    final_neutral = feature(repo, "r3-mixed-final-neutral")
+    M = repo.merge_commit(
+        (
+            invalid["adoption"],
+            valid_deletion,
+            final_carrier,
+            final_neutral,
+        ),
+        "merge invalid and valid causal sources",
+        removes=(path,),
+    )
+    N = feature(repo, "r3-invalid-valid-old")
+    return Fixture(
+        "R3-02-invalid-valid-causal-competition",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "authority_events": [
+                invalid["authority_event"],
+                valid_deletion,
+            ],
+            "source_children": [invalid["adoption"], valid_deletion],
+            "carriers": [invalid["carrier"], final_carrier],
+            "adoptions": [invalid["adoption"], M],
+            "neutral_parents": [invalid["neutral"], final_neutral],
+            "absent_sources": [
+                invalid["authority_event"],
+                invalid["adoption"],
+                valid_deletion,
+            ],
+        },
+    )
+
+
+def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r3-unrelated-invalid"
+    path = add_agent(repo, label)
+    C = repo.commit("create unrelated-invalid action at C")
+    repo.branch("old", C)
+    O = feature(repo, "r3-unrelated-invalid-old")
+    repo.branch("unrelated-invalid", C)
+    repo.remove(path)
+    unrelated_invalid = repo.commit("delete action without authority")
+    repo.branch("r3-positive-supplier", C)
+    claim(repo, (path,), "claim positive supplier action")
+    supplier = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve positive supplier action",
+    )
+    repo.branch("r3-positive-carrier", C)
+    carrier = feature(repo, "r3-positive-carrier")
+    M = repo.merge_commit(
+        (supplier, carrier),
+        "adopt only the causally relevant valid supplier",
+        removes=(path,),
+    )
+    N = repo.merge_commit(
+        (M, unrelated_invalid),
+        "retain unrelated invalid source in candidate graph",
+        writes={
+            "features/r3-unrelated-invalid-old.md": (
+                "# Feature r3-unrelated-invalid-old\n"
+            )
+        },
+        removes=(path,),
+    )
+    unrelated_reachable = (
+        repo.run(
+            "merge-base",
+            "--is-ancestor",
+            unrelated_invalid,
+            N,
+            check=False,
+        ).returncode
+        == 0
+    )
+    unrelated_ancestor_of_supplier = (
+        repo.run(
+            "merge-base",
+            "--is-ancestor",
+            unrelated_invalid,
+            supplier,
+            check=False,
+        ).returncode
+        == 0
+    )
+    return Fixture(
+        "R3-03-unrelated-invalid-does-not-poison",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "unrelated_invalid": unrelated_invalid,
+            "supplier": supplier,
+            "carrier": carrier,
+            "unrelated_reachable_from_N": unrelated_reachable,
+            "unrelated_ancestor_of_supplier": unrelated_ancestor_of_supplier,
+        },
+    )
+
+
 def generated_retry(repo: GitRepository, bad_path: str):
     finding = RECONCILE.Finding(
         "queue-name", Path(bad_path), "bad name", "rename it"
@@ -3233,6 +3448,9 @@ def scenario_builders():
         pcx19_missing_claim_blob,
         lambda root: budget_fixture(root, overflow=False),
         lambda root: budget_fixture(root, overflow=True),
+        r3_two_invalid_sources,
+        r3_invalid_valid_competition,
+        r3_unrelated_invalid_does_not_poison,
     ]
 
 
@@ -3618,6 +3836,151 @@ def validate_result(result: dict):
             for oid in lineage_oids
         ):
             errors.append("PCX-13 emitted a non-full ancestry OID")
+    if scenario == "R3-01-two-invalid-causal-sources":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        authority_events = {
+            edge["child"] for edge in result["authority_edges"]
+        }
+        propagation_sequence = [
+            (edge["parent"], edge["child"])
+            for edge in result["propagation_edges"]
+        ]
+        expected_propagation = list(
+            zip(details["carriers"], details["adoptions"], strict=True)
+        )
+        expected_reason_tokens = [
+            f"conflicting-human-response@{source}"
+            for source in details["source_children"]
+        ]
+        all_oids = (
+            details["authority_events"]
+            + details["source_children"]
+            + details["carriers"]
+            + details["adoptions"]
+            + details["neutral_parents"]
+            + details["absent_sources"]
+        )
+        if (
+            action is None
+            or status != "ambiguous"
+            or result["event_mode"] != "supplier"
+            or action["reason_code"] != "competing-causal-suppliers"
+            or not all(
+                token in action["reason"] for token in expected_reason_tokens
+            )
+        ):
+            errors.append("R3-01 did not retain both invalid source lineages")
+        if (
+            authority_events != set(details["authority_events"])
+            or len(authority) != 2
+            or propagation_sequence != expected_propagation
+        ):
+            errors.append("R3-01 lost ordered authority/propagation evidence")
+        if action is not None and (
+            action["neutral_parents"] != details["neutral_parents"]
+            or action["absent_parents"] != details["absent_sources"]
+        ):
+            errors.append("R3-01 lost neutral/absent source ancestry")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in all_oids
+        ):
+            errors.append("R3-01 emitted a non-full causal OID")
+    if scenario == "R3-02-invalid-valid-causal-competition":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        authority_events = {
+            edge["child"] for edge in result["authority_edges"]
+        }
+        propagation_sequence = [
+            (edge["parent"], edge["child"])
+            for edge in result["propagation_edges"]
+        ]
+        expected_propagation = list(
+            zip(details["carriers"], details["adoptions"], strict=True)
+        )
+        expected_reason_tokens = (
+            f"conflicting-human-response@{details['source_children'][0]}",
+            f"valid-direct-authority@{details['source_children'][1]}",
+        )
+        all_oids = (
+            details["authority_events"]
+            + details["source_children"]
+            + details["carriers"]
+            + details["adoptions"]
+            + details["neutral_parents"]
+            + details["absent_sources"]
+        )
+        if (
+            action is None
+            or status != "ambiguous"
+            or result["event_mode"] != "supplier"
+            or action["reason_code"] != "competing-causal-suppliers"
+            or not all(
+                token in action["reason"] for token in expected_reason_tokens
+            )
+        ):
+            errors.append("R3-02 did not retain invalid+valid lineages")
+        if (
+            authority_events != set(details["authority_events"])
+            or len(authority) != 2
+            or propagation_sequence != expected_propagation
+        ):
+            errors.append("R3-02 lost mixed causal edge evidence")
+        if action is not None and (
+            action["neutral_parents"] != details["neutral_parents"]
+            or action["absent_parents"] != details["absent_sources"]
+        ):
+            errors.append("R3-02 lost mixed neutral/absent ancestry")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in all_oids
+        ):
+            errors.append("R3-02 emitted a non-full causal OID")
+    if scenario == "R3-03-unrelated-invalid-does-not-poison":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        serialized_evidence = json.dumps(
+            {
+                "authority": result["authority_edges"],
+                "propagation": result["propagation_edges"],
+                "reason": result["evidence_verdict"]["reason"],
+                "absent": (
+                    action["absent_parents"] if action is not None else []
+                ),
+            },
+            sort_keys=True,
+        )
+        if (
+            action is None
+            or status != "valid"
+            or result["event_mode"] != "supplier"
+            or len(authority) != 1
+            or len(propagation) != 1
+            or result["authority_edges"][0]["child"]
+            != details["supplier"]
+            or result["metrics"]["authority_calls"] < 4
+        ):
+            errors.append("R3-03 did not select the unique valid supplier")
+        if details["unrelated_invalid"] in serialized_evidence:
+            errors.append("R3-03 was poisoned by an unrelated invalid source")
+        if (
+            not details["unrelated_reachable_from_N"]
+            or details["unrelated_ancestor_of_supplier"]
+        ):
+            errors.append("R3-03 did not place the invalid source off ancestry")
+        for oid in (
+            details["unrelated_invalid"],
+            details["supplier"],
+            details["carrier"],
+        ):
+            if len(oid) not in {40, 64} or any(
+                char not in "0123456789abcdef" for char in oid
+            ):
+                errors.append("R3-03 emitted a non-full causal OID")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")

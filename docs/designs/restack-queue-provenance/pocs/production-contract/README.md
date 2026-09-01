@@ -1,7 +1,8 @@
 # Production-contract provenance POC
 
-No reader action is needed: this isolated POC passes all 49 required real-Git
-scenarios and all five damaged-mode controls, without changing production code.
+No reader action is needed: this isolated POC passes all 49 prescribed real-Git
+scenarios, three mixed-causal-source regressions, and all five damaged-mode
+controls, without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
 could distinguish a branch's own deletion from an already-resolved deletion on
@@ -26,7 +27,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 49, "python": "3.14.7", "summary": "PASS", "total": 49}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 52, "python": "3.14.7", "summary": "PASS", "total": 52}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -53,13 +54,16 @@ The two event modes are disjoint:
 | `supplier` | Exactly one earlier real deletion event supplies authority to every continuously absent parent. | Every carrying parent-to-merge edge proves adoption only. A claimed carrier remains propagation and cannot lend its claim or evidence. |
 
 Nested supplier events retain the original authority event and stable-deduplicate
-the prior plus current neutral and absent parent lists. Later adoption cannot
-erase ancestry evidence recorded by an earlier adoption. The same accumulation
-applies when a conflicting human response changes a source-derived event from
-valid to invalid. Traceable invalid suppliers live in a causal-source collection
-separate from the valid sources that may authorize. The closest shared invalid
-source propagates its reason and complete ancestry to the next adoption, remains
-invalid, and is never added to the authorization set.
+the prior plus current propagation, neutral, and absent parent lists. Later
+adoption cannot erase ancestry evidence recorded by an earlier adoption. For
+each absent parent, the classifier records a stable ordered union of its closest
+causal sources, keyed by source event child and tagged with the source verdict.
+A sole common valid source with no competitor may authorize. A sole common
+invalid source stays invalid. Multiple valid sources, multiple invalid sources,
+or mixed valid and invalid sources are ambiguous and retain every participating
+source's edges, parent ancestry, reason code, reason chain, and full source-child
+OID. Invalid and ambiguous descendants remain traceable for later evidence but
+never enter the authorization set.
 
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
 full `C/O/M/N` OIDs, the production identity tuple, endpoint paths and
@@ -88,7 +92,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 49.
+scenario total remains 52.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -218,6 +222,51 @@ adoption1`, `carrier2 -> adoption2`, and `carrier3 -> M`. The original valid
 human deletion edge remains the only authority edge and cannot override the
 conflicting response carried by the invalid lineage.
 
+### Mixed causal-source regressions
+
+Three additional asserted real-Git graphs exercise the causal-source union that
+the prescribed P/PCX fixtures did not isolate:
+
+| Case | Observed result |
+|---|---|
+| `R3-01-two-invalid-causal-sources` | ambiguous; two independent `conflicting-human-response` sources retain two authority edges, three ordered propagation edges, three neutral parents, and four absent-source OIDs |
+| `R3-02-invalid-valid-causal-competition` | ambiguous; one invalid adoption and one valid direct source both retain their authority, propagation, neutral/absent ancestry, and reason lineage |
+| `R3-03-unrelated-invalid-does-not-poison` | valid supplier; an invalid deletion outside the absent ancestry appears nowhere in selected evidence |
+
+The two-invalid output used these full OIDs:
+
+```text
+C           73373ac5106e43d8643b5b616268d77a5ca1d264
+O           8f89d0fc4c063c0bbabb284434f74bcf244fb5d3
+M           e7f081a1bf94edfa0f7bec6f5cd0953631515354
+N           8ed846d60715d845a5e19ab6b299ce853a592614
+authority1  3298fff9fce2f3fc3ebbd376028cae9ded66c7b5
+authority2  8e26d51c111af7adbbe07af7017e319279d97c9c
+source1     554be4701af24ac290d8bd6c5c3cc2917c415092
+source2     9c6e72444535b5fcdb3d936d1ef4e0261514e0fe
+carrier1    16d3a0e951f19c1537db4170ea1433d586c93eb4
+carrier2    9da752810d7adfe967d48ea1a3451e256166f1ac
+carrier3    e920f2aaef840688a8352d3f796a14ebd8c82b03
+neutral1    291fae01a5ce5d6d601a6892ac0c5d76ccf974ba
+neutral2    fd4e2a2d7ead4cba18280c374682fd597eb988d2
+neutral3    e87aa1ec0d4a309775906d27669ebae40bc6b861
+```
+
+Its reason names
+`conflicting-human-response@554be4701af24ac290d8bd6c5c3cc2917c415092`
+and
+`conflicting-human-response@9c6e72444535b5fcdb3d936d1ef4e0261514e0fe`.
+The mixed invalid+valid result analogously names
+`conflicting-human-response@d1035891cfb898b501d4c4358e0cda42fa0cfefc`
+and
+`valid-direct-authority@86400c66cf071a7d6d02a7391373b2ca471ecb91`;
+its final adoption is `212aed04a9840447658dd22d468fbe33fd2867d8`.
+The unrelated-source positive selected supplier
+`2fe1bf184c6d0626a1622012129c5801c47d31f5` and excluded invalid commit
+`a8ae4e0bf33ab580216e0ce83a4c5d79e66b7555` from its selected evidence even
+though the invalid commit is reachable from `N` and its production authority
+verdict was evaluated.
+
 ## Cost and budget evidence
 
 The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
@@ -304,7 +353,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 49/49
+The installer and bytecode compilation exited `0`. The self-test passed 52/52
 scenarios, 4/4 executable aliases, and 5/5 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
