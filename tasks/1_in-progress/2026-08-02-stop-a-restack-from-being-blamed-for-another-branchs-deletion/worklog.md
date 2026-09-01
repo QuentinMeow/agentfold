@@ -113,6 +113,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Executable-enumeration and closed-reader correction (codex)
+
+- Fresh review ran amendment 9's literal candidate-tree command and proved Git 2.55.0
+  rejects its pathspec magic; the apparent simpler wildcard form also returned no rows.
+- The resource lens found another framed/path byte conflict, unreachable legacy continuity
+  and merge-base boundaries, scheduler-dependent chunk accounting, and no success-path
+  guarantee that long-lived continuity readers die before ordinary checking.
+- Replaced the command with bounded prefix enumeration plus exact in-process filtering;
+  made valid-output byte counts derived from structural grammar; reduced merge-base and
+  shallow probes to the records they semantically need; removed chunk-fragment authority;
+  and required all children to close, drain under budget, wait, terminate if needed, and
+  reap before the transaction returns.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Role-specific ordinary projection correction (codex)
 
 - Review rejected one generic ordinary history map because current consumers need distinct

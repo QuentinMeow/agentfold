@@ -1884,3 +1884,93 @@ Production remains unopened. A fresh five-lens review must accept one immutable 
 containing this correction and every earlier superseding amendment. Optional GitHub
 adapter implementation still requires bounded transport and live canary evidence; a core
 implementation cannot infer adapter success from the design review.
+
+## 2026-09-01 correction amendment 10 — executable enumeration and closed readers
+
+The review of `aa872dfb6b27b864b2e9b12f9a542c834c86efb7` reproduced an
+unsupported `ls-tree` pathspec, found another unreachable paired byte cap, and showed that
+older continuity and merge-base counters still made impossible exact/+1 promises. It also
+found that successful long-lived readers were not required to close before ordinary work.
+This section supersedes amendment 9's candidate-tree command and tree byte accounting,
+and every earlier continuity graph, merge-base, shallow-probe, chunk, or reader-lifecycle
+counter that conflicts with it. Classification semantics are unchanged.
+
+### Literal supported candidate-tree enumeration
+
+Git 2.55.0 rejects `:(glob)` pathspec magic in `ls-tree`; the rejected command is not a
+production option. The only candidate-tree command is the supported prefix enumeration:
+
+```sh
+git --no-replace-objects ls-tree -rz --full-tree <candidate> -- \
+  history/conversations
+```
+
+The streaming parser counts every raw prefix row, including irrelevant files, before it
+applies the exact four-component conversation/handover grammar and regular-mode filter.
+The literal command is exercised against a real repository in direct-N and synthetic-H
+tests; substituting either the rejected pathspec-magic form or a plain wildcard is an
+observed-red control.
+
+The primary tree-stream gates are 512 raw rows, 8 MiB raw stdout, and a 4 MiB peak raw
+row. There is no independent 8 MiB path-byte gate: valid path bytes are a derived portion
+of raw stdout after mode/type/OID/tab/NUL framing, then are charged again as actual retained
+arena bytes. Observed-minus-one instrumentation covers path-byte accounting. Malformed or
+overlong framing refuses under the raw byte/row/peak gates before parsing or retention.
+The 256 admitted-path and 512 request-key limits remain independent and reachable because
+irrelevant raw rows do not enter either registry.
+
+### Structurally owned continuity observations
+
+The continuity graph's 4,096 raw commit records and 8,192 raw parent OID fields are primary
+structural gates across the one intrinsic graph stream. With 64-byte full OIDs and no side
+marker, 798,720 aggregate stdout bytes and 532,545 peak line bytes are derived maxima,
+including spaces and newlines. The former 16 MiB aggregate and 1 MiB line gates are
+withdrawn. A fixed 64 KiB parser buffer owns peak input allocation; line assembly remains
+charged to the derived line maximum. Raw bytes and delimiters are observed, and an
+observed-minus-one control proves the byte accounting rather than pretending a larger
+independent exact boundary exists.
+
+The unique merge-base child needs at most two valid rows: one row supplies `C`, and a
+second proves non-uniqueness and immediately makes continuity incomplete. Its primary
+limits are two 64-byte OID tokens and two rows; its derived stdout/peak-line maxima are
+130/65 bytes. Malformed, partial, non-hex, or overlong rows refuse before OID use. Output
+after the second row is neither buffered nor interpreted: the process group is terminated
+and reaped because the result is already non-unique. The former 64-row, 64 KiB, and 4 KiB
+limits are withdrawn.
+
+The shallow-repository probe is the literal
+`git --no-replace-objects rev-parse --is-shallow-repository`. It admits exactly one ASCII
+`true` or `false` token and one line; six stdout bytes and six peak-line bytes are derived
+maxima. Any other token, second line, partial line, timeout, or nonzero exit is incomplete.
+The former two-row, 64-byte, and 16-byte independent limits are withdrawn.
+
+Input chunk calls are an implementation mechanism rather than adversarial Git records.
+The parser uses one fixed 64 KiB buffer and never retains whole graph stdout. Logical graph
+budgets charge decoded raw rows/tokens/bytes, not scheduler-dependent pipe fragmentation;
+the earlier 65,536-chunk and 1 MiB-peak-chunk exact/+1 promise is withdrawn. Short-read,
+single-byte-read, and delimiter-split test streams must produce byte-identical results and
+counters under the same deadline, proving that OS chunking cannot change admission.
+
+### Success-path reader finalization
+
+Every one-shot and long-lived child opened by policy extraction, continuity, or ordinary
+preflight is transaction-owned. Before any successful continuity result is returned to the
+integrated caller, and on every exception or refusal path, the owner:
+
+1. closes the request/stdin side;
+2. drains only already budget-admitted stdout and stderr through the same bounded readers;
+3. waits under the remaining monotonic child and aggregate deadlines; and
+4. on timeout, unexpected extra output, nonzero exit, or open descendant, terminates the
+   entire process group and reaps it before returning incomplete.
+
+No `cat-file --batch`, graph, merge-base, shallow-probe, policy, or historical-evaluator
+process survives a successful continuity preflight or crosses into ordinary snapshot
+construction. Success, semantic-invalid, budget refusal, EOF, malformed output, injected
+exception, and timeout tests assert closed descriptors, no live PID/process group, empty
+transaction-local caches after refusal, and byte-identical writer state.
+
+### Gate boundary
+
+Production remains unopened. The next review begins from a new immutable revision and
+must cover all five independent lenses; passing POC evidence cannot waive an executable
+command or resource-lifecycle defect.

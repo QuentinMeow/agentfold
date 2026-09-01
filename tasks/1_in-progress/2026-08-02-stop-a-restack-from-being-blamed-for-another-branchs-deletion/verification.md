@@ -28,6 +28,16 @@ The four-to-one panel rejected the revision. No production implementation began 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded candidate-complete ordinary design review
+
+**Reviewed revision:** `aa872dfb6b27b864b2e9b12f9a542c834c86efb7`
+
+- semantic/DAG / r19-semantic-design: `block` — the literal candidate-tree `ls-tree` command used unsupported glob pathspec magic and exited 128 on Git 2.55.0; a plain wildcard returned no rows.
+- budgets/transaction/composition / r17-production-seam-audit: `block` — candidate-tree path bytes could not reach the same cap as framed raw bytes; continuity graph, merge-base, and shallow/chunk limits retained unreachable exact boundaries; and successful batch readers could remain alive into ordinary work.
+
+The panel stopped after two independent blocks. The three remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded split-transaction design review
 
 **Reviewed revision:** `927a48825962d0b3923751f0e3ce152f3806b697`
