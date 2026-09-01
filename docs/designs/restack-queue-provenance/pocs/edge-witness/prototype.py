@@ -53,6 +53,8 @@ class Metrics:
     candidate_commits: int = 0
     candidate_parent_edges: int = 0
     witness_child_parent_edges_scanned: int = 0
+    origin_proof_commits_scanned: int = 0
+    origin_proof_parent_edges_scanned: int = 0
     pre_witness_commits_scanned: int = 0
     pre_witness_parent_edges_scanned: int = 0
     post_witness_commits_scanned: int = 0
@@ -214,6 +216,8 @@ class Fixture:
     side_resolution: str | None = None
     merge_commit: str | None = None
     conflicting_parent: str | None = None
+    shared_origin: str | None = None
+    disconnected_origins: tuple[str, ...] = ()
 
 
 def queue_path(label: str) -> str:
@@ -715,6 +719,98 @@ def fixture_witness_child_sibling_same_id_conflict(root: Path) -> Fixture:
     )
 
 
+def finish_merge_origin_fixture(
+    repo: GitRepository,
+    scenario_id: str,
+    label: str,
+    C: str,
+    expected_verdict: str,
+    shared_origin: str | None = None,
+    disconnected_origins: tuple[str, ...] = (),
+) -> Fixture:
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old-tip")
+    repo.branch("candidate", C)
+    claim(repo, label)
+    M = resolve(repo, label)
+    N = feature(repo, f"{label}-candidate-descendant")
+    findings = (queue_path(label),) if expected_verdict == (
+        "blocking-finding"
+    ) else ()
+    return Fixture(
+        scenario_id,
+        repo, C, O, M, N, expected_verdict, findings,
+        merge_commit=C,
+        shared_origin=shared_origin,
+        disconnected_origins=disconnected_origins,
+    )
+
+
+def fixture_disconnected_identical_parent_origins(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "disconnected-parent-origins"
+    path = queue_path(label)
+    R = create_common(repo)
+
+    repo.branch("independent-a", R)
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(path, action_text(label))
+    A = repo.commit("independent parent A adds Q")
+    repo.branch("independent-b", R)
+    repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    repo.write(path, action_text(label))
+    B = repo.commit("independent parent B adds byte-identical Q")
+
+    identical_tree = repo.oid(f"{A}^{{tree}}")
+    C = repo.commit_tree(
+        identical_tree,
+        "merge disconnected byte-identical Q origins",
+        A,
+        B,
+    )
+    return finish_merge_origin_fixture(
+        repo,
+        "disconnected-identical-parent-origins",
+        label,
+        C,
+        "blocking-finding",
+        disconnected_origins=(A, B),
+    )
+
+
+def fixture_shared_continuous_parent_origin(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "shared-parent-origin"
+    S = create_common(repo, (label,))
+
+    repo.branch("carrying-a", S)
+    A = feature(repo, "shared-origin-parent-a")
+    repo.branch("carrying-b", S)
+    B = feature(repo, "shared-origin-parent-b")
+
+    repo.branch("shared-origin-merge-staging", A)
+    repo.write(
+        "features/shared-origin-parent-b.md",
+        "# Feature shared-origin-parent-b\n",
+    )
+    repo.run("add", "-A")
+    merge_tree = repo.run("write-tree").stdout.strip()
+    C = repo.commit_tree(
+        merge_tree,
+        "merge parents carrying one shared continuous Q",
+        A,
+        B,
+    )
+    return finish_merge_origin_fixture(
+        repo,
+        "shared-continuous-parent-origin",
+        label,
+        C,
+        "no-finding",
+        shared_origin=S,
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -773,6 +869,8 @@ BASE_FIXTURES = (
     fixture_candidate_side_delete_merge_undo_mutate_delete,
     fixture_candidate_merge_occurrence_ambiguity,
     fixture_witness_child_sibling_same_id_conflict,
+    fixture_disconnected_identical_parent_origins,
+    fixture_shared_continuous_parent_origin,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -1059,6 +1157,137 @@ def candidate_action_state(
     }
 
 
+def continuous_occurrence_origin(
+    repo: GitRepository,
+    revision: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+    cache,
+):
+    cached = cache.get(revision)
+    if cached is not None:
+        return cached
+    metrics.origin_proof_commits_scanned += 1
+    state = candidate_action_state(
+        repo, revision, path, old_text, metrics
+    )
+    if state["state"] != "matching":
+        result = {
+            "origins": (),
+            "problem": f"{revision} is {state['state']}, not one exact occurrence",
+        }
+        cache[revision] = result
+        return result
+
+    parents = RECONCILE.revision_parents(
+        revision, f"continuous-origin parents of {revision}"
+    )
+    parent_occurrences = []
+    for parent in parents:
+        metrics.origin_proof_parent_edges_scanned += 1
+        parent_occurrences.append({
+            "oid": parent,
+            **candidate_action_state(repo, parent, path, old_text, metrics),
+        })
+    hazards = [
+        occurrence for occurrence in parent_occurrences
+        if occurrence["state"] not in {"absent", "matching"}
+    ]
+    if hazards:
+        result = {
+            "origins": (),
+            "problem": "an ancestor parent carries a conflicting or unproven occurrence",
+        }
+        cache[revision] = result
+        return result
+    carrying = [
+        occurrence for occurrence in parent_occurrences
+        if occurrence["state"] == "matching"
+    ]
+    if not carrying:
+        result = {"origins": (revision,), "problem": None}
+        cache[revision] = result
+        return result
+
+    parent_results = [
+        continuous_occurrence_origin(
+            repo, occurrence["oid"], path, old_text, metrics, cache
+        )
+        for occurrence in carrying
+    ]
+    if any(result["problem"] is not None for result in parent_results):
+        result = {
+            "origins": (),
+            "problem": "an ancestor carrying parent has no continuous origin proof",
+        }
+        cache[revision] = result
+        return result
+    if len(parent_results) == 1:
+        result = {
+            "origins": parent_results[0]["origins"],
+            "problem": None,
+        }
+        cache[revision] = result
+        return result
+
+    shared = set(parent_results[0]["origins"])
+    for parent_result in parent_results[1:]:
+        shared.intersection_update(parent_result["origins"])
+    result = {
+        "origins": tuple(sorted(shared)),
+        "problem": (
+            None if shared
+            else "matching merge parents have disconnected occurrence origins"
+        ),
+    }
+    cache[revision] = result
+    return result
+
+
+def shared_continuous_origin_proof(
+    repo: GitRepository,
+    parent_occurrences,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+    cache,
+    enforce_shared_origin: bool,
+):
+    carrying = [
+        occurrence for occurrence in parent_occurrences
+        if occurrence["state"] == "matching"
+    ]
+    if not enforce_shared_origin:
+        return {
+            "mode": "endpoint-equality-only-disabled-guard",
+            "parent_origins": [
+                {"oid": occurrence["oid"], "origins": (), "problem": None}
+                for occurrence in carrying
+            ],
+            "proven": True,
+            "shared_origins": (),
+        }
+    parent_origins = []
+    for occurrence in carrying:
+        origin = continuous_occurrence_origin(
+            repo, occurrence["oid"], path, old_text, metrics, cache
+        )
+        parent_origins.append({"oid": occurrence["oid"], **origin})
+    shared = set(parent_origins[0]["origins"])
+    for origin in parent_origins[1:]:
+        shared.intersection_update(origin["origins"])
+    proven = bool(shared) and all(
+        origin["problem"] is None for origin in parent_origins
+    )
+    return {
+        "mode": "continuous-origin-intersection",
+        "parent_origins": parent_origins,
+        "proven": proven,
+        "shared_origins": tuple(sorted(shared)) if proven else (),
+    }
+
+
 def witness_child_parent_breaks(
     repo: GitRepository,
     witness_parent: str,
@@ -1066,6 +1295,8 @@ def witness_child_parent_breaks(
     path: str,
     old_text: str,
     metrics: Metrics,
+    origin_cache,
+    enforce_shared_origin: bool,
 ):
     parents = RECONCILE.revision_parents(
         witness_child, f"witness-child parents of {witness_child}"
@@ -1082,6 +1313,7 @@ def witness_child_parent_breaks(
     }
     selected = by_oid.get(witness_parent)
     breaks = []
+    proofs = []
     if selected is None or selected["state"] != "matching":
         breaks.append({
             "child": witness_child,
@@ -1097,7 +1329,9 @@ def witness_child_parent_breaks(
             event = "witness-child-sibling-same-id-conflict"
         elif state == "ambiguous":
             event = "witness-child-sibling-multiple-copies"
-        elif state in {"matching", "renamed"}:
+        elif state == "matching":
+            continue
+        elif state == "renamed":
             event = "witness-child-sibling-occurrence-ambiguity"
         else:
             event = "witness-child-sibling-unproven-occurrence"
@@ -1107,7 +1341,32 @@ def witness_child_parent_breaks(
             "parent_occurrence": occurrence,
             "selected_parent": witness_parent,
         })
-    return breaks
+    carrying = [
+        occurrence for occurrence in parent_occurrences
+        if occurrence["state"] == "matching"
+    ]
+    if selected is not None and selected["state"] == "matching" and len(
+        carrying
+    ) > 1:
+        proof = shared_continuous_origin_proof(
+            repo,
+            parent_occurrences,
+            path,
+            old_text,
+            metrics,
+            origin_cache,
+            enforce_shared_origin,
+        )
+        proofs.append({"child": witness_child, **proof})
+        if not proof["proven"]:
+            breaks.append({
+                "child": witness_child,
+                "event": "witness-child-disconnected-occurrence-origins",
+                "origin_proof": proof,
+                "parent_occurrences": parent_occurrences,
+                "selected_parent": witness_parent,
+            })
+    return breaks, proofs
 
 
 def pre_witness_occurrence_breaks(
@@ -1116,8 +1375,11 @@ def pre_witness_occurrence_breaks(
     path: str,
     old_text: str,
     metrics: Metrics,
+    origin_cache,
+    enforce_shared_origin: bool,
 ):
     breaks = []
+    proofs = []
     revision = witness_parent
     seen = set()
     while revision not in seen:
@@ -1153,16 +1415,32 @@ def pre_witness_occurrence_breaks(
             if occurrence["state"] == "matching"
         ]
         if len(matches) > 1:
-            breaks.append({
-                "child": revision,
-                "event": "multi-parent-occurrence-ambiguity",
-                "parent_occurrences": parent_occurrences,
-            })
+            proof = shared_continuous_origin_proof(
+                repo,
+                parent_occurrences,
+                path,
+                old_text,
+                metrics,
+                origin_cache,
+                enforce_shared_origin,
+            )
+            proofs.append({"child": revision, **proof})
+            if not proof["proven"]:
+                breaks.append({
+                    "child": revision,
+                    "event": "multi-parent-occurrence-ambiguity",
+                    "origin_proof": proof,
+                    "parent_occurrences": parent_occurrences,
+                })
+                break
+            if proof["shared_origins"]:
+                revision = proof["shared_origins"][0]
+                continue
             break
         if not matches:
             break
         revision = matches[0]["oid"]
-    return breaks
+    return breaks, proofs
 
 
 def post_witness_event(parent_state, child_state, merge):
@@ -1259,6 +1537,7 @@ def deletion_witnesses(
     path: str,
     old_text: str,
     metrics: Metrics,
+    enforce_shared_origin: bool,
 ):
     old_identity = action_identity(path, old_text)
     witnesses = []
@@ -1276,11 +1555,29 @@ def deletion_witnesses(
             problem = RECONCILE.queue_deletion_problem(
                 path, before, parent, commit
             )
-            witness_parent_breaks = witness_child_parent_breaks(
-                repo, parent, commit, path, old_text, metrics
+            origin_cache = {}
+            witness_parent_breaks, witness_parent_origin_proofs = (
+                witness_child_parent_breaks(
+                    repo,
+                    parent,
+                    commit,
+                    path,
+                    old_text,
+                    metrics,
+                    origin_cache,
+                    enforce_shared_origin,
+                )
             )
-            occurrence_breaks = pre_witness_occurrence_breaks(
-                repo, parent, path, old_text, metrics
+            occurrence_breaks, pre_witness_origin_proofs = (
+                pre_witness_occurrence_breaks(
+                    repo,
+                    parent,
+                    path,
+                    old_text,
+                    metrics,
+                    origin_cache,
+                    enforce_shared_origin,
+                )
             )
             continuity_breaks = post_witness_continuity_breaks(
                 repo, parent, commit, new_head, path, old_text, metrics
@@ -1294,8 +1591,12 @@ def deletion_witnesses(
                     "parent": parent,
                     "post_witness_breaks": continuity_breaks,
                     "pre_witness_occurrence_breaks": occurrence_breaks,
+                    "pre_witness_origin_proofs": pre_witness_origin_proofs,
                     "problem": problem,
                     "witness_child_parent_breaks": witness_parent_breaks,
+                    "witness_child_parent_origin_proofs": (
+                        witness_parent_origin_proofs
+                    ),
                 }
             )
     return witnesses
@@ -1358,6 +1659,7 @@ def classify(
     enforce_witness_child_parents=True,
     enforce_pre_witness_occurrence=True,
     enforce_post_witness_continuity=True,
+    enforce_shared_occurrence_origin=True,
 ):
     metrics = Metrics()
     items = {}
@@ -1463,6 +1765,7 @@ def classify(
                     path,
                     old_text,
                     metrics,
+                    enforce_shared_occurrence_origin,
                 )
                 metrics.synthetic_control_calls += 1
                 synthetic_edge_problem = RECONCILE.queue_deletion_problem(
@@ -1776,6 +2079,49 @@ def verify_result(fixture: Fixture, result):
                 problems.append("fixture accidentally tested pre-witness continuity")
             if witness["post_witness_breaks"]:
                 problems.append("fixture accidentally tested post-witness continuity")
+    if fixture.scenario_id == "disconnected-identical-parent-origins":
+        item = result["items"][fixture.expected_findings[0]]
+        if item["evidence_verdict"] != "invalid-witness-occurrence-ambiguity":
+            problems.append("disconnected identical origins were treated as one")
+        if len(item["witnesses"]) != 1:
+            problems.append("disconnected-origin fixture did not isolate one witness")
+        else:
+            witness = item["witnesses"][0]
+            if witness["problem"] is not None:
+                problems.append("raw production deletion helper did not false-green")
+            proofs = witness["pre_witness_origin_proofs"]
+            if len(proofs) != 1 or proofs[0]["proven"]:
+                problems.append("disconnected origin proof did not fail closed")
+            else:
+                parent_origins = {
+                    origin["oid"]: tuple(origin["origins"])
+                    for origin in proofs[0]["parent_origins"]
+                }
+                expected = {
+                    origin: (origin,) for origin in fixture.disconnected_origins
+                }
+                if parent_origins != expected:
+                    problems.append("independent parent origins were not preserved")
+                if proofs[0]["child"] != fixture.C:
+                    problems.append("origin proof did not bind the shared boundary C")
+    if fixture.scenario_id == "shared-continuous-parent-origin":
+        path = queue_path("shared-parent-origin")
+        item = result["items"][path]
+        if item["evidence_verdict"] != "valid-real-edge":
+            problems.append("shared continuous origin remained overblocked")
+        if len(item["witnesses"]) != 1:
+            problems.append("shared-origin fixture did not isolate one witness")
+        else:
+            witness = item["witnesses"][0]
+            proofs = witness["pre_witness_origin_proofs"]
+            if len(proofs) != 1 or not proofs[0]["proven"]:
+                problems.append("shared parent origin was not proven")
+            elif tuple(proofs[0]["shared_origins"]) != (
+                fixture.shared_origin,
+            ):
+                problems.append("shared origin proof selected the wrong commit")
+            if witness["pre_witness_occurrence_breaks"]:
+                problems.append("proven shared origin still emitted an ambiguity")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
@@ -1930,6 +2276,34 @@ def executable_controls(fixtures, results):
             event["event"]
             for event in sibling_witness["witness_child_parent_breaks"]
         ],
+    })
+
+    disconnected = fixtures["disconnected-identical-parent-origins"]
+    damaged_origin_proof = classify(
+        disconnected, enforce_shared_occurrence_origin=False
+    )
+    disconnected_path = queue_path("disconnected-parent-origins")
+    if damaged_origin_proof["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged origin proof did not union disconnected identical parents"
+        )
+    disconnected_witness = damaged_origin_proof["items"][
+        disconnected_path
+    ]["witnesses"][0]
+    origin_proofs = disconnected_witness["pre_witness_origin_proofs"]
+    if len(origin_proofs) != 1 or origin_proofs[0]["mode"] != (
+        "endpoint-equality-only-disabled-guard"
+    ):
+        raise AssertionError("damaged origin proof did not expose its weak mode")
+    controls.append({
+        "control": "observed-red-disconnected-identical-parent-origins",
+        "damaged_classification": damaged_origin_proof["classification"],
+        "disconnected_origins": disconnected.disconnected_origins,
+        "expected": disconnected.expected_verdict,
+        "merge_commit": disconnected.C,
+        "origin_mode": origin_proofs[0]["mode"],
+        "raw_production_problem": disconnected_witness["problem"],
+        "status": "OBSERVED_RED",
     })
 
     s2 = fixtures["S2-invalid-base-deletion"]
