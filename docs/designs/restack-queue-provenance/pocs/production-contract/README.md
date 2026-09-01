@@ -1,8 +1,8 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, six causal-source regressions, and all five damaged-mode
-controls, without changing production code.
+scenarios, 16 focused contract regressions, and all five damaged-mode controls,
+without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
 could distinguish a branch's own deletion from an already-resolved deletion on
@@ -27,7 +27,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 55, "python": "3.14.7", "summary": "PASS", "total": 55}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 65, "python": "3.14.7", "summary": "PASS", "total": 65}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -38,6 +38,16 @@ The POC first requires exactly one merge base and requires it to equal the
 declared `C`. It enumerates only `O N ^C`, once, with `git rev-list --parents`.
 It never opens parents of `C` for normal classification. A dedicated damaged
 control proves that reopening pre-`C` genealogy creates a false block.
+
+The declared selected range base `M` is a separate mandatory input. Immediately
+after that one graph enumeration, and before snapshots, per-action identity
+calls, deletion-authority calls, or event selection, the classifier verifies
+that `M` is an available commit in the enumerated `C`-rooted ancestry through
+`N`. Therefore `M` must descend from or equal `C` and be an ancestor of or equal
+`N`; the contract explicitly permits both endpoint equalities. Missing and
+non-commit objects return `unreadable`; readable commits outside the region
+return `ambiguous`. Both failures emit `range_base_validation` with the full
+`M` OID and reason, zero selected events, and zero identity or authority calls.
 
 Each immutable production identity maps to a list of paths in every snapshot.
 Counts and paths remain visible, so duplicates cannot collapse into set
@@ -68,9 +78,18 @@ valid roots, multiple invalid roots, or mixed valid and invalid roots are
 ambiguous. Invalid and ambiguous descendants remain traceable for later evidence
 but never enter the authorization set.
 
+If a supplier-authorized occurrence is later reintroduced and deleted again,
+the classifier does not select only the last deletion. It finds the events in
+the final-absence causal history and stable-aggregates every authority edge,
+supplier propagation edge, absent/neutral parent, canonical root, and
+reason/source-child record. Any reintroduction makes the result ambiguous even
+when the later deletion independently passes production authority, so two
+different occurrences can never authorize each other.
+
 A result emits `valid`, `invalid`, `none`, `ambiguous`, or `unreadable`, plus
-full `C/O/M/N` OIDs, the production identity tuple, endpoint paths and
-multiplicity, event OID, authority-edge validator results, propagation edges,
+full `C/O/M/N` OIDs, the `range_base_validation` verdict, the production
+identity tuple, endpoint paths and multiplicity, event OID, authority-edge
+validator results, propagation edges,
 neutral and absent parents, canonical roots, stable reason/source-child records,
 reason code, and measured counters.
 
@@ -96,7 +115,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 55.
+scenario total remains 65.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -135,11 +154,29 @@ makes `--self-test` exit nonzero.
 | P15 | `P15-competing-suppliers` | ambiguous; both authority events emitted |
 | P16 | `P16-PCX-08-invalid-supplier-claimed-carrier` | invalid supplier; claimed carrier remains propagation |
 | P17 | `P17-post-event-reintroduction` | ambiguous discontinuity through `N` |
-| P18 | seven `P18a`-`P18g` cases | missing tip, non-commit tip, unrelated tip, shallow history, missing blob, missing tree, and multiple bases all return `unreadable` |
+| P18 | fifteen `P18a`-`P18o` cases | tip/history/object failures plus missing, non-commit, unrelated, and after-`N` `M` values fail structurally; `M=C` and `M=N` pass the range gate |
 | P19 | `P19-production-identities` | path-independent ordinary identity, payload distinction, typed generated retry, and multimap multiplicity asserted |
 | P20 | `P20-lifecycle-types` | ordinary agent, human decision, generated retry, and task pickup use four production validator leaves |
 | P21 | `P21-PCX-17c-squash-erasure` | invalid; squash contains no surviving claim edge |
 | P22 | `P22-PCX-18-one-pass-many-actions` | 16 actions across 133 enumerated commits; one graph walk, eight valid and eight findings |
+
+### Selected-range-base boundary regressions
+
+P18h-P18o make the `M` gate executable. The first six rows return before action
+classification with no event and `identity_calls=0`, `authority_calls=0`. The
+last two preserve the queue action and prove that the contract's endpoint
+equalities pass the gate without claiming a deletion event.
+
+| Case | C / O / M / N | Observed result |
+|---|---|---|
+| `P18h-missing-M` | `d06a8e1f62d588293f3bf70a91e8f1900aca1edc` / `3c929150f394845dad6e969d058706c5dc878be8` / `ffffffffffffffffffffffffffffffffffffffff` / `70d6e8e514a7e81d6a91a799fcfa66e0eae162de` | `unreadable`; missing `M` named |
+| `P18i-noncommit-M-blob` | `9c80ff6bb92b21e4e2206832a0080f34730d303d` / `3dbbaa22aa15be990b38094b5172de55e436adcb` / `f3fd2c414ebecbd374165a57fb97777d7854881f` / `e2f94048ffe0bb5fea0b4fcfabfbf4cc93a26285` | `unreadable`; blob named |
+| `P18j-noncommit-M-tree` | `06bad3cc92638141b3f5f528b1b191e909bdbf29` / `8eea7da51b06c93ff0be6ab37d90644249993f26` / `4b825dc642cb6eb9a060e54bf8d69288fbee4904` / `5d8fd9eaa9152b6cf9bc2df1506e01c8abb9c2ea` | `unreadable`; tree named |
+| `P18k-noncommit-M-tag` | `79cd0a510242ca533cd60cc19dbd7486483ec5d0` / `b631c4387527a69c216c988af10f997629ee21e6` / `d04b0f4cb2a439d32b7025e18869178554ce9609` / `110ee672efbfe974b199b21f485d6d0d5bd0070d` | `unreadable`; tag named |
+| `P18l-unrelated-M` | `5deac7dbb2f7af1347528f202d2dea6305a7eed0` / `c66670d8212839c869bfe1e669e5d883d47eb2e8` / `d4a8acb5380c5835b7dbc237a3e0042d2905eec6` / `530b2c8c7e8d9ec4ef440a046e37b58db35d5981` | `ambiguous`; outside `C..N` |
+| `P18m-M-after-N` | `e4e34696b271e37e86dde938c3f771c9cfe4bb2b` / `31f51f6be37d39d514b002a0c290a8fd6299d9c8` / `3794feb6c65bb4e6f541ddc3c2fb1e4e15434a39` / `8043519a0136308dc2f1218806192609d3b74a26` | `ambiguous`; not an ancestor of/equal to `N` |
+| `P18n-M-equals-C` | `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` / `ae6ec2647ed53b0c6c516952e1db0fa2c1feb96c` / `7b3cf8dd0cfc307a8b957b539f71033e92063a4b` / `8f3df0dee8d186622cb4b9f8da6d0a575a3f6d03` | range `valid`; `none`, no finding |
+| `P18o-M-equals-N` | `740bcad8cc95b46955d8d112d070d93646351a6d` / `bc321981f1a4d3b740ce79454ccaa0ccb474e31c` / `4fda9e18664e3ae611b1d17877b03fa941783cc5` / `4fda9e18664e3ae611b1d17877b03fa941783cc5` | range `valid`; `none`, no finding |
 
 ## PCX-01-PCX-20 attack coverage
 
@@ -313,6 +350,37 @@ valid root `c7e6eed4001a36d03480ed64b6cb67c3bbbe7e76` and invalid root
 `94140cd414a88d470dba443360d8b55c35f02844`, including the production
 validator's missing-claim problem for the invalid authority edge.
 
+### Reintroduced-occurrence history regressions
+
+The r5 fixtures isolate the final-history aggregation. Both begin with real
+authority `K -> D`, adopt `D` through supplier propagation `P -> M`, reintroduce
+the action, and delete the new occurrence. Both return `ambiguous` and retain
+two authority edges, one propagation edge, absent source `D`, canonical roots
+for both deletions, and reason/source-child records for `D`, `M`, and the final
+deletion. The later invalid fixture records the production missing-claim
+problem; the later valid fixture records a second passing production verdict,
+but still cannot collapse two occurrences into one authorized deletion.
+
+```text
+R5-01 invalid later deletion
+C          1e5dad973b3278ca8c12f3dd74f72250eaaf9f09
+O          c63664276a141f3f60f61c9d404de201e6f8cf16
+M          3b07620bd6ed19324c9ee2dc55474f10854dc1e1
+N          d40a531fd9a0dacb986f9259ac6f94ec0d248faa
+authority1 d097d2d4349754253439ed58633b35fbf5853341 -> 657f1c682a87519967522b7cdae62f344c3a4925 (valid)
+propagation 88436bd443f79b863ddce9b04c9610992955e68a -> 3b07620bd6ed19324c9ee2dc55474f10854dc1e1
+authority2 44cc5668629790c721576756a38b630d563c746a -> 4338a7869360b2e539dd905c7204c948d573f06b (invalid)
+
+R5-02 valid later deletion
+C          79b338b3ef54382a0ec95e87a7ba962b1ec7c20a
+O          9c8b1418effb6889d14466e278a7987b7e7cfbc3
+M          3b0a6316833b818079a00141bb5ef27df4a4bc36
+N          fb0bff9778f436aed2a46f887eafb84e1c74ea5f
+authority1 287db35c723666b4f76026d4df9a4957eb700fb6 -> 70c42629ff66371a7d94eca7e18596d5e0dc631b (valid)
+propagation 295eee5d213e52511863f8a3208b832941959e86 -> 3b0a6316833b818079a00141bb5ef27df4a4bc36
+authority2 e1127dd93fc3b2324b7181086232ce6946e44cbe -> b51f3158e90132b85b13544e650101185228505a (valid)
+```
+
 ## Cost and budget evidence
 
 The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
@@ -325,11 +393,11 @@ as valid and emitted eight findings. These are measured counts from that run:
 | Graph parent edges | 132 |
 | Graph enumerations | 1 |
 | Per-action history walks | 0 |
-| Queue snapshots requested | 10,828 |
-| Snapshot cache hits | 10,825 |
+| Queue snapshots requested | 10,876 |
+| Snapshot cache hits | 10,873 |
 | Distinct queue subtree reads | 3 |
 | Git object reads | 297 |
-| Object cache hits | 21,401 |
+| Object cache hits | 21,499 |
 | Production identity calls | 32 |
 | Production authority calls | 32 |
 | `cat-file --batch` processes | 1 |
@@ -399,7 +467,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 55/55
+The installer and bytecode compilation exited `0`. The self-test passed 65/65
 scenarios, 4/4 executable aliases, and 5/5 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The

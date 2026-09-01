@@ -620,6 +620,24 @@ class Classifier:
             "production_tuple_sha256": hashlib.sha256(payload).hexdigest(),
         }
 
+    def selected_base_problem(self) -> str | None:
+        """Validate declared M before any identity or authority work."""
+        assert self.objects is not None
+        assert self.graph is not None
+        M = self.fixture.M
+        try:
+            tree = self.objects.commit_tree(M)
+            self.objects.tree_entries(tree)
+        except Unreadable as error:
+            raise Unreadable(f"M {M}: {error}") from error
+        if M not in self.graph.new_nodes:
+            return (
+                f"declared M {M} is outside the required C-rooted candidate "
+                f"region: M must descend from or equal C {self.fixture.C} "
+                f"and be an ancestor of or equal N {self.fixture.N}"
+            )
+        return None
+
     def unique_carry_problem(
         self, identity: tuple, tip: str
     ) -> str | None:
@@ -1355,9 +1373,153 @@ class Classifier:
             results.append(event)
         return results
 
+    def has_reintroduction(
+        self, identity: tuple, event: Event
+    ) -> bool:
+        assert self.graph is not None
+        marked_post_event = any(
+            record["reason_code"]
+            in {
+                "post-event-reintroduction",
+                "post-supplier-reintroduction",
+            }
+            for record in (
+                event.reason_records
+                or [
+                    {
+                        "reason_code": event.reason_code,
+                        "reason": event.reason,
+                    }
+                ]
+            )
+        )
+        return bool(
+            marked_post_event
+            and event.child is not None
+            and any(
+                commit != event.child and self.states(commit, identity)
+                for commit in self.graph.between(
+                    event.child, self.fixture.N
+                )
+            )
+        )
+
+    def final_absence_participants(
+        self, identity: tuple, events: list[Event]
+    ) -> list[Event]:
+        """Keep every event in a reintroduced occurrence's final history."""
+        assert self.graph is not None
+        continuous = [
+            event
+            for event in events
+            if (
+                event.child is not None
+                and self.absence_problem(
+                    identity, event.child, self.fixture.N
+                )
+                is None
+            )
+        ]
+        if not continuous:
+            return []
+        participating = list(continuous)
+        for event in events:
+            if event in participating or not self.has_reintroduction(
+                identity, event
+            ):
+                continue
+            if any(
+                event.child is not None
+                and terminal.child is not None
+                and event.child in self.graph.ancestors(terminal.child)
+                for terminal in continuous
+            ):
+                participating.append(event)
+        order = {
+            commit: index for index, commit in enumerate(self.graph.order)
+        }
+        return sorted(
+            participating,
+            key=lambda event: (
+                order.get(event.child, len(order)),
+                0 if event.mode == "direct" else 1,
+                event.reason_code,
+            ),
+        )
+
+    def aggregate_blocking_history(
+        self, identity: tuple, events: list[Event]
+    ) -> Event:
+        """Return non-authorizing evidence for all causal occurrences."""
+        assert events
+        authority_edges = self.stable_edges(
+            edge for event in events for edge in event.authority_edges
+        )
+        propagation_edges = self.stable_edges(
+            edge for event in events for edge in event.propagation_edges
+        )
+        neutral_parents = self.stable_oids(
+            parent for event in events for parent in event.neutral_parents
+        )
+        absent_parents = self.stable_oids(
+            parent for event in events for parent in event.absent_parents
+        )
+        causal_roots = self.stable_roots(
+            root for event in events for root in event.causal_roots
+        )
+        prior_records = self.stable_reason_records(
+            record for event in events for record in event.reason_records
+        )
+        reintroduced = any(
+            self.has_reintroduction(identity, event) for event in events
+        )
+        root_roles_compete = len(causal_roots) != 1
+        ambiguous = (
+            reintroduced
+            or root_roles_compete
+            or any(event.status == "ambiguous" for event in events)
+            or len({event.status for event in events}) != 1
+        )
+        status = "ambiguous" if ambiguous else events[-1].status
+        reason_code = (
+            "reintroduced-competing-occurrences"
+            if reintroduced
+            else "competing-blocking-events"
+        )
+        reason = (
+            "final absence has multiple causal occurrences: "
+            + "; ".join(
+                f"{event.reason_code}@{event.child}: {event.reason}"
+                for event in events
+            )
+        )
+        result = Event(
+            status,
+            "ambiguous" if status == "ambiguous" else events[-1].mode,
+            events[-1].child,
+            authority_edges,
+            propagation_edges,
+            neutral_parents,
+            absent_parents,
+            reason_code,
+            reason,
+        )
+        return self.attach_causal_metadata(
+            result, causal_roots, prior_records
+        )
+
     def select_event(self, identity: tuple) -> Event:
         events = self.direct_events(identity) + self.supplier_events(identity)
         valid = [event for event in events if event.status == "valid"]
+        participants = self.final_absence_participants(identity, events)
+        if (
+            len(participants) > 1
+            and any(
+                self.has_reintroduction(identity, event)
+                for event in participants
+            )
+        ):
+            return self.aggregate_blocking_history(identity, participants)
         if len(valid) == 1:
             chosen = valid[0]
             authority = {
@@ -1415,6 +1577,10 @@ class Classifier:
                 ),
             )
         if events:
+            if len(participants) > 1:
+                return self.aggregate_blocking_history(identity, participants)
+            if len(participants) == 1:
+                return participants[0]
             ambiguous = [
                 event for event in events if event.status == "ambiguous"
             ]
@@ -1631,6 +1797,11 @@ class Classifier:
             "M": fixture.M,
             "N": fixture.N,
             "expected_result": fixture.expected,
+            "range_base_validation": {
+                "status": "unchecked",
+                "M": fixture.M,
+                "reason": "M validation has not run",
+            },
         }
         objects = None
         try:
@@ -1647,6 +1818,35 @@ class Classifier:
                     objects,
                     self.metrics,
                 )
+                M_problem = self.selected_base_problem()
+                if M_problem:
+                    return {
+                        **base,
+                        "range_base_validation": {
+                            "status": "ambiguous",
+                            "M": fixture.M,
+                            "reason": M_problem,
+                        },
+                        "classification": "blocking-finding",
+                        "evidence_verdict": {
+                            "status": "ambiguous",
+                            "reason": M_problem,
+                        },
+                        "event_mode": "none",
+                        "authority_edges": [],
+                        "propagation_edges": [],
+                        "actions": [],
+                        "metrics": self.metrics.as_dict(),
+                        "details": fixture.details,
+                    }
+                base["range_base_validation"] = {
+                    "status": "valid",
+                    "M": fixture.M,
+                    "reason": (
+                        f"M {fixture.M} is a readable commit in the "
+                        f"C-rooted candidate ancestry through N {fixture.N}"
+                    ),
+                }
                 if (
                     fixture.budget_limit is not None
                     and self.metrics.graph_commits > fixture.budget_limit
@@ -1749,6 +1949,11 @@ class Classifier:
         ) as error:
             return {
                 **base,
+                "range_base_validation": {
+                    "status": "unreadable",
+                    "M": fixture.M,
+                    "reason": str(error),
+                },
                 "classification": "unreadable",
                 "evidence_verdict": {
                     "status": "unreadable",
@@ -3326,6 +3531,79 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
     )
 
 
+def r5_reintroduced_supplier_history(
+    root: Path, *, later_valid: bool
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    suffix = "valid" if later_valid else "invalid"
+    label = f"r5-reintroduced-supplier-{suffix}"
+    path = add_agent(repo, label)
+    original = repo.read(path)
+    C = repo.commit(f"create {label} action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch(f"{label}-supplier", C)
+    root_parent = claim(repo, (path,), "claim initial supplier occurrence")
+    valid_root = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve initial supplier occurrence",
+    )
+    repo.branch(f"{label}-carrier", C)
+    carrier = feature(repo, f"{label}-carrier")
+    M = repo.merge_commit(
+        (valid_root, carrier),
+        "adopt initial supplier absence",
+        removes=(path,),
+    )
+    repo.write(path, original)
+    if later_valid:
+        repo.write(evidence_path(label), f"# Evidence {label}: pending\n")
+    reintroduction = repo.commit("reintroduce the queue occurrence")
+    later_parent = reintroduction
+    if later_valid:
+        later_parent = claim(
+            repo, (path,), "claim reintroduced queue occurrence"
+        )
+        redeletion = delete_with_evidence(
+            repo,
+            ((label, path),),
+            "resolve reintroduced queue occurrence",
+        )
+    else:
+        repo.remove(path)
+        redeletion = repo.commit(
+            "delete reintroduced queue occurrence without authority"
+        )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        (
+            "R5-02-valid-redelete-after-supplier-reintroduction"
+            if later_valid
+            else "R5-01-invalid-redelete-after-supplier-reintroduction"
+        ),
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "initial_authority_parent": root_parent,
+            "initial_authority_child": valid_root,
+            "carrier": carrier,
+            "supplier_adoption": M,
+            "initial_absent_parent": valid_root,
+            "reintroduction": reintroduction,
+            "later_authority_parent": later_parent,
+            "later_authority_child": redeletion,
+            "later_authority_valid": later_valid,
+            "reason_children": [valid_root, M, redeletion],
+        },
+    )
+
+
 def generated_retry(repo: GitRepository, bad_path: str):
     finding = RECONCILE.Finding(
         "queue-name", Path(bad_path), "bad name", "rename it"
@@ -3757,6 +4035,99 @@ def p18_multiple_bases(root: Path) -> Fixture:
     )
 
 
+def p18_missing_M(root: Path) -> Fixture:
+    fixture = ordinary_linear_fixture(
+        root, "P18h-missing-M", valid=True
+    )
+    fixture.M = "f" * len(fixture.M)
+    fixture.expected = "unreadable"
+    fixture.details["M_failure"] = "missing-object"
+    return fixture
+
+
+def p18_noncommit_M(root: Path, kind: str) -> Fixture:
+    letter = {"blob": "i", "tree": "j", "tag": "k"}[kind]
+    fixture = ordinary_linear_fixture(
+        root, f"P18{letter}-noncommit-M-{kind}", valid=True
+    )
+    if kind == "blob":
+        M = fixture.repo.run(
+            "hash-object", "-w", "--stdin", input_text="not M\n"
+        ).stdout.strip()
+    elif kind == "tree":
+        M = fixture.repo.run("mktree", input_text="").stdout.strip()
+    elif kind == "tag":
+        blob = fixture.repo.run(
+            "hash-object", "-w", "--stdin", input_text="tag target\n"
+        ).stdout.strip()
+        M = fixture.repo.run(
+            "mktag",
+            input_text=(
+                f"object {blob}\n"
+                "type blob\n"
+                "tag selected-base\n"
+                "tagger Production Contract POC "
+                "<production-contract@example.invalid> "
+                "1800000000 +0000\n\n"
+                "non-commit selected base\n"
+            ),
+        ).stdout.strip()
+    else:
+        raise ValueError(kind)
+    fixture.M = M
+    fixture.expected = "unreadable"
+    fixture.details.update({"M_failure": "non-commit", "M_kind": kind})
+    return fixture
+
+
+def p18_unrelated_M(root: Path) -> Fixture:
+    fixture = ordinary_linear_fixture(
+        root, "P18l-unrelated-M", valid=True
+    )
+    empty = fixture.repo.run("mktree", input_text="").stdout.strip()
+    fixture.M = fixture.repo.commit_tree(empty, "unrelated M root")
+    fixture.expected = "blocking-finding"
+    fixture.details["M_failure"] = "unrelated-readable-commit"
+    return fixture
+
+
+def p18_M_after_N(root: Path) -> Fixture:
+    fixture = ordinary_linear_fixture(
+        root, "P18m-M-after-N", valid=True
+    )
+    fixture.repo.branch("after-N", fixture.N)
+    fixture.M = feature(fixture.repo, "p18m-after-N")
+    fixture.expected = "blocking-finding"
+    fixture.details["M_failure"] = "C-descendant-after-N"
+    return fixture
+
+
+def p18_M_endpoint(root: Path, endpoint: str) -> Fixture:
+    scenario = f"P18{'n' if endpoint == 'C' else 'o'}-M-equals-{endpoint}"
+    repo = GitRepository(root)
+    initialize(repo)
+    path = add_agent(repo, scenario.lower())
+    C = repo.commit("create endpoint-equality action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{scenario.lower()}-old")
+    repo.branch("candidate", C)
+    N = feature(repo, f"{scenario.lower()}-candidate")
+    M = C if endpoint == "C" else N
+    return Fixture(
+        scenario,
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "M_endpoint": endpoint,
+            "preserved_path": path,
+        },
+    )
+
+
 def pcx19_missing_claim_blob(root: Path) -> Fixture:
     fixture = ordinary_linear_fixture(
         root, "PCX-19-missing-claim-blob-recovery", valid=True
@@ -3880,6 +4251,14 @@ def scenario_builders():
         p18_missing_blob,
         p18_missing_tree,
         p18_multiple_bases,
+        p18_missing_M,
+        lambda root: p18_noncommit_M(root, "blob"),
+        lambda root: p18_noncommit_M(root, "tree"),
+        lambda root: p18_noncommit_M(root, "tag"),
+        p18_unrelated_M,
+        p18_M_after_N,
+        lambda root: p18_M_endpoint(root, "C"),
+        lambda root: p18_M_endpoint(root, "N"),
         p19_identities,
         p20_lifecycle_types,
         lambda root: pcx17_cherry_pick(root, "squash"),
@@ -3934,6 +4313,12 @@ def scenario_builders():
         r4_same_root_diamond,
         r4_distinct_root_diamond,
         r4_equal_root_plus_invalid,
+        lambda root: r5_reintroduced_supplier_history(
+            root, later_valid=False
+        ),
+        lambda root: r5_reintroduced_supplier_history(
+            root, later_valid=True
+        ),
     ]
 
 
@@ -4113,8 +4498,57 @@ def validate_result(result: dict):
             result["evidence_verdict"]["reason"]
         ):
             errors.append("P17 did not fail on post-event reintroduction")
-    if scenario.startswith("P18") and status != "unreadable":
+    M_unreadable = {
+        "P18h-missing-M",
+        "P18i-noncommit-M-blob",
+        "P18j-noncommit-M-tree",
+        "P18k-noncommit-M-tag",
+    }
+    M_ambiguous = {
+        "P18l-unrelated-M",
+        "P18m-M-after-N",
+    }
+    M_endpoints = {
+        "P18n-M-equals-C",
+        "P18o-M-equals-N",
+    }
+    if (
+        scenario.startswith("P18")
+        and scenario not in M_ambiguous | M_endpoints
+        and status != "unreadable"
+    ):
         errors.append("P18 did not return structured unreadable")
+    if scenario in M_unreadable | M_ambiguous:
+        expected_M_status = (
+            "unreadable" if scenario in M_unreadable else "ambiguous"
+        )
+        range_verdict = result["range_base_validation"]
+        if (
+            status != expected_M_status
+            or range_verdict["status"] != expected_M_status
+            or range_verdict["M"] != result["M"]
+            or result["M"] not in range_verdict["reason"]
+            or result["M"] not in result["evidence_verdict"]["reason"]
+            or actions
+            or result["event_mode"] != "none"
+            or authority
+            or propagation
+            or result["metrics"]["identity_calls"] != 0
+            or result["metrics"]["authority_calls"] != 0
+        ):
+            errors.append("P18 M gate did not fail before classification")
+    if scenario in M_endpoints:
+        endpoint = result["details"]["M_endpoint"]
+        expected_M = result[endpoint]
+        if (
+            result["range_base_validation"]["status"] != "valid"
+            or result["M"] != expected_M
+            or result["classification"] != "no-finding"
+            or status != "none"
+            or authority
+            or propagation
+        ):
+            errors.append("P18 rejected a permitted M endpoint equality")
     if scenario == "P19-production-identities":
         details = result["details"]
         for key in (
@@ -4548,6 +4982,68 @@ def validate_result(result: dict):
             or details["authority_events"][1] not in action["reason"]
         ):
             errors.append("R4-03 hid the additional invalid root")
+    if scenario.startswith("R5-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        expected_authority = {
+            (
+                details["initial_authority_parent"],
+                details["initial_authority_child"],
+            ),
+            (
+                details["later_authority_parent"],
+                details["later_authority_child"],
+            ),
+        }
+        expected_propagation = {
+            (details["carrier"], details["supplier_adoption"])
+        }
+        reason_children = {
+            record["source_child"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        root_children = {
+            root["root_child"]
+            for root in (
+                action["causal_roots"] if action is not None else []
+            )
+        }
+        later_edge = next(
+            (
+                edge
+                for edge in result["authority_edges"]
+                if edge["child"] == details["later_authority_child"]
+            ),
+            None,
+        )
+        if (
+            result["classification"] != "blocking-finding"
+            or status != "ambiguous"
+            or result["event_mode"] != "ambiguous"
+            or action is None
+            or action["event_child"]
+            != details["later_authority_child"]
+            or action["reason_code"]
+            != "reintroduced-competing-occurrences"
+            or authority != expected_authority
+            or propagation != expected_propagation
+            or details["initial_absent_parent"]
+            not in action["absent_parents"]
+            or {
+                details["initial_authority_child"],
+                details["later_authority_child"],
+            }
+            - root_children
+            or set(details["reason_children"]) - reason_children
+            or later_edge is None
+            or bool(later_edge["problem"])
+            == details["later_authority_valid"]
+        ):
+            errors.append(
+                "R5 reintroduction history lost a causal occurrence"
+            )
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
