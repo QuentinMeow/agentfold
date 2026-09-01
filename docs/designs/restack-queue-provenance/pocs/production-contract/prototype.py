@@ -15,10 +15,12 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import selectors
 import subprocess
 import sys
 import tempfile
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 HERE = Path(__file__).resolve()
@@ -47,28 +49,202 @@ class Unreadable(RuntimeError):
     """Required immutable Git evidence could not be read."""
 
 
+class BudgetExceeded(RuntimeError):
+    """A measured operation was refused before its work began."""
+
+    def __init__(self, counter: str, value: int, limit: int):
+        super().__init__(f"{counter}={value}>{limit}")
+        self.counter = counter
+        self.value = value
+        self.limit = limit
+        self.C: str | None = None
+
+
 @dataclasses.dataclass
 class Metrics:
     git_processes: int = 0
     graph_enumerations: int = 0
     graph_commits: int = 0
     graph_parent_edges: int = 0
+    graph_output_bytes: int = 0
+    graph_line_bytes: int = 0
+    graph_line_peak_bytes: int = 0
+    graph_lines: int = 0
+    graph_commit_tokens: int = 0
+    graph_parent_tokens: int = 0
+    graph_process_terminations: int = 0
+    graph_process_reaps: int = 0
+    graph_process_cleanup_checks: int = 0
+    graph_buffered_bytes: int = 0
+    graph_stream_chunks: int = 0
+    graph_stream_peak_chunk_bytes: int = 0
+    merge_base_output_bytes: int = 0
+    merge_base_line_bytes: int = 0
+    merge_base_line_peak_bytes: int = 0
+    merge_base_lines: int = 0
+    merge_base_tokens: int = 0
+    merge_base_process_terminations: int = 0
+    merge_base_process_reaps: int = 0
+    shallow_output_bytes: int = 0
+    shallow_line_bytes: int = 0
+    shallow_line_peak_bytes: int = 0
+    shallow_lines: int = 0
+    shallow_tokens: int = 0
+    shallow_process_terminations: int = 0
+    shallow_process_reaps: int = 0
     batch_processes: int = 0
     object_reads: int = 0
     object_cache_hits: int = 0
+    object_header_bytes: int = 0
+    object_payload_bytes: int = 0
+    object_payload_peak_bytes: int = 0
+    object_process_terminations: int = 0
+    object_process_reaps: int = 0
+    tree_entries: int = 0
+    tree_entry_name_bytes: int = 0
+    flattened_paths: int = 0
+    flattened_path_bytes: int = 0
+    flat_tree_peak_paths: int = 0
     queue_snapshots_requested: int = 0
     queue_subtree_reads: int = 0
     snapshot_cache_hits: int = 0
+    queue_paths: int = 0
+    queue_path_bytes: int = 0
+    queue_blob_bytes: int = 0
     identity_calls: int = 0
     authority_calls: int = 0
     support_certificate_calls: int = 0
     support_adoption_checks: int = 0
     support_paths_checked: int = 0
+    support_delta_candidates: int = 0
+    support_delta_rows: int = 0
+    support_referenced_paths: int = 0
+    support_anchor_rows: int = 0
+    support_obligations: int = 0
+    support_serialized_bytes: int = 0
+    dynamic_support_paths_traversed: int = 0
+    dynamic_support_paths_discovered: int = 0
+    dynamic_support_path_bytes: int = 0
     mutation_calls: int = 0
     per_action_history_walks: int = 0
+    carry_proof_nodes: int = 0
+    carry_proof_edges: int = 0
+    production_helper_calls: int = 0
+    production_helper_input_bytes: int = 0
+    production_parent_queries: int = 0
+    git_stderr_bytes: int = 0
+    _budget_limit: int | None = dataclasses.field(
+        default=None, repr=False
+    )
+    _posthoc_budget_accounting: bool = dataclasses.field(
+        default=False, repr=False
+    )
+    _budget_limits: dict[str, int] = dataclasses.field(
+        default_factory=dict, repr=False
+    )
+
+    HARD_LIMITS = {
+        "graph_output_bytes": 8 * 1024 * 1024,
+        "graph_line_bytes": 8 * 1024 * 1024,
+        "graph_line_peak_bytes": 1024 * 1024,
+        "graph_lines": 200_000,
+        "graph_commit_tokens": 200_000,
+        "graph_parent_tokens": 1_000_000,
+        "merge_base_output_bytes": 1024 * 1024,
+        "merge_base_line_bytes": 1024 * 1024,
+        "merge_base_line_peak_bytes": 1024,
+        "merge_base_lines": 20_000,
+        "merge_base_tokens": 20_000,
+        "shallow_output_bytes": 64,
+        "shallow_line_bytes": 63,
+        "shallow_line_peak_bytes": 16,
+        "shallow_lines": 2,
+        "shallow_tokens": 2,
+        "object_header_bytes": 64 * 1024 * 1024,
+        "object_payload_bytes": 64 * 1024 * 1024,
+        "object_payload_peak_bytes": 8 * 1024 * 1024,
+        "tree_entries": 1_000_000,
+        "tree_entry_name_bytes": 64 * 1024 * 1024,
+        "flattened_paths": 1_000_000,
+        "flattened_path_bytes": 64 * 1024 * 1024,
+        "flat_tree_peak_paths": 1_000_000,
+        "queue_paths": 1_000_000,
+        "queue_path_bytes": 64 * 1024 * 1024,
+        "queue_blob_bytes": 64 * 1024 * 1024,
+        "support_delta_candidates": 1_000_000,
+        "support_delta_rows": 1_000_000,
+        "support_referenced_paths": 1_000_000,
+        "support_anchor_rows": 1_000_000,
+        "support_obligations": 1_000_000,
+        "support_serialized_bytes": 64 * 1024 * 1024,
+        "dynamic_support_paths_traversed": 1_000_000,
+        "dynamic_support_paths_discovered": 1_000_000,
+        "dynamic_support_path_bytes": 64 * 1024 * 1024,
+        "production_helper_input_bytes": 64 * 1024 * 1024,
+        "git_stderr_bytes": 1024 * 1024,
+    }
+
+    def configure_budget(
+        self,
+        limit: int | None,
+        *,
+        limits: dict[str, int] | None = None,
+        posthoc_budget_accounting: bool = False,
+    ):
+        self._budget_limit = limit
+        self._budget_limits = dict(limits or {})
+        self._posthoc_budget_accounting = posthoc_budget_accounting
+
+    def limit_for(self, counter: str) -> int | None:
+        if counter in self._budget_limits:
+            return self._budget_limits[counter]
+        if self._budget_limit is not None:
+            return self._budget_limit
+        return self.HARD_LIMITS.get(counter)
+
+    def charge(self, counter: str, amount: int = 1):
+        """Charge before work; record only limit+1 when refusing a batch."""
+        if amount < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric charge {counter}={amount}")
+        current = getattr(self, counter)
+        attempted = current + amount
+        limit = self.limit_for(counter)
+        if (
+            limit is not None
+            and not self._posthoc_budget_accounting
+            and attempted > limit
+        ):
+            refused = limit + 1
+            setattr(self, counter, refused)
+            raise BudgetExceeded(counter, refused, limit)
+        setattr(self, counter, attempted)
+
+    def observe(self, counter: str, amount: int = 1):
+        """Record cleanup already performed; cleanup itself is never refused."""
+        if amount < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric observation {counter}={amount}")
+        setattr(self, counter, getattr(self, counter) + amount)
+
+    def admit_peak(self, counter: str, value: int):
+        """Refuse an individual allocation before it exceeds its peak cap."""
+        if value < 0 or not hasattr(self, counter) or counter.startswith("_"):
+            raise ValueError(f"invalid metric peak {counter}={value}")
+        limit = self.limit_for(counter)
+        if (
+            limit is not None
+            and not self._posthoc_budget_accounting
+            and value > limit
+        ):
+            setattr(self, counter, limit + 1)
+            raise BudgetExceeded(counter, limit + 1, limit)
+        setattr(self, counter, max(getattr(self, counter), value))
 
     def as_dict(self):
-        return dataclasses.asdict(self)
+        return {
+            field.name: getattr(self, field.name)
+            for field in dataclasses.fields(self)
+            if not field.name.startswith("_")
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,13 +258,19 @@ class ActionState:
 class Fixture:
     scenario: str
     repo: "GitRepository"
-    C: str
+    expected_C: str
     O: str
-    M: str
+    candidate_landmark: str
     N: str
     expected: str
     details: dict = dataclasses.field(default_factory=dict)
     budget_limit: int | None = None
+    budget_limits: dict[str, int] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class RepositoryView:
+    root: Path
 
 
 @dataclasses.dataclass
@@ -109,6 +291,20 @@ class Damage:
     skip_persisted_candidate_continuity: bool = False
     skip_old_side_continuity: bool = False
     skip_supplier_support_certificate: bool = False
+    universal_ancestor_carry_scan: bool = False
+    ignore_outside_c_collision: bool = False
+    ignore_absent_c_arm: bool = False
+    first_parent_carry_only: bool = False
+    skip_carry_compatibility: bool = False
+    unmetered_cone_work: bool = False
+    posthoc_budget_accounting: bool = False
+    ambient_git_diagnostics: bool = False
+    reopen_outside_c_boundary_ancestry: bool = False
+    buffered_graph_output: bool = False
+    unmetered_object_bytes: bool = False
+    unmetered_tree_paths: bool = False
+    unmetered_dynamic_support: bool = False
+    unmetered_support_construction: bool = False
 
 
 @dataclasses.dataclass
@@ -125,6 +321,7 @@ class Event:
     causal_roots: list[dict] = dataclasses.field(default_factory=list)
     reason_records: list[dict] = dataclasses.field(default_factory=list)
     support_checks: list[dict] = dataclasses.field(default_factory=list)
+    carry_proofs: list[dict] = dataclasses.field(default_factory=list)
 
 
 def is_git_command(command) -> bool:
@@ -135,13 +332,69 @@ def is_git_command(command) -> bool:
     )
 
 
+def stable_git_environment(environment=None):
+    result = dict(os.environ if environment is None else environment)
+    result.update(
+        {
+            "LANG": "C",
+            "LANGUAGE": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+        }
+    )
+    return result
+
+
+def stable_git_failure(arguments, stderr: str) -> str:
+    oids = re.findall(r"(?<![0-9a-f])[0-9a-f]{40,64}(?![0-9a-f])", stderr)
+    if oids:
+        return f"missing-or-malformed-commit:{oids[0]}"
+    operation = next(
+        (argument for argument in arguments if not argument.startswith("-")),
+        "unknown",
+    )
+    return f"git-command-failed:{operation}"
+
+
 @contextlib.contextmanager
-def count_production_git(metrics: Metrics):
+def temporary_environment(**updates):
+    saved = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@contextlib.contextmanager
+def count_production_git(
+    metrics: Metrics, *, stable_git_diagnostics: bool = True
+):
     """Count each Git child spawned by imported production helpers once."""
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
-            metrics.git_processes += 1
+            encoded = sum(
+                len(str(argument).encode("utf-8", errors="surrogateescape"))
+                for argument in command
+            )
+            metrics.charge("production_helper_calls")
+            metrics.charge("production_helper_input_bytes", encoded)
+            command_text = tuple(str(argument) for argument in command)
+            if (
+                "rev-list" in command_text
+                and "--parents" in command_text
+                and "-n" in command_text
+                and "1" in command_text
+            ):
+                metrics.charge("production_parent_queries")
+            metrics.charge("git_processes")
+            if stable_git_diagnostics:
+                kwargs["env"] = stable_git_environment(kwargs.get("env"))
         return REAL_POPEN(command, *args, **kwargs)
 
     original_popen = subprocess.Popen
@@ -195,7 +448,7 @@ class GitRepository:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
+            env=stable_git_environment(env),
             check=False,
         )
         if check and result.returncode:
@@ -238,6 +491,7 @@ class GitRepository:
                 "GIT_COMMITTER_EMAIL": "production-contract@example.invalid",
                 "GIT_AUTHOR_DATE": stamp,
                 "GIT_COMMITTER_DATE": stamp,
+                "GIT_EDITOR": "true",
             }
         )
         return environment
@@ -300,7 +554,13 @@ class GitRepository:
         return hidden, source
 
 
-def run_git(root: Path, metrics: Metrics, *arguments, check=True):
+def run_git(
+    root: Path,
+    metrics: Metrics,
+    *arguments,
+    check=True,
+    stable_git_diagnostics=True,
+):
     # count_production_git observes this subprocess at the Popen boundary.
     result = REAL_RUN(
         ["git", *arguments],
@@ -308,31 +568,224 @@ def run_git(root: Path, metrics: Metrics, *arguments, check=True):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=(stable_git_environment() if stable_git_diagnostics else None),
         check=False,
     )
     if check and result.returncode:
         raise Unreadable(
-            result.stderr.strip()
-            or f"git {' '.join(arguments)} failed ({result.returncode})"
+            stable_git_failure(arguments, result.stderr)
+            if stable_git_diagnostics
+            else (
+                result.stderr.strip()
+                or f"git {' '.join(arguments)} failed ({result.returncode})"
+            )
         )
     return result
+
+
+def _terminate_and_reap(
+    process: subprocess.Popen,
+    metrics: Metrics,
+    *,
+    counter_prefix: str,
+):
+    """Terminate a refused Git child and prove that it was reaped."""
+    if process.poll() is None:
+        process.terminate()
+        metrics.observe(f"{counter_prefix}_process_terminations")
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    metrics.observe(f"{counter_prefix}_process_reaps")
+    metrics.observe("graph_process_cleanup_checks")
+    if process.poll() is None:
+        raise RuntimeError("bounded Git child was not reaped")
+
+
+def bounded_git_lines(
+    root: Path,
+    metrics: Metrics,
+    arguments: tuple[str, ...],
+    *,
+    counter_prefix: str,
+    buffered_damage: bool = False,
+    stable_git_diagnostics: bool = True,
+    line_callback: Callable[[bytes], None] | None = None,
+    command_prefix: tuple[str, ...] = ("git",),
+) -> tuple[int, tuple[bytes, ...], bytes]:
+    """Read one Git command with bounded chunks and transactional output."""
+    stream_chunk_bytes = 256
+    output_counter = f"{counter_prefix}_output_bytes"
+    line_counter = f"{counter_prefix}_line_bytes"
+    line_peak_counter = f"{counter_prefix}_line_peak_bytes"
+    lines_counter = f"{counter_prefix}_lines"
+    if buffered_damage:
+        result = run_git(
+            root,
+            metrics,
+            *arguments,
+            check=False,
+            stable_git_diagnostics=stable_git_diagnostics,
+        )
+        raw = result.stdout.encode("utf-8", errors="surrogateescape")
+        metrics.observe("graph_buffered_bytes", len(raw))
+        metrics.charge(output_counter, len(raw))
+        metrics.charge(line_counter, len(raw.replace(b"\n", b"")))
+        lines = tuple(raw.splitlines())
+        metrics.admit_peak(
+            line_peak_counter, max((len(line) for line in lines), default=0)
+        )
+        metrics.charge(lines_counter, len(lines))
+        metrics.observe(f"{counter_prefix}_process_reaps")
+        if line_callback is not None:
+            for line in lines:
+                line_callback(line)
+        return (
+            result.returncode,
+            lines,
+            result.stderr.encode("utf-8", errors="surrogateescape"),
+        )
+
+    metrics.charge("git_processes")
+    process = REAL_POPEN(
+        [*command_prefix, *arguments],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=(stable_git_environment() if stable_git_diagnostics else None),
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    line = bytearray()
+    stderr = bytearray()
+
+    def bounded_read_size(counter: str) -> int:
+        if metrics._posthoc_budget_accounting:
+            return stream_chunk_bytes
+        limit = metrics.limit_for(counter)
+        if limit is None:
+            return stream_chunk_bytes
+        return max(
+            1,
+            min(
+                stream_chunk_bytes,
+                limit - getattr(metrics, counter) + 1,
+            ),
+        )
+
+    try:
+        while selector.get_map():
+            for key, _events in selector.select():
+                stream = key.fileobj
+                if key.data == "stdout":
+                    peak_limit = metrics.limit_for(line_peak_counter)
+                    peak_room = (
+                        stream_chunk_bytes
+                        if peak_limit is None
+                        else max(1, peak_limit - len(line) + 1)
+                    )
+                    size = min(
+                        bounded_read_size(output_counter),
+                        bounded_read_size(line_counter),
+                        (
+                            stream_chunk_bytes
+                            if metrics._posthoc_budget_accounting
+                            else peak_room
+                        ),
+                    )
+                else:
+                    size = bounded_read_size("git_stderr_bytes")
+                chunk = (
+                    stream.readline(size)
+                    if key.data == "stdout"
+                    else os.read(stream.fileno(), size)
+                )
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                if key.data == "stderr":
+                    metrics.charge("git_stderr_bytes", len(chunk))
+                    stderr.extend(chunk)
+                    continue
+                if counter_prefix == "graph":
+                    metrics.observe("graph_stream_chunks")
+                    metrics.admit_peak(
+                        "graph_stream_peak_chunk_bytes", len(chunk)
+                    )
+                metrics.charge(output_counter, len(chunk))
+                metrics.charge(line_counter, len(chunk) - chunk.count(b"\n"))
+                start = 0
+                while True:
+                    newline = chunk.find(b"\n", start)
+                    if newline < 0:
+                        metrics.admit_peak(
+                            line_peak_counter,
+                            len(line) + len(chunk[start:]),
+                        )
+                        line.extend(chunk[start:])
+                        break
+                    metrics.admit_peak(
+                        line_peak_counter,
+                        len(line) + newline - start,
+                    )
+                    line.extend(chunk[start:newline])
+                    metrics.charge(lines_counter)
+                    completed = bytes(line)
+                    if line_callback is not None:
+                        line_callback(completed)
+                    line.clear()
+                    start = newline + 1
+        if line:
+            metrics.charge(lines_counter)
+            completed = bytes(line)
+            if line_callback is not None:
+                line_callback(completed)
+        returncode = process.wait(timeout=5)
+        metrics.observe(f"{counter_prefix}_process_reaps")
+        metrics.observe("graph_process_cleanup_checks")
+        return returncode, (), bytes(stderr)
+    except (BudgetExceeded, Unreadable):
+        _terminate_and_reap(
+            process, metrics, counter_prefix=counter_prefix
+        )
+        raise
+    finally:
+        selector.close()
 
 
 class ObjectDatabase:
     """One cat-file process plus immutable object/tree/snapshot caches."""
 
-    def __init__(self, root: Path, metrics: Metrics):
+    def __init__(
+        self,
+        root: Path,
+        metrics: Metrics,
+        *,
+        damage: Damage | None = None,
+        stable_git_diagnostics: bool = True,
+    ):
         self.root = root
         self.metrics = metrics
+        self.damage = damage or Damage()
+        metrics.charge("git_processes")
+        metrics.charge("batch_processes")
         self.process = REAL_POPEN(
             ["git", "--no-replace-objects", "cat-file", "--batch"],
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=(
+                stable_git_environment()
+                if stable_git_diagnostics
+                else None
+            ),
         )
-        metrics.git_processes += 1
-        metrics.batch_processes += 1
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
         self.flat_trees: dict[str, dict[str, tuple[str, str]]] = {}
@@ -341,22 +794,54 @@ class ObjectDatabase:
         ] = {}
 
     def close(self):
-        if self.process.stdin:
-            self.process.stdin.close()
-        if self.process.stdout:
-            self.process.stdout.close()
-        self.process.wait(timeout=5)
+        if self.process.poll() is None:
+            with contextlib.suppress(BrokenPipeError):
+                if self.process.stdin:
+                    self.process.stdin.close()
+            if self.process.stdout:
+                self.process.stdout.close()
+            self.process.wait(timeout=5)
+
+    def abort(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            self.metrics.observe("object_process_terminations")
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        self.metrics.observe("object_process_reaps")
+        if self.process.poll() is None:
+            raise RuntimeError("cat-file child was not reaped")
 
     def read(self, oid: str) -> tuple[str, bytes]:
         if oid in self.objects:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.objects[oid]
-        self.metrics.object_reads += 1
+        self.metrics.charge("object_reads")
         assert self.process.stdin is not None
         assert self.process.stdout is not None
-        self.process.stdin.write(oid.encode("ascii") + b"\n")
-        self.process.stdin.flush()
-        header = self.process.stdout.readline().rstrip(b"\n").split()
+        try:
+            self.process.stdin.write(oid.encode("ascii") + b"\n")
+            self.process.stdin.flush()
+            header_limit = self.metrics.limit_for("object_header_bytes")
+            header_room = (
+                4096
+                if header_limit is None
+                else max(
+                    1,
+                    header_limit - self.metrics.object_header_bytes + 1,
+                )
+            )
+            raw_header = self.process.stdout.readline(header_room)
+            self.metrics.charge("object_header_bytes", len(raw_header))
+            if not raw_header.endswith(b"\n"):
+                raise Unreadable(f"malformed cat-file frame for {oid}")
+            header = raw_header.rstrip(b"\n").split()
+        except BudgetExceeded:
+            self.abort()
+            raise
         if len(header) == 2 and header[1] == b"missing":
             raise Unreadable(f"required Git object {oid} is missing")
         if len(header) != 3:
@@ -365,7 +850,14 @@ class ObjectDatabase:
             size = int(header[2])
         except ValueError as error:
             raise Unreadable(f"malformed cat-file size for {oid}") from error
-        payload = self.process.stdout.read(size)
+        try:
+            if not self.damage.unmetered_object_bytes:
+                self.metrics.admit_peak("object_payload_peak_bytes", size)
+                self.metrics.charge("object_payload_bytes", size)
+            payload = self.process.stdout.read(size)
+        except BudgetExceeded:
+            self.abort()
+            raise
         if len(payload) != size or self.process.stdout.read(1) != b"\n":
             raise Unreadable(f"truncated cat-file frame for {oid}")
         result = (header[1].decode("ascii"), payload)
@@ -395,7 +887,7 @@ class ObjectDatabase:
 
     def tree_entries(self, oid: str) -> dict[str, tuple[str, str]]:
         if oid in self.trees:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.trees[oid]
         kind, payload = self.read(oid)
         if kind != "tree":
@@ -408,8 +900,12 @@ class ObjectDatabase:
             nul = payload.find(b"\0", space + 1)
             if space <= offset or nul < 0 or nul + 1 + width > len(payload):
                 raise Unreadable(f"malformed tree {oid}")
+            raw_name = payload[space + 1:nul]
+            if not self.damage.unmetered_tree_paths:
+                self.metrics.charge("tree_entries")
+                self.metrics.charge("tree_entry_name_bytes", len(raw_name))
             mode = payload[offset:space].decode("ascii")
-            name = payload[space + 1:nul].decode(
+            name = raw_name.decode(
                 "utf-8", errors="surrogateescape"
             )
             child = payload[nul + 1:nul + 1 + width].hex()
@@ -422,21 +918,32 @@ class ObjectDatabase:
         """Return every leaf path with its exact mode and object OID."""
         root = self.commit_tree(commit)
         if root in self.flat_trees:
-            self.metrics.object_cache_hits += 1
+            self.metrics.charge("object_cache_hits")
             return self.flat_trees[root]
         flattened: dict[str, tuple[str, str]] = {}
+        leaf_count = 0
 
-        def walk(tree_oid: str, prefix: str):
-            for name, (mode, child) in sorted(
-                self.tree_entries(tree_oid).items()
-            ):
+        def walk(tree_oid: str, prefix: str, prefix_bytes: int):
+            nonlocal leaf_count
+            for name, (mode, child) in self.tree_entries(tree_oid).items():
+                path_bytes = len(
+                    name.encode("utf-8", errors="surrogateescape")
+                ) + (prefix_bytes + 1 if prefix else 0)
+                if not self.damage.unmetered_tree_paths:
+                    self.metrics.charge("flattened_paths")
+                    self.metrics.charge("flattened_path_bytes", path_bytes)
                 path = f"{prefix}/{name}" if prefix else name
                 if mode in {"40000", "040000"}:
-                    walk(child, path)
+                    walk(child, path, path_bytes)
                 else:
+                    leaf_count += 1
+                    if not self.damage.unmetered_tree_paths:
+                        self.metrics.admit_peak(
+                            "flat_tree_peak_paths", leaf_count
+                        )
                     flattened[path] = (mode, child)
 
-        walk(root, "")
+        walk(root, "", 0)
         self.flat_trees[root] = flattened
         return flattened
 
@@ -470,21 +977,26 @@ class ObjectDatabase:
         return oid
 
     def snapshot(self, commit: str):
-        self.metrics.queue_snapshots_requested += 1
+        self.metrics.charge("queue_snapshots_requested")
         queue_tree = self.queue_tree(commit)
         if queue_tree in self.snapshots:
-            self.metrics.snapshot_cache_hits += 1
+            self.metrics.charge("snapshot_cache_hits")
             return self.snapshots[queue_tree]
-        self.metrics.queue_subtree_reads += 1
+        self.metrics.charge("queue_subtree_reads")
         by_identity: dict[tuple, list[ActionState]] = {}
 
-        def walk(tree_oid: str, prefix: str):
-            for name, (mode, child) in sorted(
-                self.tree_entries(tree_oid).items()
-            ):
+        def walk(tree_oid: str, prefix: str, prefix_bytes: int):
+            for name, (mode, child) in self.tree_entries(tree_oid).items():
+                path_bytes = (
+                    prefix_bytes
+                    + 1
+                    + len(name.encode("utf-8", errors="surrogateescape"))
+                )
+                self.metrics.charge("queue_paths")
+                self.metrics.charge("queue_path_bytes", path_bytes)
                 path = f"{prefix}/{name}"
                 if mode in {"40000", "040000"}:
-                    walk(child, path)
+                    walk(child, path, path_bytes)
                     continue
                 parts = Path(path).parts
                 if (
@@ -498,19 +1010,20 @@ class ObjectDatabase:
                 if kind != "blob":
                     raise Unreadable(f"queue item {path} is a {kind}")
                 try:
+                    self.metrics.charge("queue_blob_bytes", len(payload))
                     text = payload.decode("utf-8")
                 except UnicodeDecodeError as error:
                     raise Unreadable(
                         f"queue item {path} is not UTF-8"
                     ) from error
-                self.metrics.identity_calls += 1
+                self.metrics.charge("identity_calls")
                 identity = RECONCILE.queue_action_identity(path, text)
                 by_identity.setdefault(identity, []).append(
                     ActionState(path, text, child)
                 )
 
         if queue_tree is not None:
-            walk(queue_tree, "message-queue")
+            walk(queue_tree, "message-queue", len(b"message-queue"))
         frozen = {
             identity: tuple(sorted(states, key=lambda state: state.path))
             for identity, states in by_identity.items()
@@ -525,78 +1038,181 @@ class Graph:
     def __init__(
         self,
         root: Path,
-        C: str,
         O: str,
         N: str,
         objects: ObjectDatabase,
         metrics: Metrics,
+        *,
+        reopen_outside_c_boundary_ancestry: bool = False,
+        buffered_graph_output: bool = False,
+        stable_git_diagnostics: bool = True,
     ):
         self.root = root
-        self.C = C
         self.O = O
         self.N = N
         self.objects = objects
         self.metrics = metrics
-        shallow = run_git(
-            root, metrics, "rev-parse", "--is-shallow-repository"
-        ).stdout.strip()
+        shallow_values: list[str] = []
+
+        def receive_shallow(line: bytes):
+            if not line:
+                return
+            metrics.charge("shallow_tokens")
+            try:
+                value = line.decode("ascii")
+            except UnicodeDecodeError as error:
+                raise Unreadable("shallow probe emitted non-ASCII data") from error
+            if value not in {"true", "false"}:
+                raise Unreadable("shallow probe emitted malformed data")
+            shallow_values.append(value)
+
+        shallow_returncode, _shallow_lines, shallow_stderr = bounded_git_lines(
+            root,
+            metrics,
+            ("rev-parse", "--is-shallow-repository"),
+            counter_prefix="shallow",
+            stable_git_diagnostics=stable_git_diagnostics,
+            line_callback=receive_shallow,
+        )
+        if shallow_returncode or len(shallow_values) != 1:
+            diagnostic = shallow_stderr.decode(
+                "utf-8", errors="surrogateescape"
+            )
+            raise Unreadable(
+                stable_git_failure(
+                    ("rev-parse", "--is-shallow-repository"), diagnostic
+                )
+                if stable_git_diagnostics
+                else diagnostic.strip() or "could not inspect shallow state"
+            )
+        shallow = shallow_values[0]
         if shallow == "true":
             raise Unreadable("required post-C history is shallow")
-        for label, oid in (("C", C), ("O", O), ("N", N)):
+        for label, oid in (("O", O), ("N", N)):
             try:
                 objects.commit_tree(oid)
             except Unreadable as error:
                 raise Unreadable(f"{label}: {error}") from error
-        bases = run_git(
-            root,
-            metrics,
+        base_arguments = (
             "--no-replace-objects",
             "merge-base",
             "--all",
             O,
             N,
-            check=False,
         )
-        if bases.returncode:
-            raise Unreadable(
-                bases.stderr.strip() or "could not determine the merge base"
+        merge_bases: list[str] = []
+
+        def receive_base(line: bytes):
+            if not line:
+                return
+            metrics.charge("merge_base_tokens")
+            try:
+                oid = line.decode("ascii")
+            except UnicodeDecodeError as error:
+                raise Unreadable(
+                    "merge-base emitted a non-ASCII object ID"
+                ) from error
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+                raise Unreadable("merge-base emitted a malformed object ID")
+            merge_bases.append(oid)
+
+        base_returncode, _base_lines, base_stderr = bounded_git_lines(
+            root,
+            metrics,
+            base_arguments,
+            counter_prefix="merge_base",
+            stable_git_diagnostics=stable_git_diagnostics,
+            line_callback=receive_base,
+        )
+        if base_returncode:
+            decoded_stderr = base_stderr.decode(
+                "utf-8", errors="surrogateescape"
             )
-        merge_bases = tuple(line for line in bases.stdout.splitlines() if line)
+            raise Unreadable(
+                stable_git_failure(
+                    ("merge-base", "--all", O, N), decoded_stderr
+                )
+                if stable_git_diagnostics
+                else (
+                    decoded_stderr.strip()
+                    or "could not determine the merge base"
+                )
+            )
+        merge_bases = tuple(merge_bases)
         if len(merge_bases) != 1:
             raise Unreadable(
                 f"expected exactly one merge base C; found {len(merge_bases)}"
             )
-        if merge_bases[0] != C:
-            raise Unreadable(
-                f"declared C {C} is not the unique merge base {merge_bases[0]}"
-            )
-        metrics.graph_enumerations += 1
-        listing = run_git(
-            root,
-            metrics,
+        self.C = merge_bases[0]
+        try:
+            objects.commit_tree(self.C)
+        except Unreadable as error:
+            raise Unreadable(f"derived C: {error}") from error
+        listing_arguments = [
             "--no-replace-objects",
             "rev-list",
             "--parents",
             "--topo-order",
             "--reverse",
-            O,
-            N,
-            f"^{C}",
-        )
-        self.order = [C]
-        self.parents: dict[str, tuple[str, ...]] = {C: ()}
-        for line in listing.stdout.splitlines():
-            fields = line.split()
-            if not fields:
-                continue
+        ]
+        if not reopen_outside_c_boundary_ancestry:
+            listing_arguments.append("--ancestry-path")
+        metrics.charge("graph_enumerations")
+        local_order = [self.C]
+        local_parents: dict[str, tuple[str, ...]] = {self.C: ()}
+        seen = {self.C}
+        metrics.charge("graph_commits")
+
+        def receive_graph_line(raw_line: bytes):
+            if not raw_line:
+                return
+            token_count = raw_line.count(b" ") + 1
+            metrics.charge("graph_commit_tokens")
+            metrics.charge("graph_parent_tokens", token_count - 1)
+            metrics.charge("graph_parent_edges", token_count - 1)
+            try:
+                fields = raw_line.decode("ascii").split()
+            except UnicodeDecodeError as error:
+                raise Unreadable("rev-list emitted non-ASCII graph data") from error
+            if len(fields) != token_count or any(
+                not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", field)
+                for field in fields
+            ):
+                raise Unreadable("rev-list emitted a malformed graph line")
             commit, raw_parents = fields[0], tuple(fields[1:])
-            self.order.append(commit)
-            self.parents[commit] = raw_parents
-        self.order = list(dict.fromkeys(self.order))
-        metrics.graph_commits = len(self.order)
-        metrics.graph_parent_edges = sum(
-            len(value) for value in self.parents.values()
-        )
+            if commit in seen:
+                return
+            metrics.charge("graph_commits")
+            seen.add(commit)
+            local_order.append(commit)
+            local_parents[commit] = raw_parents
+
+        try:
+            listing_returncode, _listing_lines, listing_stderr = (
+                bounded_git_lines(
+                    root,
+                    metrics,
+                    tuple([*listing_arguments, O, N, f"^{self.C}"]),
+                    counter_prefix="graph",
+                    buffered_damage=buffered_graph_output,
+                    stable_git_diagnostics=stable_git_diagnostics,
+                    line_callback=receive_graph_line,
+                )
+            )
+        except BudgetExceeded as error:
+            error.C = self.C
+            raise
+        if listing_returncode:
+            decoded_stderr = listing_stderr.decode(
+                "utf-8", errors="surrogateescape"
+            )
+            raise Unreadable(
+                stable_git_failure(tuple(listing_arguments), decoded_stderr)
+                if stable_git_diagnostics
+                else decoded_stderr.strip() or "could not enumerate post-C graph"
+            )
+        self.order = local_order
+        self.parents = local_parents
         self.children: dict[str, list[str]] = {
             commit: [] for commit in self.order
         }
@@ -606,9 +1222,24 @@ class Graph:
                     self.children.setdefault(parent, []).append(child)
         self.old_nodes = self.ancestors(O)
         self.new_nodes = self.ancestors(N)
-        if C not in self.old_nodes or C not in self.new_nodes:
+        if self.C not in self.old_nodes or self.C not in self.new_nodes:
             raise Unreadable("both tips must descend from C")
-        self.candidate_nodes = self.new_nodes - self.old_nodes
+        self.c_descendants = self.descendants(self.C)
+        self.intrinsic_candidate_nodes = self.new_nodes.intersection(
+            self.c_descendants
+        )
+        self.boundary_parents = {
+            parent
+            for child in self.intrinsic_candidate_nodes
+            for parent in self.parents.get(child, ())
+            if parent not in self.c_descendants
+        }
+        self.identity_nodes = (
+            self.intrinsic_candidate_nodes | self.boundary_parents
+        )
+        self.candidate_nodes = set(self.intrinsic_candidate_nodes)
+        if reopen_outside_c_boundary_ancestry:
+            self.candidate_nodes.update(self.boundary_parents)
 
     def ancestors(self, tip: str) -> set[str]:
         seen = set()
@@ -644,6 +1275,11 @@ class Graph:
         selected = set(commits)
         return [commit for commit in self.order if commit in selected]
 
+    def ordered_identity_nodes(self) -> list[str]:
+        """Enumerate intrinsic nodes, then immediate boundaries, never ancestors."""
+        intrinsic = self.ordered(self.intrinsic_candidate_nodes)
+        return intrinsic + sorted(self.boundary_parents)
+
 
 class Classifier:
     """In-memory provenance over one enumerated graph and cached snapshots."""
@@ -652,8 +1288,59 @@ class Classifier:
         self.fixture = fixture
         self.damage = damage or Damage()
         self.metrics = Metrics()
+        self.metrics.configure_budget(
+            None if self.damage.unmetered_cone_work else fixture.budget_limit,
+            limits=(
+                {}
+                if self.damage.unmetered_cone_work
+                else fixture.budget_limits
+            ),
+            posthoc_budget_accounting=(
+                self.damage.posthoc_budget_accounting
+            ),
+        )
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
+        self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
+
+    def budget_overflows(self) -> list[tuple[str, int]]:
+        if self.damage.unmetered_cone_work:
+            return []
+        return sorted(
+            (name, value)
+            for name, value in self.metrics.as_dict().items()
+            if (
+                self.metrics.limit_for(name) is not None
+                and value > self.metrics.limit_for(name)
+            )
+        )
+
+    def budget_result(self, base: dict) -> dict | None:
+        overflows = self.budget_overflows()
+        if not overflows:
+            return None
+        reason = "; ".join(
+            f"{name}={value}>{self.metrics.limit_for(name)}"
+            for name, value in overflows
+        )
+        return {
+            **base,
+            "audit_exit": 2,
+            "classification": "blocking-finding",
+            "evidence_verdict": {
+                "status": "ambiguous",
+                "reason": f"measured work budget exceeded: {reason}",
+            },
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+            "metrics": self.metrics.as_dict(),
+            "details": self.fixture.details,
+        }
 
     def states(
         self, revision: str, identity: tuple
@@ -675,42 +1362,215 @@ class Classifier:
             "production_tuple_sha256": hashlib.sha256(payload).hexdigest(),
         }
 
-    def selected_base_problem(self) -> str | None:
-        """Validate declared M before any identity or authority work."""
-        assert self.objects is not None
-        assert self.graph is not None
-        M = self.fixture.M
-        try:
-            tree = self.objects.commit_tree(M)
-            self.objects.tree_entries(tree)
-        except Unreadable as error:
-            raise Unreadable(f"M {M}: {error}") from error
-        if M not in self.graph.new_nodes:
-            return (
-                f"declared M {M} is outside the required C-rooted candidate "
-                f"region: M must descend from or equal C {self.fixture.C} "
-                f"and be an ancestor of or equal N {self.fixture.N}"
-            )
-        return None
+    def charge_production_helper_input(self, *values: str):
+        """Bound imported helper inputs before calling production code."""
+        self.metrics.charge("production_helper_calls")
+        self.metrics.charge(
+            "production_helper_input_bytes",
+            sum(
+                len(value.encode("utf-8", errors="surrogateescape"))
+                for value in values
+            ),
+        )
 
-    def unique_carry_problem(
-        self, identity: tuple, tip: str
-    ) -> str | None:
+    def carry_proof(self, identity: tuple, tip: str) -> dict:
+        """Prove one live occurrence by C-rooted edges, not all ancestors."""
         assert self.graph is not None
-        region = self.graph.ancestors(tip)
-        if self.graph.C not in region:
-            return f"carrying parent {tip} is not rooted at C"
-        for commit in self.graph.ordered(region):
-            multiplicity = len(self.states(commit, identity))
-            if multiplicity != 1:
-                paths = [
-                    state.path for state in self.states(commit, identity)
-                ]
-                return (
-                    f"C-rooted carrying history is discontinuous at {commit}: "
-                    f"multiplicity {multiplicity}, paths {paths}"
+        key = (identity, tip)
+        if key in self.carry_proof_cache:
+            return self.carry_proof_cache[key]
+
+        if self.damage.universal_ancestor_carry_scan:
+            region = self.graph.ancestors(tip)
+            problem = None
+            for commit in self.graph.ordered(region):
+                multiplicity = len(self.states(commit, identity))
+                if multiplicity != 1:
+                    paths = [state.path for state in self.states(commit, identity)]
+                    problem = (
+                        "DAMAGED universal ancestor scan rejected "
+                        f"{commit}: multiplicity {multiplicity}, paths {paths}"
+                    )
+                    break
+            result = {
+                "tip": tip,
+                "status": "valid" if problem is None else "ambiguous",
+                "reason": problem,
+                "edges": [],
+                "outside_neutral": [],
+                "outside_collisions": [],
+                "absent_c_parents": [],
+            }
+            self.carry_proof_cache[key] = result
+            return result
+
+        visiting: set[str] = set()
+        memo: dict[str, str | None] = {}
+        edges: list[dict] = []
+        outside_neutral: list[str] = []
+        outside_collisions: list[dict] = []
+        absent_c_parents: list[str] = []
+
+        def fail(message: str) -> str:
+            return message
+
+        def trace(child: str) -> str | None:
+            if child in memo:
+                return memo[child]
+            if child in visiting:
+                return fail(f"C-rooted carry graph cycles at {child}")
+            if child not in self.graph.c_descendants:
+                return fail(f"carrying node {child} is outside the C-rooted cone")
+            self.metrics.charge("carry_proof_nodes")
+            visiting.add(child)
+            child_states = self.states(child, identity)
+            if len(child_states) != 1:
+                problem = fail(
+                    f"C-rooted carrying node {child} has multiplicity "
+                    f"{len(child_states)}"
                 )
-        return None
+                visiting.remove(child)
+                memo[child] = problem
+                return problem
+            if child == self.graph.C:
+                visiting.remove(child)
+                memo[child] = None
+                return None
+
+            after = child_states[0]
+            carrying: list[tuple[str, ActionState]] = []
+            local_absent: list[str] = []
+            local_collisions: list[dict] = []
+            local_neutral: list[str] = []
+            if self.damage.first_parent_carry_only:
+                parents = list(self.graph.parents.get(child, ()))[:1]
+            else:
+                parents = sorted(self.graph.parents.get(child, ()))
+            for parent in parents:
+                self.metrics.charge("carry_proof_edges")
+                states = self.states(parent, identity)
+                if parent in self.graph.c_descendants:
+                    if len(states) == 1:
+                        carrying.append((parent, states[0]))
+                    elif len(states) == 0:
+                        local_absent.append(parent)
+                    else:
+                        local_collisions.append(
+                            {
+                                "parent": parent,
+                                "multiplicity": len(states),
+                                "paths": [state.path for state in states],
+                                "scope": "C-descendant",
+                            }
+                        )
+                elif len(states) == 0:
+                    local_neutral.append(parent)
+                elif not self.damage.ignore_outside_c_collision:
+                    local_collisions.append(
+                        {
+                            "parent": parent,
+                            "multiplicity": len(states),
+                            "paths": [state.path for state in states],
+                            "scope": "outside-C",
+                        }
+                    )
+            outside_neutral.extend(local_neutral)
+            outside_collisions.extend(
+                item for item in local_collisions if item["scope"] == "outside-C"
+            )
+            absent_c_parents.extend(local_absent)
+            if local_collisions:
+                problem = fail(
+                    f"carrying node {child} has identity collision(s): "
+                    + "; ".join(
+                        f"{item['scope']} parent {item['parent']} "
+                        f"multiplicity {item['multiplicity']}, "
+                        f"paths {item['paths']}"
+                        for item in local_collisions
+                    )
+                )
+            elif local_absent and not self.damage.ignore_absent_c_arm:
+                problem = fail(
+                    f"carrying node {child} has absent C-descendant arm(s) "
+                    f"{sorted(local_absent)}; deletion/reintroduction competes"
+                )
+            elif not carrying:
+                problem = fail(
+                    f"carrying node {child} has no C-rooted carrying parent"
+                )
+            else:
+                upstream = [trace(parent) for parent, _ in carrying]
+                problem = next((item for item in upstream if item), None)
+                candidate_edges = [
+                    self.mutation_edge(identity, parent, child, before, after)
+                    for parent, before in carrying
+                ]
+                edges.extend(candidate_edges)
+                if problem is None and not self.damage.skip_carry_compatibility:
+                    sources = [
+                        index for index, edge in enumerate(candidate_edges)
+                        if edge["problem"] is None
+                    ]
+                    if not sources:
+                        problem = (
+                            f"no carrying edge into {child} passes production "
+                            "mutation and frozen-byte authority: "
+                            + "; ".join(
+                                f"{edge['parent']}->{edge['child']}: "
+                                + " | ".join(
+                                    dict.fromkeys(
+                                        item
+                                        for item in (
+                                            edge["production_problem"],
+                                            edge["frozen_problem"],
+                                            edge["binding_problem"],
+                                        )
+                                        if item is not None
+                                    )
+                                )
+                                for edge in candidate_edges
+                            )
+                        )
+                    else:
+                        source_index = sources[0]
+                        for index, ((_, before), edge) in enumerate(
+                            zip(carrying, candidate_edges, strict=True)
+                        ):
+                            if index == source_index:
+                                edge["role"] = "source"
+                            else:
+                                edge["role"] = "compatible-carrier"
+                                edge["problem"] = self.merge_compatible_problem(
+                                    identity, edge, before, after
+                                )
+                                if edge["problem"] and problem is None:
+                                    problem = (
+                                        f"carrying merge edge into {child} is incompatible: "
+                                        f"{edge['problem']}"
+                                    )
+            visiting.remove(child)
+            memo[child] = problem
+            return problem
+
+        problem = trace(tip)
+        result = {
+            "tip": tip,
+            "status": "valid" if problem is None else "ambiguous",
+            "reason": problem,
+            "edges": self.stable_edges(edges),
+            "outside_neutral": sorted(set(outside_neutral)),
+            "outside_collisions": sorted(
+                {json.dumps(item, sort_keys=True): item for item in outside_collisions}.values(),
+                key=lambda item: (item["parent"], item["multiplicity"]),
+            ),
+            "absent_c_parents": sorted(set(absent_c_parents)),
+        }
+        self.carry_proof_cache[key] = result
+        return result
+
+    def unique_carry_problem(self, identity: tuple, tip: str) -> str | None:
+        """Compatibility shim for callers while authority uses carry_proof."""
+        return self.carry_proof(identity, tip)["reason"]
 
     def absence_problem(
         self, identity: tuple, start: str, end: str
@@ -740,9 +1600,42 @@ class Classifier:
         return None
 
     @staticmethod
-    def canonical_digest(domain: str, value: dict) -> str:
+    def canonical_json_size(value) -> int:
+        """Compute canonical JSON bytes without constructing the full JSON."""
+        if value is None:
+            return 4
+        if value is True:
+            return 4
+        if value is False:
+            return 5
+        if isinstance(value, (int, float)):
+            return len(str(value).encode("ascii"))
+        if isinstance(value, str):
+            return len(
+                json.dumps(value, ensure_ascii=False).encode("utf-8")
+            )
+        if isinstance(value, (list, tuple)):
+            return 2 + max(0, len(value) - 1) + sum(
+                Classifier.canonical_json_size(item) for item in value
+            )
+        if isinstance(value, dict):
+            return 2 + max(0, len(value) - 1) + sum(
+                Classifier.canonical_json_size(str(key))
+                + 1
+                + Classifier.canonical_json_size(value[key])
+                for key in sorted(value)
+            )
+        raise TypeError(f"unsupported canonical JSON value {type(value)!r}")
+
+    def canonical_digest(self, domain: str, value: dict) -> str:
+        wrapped = {"domain": domain, "value": value}
+        if not self.damage.unmetered_support_construction:
+            self.metrics.charge(
+                "support_serialized_bytes",
+                self.canonical_json_size(wrapped),
+            )
         payload = json.dumps(
-            {"domain": domain, "value": value},
+            wrapped,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -760,19 +1653,35 @@ class Classifier:
         parts = Path(state.path).parts
         actor = parts[1] if len(parts) > 1 else ""
         leaf = parts[2] if len(parts) > 2 else ""
-        declared = sorted(set(RECONCILE.context_path_candidates(state.text)))
-        obligations: list[dict] = [
+        self.charge_production_helper_input(state.text)
+        declared_candidates = RECONCILE.context_path_candidates(state.text)
+        declared_set: dict[str, None] = {}
+        for path in declared_candidates:
+            if path in declared_set:
+                continue
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_referenced_paths")
+            declared_set[path] = None
+        declared = sorted(declared_set)
+        obligations: list[dict] = []
+
+        def add_obligation(obligation: dict):
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_obligations")
+            obligations.append(obligation)
+
+        add_obligation(
             {
                 "kind": "production-deletion-postcondition",
                 "authority_parent": parent,
                 "authority_child": child,
             }
-        ]
-        obligations.extend(
-            {"kind": "declared-path-anchor", "path": path}
-            for path in declared
-            if path != state.path
         )
+        for path in declared:
+            if path != state.path:
+                add_obligation(
+                    {"kind": "declared-path-anchor", "path": path}
+                )
         if actor == "needs-agent" and leaf == "requests":
             if fields.get("Request kind", "").strip() == "task-pickup":
                 task_paths = [
@@ -780,7 +1689,7 @@ class Classifier:
                 ]
                 if len(task_paths) != 1:
                     return obligations, "task pickup has no unique task path"
-                obligations.append(
+                add_obligation(
                     {
                         "kind": "task-pickup-postcondition",
                         "task_path": task_paths[0],
@@ -791,7 +1700,7 @@ class Classifier:
                 return obligations, None
             if fields.get("Status", "").strip() != "in-repair":
                 return obligations, "ordinary agent action is not in-repair"
-            obligations.append({"kind": "agent-evidence-lineage"})
+            add_obligation({"kind": "agent-evidence-lineage"})
             return obligations, None
         if actor == "needs-agent" and leaf == "retries":
             item = self.fixture.repo.root / state.path
@@ -800,7 +1709,7 @@ class Classifier:
             check = fields.get("Check", "").strip()
             if check not in RECONCILE.CHECKS:
                 return obligations, "retry names an unknown checker"
-            obligations.append(
+            add_obligation(
                 {
                     "kind": "generated-retry-clear",
                     "check": check,
@@ -814,7 +1723,7 @@ class Classifier:
         }:
             if fields.get("Status", "").strip() != "folding":
                 return obligations, "human action is not folding"
-            obligations.append({"kind": "terminal-human-response"})
+            add_obligation({"kind": "terminal-human-response"})
             return obligations, None
         if actor == "needs-human" and leaf == "reviews":
             outcome = fields.get("Review outcome", "").strip()
@@ -830,7 +1739,7 @@ class Classifier:
                 return obligations, "boundary review receipt is unsupported"
             if outcome not in RECONCILE.REVIEW_TERMINAL_OUTCOMES:
                 return obligations, "review has no supported terminal outcome"
-            obligations.append(
+            add_obligation(
                 {
                     "kind": "terminal-review-binding",
                     "outcome": outcome,
@@ -852,36 +1761,54 @@ class Classifier:
     ) -> dict:
         """Bind one real authority root to its complete support projection."""
         assert self.objects is not None
-        self.metrics.support_certificate_calls += 1
+        self.metrics.charge("support_certificate_calls")
         before = self.objects.flat_tree(parent)
         after = self.objects.flat_tree(child)
+        candidates: dict[str, None] = {}
+        for mapping in (before, after):
+            for path in mapping:
+                if path in candidates:
+                    continue
+                if not self.damage.unmetered_support_construction:
+                    self.metrics.charge("support_delta_candidates")
+                candidates[path] = None
         changed = sorted(
             path
-            for path in set(before).union(after)
+            for path in candidates
             if before.get(path) != after.get(path) and path != state.path
         )
-        referenced = sorted(
-            path
-            for path in set(RECONCILE.context_path_candidates(state.text))
-            if path != state.path
-        )
+        referenced_set: dict[str, None] = {}
+        self.charge_production_helper_input(state.text)
+        for path in RECONCILE.context_path_candidates(state.text):
+            if path == state.path or path in referenced_set:
+                continue
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_referenced_paths")
+            referenced_set[path] = None
+        referenced = sorted(referenced_set)
         support_paths = sorted(set(changed).union(referenced))
-        raw_delta = [
-            {
+        raw_delta = []
+        for path in changed:
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_delta_rows")
+            raw_delta.append(
+                {
                 "path": path,
                 "before": self.objects.path_entry(parent, path),
                 "after": self.objects.path_entry(child, path),
-            }
-            for path in changed
-        ]
-        anchors = [
-            {
+                }
+            )
+        anchors = []
+        for path in support_paths:
+            if not self.damage.unmetered_support_construction:
+                self.metrics.charge("support_anchor_rows")
+            anchors.append(
+                {
                 "path": path,
                 "entry": self.objects.path_entry(child, path),
                 "changed_on_authority_edge": path in changed,
-            }
-            for path in support_paths
-        ]
+                }
+            )
         obligations, incomplete = self.support_leaf_obligations(
             state, parent, child
         )
@@ -932,7 +1859,7 @@ class Classifier:
                 ),
             }
         state = states[0]
-        self.metrics.authority_calls += 1
+        self.metrics.charge("authority_calls")
         try:
             problem = RECONCILE.queue_deletion_problem(
                 state.path, state.text, parent, child
@@ -1142,14 +2069,17 @@ class Classifier:
         duplicate = []
         for parent in self.graph.parents[child]:
             multiplicity = len(self.states(parent, identity))
-            if multiplicity == 1:
-                carrying.append(parent)
-            elif multiplicity > 1:
-                duplicate.append(parent)
-            elif self.graph.reaches_C(parent):
-                absent.append(parent)
-            else:
+            if parent in self.graph.c_descendants:
+                if multiplicity == 1:
+                    carrying.append(parent)
+                elif multiplicity > 1:
+                    duplicate.append(parent)
+                else:
+                    absent.append(parent)
+            elif multiplicity == 0 or self.damage.ignore_outside_c_collision:
                 neutral.append(parent)
+            else:
+                duplicate.append(parent)
         return carrying, absent, neutral, duplicate
 
     def raw_direct_events(self, identity: tuple) -> list[Event]:
@@ -1165,25 +2095,48 @@ class Classifier:
             carrying, absent, neutral, duplicate = self.parent_roles(
                 identity, child
             )
-            if not carrying or absent:
+            if absent:
                 continue
             if duplicate:
+                collision_edges = []
+                for parent in duplicate:
+                    states = self.states(parent, identity)
+                    if (
+                        parent not in self.graph.c_descendants
+                        and len(states) == 1
+                    ):
+                        edge = self.authority_edge(
+                            identity, parent, child
+                        )
+                        edge["problem"] = (
+                            "outside-C parent carries a matching identity; "
+                            "its provenance is an unresolved collision"
+                        )
+                        edge["support_certificate"] = None
+                        collision_edges.append(edge)
                 event = Event(
                     "ambiguous",
                     "direct",
                     child,
-                    [],
+                    collision_edges,
                     [],
                     neutral,
                     [],
                     "direct-parent-multiplicity",
-                    "a carrying parent has duplicate exact identities",
+                    "a parent has colliding exact identity provenance",
                 )
                 events.append(
                     self.attach_causal_metadata(
-                        event, [self.synthetic_causal_root(event)]
+                        event,
+                        (
+                            self.direct_causal_roots(event)
+                            if collision_edges
+                            else [self.synthetic_causal_root(event)]
+                        ),
                     )
                 )
+                continue
+            if not carrying:
                 continue
             selected = (
                 carrying
@@ -1194,15 +2147,11 @@ class Classifier:
                 self.authority_edge(identity, parent, child)
                 for parent in selected
             ]
+            carry_proofs = [
+                self.carry_proof(identity, parent) for parent in carrying
+            ]
             continuity = next(
-                (
-                    problem
-                    for problem in (
-                        self.unique_carry_problem(identity, parent)
-                        for parent in carrying
-                    )
-                    if problem
-                ),
+                (proof["reason"] for proof in carry_proofs if proof["reason"]),
                 None,
             )
             invalid = [edge for edge in edges if edge["problem"]]
@@ -1237,10 +2186,17 @@ class Classifier:
                 child,
                 edges,
                 [],
-                neutral,
+                sorted(
+                    set(neutral).union(
+                        parent
+                        for proof in carry_proofs
+                        for parent in proof["outside_neutral"]
+                    )
+                ),
                 [],
                 code,
                 reason,
+                carry_proofs=carry_proofs,
             )
             events.append(
                 self.attach_causal_metadata(
@@ -1411,7 +2367,7 @@ class Classifier:
         ]
         if len(states) != 1:
             return "authority root action bytes are not uniquely readable"
-        self.metrics.support_adoption_checks += 1
+        self.metrics.charge("support_adoption_checks")
         try:
             return RECONCILE.queue_deletion_problem(
                 states[0].path,
@@ -1534,35 +2490,48 @@ class Classifier:
         self, certificate: dict, revision: str
     ) -> list[str]:
         """Resolve typed monotone obligations to their current exact paths."""
-        paths = []
+        assert self.objects is not None
+        paths: dict[str, None] = {}
+
+        def discover(path: str):
+            if path in paths:
+                return
+            if not self.damage.unmetered_dynamic_support:
+                self.metrics.charge("dynamic_support_paths_discovered")
+                self.metrics.charge(
+                    "dynamic_support_path_bytes",
+                    len(path.encode("utf-8", errors="surrogateescape")),
+                )
+            paths[path] = None
+
+        def traverse(path: str):
+            if not self.damage.unmetered_dynamic_support:
+                self.metrics.charge("dynamic_support_paths_traversed")
+
         for obligation in certificate["obligations"]:
             if obligation["kind"] == "task-pickup-postcondition":
-                try:
-                    incarnations = RECONCILE.task_incarnations_at(
-                        revision, obligation["task_id"]
-                    )
-                except (
-                    RECONCILE.GitSnapshotError,
-                    OSError,
-                    ValueError,
-                    UnicodeError,
-                ) as error:
-                    raise Unreadable(
-                        "pickup dynamic support projection could not read "
-                        f"{revision}: {error}"
-                    ) from error
-                paths.extend(incarnations)
-                assert self.objects is not None
                 tree_paths = self.objects.flat_tree(revision)
+                task_pattern = re.compile(
+                    rf"tasks/(?:{'|'.join(RECONCILE.TASK_STATUSES)})/"
+                    + re.escape(obligation["task_id"])
+                    + r"/task\.md"
+                )
+                incarnations = []
+                for path in tree_paths:
+                    traverse(path)
+                    if task_pattern.fullmatch(path):
+                        discover(path)
+                        incarnations.append(path)
                 for task_path in incarnations:
                     task_dir = Path(task_path).parent
-                    paths.extend(
-                        path
-                        for path in tree_paths
-                        if Path(path).parent == task_dir
-                        and Path(path).name
-                        in RECONCILE.TASK_ARTIFACT_NAMES
-                    )
+                    for path in tree_paths:
+                        traverse(path)
+                        if (
+                            Path(path).parent == task_dir
+                            and Path(path).name
+                            in RECONCILE.TASK_ARTIFACT_NAMES
+                        ):
+                            discover(path)
             elif obligation["kind"] == "generated-retry-clear":
                 subject = obligation["subject"].strip("`")
                 if RECONCILE.valid_queue_item_path(subject) or (
@@ -1570,8 +2539,8 @@ class Classifier:
                     and not subject.startswith("/")
                     and ".." not in Path(subject).parts
                 ):
-                    paths.append(subject)
-        return sorted(set(paths))
+                    discover(subject)
+        return sorted(paths)
 
     def supplier_support_checks(
         self,
@@ -1603,17 +2572,25 @@ class Classifier:
             problems.append("a valid authority edge has no support certificate")
         for digest, certificate in sorted(certificates.items()):
             source_parents = sorted(set(absent_parents))
-            fixed_support_paths = [
-                anchor["path"] for anchor in certificate["support_paths"]
-            ]
-            support_paths = sorted(
-                set(fixed_support_paths).union(
-                    path
-                    for revision in [*source_parents, child]
-                    for path in self.dynamic_support_paths(
-                        certificate, revision
-                    )
-                )
+            support_path_set: dict[str, None] = {}
+
+            def add_support_path(path: str):
+                if path in support_path_set:
+                    return
+                self.metrics.charge("support_paths_checked")
+                support_path_set[path] = None
+
+            for anchor in certificate["support_paths"]:
+                add_support_path(anchor["path"])
+            for revision in [*source_parents, child]:
+                for path in self.dynamic_support_paths(
+                    certificate, revision
+                ):
+                    add_support_path(path)
+            support_paths = sorted(support_path_set)
+            self.metrics.charge(
+                "support_paths_checked",
+                len(support_paths) * len(source_parents),
             )
             source_projections = [
                 {
@@ -1635,9 +2612,6 @@ class Classifier:
                 }
                 for path in support_paths
             ]
-            self.metrics.support_paths_checked += len(support_paths) * (
-                len(source_parents) + 1
-            )
             agreed = bool(source_projections) and all(
                 projection["entries"] == source_projections[0]["entries"]
                 for projection in source_projections[1:]
@@ -1765,7 +2739,7 @@ class Classifier:
         after: ActionState,
     ) -> dict:
         """Call both production mutation authorities for a real Git edge."""
-        self.metrics.mutation_calls += 1
+        self.metrics.charge("mutation_calls")
         try:
             production_problem = RECONCILE.queue_mutation_problem(
                 before.path,
@@ -1796,6 +2770,15 @@ class Classifier:
         binding_problem = self.binding_subset_problem(
             identity, before, after
         )
+        if (
+            self.damage.broad_review_pending_normalization
+            and binding_problem is None
+            and production_problem is not None
+            and production_problem.startswith(
+                "immutable review binding changed outside"
+            )
+        ):
+            production_problem = None
         # Production mutation authority owns ordinary linear transitions,
         # including its exact unanswered review retraction exception.  The
         # subset comparison is evidence for O anchoring and for non-authoring
@@ -1857,156 +2840,51 @@ class Classifier:
         identity: tuple,
         old_state: ActionState,
         new_state: ActionState | None,
-    ) -> tuple[str | None, str, list[dict]]:
+    ) -> tuple[str | None, str, list[dict], list[dict]]:
         """Trace the admitted occurrence from each implicated tip to C."""
         assert self.graph is not None
 
-        C_states = self.states(self.fixture.C, identity)
+        C_states = self.states(self.graph.C, identity)
         if len(C_states) != 1:
             return (
                 f"C carries exact identity multiplicity {len(C_states)}",
                 "persisted-C-multiplicity",
                 [],
+                [],
             )
-
-        memo: dict[str, bool] = {self.fixture.C: True}
-        visiting: set[str] = set()
-        edges: list[dict] = []
-        failures: list[tuple[str, str]] = []
-
-        def fail(code: str, reason: str) -> bool:
-            failures.append((code, reason))
-            return False
-
-        def trace(child: str) -> bool:
-            if child in memo:
-                return memo[child]
-            if child in visiting:
-                return fail(
-                    "persisted-cycle", f"post-C graph cycles at {child}"
-                )
-            visiting.add(child)
-            child_states = self.states(child, identity)
-            if len(child_states) != 1:
-                result = fail(
-                    "persisted-intermediate-multiplicity",
-                    f"persisted occurrence has multiplicity "
-                    f"{len(child_states)} at {child}",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-            after = child_states[0]
-            carriers: list[tuple[str, ActionState]] = []
-            duplicates: list[tuple[str, int]] = []
-            absent: list[str] = []
-            for parent in self.graph.parents.get(child, ()):
-                if not self.graph.reaches_C(parent):
-                    continue
-                parent_states = self.states(parent, identity)
-                if len(parent_states) == 1:
-                    carriers.append((parent, parent_states[0]))
-                elif len(parent_states) > 1:
-                    duplicates.append((parent, len(parent_states)))
-                else:
-                    absent.append(parent)
-            if duplicates:
-                result = fail(
-                    "persisted-parent-multiplicity",
-                    f"post-C child {child} has duplicate C-rooted "
-                    f"carriers {duplicates}",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-            if not carriers:
-                result = fail(
-                    "persisted-delete-recreate",
-                    f"post-C child {child} carries the exact identity "
-                    "without any C-rooted carrying parent; absent C-rooted "
-                    f"parents are {absent}",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-
-            parent_results = [trace(parent) for parent, _ in carriers]
-            parents_continuous = all(parent_results)
-            candidate_edges = [
-                self.mutation_edge(identity, parent, child, before, after)
-                for parent, before in carriers
-            ]
-            edges.extend(candidate_edges)
-            if not parents_continuous:
-                result = fail(
-                    "persisted-upstream-discontinuity",
-                    f"post-C child {child} descends from a carrying "
-                    "parent whose C-rooted occurrence is invalid",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-
-            source_indices = [
-                index
-                for index, edge in enumerate(candidate_edges)
-                if edge["problem"] is None
-            ]
-            if not source_indices:
-                problems = [
-                    edge["problem"] for edge in candidate_edges
-                ]
-                result = fail(
-                    "persisted-invalid-mutation",
-                    f"no carrying edge into {child} passes production "
-                    f"mutation and frozen-byte authority: {problems}",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-
-            compatible = True
-            for index, ((_, before), edge) in enumerate(
-                zip(carriers, candidate_edges)
-            ):
-                if index in source_indices:
-                    edge["role"] = "source"
-                    continue
-                edge["role"] = "compatible-carrier"
-                edge["problem"] = self.merge_compatible_problem(
-                    identity, edge, before, after
-                )
-                if edge["problem"]:
-                    compatible = False
-            if not compatible:
-                result = fail(
-                    "persisted-merge-carrier-conflict",
-                    f"post-C child {child} has a carrying merge parent "
-                    "whose concrete state is incompatible with the child",
-                )
-                visiting.remove(child)
-                memo[child] = result
-                return result
-            visiting.remove(child)
-            memo[child] = True
-            return True
-
-        old_continuous = (
-            True
-            if self.damage.skip_old_side_continuity
-            else trace(self.fixture.O)
+        proofs = []
+        if not self.damage.skip_old_side_continuity:
+            proofs.append(self.carry_proof(identity, self.fixture.O))
+        if (
+            new_state is not None
+            and not self.damage.skip_persisted_candidate_continuity
+        ):
+            proofs.append(self.carry_proof(identity, self.fixture.N))
+        ordered_edges = self.stable_edges(
+            edge for proof in proofs for edge in proof["edges"]
         )
-        new_continuous = (
-            True
-            if new_state is None
-            or self.damage.skip_persisted_candidate_continuity
-            else trace(self.fixture.N)
+        failed_proof = next(
+            (proof for proof in proofs if proof["reason"] is not None), None
         )
-        continuous = old_continuous and new_continuous
-        ordered_edges = self.stable_edges(edges)
-        if not continuous:
-            code, reason = failures[0]
-            return reason, code, ordered_edges
+        if failed_proof is not None:
+            reason = failed_proof["reason"]
+            if failed_proof["outside_collisions"]:
+                code = "persisted-outside-C-collision"
+            elif failed_proof["absent_c_parents"]:
+                code = "persisted-delete-recreate"
+            elif "identity collision" in reason:
+                code = "persisted-parent-multiplicity"
+            elif "multiplicity" in reason:
+                code = "persisted-intermediate-multiplicity"
+            elif "no C-rooted carrying parent" in reason:
+                code = "persisted-delete-recreate"
+            elif "incompatible" in reason:
+                code = "persisted-merge-carrier-conflict"
+            elif "no carrying edge" in reason:
+                code = "persisted-invalid-mutation"
+            else:
+                code = "persisted-upstream-discontinuity"
+            return reason, code, ordered_edges, proofs
         C_state = C_states[0]
         old_anchor_regression = (
             RECONCILE.queue_parent_state_regression_problem(
@@ -2024,9 +2902,15 @@ class Classifier:
                 old_anchor_binding or old_anchor_regression,
                 "persisted-old-endpoint-regression",
                 ordered_edges,
+                proofs,
             )
         if new_state is None or self.damage.skip_persisted_candidate_continuity:
-            return None, "persisted-old-C-rooted-continuity", ordered_edges
+            return (
+                None,
+                "persisted-old-C-rooted-continuity",
+                ordered_edges,
+                proofs,
+            )
         endpoint_regression = RECONCILE.queue_parent_state_regression_problem(
             old_state.text, new_state.text
         )
@@ -2038,8 +2922,9 @@ class Classifier:
                 endpoint_binding or endpoint_regression,
                 "persisted-endpoint-regression",
                 ordered_edges,
+                proofs,
             )
-        return None, "persisted-C-rooted-continuity", ordered_edges
+        return None, "persisted-C-rooted-continuity", ordered_edges, proofs
 
     def supplier_base_events(self, identity: tuple) -> list[Event]:
         """Build nested supplier events while preserving original authority."""
@@ -2088,15 +2973,11 @@ class Classifier:
                 observed_sources.append(result)
                 results.append(result)
                 continue
+            carry_proofs = [
+                self.carry_proof(identity, parent) for parent in carrying
+            ]
             carry_problem = next(
-                (
-                    problem
-                    for problem in (
-                        self.unique_carry_problem(identity, parent)
-                        for parent in carrying
-                    )
-                    if problem
-                ),
+                (proof["reason"] for proof in carry_proofs if proof["reason"]),
                 None,
             )
             per_absent: list[list[Event]] = []
@@ -2213,6 +3094,11 @@ class Classifier:
                     for parent in source.neutral_parents
                 ]
                 + neutral
+                + [
+                    parent
+                    for proof in carry_proofs
+                    for parent in proof["outside_neutral"]
+                ]
             )
             accumulated_absent = self.stable_oids(
                 [
@@ -2431,6 +3317,7 @@ class Classifier:
             result.support_checks = self.stable_support_checks(
                 [*inherited_support_checks, *current_support_checks]
             )
+            result.carry_proofs = carry_proofs
             results.append(result)
         return results
 
@@ -2498,16 +3385,9 @@ class Classifier:
     def final_absence_participants(
         self, identity: tuple, events: list[Event]
     ) -> list[Event]:
-        """Find the event frontier at M, extended after reintroduction."""
+        """Find every causal event that reaches the fixed N frontier."""
         assert self.graph is not None
-        boundary = (
-            self.fixture.M
-            if self.absence_problem(
-                identity, self.fixture.M, self.fixture.N
-            )
-            is None
-            else self.fixture.N
-        )
+        boundary = self.fixture.N
         continuous = [
             event
             for event in events
@@ -2572,6 +3452,13 @@ class Classifier:
         support_checks = self.stable_support_checks(
             check for event in events for check in event.support_checks
         )
+        carry_proofs = list(
+            {
+                proof["tip"]: proof
+                for event in events
+                for proof in event.carry_proofs
+            }.values()
+        )
         reintroduced = any(
             self.has_reintroduction(identity, event) for event in events
         )
@@ -2625,6 +3512,7 @@ class Classifier:
             reason_code,
             reason,
             support_checks=support_checks,
+            carry_proofs=carry_proofs,
         )
         return self.attach_causal_metadata(
             result, causal_roots, prior_records
@@ -2751,7 +3639,8 @@ class Classifier:
         identity: tuple,
         old_states: tuple[ActionState, ...],
     ) -> dict:
-        C_states = self.states(self.fixture.C, identity)
+        assert self.graph is not None
+        C_states = self.states(self.graph.C, identity)
         N_states = self.states(self.fixture.N, identity)
         return {
             "identity": self.identity_view(identity),
@@ -2773,6 +3662,7 @@ class Classifier:
             "propagation_edges": [],
             "mutation_edges": [],
             "support_checks": [],
+            "carry_proofs": [],
             "neutral_parents": [],
             "absent_parents": [],
             "causal_roots": [],
@@ -2788,7 +3678,7 @@ class Classifier:
     ) -> dict:
         assert self.graph is not None
         base = self.action_base(identity, old_states)
-        C_states = self.states(self.fixture.C, identity)
+        C_states = self.states(self.graph.C, identity)
         N_states = self.states(self.fixture.N, identity)
         if N_states:
             if len(N_states) != len(old_states) or len(N_states) != 1:
@@ -2807,8 +3697,14 @@ class Classifier:
                 state_problem = None
                 state_code = "DAMAGED-skipped"
                 mutation_edges = []
+                persisted_proofs = []
             else:
-                state_problem, state_code, mutation_edges = (
+                (
+                    state_problem,
+                    state_code,
+                    mutation_edges,
+                    persisted_proofs,
+                ) = (
                     self.persisted_occurrence_problem(
                         identity, old_states[0], N_states[0]
                     )
@@ -2823,6 +3719,7 @@ class Classifier:
                         "persisted-parent-multiplicity",
                         "persisted-delete-recreate",
                         "persisted-upstream-discontinuity",
+                        "persisted-outside-C-collision",
                     }
                     else "invalid"
                 )
@@ -2832,6 +3729,7 @@ class Classifier:
                     "finding": True,
                     "authoring_lineage": "persisted-state-regression",
                     "mutation_edges": mutation_edges,
+                    "carry_proofs": persisted_proofs,
                     "reason_code": state_code,
                     "reason": (
                         "the production identity remains live but its one "
@@ -2845,6 +3743,7 @@ class Classifier:
                 "finding": False,
                 "authoring_lineage": "preserved",
                 "mutation_edges": mutation_edges,
+                "carry_proofs": persisted_proofs,
                 "reason_code": "identity-preserved",
                 "reason": (
                     "the exact production identity remains live through "
@@ -2887,7 +3786,12 @@ class Classifier:
                     f"C carries exact identity multiplicity {len(C_states)}"
                 ),
             }
-        old_problem, old_code, old_mutation_edges = (
+        (
+            old_problem,
+            old_code,
+            old_mutation_edges,
+            old_carry_proofs,
+        ) = (
             self.persisted_occurrence_problem(
                 identity, effective_old[0], None
             )
@@ -2902,6 +3806,7 @@ class Classifier:
                     "persisted-parent-multiplicity",
                     "persisted-delete-recreate",
                     "persisted-upstream-discontinuity",
+                    "persisted-outside-C-collision",
                 }
                 else "invalid"
             )
@@ -2911,6 +3816,7 @@ class Classifier:
                 "finding": True,
                 "authoring_lineage": "old-side-discontinuous",
                 "mutation_edges": old_mutation_edges,
+                "carry_proofs": old_carry_proofs,
                 "reason_code": old_code,
                 "reason": (
                     "the old tip identity does not retain one continuously "
@@ -2920,7 +3826,7 @@ class Classifier:
             }
         if self.damage.reopen_pre_c_genealogy:
             assert self.objects is not None
-            parents = self.objects.commit_parents(self.fixture.C)
+            parents = self.objects.commit_parents(self.graph.C)
             carrying = [
                 parent for parent in parents if self.states(parent, identity)
             ]
@@ -2935,16 +3841,6 @@ class Classifier:
                         "DAMAGED: reopened genealogy before admitted C"
                     ),
                 }
-        old_problem = self.unique_carry_problem(identity, self.fixture.O)
-        if old_problem:
-            return {
-                **base,
-                "status": "invalid",
-                "finding": True,
-                "authoring_lineage": "old-side-discontinuous",
-                "reason_code": "old-side-discontinuity",
-                "reason": old_problem,
-            }
         event = self.select_event(identity)
         return {
             **base,
@@ -2956,6 +3852,7 @@ class Classifier:
             "propagation_edges": event.propagation_edges,
             "mutation_edges": old_mutation_edges,
             "support_checks": event.support_checks,
+            "carry_proofs": old_carry_proofs + event.carry_proofs,
             "neutral_parents": event.neutral_parents,
             "absent_parents": event.absent_parents,
             "causal_roots": event.causal_roots,
@@ -2974,7 +3871,7 @@ class Classifier:
             return None
         candidate_states = [
             commit
-            for commit in self.graph.ordered(self.graph.candidate_nodes)
+            for commit in self.graph.ordered_identity_nodes()
             if self.states(commit, identity)
         ]
         if not candidate_states:
@@ -3018,76 +3915,66 @@ class Classifier:
         fixture = self.fixture
         base = {
             "scenario": fixture.scenario,
-            "C": fixture.C,
+            "C": None,
             "O": fixture.O,
-            "M": fixture.M,
             "N": fixture.N,
             "expected_result": fixture.expected,
-            "range_base_validation": {
-                "status": "unchecked",
-                "M": fixture.M,
-                "reason": "M validation has not run",
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
             },
         }
         objects = None
         try:
             with reconciler_repository(
                 fixture.repo.root
-            ), count_production_git(self.metrics):
-                objects = ObjectDatabase(fixture.repo.root, self.metrics)
+            ), count_production_git(
+                self.metrics,
+                stable_git_diagnostics=(
+                    not self.damage.ambient_git_diagnostics
+                ),
+            ):
+                objects = ObjectDatabase(
+                    fixture.repo.root,
+                    self.metrics,
+                    damage=self.damage,
+                    stable_git_diagnostics=(
+                        not self.damage.ambient_git_diagnostics
+                    ),
+                )
                 self.objects = objects
                 self.graph = Graph(
                     fixture.repo.root,
-                    fixture.C,
                     fixture.O,
                     fixture.N,
                     objects,
                     self.metrics,
-                )
-                M_problem = self.selected_base_problem()
-                if M_problem:
-                    return {
-                        **base,
-                        "range_base_validation": {
-                            "status": "ambiguous",
-                            "M": fixture.M,
-                            "reason": M_problem,
-                        },
-                        "classification": "blocking-finding",
-                        "evidence_verdict": {
-                            "status": "ambiguous",
-                            "reason": M_problem,
-                        },
-                        "event_mode": "none",
-                        "authority_edges": [],
-                        "propagation_edges": [],
-                        "mutation_edges": [],
-                        "support_checks": [],
-                        "actions": [],
-                        "metrics": self.metrics.as_dict(),
-                        "details": fixture.details,
-                    }
-                base["range_base_validation"] = {
-                    "status": "valid",
-                    "M": fixture.M,
-                    "reason": (
-                        f"M {fixture.M} is a readable commit in the "
-                        f"C-rooted candidate ancestry through N {fixture.N}"
+                    reopen_outside_c_boundary_ancestry=(
+                        self.damage.reopen_outside_c_boundary_ancestry
                     ),
-                }
-                if (
-                    fixture.budget_limit is not None
-                    and self.metrics.graph_commits > fixture.budget_limit
-                ):
+                    buffered_graph_output=self.damage.buffered_graph_output,
+                    stable_git_diagnostics=(
+                        not self.damage.ambient_git_diagnostics
+                    ),
+                )
+                base["C"] = self.graph.C
+                if fixture.expected_C:
+                    base["derived_C_matches_fixture"] = (
+                        self.graph.C == fixture.expected_C
+                    )
+                budget_result = self.budget_result(base)
+                if budget_result is not None:
+                    return budget_result
+                if self.graph.C == fixture.O:
                     return {
                         **base,
-                        "classification": "blocking-finding",
+                        "audit_exit": 0,
+                        "classification": "no-finding",
                         "evidence_verdict": {
-                            "status": "ambiguous",
+                            "status": "none",
                             "reason": (
-                                "measured fixture budget exceeded: "
-                                f"{self.metrics.graph_commits}>"
-                                f"{fixture.budget_limit}"
+                                "O is the unique merge base of O and N; "
+                                "the update is a fast-forward, not a restack"
                             ),
                         },
                         "event_mode": "none",
@@ -3095,6 +3982,7 @@ class Classifier:
                         "propagation_edges": [],
                         "mutation_edges": [],
                         "support_checks": [],
+                        "carry_proofs": [],
                         "actions": [],
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
@@ -3108,9 +3996,7 @@ class Classifier:
                 ]
                 seen = set(old_snapshot)
                 candidate_identities = set()
-                for commit in self.graph.ordered(
-                    self.graph.candidate_nodes
-                ):
+                for commit in self.graph.ordered_identity_nodes():
                     candidate_identities.update(objects.snapshot(commit))
                 for identity in sorted(
                     candidate_identities - seen, key=repr
@@ -3144,6 +4030,7 @@ class Classifier:
                 )
                 result = {
                     **base,
+                    "audit_exit": 1 if findings else 0,
                     "classification": classification,
                     "evidence_verdict": {
                         "status": evidence_status,
@@ -3177,11 +4064,32 @@ class Classifier:
                         for action in actions
                         for check in action["support_checks"]
                     ],
+                    "carry_proofs": [
+                        proof
+                        for action in actions
+                        for proof in action["carry_proofs"]
+                    ],
                     "actions": actions,
                     "metrics": self.metrics.as_dict(),
                     "details": fixture.details,
                 }
+                budget_result = self.budget_result(base)
+                if budget_result is not None:
+                    return budget_result
                 return result
+        except BudgetExceeded as error:
+            if error.C is not None:
+                base["C"] = error.C
+                if fixture.expected_C:
+                    base["derived_C_matches_fixture"] = (
+                        error.C == fixture.expected_C
+                    )
+            result = self.budget_result(base)
+            if result is None:
+                raise AssertionError(
+                    "pre-charge budget exception lost its overflow"
+                ) from error
+            return result
         except (
             Unreadable,
             RECONCILE.GitSnapshotError,
@@ -3191,11 +4099,7 @@ class Classifier:
         ) as error:
             return {
                 **base,
-                "range_base_validation": {
-                    "status": "unreadable",
-                    "M": fixture.M,
-                    "reason": str(error),
-                },
+                "audit_exit": 2,
                 "classification": "unreadable",
                 "evidence_verdict": {
                     "status": "unreadable",
@@ -3206,6 +4110,7 @@ class Classifier:
                 "propagation_edges": [],
                 "mutation_edges": [],
                 "support_checks": [],
+                "carry_proofs": [],
                 "actions": [],
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
@@ -3500,17 +4405,17 @@ def ordinary_linear_fixture(
     repo.branch("candidate", C)
     if valid:
         claim(repo, (path,))
-        M = delete_with_evidence(repo, ((label, path),))
+        candidate_landmark = delete_with_evidence(repo, ((label, path),))
     else:
         repo.remove(path)
-        M = repo.commit("delete without authority")
+        candidate_landmark = repo.commit("delete without authority")
     N = feature(repo, f"{label}-old")
     return Fixture(
         scenario,
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding" if valid else "blocking-finding",
     )
@@ -3524,14 +4429,14 @@ def p3_old_loss(root: Path) -> Fixture:
     path = add_agent(repo, "p3")
     O = feature(repo, "p3-task")
     repo.branch("candidate", C)
-    M = feature(repo, "p3-base")
+    candidate_landmark = feature(repo, "p3-base")
     N = feature(repo, "p3-task")
     return Fixture(
         "P3-genuine-old-loss",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"lost_path": path},
@@ -3556,14 +4461,14 @@ def p4_pre_c_origins(root: Path) -> Fixture:
     O = feature(repo, "p4-old")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p4", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p4", path),))
     N = feature(repo, "p4-old")
     return Fixture(
         "P4-pre-C-identical-origins",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"pre_C_origins": [A, B], "pre_C_root": R},
@@ -3585,14 +4490,14 @@ def p5_duplicate_at_c(root: Path) -> Fixture:
     repo.write(evidence_path("p5"), "# Evidence p5: resolved\n")
     repo.remove(first)
     repo.remove(second)
-    M = repo.commit("delete both duplicate paths")
+    candidate_landmark = repo.commit("delete both duplicate paths")
     N = feature(repo, "p5-old")
     return Fixture(
         "P5-duplicate-at-C",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3612,14 +4517,14 @@ def p6_old_recreate(root: Path) -> Fixture:
     O = feature(repo, "p6-old-task")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p6-old", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p6-old", path),))
     N = feature(repo, "p6-old-task")
     return Fixture(
         "P6a-old-delete-recreate",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3639,7 +4544,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
     repo.write(path, original)
     repo.commit("recreate byte-identical p6")
     claim(repo, (path,), "fresh claim after recreation")
-    M = delete_with_evidence(
+    candidate_landmark = delete_with_evidence(
         repo, (("p6-candidate", path),), "second deletion"
     )
     N = feature(repo, "p6-candidate-old")
@@ -3648,7 +4553,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
     )
@@ -3666,14 +4571,14 @@ def p7_payload_change(root: Path) -> Fixture:
     O = feature(repo, "p7-old")
     repo.branch("candidate", C)
     claim(repo, (path,))
-    M = delete_with_evidence(repo, (("p7", path),))
+    candidate_landmark = delete_with_evidence(repo, (("p7", path),))
     N = feature(repo, "p7-old")
     return Fixture(
         "P7-immutable-payload-change",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -3700,7 +4605,7 @@ def p8_timing_move(root: Path) -> Fixture:
     O = feature(repo, "p8-old")
     repo.branch("candidate", C)
     repo.move(old_path, new_path)
-    M = repo.commit("perform one-to-one timing path move")
+    candidate_landmark = repo.commit("perform one-to-one timing path move")
     N = feature(repo, "p8-old")
     before = agent_text("p8")
     details = {
@@ -3721,7 +4626,7 @@ def p8_timing_move(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         details,
@@ -3755,7 +4660,7 @@ def direct_merge_fixture(
         repo.branch("neutral", R)
         neutral = feature(repo, f"{label}-neutral")
         parents.append(neutral)
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         parents,
         f"direct merge deletion for {label}",
         writes={evidence_path(label): f"# Evidence {label}: resolved\n"},
@@ -3772,7 +4677,7 @@ def direct_merge_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         {
@@ -3804,7 +4709,7 @@ def pcx03_foreign_identity(root: Path) -> Fixture:
     add_agent(repo, "pcx03", path=path, text=text)
     claim(repo, (path,), "claim independent occurrence")
     foreign_parent = feature(repo, "pcx03-foreign")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (valid_parent, foreign_parent),
         "delete disconnected exact identities",
         writes={evidence_path("pcx03"): "# Evidence pcx03: resolved\n"},
@@ -3816,7 +4721,7 @@ def pcx03_foreign_identity(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -3860,7 +4765,7 @@ def supplier_fixture(
         if merge_changes_evidence
         else {}
     )
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt supplier absence",
         writes=writes,
@@ -3872,7 +4777,7 @@ def supplier_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding" if supplier_valid else "blocking-finding",
         {
@@ -3904,7 +4809,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
     )
     repo.branch("carrier", C)
     carrier = feature(repo, "p14-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (second, carrier),
         "merge after supplier reintroduction",
         removes=(path,),
@@ -3915,7 +4820,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"first_deletion": first, "second_deletion": second},
@@ -3942,7 +4847,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
         )
     repo.branch("carrier", C)
     carrier = feature(repo, "p15-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (*suppliers, carrier),
         "merge competing suppliers",
         removes=(path,),
@@ -3953,7 +4858,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"supplier_events": suppliers},
@@ -3976,14 +4881,14 @@ def p17_post_event_reintroduction(root: Path) -> Fixture:
     repo.write(path, original)
     repo.commit("reintroduce p17 after valid event")
     repo.remove(path)
-    M = repo.commit("delete recreated p17 without claim")
+    candidate_landmark = repo.commit("delete recreated p17 without claim")
     N = feature(repo, "p17-old")
     return Fixture(
         "P17-post-event-reintroduction",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"early_authority_event": first},
@@ -4008,7 +4913,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
         absent.append(feature(repo, f"pcx04-absent-{index}"))
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx04-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (*absent, carrier),
         "adopt one supplier through two absent parents",
         removes=(path,),
@@ -4019,7 +4924,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -4057,7 +4962,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
     second = repo.commit("supplier D2")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx05-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (absent_one, second, carrier),
         "merge competing D1 and D2",
         removes=(path,),
@@ -4068,7 +4973,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"D1": first, "D2": second},
@@ -4108,7 +5013,7 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
     carrier_two = feature(repo, "pcx06-carrier-two")
     repo.branch("neutral-two", R)
     neutral_two = feature(repo, "pcx06-neutral-two")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (adoption_one, carrier_two, neutral_two),
         "second supplier adoption",
         removes=(path,),
@@ -4119,12 +5024,12 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
             "direct_event": deletion,
-            "adoptions": [adoption_one, M],
+            "adoptions": [adoption_one, candidate_landmark],
             "carriers": [carrier_one, carrier_two],
             "neutral_parents": [neutral_one, neutral_two],
             "absent_sources": [deletion, adoption_one],
@@ -4151,7 +5056,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
     second = repo.commit("delete recreated bytes without fresh claim")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx09-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (second, carrier),
         "adopt recreated deletion",
         removes=(path,),
@@ -4162,7 +5067,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"D1": first, "D2": second},
@@ -4184,14 +5089,14 @@ def pcx10_transient_multiplicity(root: Path) -> Fixture:
     duplicate = repo.commit("transiently duplicate exact identity")
     repo.remove(second)
     repo.commit("collapse transient duplicate")
-    M = delete_with_evidence(repo, (("pcx10", first),))
+    candidate_landmark = delete_with_evidence(repo, (("pcx10", first),))
     N = feature(repo, "pcx10-old")
     return Fixture(
         "PCX-10-transient-multiplicity",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"duplicate_commit": duplicate, "duplicate_path": second},
@@ -4225,7 +5130,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
         ),
     )
     foreign = feature(repo, "pcx11-foreign-b")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier, foreign),
         "merge absent Q-A and delete unresolved Q-B",
         removes=(path,),
@@ -4236,7 +5141,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -4266,7 +5171,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
     repo.branch("carrier", C)
     repo.move(old_path, moved)
     carrier = feature(repo, "pcx12-moved-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt supplier after identity-preserving move",
         removes=(old_path, moved),
@@ -4277,7 +5182,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"moved_path": moved, "carrier": carrier},
@@ -4333,7 +5238,7 @@ def human_supplier_fixture(
         carrier_three = feature(repo, f"{label}-carrier-three")
         repo.branch("human-neutral-three", R)
         neutral_three = feature(repo, f"{label}-neutral-three")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (outer_invalid, carrier_three, neutral_three),
             "continue third-level invalid human supplier ancestry",
             removes=(path,),
@@ -4342,7 +5247,7 @@ def human_supplier_fixture(
             {
                 "inner_invalid": inner_invalid,
                 "outer_invalid": outer_invalid,
-                "adoptions": [inner_invalid, outer_invalid, M],
+                "adoptions": [inner_invalid, outer_invalid, candidate_landmark],
                 "carriers": [carrier, carrier_two, carrier_three],
                 "neutral_parents": [
                     neutral_one,
@@ -4357,7 +5262,7 @@ def human_supplier_fixture(
             }
         )
     else:
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (supplier, carrier),
             "adopt human supplier absence",
             removes=(path,),
@@ -4368,7 +5273,7 @@ def human_supplier_fixture(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         (
             "blocking-finding"
@@ -4406,20 +5311,20 @@ def r8_human_response_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt human response supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     return Fixture(
         f"R8-{mode}-human-response-{disposition}",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -4470,14 +5375,14 @@ def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
         ((label, path),),
         "resolve candidate human review",
     )
-    M = deletion
+    candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     return Fixture(
         f"R8-review-binding-{disposition}",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if divergent else "no-finding",
         {
@@ -4569,22 +5474,16 @@ def r9_review_pending_binding(
     path = add_review(
         repo,
         label,
-        status="waiting",
-        target="pending" if field_slug == "target" else target,
-        revision="pending" if field_slug == "revision" else revision,
+        status="awaiting-artifact",
+        target="pending",
+        revision="pending",
     )
     C = repo.commit(f"create review with pending {field_slug} at C")
     repo.branch("old", C)
     answer_review(repo, path, "approve")
     O = feature(repo, f"{label}-old")
     repo.branch("candidate", C)
-    fill_review_pending(
-        repo,
-        path,
-        field=pending_field,
-        target=target,
-        revision=revision,
-    )
+    publish_review(repo, path, target, revision)
     answer_review(repo, path, "approve")
     authority_parent = claim_review(repo, path)
     deletion = delete_with_evidence(
@@ -4596,13 +5495,13 @@ def r9_review_pending_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             f"adopt review {field_slug} supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     old_pending_value = "pending"
     candidate_value = (
@@ -4615,7 +5514,7 @@ def r9_review_pending_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -4680,13 +5579,13 @@ def r10_malformed_review_binding(
     if mode == "supplier":
         repo.branch("candidate-carrier", C)
         carrier = feature(repo, f"{label}-carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             f"adopt malformed {field_slug} review supplier absence",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
     candidate_value = (
         f"`{target}`" if field == "Review target" else revision
@@ -4696,7 +5595,7 @@ def r10_malformed_review_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -4775,7 +5674,7 @@ def r13_review_parent_binding(
         carrier = feature(repo, f"{label}-live-carrier")
 
     if mode == "direct":
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (authority_parent, carrier),
             "directly delete review from both carrying parents",
             writes={
@@ -4784,7 +5683,7 @@ def r13_review_parent_binding(
             removes=(path,),
         )
     else:
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt review supplier absence with carrying parent",
             removes=(path,),
@@ -4802,7 +5701,7 @@ def r13_review_parent_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -4832,9 +5731,9 @@ def r13_review_parent_binding(
                 ),
             ],
             "authority_parent": authority_parent,
-            "authority_child": M if mode == "direct" else deletion,
+            "authority_child": candidate_landmark if mode == "direct" else deletion,
             "carrier": carrier,
-            "merge": M,
+            "merge": candidate_landmark,
         },
     )
 
@@ -4944,7 +5843,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         Path(path).with_name(f"non-blocking-{label}-moved.md")
     )
     repo.move(path, moved)
-    M = repo.commit(f"move low-similarity persisted-state {variant}")
+    candidate_landmark = repo.commit(f"move low-similarity persisted-state {variant}")
     N = feature(repo, f"{label}-new-tip")
 
     old_text = repo.run("show", f"{O}:{path}").stdout
@@ -4968,7 +5867,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if expected_problem else "no-finding",
         {
@@ -5069,13 +5968,13 @@ def r14_review_carrier_binding(
                 repo, path, carrier_target, carrier_revision
             )
             carrier_binding = [carrier_target, carrier_revision]
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (deletion, carrier),
             "adopt absence with an unanswered published review carrier",
             removes=(path,),
         )
     else:
-        M = deletion
+        candidate_landmark = deletion
         carrier_binding = [authority_target, authority_revision]
     N = feature(repo, f"{label}-new")
 
@@ -5085,7 +5984,7 @@ def r14_review_carrier_binding(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
         {
@@ -5122,7 +6021,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.move(path, moved)
     repo.write(moved, original.replace(hidden_A, hidden_B))
-    M = repo.commit("move action while replacing protected hidden bytes")
+    candidate_landmark = repo.commit("move action while replacing protected hidden bytes")
     N = feature(repo, f"{label}-new")
     before = repo.run("show", f"{O}:{path}").stdout
     after = repo.run("show", f"{N}:{moved}").stdout
@@ -5134,7 +6033,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5174,14 +6073,14 @@ def r14_persisted_intermediate_claim(root: Path) -> Fixture:
     )
     bad = repo.commit("regress candidate claim in intermediate commit")
     repo.write(path, before_bad)
-    M = repo.commit("restore candidate claim before endpoint")
+    candidate_landmark = repo.commit("restore candidate claim before endpoint")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-intermediate-claim-regression",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"bad": bad, "expected_problem": "committed in-repair"},
@@ -5223,14 +6122,14 @@ def r14_persisted_intermediate_review(root: Path) -> Fixture:
     )
     bad = repo.commit("mutate review binding in intermediate commit")
     repo.write(path, original)
-    M = repo.commit("restore review binding before endpoint")
+    candidate_landmark = repo.commit("restore review binding before endpoint")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-intermediate-review-regression",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"bad": bad, "expected_problem": "immutable review binding"},
@@ -5251,14 +6150,14 @@ def r14_persisted_delete_recreate(root: Path) -> Fixture:
     gap = repo.commit("temporarily delete exact persisted identity")
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.write(moved, original)
-    M = repo.commit("recreate exact persisted identity")
+    candidate_landmark = repo.commit("recreate exact persisted identity")
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-delete-recreate",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {"gap": gap, "old_path": path, "new_path": moved},
@@ -5296,14 +6195,14 @@ def r14_persisted_review_retraction(root: Path) -> Fixture:
     repo.write(path, text)
     retracted = repo.commit("retract unanswered review publication")
     published_B = publish_review(repo, path, target_B, revision_B)
-    M = published_B
+    candidate_landmark = published_B
     N = feature(repo, f"{label}-new")
     return Fixture(
         "R14-persisted-valid-review-retraction",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -5326,7 +6225,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
     answer_commit = answer(repo, path, "first-response-" * 4096)
     moved = str(Path(path).with_name(f"non-blocking-{label}-moved.md"))
     repo.move(path, moved)
-    M = repo.commit("move decision after valid first response")
+    candidate_landmark = repo.commit("move decision after valid first response")
     N = feature(repo, f"{label}-new")
     name_status = repo.run(
         "diff", "--name-status", "-M", O, N, "--", path, moved
@@ -5336,7 +6235,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -5385,7 +6284,7 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         carrier = publish_review(repo, path, target_B, revision_B)
     else:
         carrier = feature(repo, f"{label}-pending")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (source, carrier),
         "merge persisted source with compatible or conflicting carrier",
         writes={path: source_text},
@@ -5396,31 +6295,50 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding" if conflict else "no-finding",
-        {"source": source, "carrier": carrier, "merge": M, "conflict": conflict},
+        {"source": source, "carrier": carrier, "merge": candidate_landmark, "conflict": conflict},
     )
 
 
-def r8_adapter_M_variants(root: Path) -> Fixture:
+def r17_outside_c_neutral_parent(root: Path) -> Fixture:
+    """Exact legal-restack DAG from the r17 blocking core review."""
     repo = GitRepository(root)
     initialize(repo)
-    label = "r8-adapter-M-input"
+    R = repo.commit("create root before the reviewed action exists")
+    repo.branch("reviewed-C-line", R)
+    label = "r17-outside-c-neutral-parent"
     path = add_agent(repo, label)
-    C = repo.commit("create adapter-input action at C")
+    C = repo.commit("create reviewed action at C")
     repo.branch("old", C)
-    O = feature(repo, f"{label}-old")
-    repo.branch("candidate", C)
-    claim(repo, (path,), "claim adapter-input action")
+    O = feature(repo, f"{label}-task-patch")
+    repo.branch("outside-C", R)
+    F = feature(repo, f"{label}-outside-parent")
+    P = repo.merge_commit(
+        (C, F),
+        "merge outside-C action-free parent while retaining Q",
+    )
+    repo.branch("candidate", P)
+    K = claim(repo, (path,), "claim reviewed action after neutral merge")
     deletion = delete_with_evidence(
         repo,
         ((label, path),),
-        "resolve adapter-input action",
+        "validly resolve reviewed action after neutral merge",
     )
-    N = feature(repo, f"{label}-old")
+    N = feature(repo, f"{label}-task-patch")
+    old_patch = repo.run("diff", "--binary", C, O).stdout
+    replayed_patch = repo.run("diff", "--binary", deletion, N).stdout
+    bases = repo.run("merge-base", "--all", O, N).stdout.splitlines()
+    with reconciler_repository(repo.root):
+        deletion_problem = RECONCILE.queue_deletion_problem(
+            path,
+            repo.run("show", f"{K}:{path}").stdout,
+            K,
+            deletion,
+        )
     return Fixture(
-        "R8-adapter-M-input-variants",
+        "R17-outside-C-neutral-parent-valid-restack",
         repo,
         C,
         O,
@@ -5428,12 +6346,543 @@ def r8_adapter_M_variants(root: Path) -> Fixture:
         N,
         "no-finding",
         {
-            "adapter_M_variants": {
-                "workflow_M_equals_O": O,
-                "explicit_candidate_M": deletion,
-                "endpoint_M_equals_N": N,
+            "R": R,
+            "F": F,
+            "P": P,
+            "K": K,
+            "deletion": deletion,
+            "unique_merge_base": bases,
+            "task_patch_equal": old_patch == replayed_patch,
+            "production_deletion_problem": deletion_problem,
+            "reviewer_counterexample_oids": {
+                "C": "030fe92b832b1bd2790182cab030b9dfd46ec6dc",
+                "O": "07418610247abbde975bd54ac937acf75ca02500",
+                "F": "233e9c9821300b9a1579c261a37b3829d0459250",
+                "P": "bda691d6bc1759421cc55925e8c350edea7d42be",
+                "K": "920d63682562575383ac5adbaf33c5855d24a554",
+                "deletion": "d45b8657259492bbc12f6c32a2e81a7944357ce4",
+                "N": "3a60d2c225bbcdf0619135111af9bc0a1120dbce",
             },
-            "poc_changes_adapter": False,
+        },
+    )
+
+
+def r17_carry_merge_fixture(
+    root: Path, *, variant: str, reverse_parents: bool = False
+) -> Fixture:
+    """Exercise one retained live occurrence across a post-C merge."""
+    if variant not in {
+        "compatible",
+        "incompatible",
+        "absent-arm",
+        "outside-single",
+        "outside-duplicate",
+    }:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit(f"create {variant} carry root")
+    label = f"r17-carry-{variant}"
+    path = add_agent(repo, label)
+    text = repo.read(path)
+    C = repo.commit(f"create {variant} carried action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+
+    repo.branch("primary-carrier", C)
+    primary = feature(repo, f"{label}-primary")
+    repo.branch("second-carrier", R if variant.startswith("outside-") else C)
+    if variant == "incompatible":
+        claim(repo, (path,), "claim incompatible carry arm")
+        second = feature(repo, f"{label}-incompatible")
+    elif variant == "absent-arm":
+        repo.remove(path)
+        second = repo.commit("remove action on competing C-descendant arm")
+    elif variant == "outside-single":
+        add_agent(repo, label, path=path, text=text)
+        second = feature(repo, f"{label}-outside-single")
+    elif variant == "outside-duplicate":
+        add_agent(repo, label, path=path, text=text)
+        duplicate_path = queue_path(f"{label}-duplicate")
+        add_agent(repo, label, path=duplicate_path, text=text)
+        second = feature(repo, f"{label}-outside-duplicate")
+    else:
+        second = feature(repo, f"{label}-compatible")
+    parents = (second, primary) if reverse_parents else (primary, second)
+    merge = repo.merge_commit(
+        parents,
+        f"retain action across {variant} carry merge",
+        writes={path: text},
+        removes=(
+            (queue_path(f"{label}-duplicate"),)
+            if variant == "outside-duplicate"
+            else ()
+        ),
+    )
+    repo.branch("candidate", merge)
+    authority_parent = claim(repo, (path,), "claim retained carried action")
+    deletion = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve retained carried action",
+    )
+    N = feature(repo, f"{label}-task-patch")
+    expected = "no-finding" if variant == "compatible" else "blocking-finding"
+    suffix = "-reversed" if reverse_parents else ""
+    return Fixture(
+        f"R17-carry-{variant}{suffix}",
+        repo,
+        C,
+        O,
+        deletion,
+        N,
+        expected,
+        {
+            "variant": variant,
+            "merge": merge,
+            "primary": primary,
+            "second": second,
+            "merge_parents": list(parents),
+            "authority_parent": authority_parent,
+            "authority_child": deletion,
+            "reverse_parents": reverse_parents,
+        },
+    )
+
+
+def r17_persisted_carry_fixture(
+    root: Path, *, variant: str, reverse_parents: bool = False
+) -> Fixture:
+    """Persist Q across a merge whose second arm must still compete."""
+    if variant not in {
+        "outside-single",
+        "outside-duplicate",
+        "valid-absent-arm",
+        "unauthorized-absent-arm",
+    }:
+        raise ValueError(variant)
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit(f"create persisted {variant} root")
+    label = f"r17-persisted-{variant}"
+    text = agent_text(label)
+    path = add_agent(repo, label, text=text)
+    C = repo.commit(f"admit persisted {variant} action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+    repo.branch("primary-carrier", C)
+    A = feature(repo, f"{label}-carrier")
+
+    duplicate_path = None
+    if variant.startswith("outside-"):
+        repo.branch("competing-arm", R)
+        add_agent(repo, label, path=path, text=text)
+        if variant == "outside-duplicate":
+            duplicate_path = queue_path(f"{label}-duplicate")
+            add_agent(repo, label, path=duplicate_path, text=text)
+        second = feature(repo, f"{label}-outside")
+        K = D = None
+    else:
+        repo.branch("competing-arm", C)
+        if variant == "valid-absent-arm":
+            K = claim(repo, (path,), "claim persisted absent arm")
+            D = delete_with_evidence(
+                repo,
+                ((label, path),),
+                "validly delete persisted absent arm",
+            )
+        else:
+            K = None
+            repo.remove(path)
+            D = repo.commit("delete persisted absent arm without authority")
+        second = D
+    parents = (second, A) if reverse_parents else (A, second)
+    P = repo.merge_commit(
+        parents,
+        f"explicitly retain persisted action across {variant}",
+        writes={path: text},
+        removes=((duplicate_path,) if duplicate_path else ()),
+    )
+    N = feature(repo, f"{label}-task-patch")
+    details = {
+        "R": R,
+        "A": A,
+        "second": second,
+        "P": P,
+        "K": K,
+        "D": D,
+        "variant": variant,
+        "reverse_parents": reverse_parents,
+        "merge_parents": list(parents),
+        "duplicate_path": duplicate_path,
+    }
+    if variant == "outside-single":
+        details["review_reference_oids"] = {
+            "C": "843634959ac1156ef81ee7ccbf1f703261bbde1f",
+            "O": "c0ec07829f6aa4e1207a680a0354deb8a8f0c162",
+            "A": "426b485efa3b5f85a678600795a20b1e91c6049f",
+            "F": "e10a4eb3208c44000e7363c2894e2a77b74828fa",
+            "P": "60f5448337b6f9a114c0231b86242474dd34873b",
+            "N": "af48cf172570a08d65c12dc467b2226dfbe8981a",
+        }
+    elif variant == "valid-absent-arm":
+        details["review_reference_oids"] = {
+            "C": "0ddb561a40c84c0590d9abe8a3036521b239de25",
+            "O": "17ef4a3d8c518778d62c635864670319efd03754",
+            "A": "90de0b5af2ad8baec036ddaed2842eda86c2c556",
+            "K": "f03d61cc931d7c860e7fd6f166c60d09596b48e5",
+            "D": "161d7ed2d7bc121ce5331fed2e1ecb0dd650041e",
+            "P": "1847cdbe8298d5895ad566c03abc870064ca711b",
+            "N": "76cf3354a913effec09cac7b183684159dfd0b84",
+        }
+    suffix = "-reversed" if reverse_parents else ""
+    return Fixture(
+        f"R17-persisted-{variant}{suffix}",
+        repo,
+        C,
+        O,
+        P,
+        N,
+        "blocking-finding",
+        details,
+    )
+
+
+def r17_boundary_budget_fixture(
+    root: Path,
+    *,
+    counter: str = "graph_parent_tokens",
+    limit: int = 7,
+    exact: bool = False,
+) -> Fixture:
+    """Meter a small intrinsic cone with a wide outside-C boundary."""
+    repo = GitRepository(root)
+    initialize(repo)
+    R = repo.commit("create wide-boundary budget root")
+    label = "r17-boundary-budget"
+    path = add_agent(repo, label)
+    C = repo.commit("admit wide-boundary budget action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+    repo.branch("primary-carrier", C)
+    A = feature(repo, f"{label}-carrier")
+    outside = []
+    for index in range(64):
+        repo.branch(f"outside-{index:02d}", R)
+        outside.append(feature(repo, f"{label}-outside-{index:02d}"))
+    P = repo.merge_commit(
+        (A, *outside),
+        "retain action across 64 immediate outside-C boundary parents",
+    )
+    N = feature(repo, f"{label}-task-patch")
+    scenario = (
+        f"R17-wide-graph-{counter}-exact"
+        if exact
+        else "R17-wide-outside-C-boundary-budget"
+    )
+    return Fixture(
+        scenario,
+        repo,
+        C,
+        O,
+        P,
+        N,
+        "no-finding" if exact else "blocking-finding",
+        {
+            "A": A,
+            "P": P,
+            "outside_parents": outside,
+            "budget_contract": {
+                "counter": counter,
+                "limit": limit,
+                "overflow_classification": "budget-exceeded",
+                "transactional_zero_results": True,
+                "raw_graph_bytes": 2952,
+                "raw_graph_lines": 4,
+                "raw_graph_fields": [2, 2, 66, 2],
+            },
+            "review_reference_oids": {
+                "C": "b066accf737c901fd1ee314fcf310afb70c8fe87",
+                "O": "ba894e5a1c019e3b2c29ee8319eebfb4b0aaa9a3",
+                "P": "b79ff7a4036270fed4a70d82ad226817ae94e662",
+                "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
+            },
+        },
+        budget_limits={counter: limit},
+    )
+
+
+def r17_graph_parent_tokens_exact(root: Path) -> Fixture:
+    fixture = r17_boundary_budget_fixture(
+        root, counter="graph_parent_tokens", limit=68, exact=True
+    )
+    fixture.scenario = "R17-graph-parent-tokens-exact"
+    fixture.details["typed_budget_counter"] = "graph_parent_tokens"
+    fixture.details["typed_budget_limit"] = 68
+    fixture.details["overflow_by_one"] = False
+    return fixture
+
+
+def r17_graph_parent_tokens_plus_one(root: Path) -> Fixture:
+    fixture = r17_boundary_budget_fixture(
+        root, counter="graph_parent_tokens", limit=67
+    )
+    fixture.scenario = "R17-graph-parent-tokens-plus-one-refused"
+    fixture.details["typed_budget_counter"] = "graph_parent_tokens"
+    fixture.details["typed_budget_limit"] = 67
+    fixture.details["overflow_by_one"] = True
+    return fixture
+
+
+def r17_graph_dimension_budget(
+    root: Path,
+    *,
+    counter: str,
+    limit: int,
+    overflow: bool,
+) -> Fixture:
+    fixture = r17_boundary_budget_fixture(
+        root, counter=counter, limit=limit, exact=not overflow
+    )
+    dimension = {
+        "graph_output_bytes": "output-bytes",
+        "graph_line_peak_bytes": "line-peak-bytes",
+    }[counter]
+    fixture.scenario = (
+        f"R17-graph-{dimension}-plus-one-refused"
+        if overflow
+        else f"R17-graph-{dimension}-exact"
+    )
+    fixture.expected = "blocking-finding" if overflow else "no-finding"
+    fixture.details["typed_budget_counter"] = counter
+    fixture.details["typed_budget_limit"] = limit
+    fixture.details["overflow_by_one"] = overflow
+    return fixture
+
+
+def r17_workflow_input_case(root: Path, case: str) -> Fixture:
+    """Bind non-core transport claims to the exact O,N-only API."""
+    cases = {
+        "fast-forward",
+        "pre-pr-push",
+        "base-advance-retarget",
+        "multiple-pr-api-race",
+        "stale-rerun",
+        "missing-old",
+        "zero-endpoints",
+        "pr-synchronize",
+    }
+    if case not in cases:
+        raise ValueError(case)
+    if case == "fast-forward":
+        repo = GitRepository(root)
+        initialize(repo)
+        path = add_agent(repo, "r17-workflow-fast-forward")
+        C = repo.commit("create fast-forward input action")
+        O = feature(repo, "r17-workflow-fast-forward-old")
+        N = feature(repo, "r17-workflow-fast-forward-new")
+        fixture = Fixture(
+            "W0-fast-forward-return",
+            repo,
+            O,
+            O,
+            N,
+            N,
+            "no-finding",
+            {"preserved_path": path},
+        )
+    else:
+        fixture = ordinary_linear_fixture(
+            root,
+            f"W-{case}",
+            valid=True,
+        )
+        fixture.scenario = {
+            "pre-pr-push": "W1-pre-PR-push-exact-endpoints",
+            "base-advance-retarget": "W2-base-advance-retarget-invariant",
+            "multiple-pr-api-race": "W3-multiple-PR-API-zero-calls",
+            "stale-rerun": "W4-stale-rerun-exact-inputs",
+            "missing-old": "W5-missing-O-coverage-unavailable",
+            "zero-endpoints": "W6-created-deleted-zero-endpoints",
+            "pr-synchronize": "W7-PR-synchronize-top-level-endpoints",
+        }[case]
+    O = fixture.O
+    N = fixture.N
+    contract = {
+        "authoritative_inputs": {"O": O, "N": N},
+        "classifier_parameters": ["O", "N"],
+        "provider_api_calls": 0,
+        "fallback": None,
+    }
+    if case == "pre-pr-push":
+        fixture.repo.branch("workflow-default-tip", fixture.expected_C)
+        default_tip = feature(fixture.repo, "workflow-default-tip")
+        contract.update(
+            {
+                "transport": "push",
+                "O_source": "immutable event.before",
+                "N_source": "immutable event.after",
+                "event_before": O,
+                "event_after": N,
+                "github_sha": default_tip,
+                "github_sha_is_authoritative": False,
+                "pre_PR": True,
+            }
+        )
+    elif case == "base-advance-retarget":
+        contract["provider_state_variants"] = [
+            "base-advanced",
+            "retargeted",
+            "base-equals-new-tip",
+        ]
+        contract["variants_keep_exact_O_N"] = True
+    elif case == "multiple-pr-api-race":
+        contract.update(
+            {
+                "provider_states": [
+                    "pre-PR",
+                    "closed-PR",
+                    "multiple-PRs",
+                    "fork",
+                    "API-race",
+                ],
+                "PR_lookup": False,
+            }
+        )
+    elif case == "stale-rerun":
+        contract.update(
+            {
+                "repeat_exact_inputs": True,
+                "stale_rerun_policy": "reuse immutable O,N",
+            }
+        )
+    elif case == "missing-old":
+        missing = "f" * len(O)
+        fixture.O = missing
+        fixture.expected = "unreadable"
+        contract["authoritative_inputs"]["O"] = missing
+        contract.update(
+            {
+                "coverage_classification": "coverage-unavailable",
+                "old_object_fetch_exit": 2,
+                "fallback": None,
+            }
+        )
+    elif case == "zero-endpoints":
+        zero = "0" * len(O)
+        contract["event_classifications"] = [
+            {
+                "event": "created",
+                "before": zero,
+                "classification": "coverage-unavailable",
+            },
+            {
+                "event": "deleted",
+                "after": zero,
+                "classification": "coverage-unavailable",
+            },
+        ]
+    elif case == "pr-synchronize":
+        contract.update(
+            {
+                "transport": "pull_request.synchronize",
+                "O_source": "top-level before",
+                "N_source": "top-level after",
+                "top_level_before": O,
+                "top_level_after": N,
+                "pull_request_head_sha": N,
+                "after_matches_head": True,
+                "mismatch_classification": "coverage-unavailable",
+                "PR_lookup": False,
+            }
+        )
+    elif case == "fast-forward":
+        contract["fast_forward_return"] = True
+    fixture.details["workflow_contract"] = contract
+    return fixture
+
+
+def r17_unreadable_boundary(root: Path) -> Fixture:
+    fixture = r17_outside_c_neutral_parent(root)
+    boundary = fixture.details["F"]
+    hidden, _target = fixture.repo.hide_loose_object(boundary)
+    fixture.scenario = "R17-unreadable-outside-C-boundary"
+    fixture.expected = "unreadable"
+    fixture.details.update(
+        {
+            "unreadable_boundary": boundary,
+            "hidden_boundary_object": hidden.relative_to(
+                fixture.repo.root
+            ).as_posix(),
+        }
+    )
+    return fixture
+
+
+def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r17-unopened-outside-c-ancestor"
+    R = repo.commit("create shared root")
+    repo.branch("outside", R)
+    outside_text = agent_text(label, status="blocked")
+    outside_path = add_agent(repo, label, text=outside_text)
+    G = repo.commit("create outside-C ancestor with matching identity")
+    ancestor_blob = repo.tree_entry_oid(G, outside_path)
+    repo.remove(outside_path)
+    F = repo.commit("drop matching identity before outside-C boundary")
+    repo.branch("reviewed", R)
+    c_text = agent_text(label)
+    path = add_agent(repo, label, text=c_text)
+    C = repo.commit("admit matching identity independently at C")
+    c_blob = repo.tree_entry_oid(C, path)
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-task-patch")
+    P = repo.merge_commit(
+        (C, F),
+        "retain action across neutral outside-C boundary",
+    )
+    repo.branch("candidate", P)
+    K = claim(repo, (path,), "claim action after neutral boundary")
+    D = delete_with_evidence(
+        repo, ((label, path),), "resolve action after neutral boundary"
+    )
+    N = feature(repo, f"{label}-task-patch")
+    hidden, _target = repo.hide_loose_object(ancestor_blob)
+    return Fixture(
+        "R17-unreadable-outside-C-ancestor-stays-unopened",
+        repo,
+        C,
+        O,
+        D,
+        N,
+        "no-finding",
+        {
+            "R": R,
+            "G": G,
+            "F": F,
+            "P": P,
+            "K": K,
+            "D": D,
+            "ancestor_blob": ancestor_blob,
+            "C_blob": c_blob,
+            "same_identity": (
+                RECONCILE.queue_action_identity(outside_path, outside_text)
+                == RECONCILE.queue_action_identity(path, c_text)
+            ),
+            "ancestor_blob_is_unique": ancestor_blob != c_blob,
+            "hidden_ancestor_blob": hidden.relative_to(repo.root).as_posix(),
+            "attacker_reference_oids": {
+                "G": "b838a677f5753a45bff2d33f6e94b3a80cc92905",
+                "G_blob": "88ce173dddc1914b0e7ccd52f5b89fb4742a713d",
+                "C": "52c16e3ace5b2fb945b2e8fc42b7485536ea1a47",
+                "O": "5ff93e594d8689fe44774a9728a882c846e1833e",
+                "F": "4afa966344cb99e6a72a10997b10572072e7cccb",
+                "P": "6564e680097653cebcc008a0bfee8587c644057f",
+                "K": "245d7de3ef54645d32fbcf8bbda7d69f426ce6d2",
+                "D": "595acd03b0c0f5cee214599587247d1115b2fc40",
+                "N": "61d97651036a8cc9da10662ca7560bce14ce9ce5",
+            },
         },
     )
 
@@ -5504,7 +6953,7 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
     O = feature(repo, f"{label}-old-tip")
 
     repo.branch("candidate", C)
-    M = feature(repo, f"{label}-candidate-base")
+    candidate_landmark = feature(repo, f"{label}-candidate-base")
     N = feature(repo, f"{label}-candidate-tip")
     expected = "no-finding" if variant == "continuous-preserved" else "blocking-finding"
     details["old_text_equals_C"] = (
@@ -5530,28 +6979,10 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         details,
-    )
-
-
-def r8_adapter_M_endpoint_counterexample(root: Path) -> Fixture:
-    base = r3_unrelated_invalid_does_not_poison(root)
-    details = {
-        **base.details,
-        "adapter_M_variants": {
-            "explicit_candidate_M": base.M,
-            "endpoint_M_equals_N": base.N,
-        },
-        "poc_changes_adapter": False,
-        "automatic_M_equals_N_safe": False,
-    }
-    return dataclasses.replace(
-        base,
-        scenario="R8-adapter-M-N-frontier-counterexample",
-        details=details,
     )
 
 
@@ -5620,7 +7051,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
     final_carrier = feature(repo, "r3-two-invalid-final-carrier")
     repo.branch("r3-two-invalid-final-neutral", R)
     final_neutral = feature(repo, "r3-two-invalid-final-neutral")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (
             first["adoption"],
             second["adoption"],
@@ -5636,7 +7067,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5650,7 +7081,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
                 second["carrier"],
                 final_carrier,
             ],
-            "adoptions": [first["adoption"], second["adoption"], M],
+            "adoptions": [first["adoption"], second["adoption"], candidate_landmark],
             "neutral_parents": [
                 first["neutral"],
                 second["neutral"],
@@ -5695,7 +7126,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
     final_carrier = feature(repo, "r3-mixed-final-carrier")
     repo.branch("r3-mixed-final-neutral", R)
     final_neutral = feature(repo, "r3-mixed-final-neutral")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (
             invalid["adoption"],
             valid_deletion,
@@ -5711,7 +7142,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5721,7 +7152,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
             ],
             "source_children": [invalid["adoption"], valid_deletion],
             "carriers": [invalid["carrier"], final_carrier],
-            "adoptions": [invalid["adoption"], M],
+            "adoptions": [invalid["adoption"], candidate_landmark],
             "neutral_parents": [invalid["neutral"], final_neutral],
             "absent_sources": [
                 invalid["authority_event"],
@@ -5732,7 +7163,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
     )
 
 
-def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
+def r3_valid_plus_invalid_at_N(root: Path) -> Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r3-unrelated-invalid"
@@ -5752,13 +7183,13 @@ def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
     )
     repo.branch("r3-positive-carrier", C)
     carrier = feature(repo, "r3-positive-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt only the causally relevant valid supplier",
         removes=(path,),
     )
     N = repo.merge_commit(
-        (M, unrelated_invalid),
+        (candidate_landmark, unrelated_invalid),
         "retain unrelated invalid source in candidate graph",
         writes={
             "features/r3-unrelated-invalid-old.md": (
@@ -5788,13 +7219,13 @@ def r3_unrelated_invalid_does_not_poison(root: Path) -> Fixture:
         == 0
     )
     return Fixture(
-        "R3-03-unrelated-invalid-does-not-poison",
+        "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
-        "no-finding",
+        "blocking-finding",
         {
             "unrelated_invalid": unrelated_invalid,
             "supplier": supplier,
@@ -5895,14 +7326,14 @@ def r4_same_root_diamond(root: Path) -> Fixture:
         absent_parents=(first["adoption"], second["adoption"]),
         suffix="r4-same-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-same-root-diamond-old")
     return Fixture(
         "R4-01-same-root-valid-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -5916,7 +7347,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
             "adoptions": [
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 first["neutral"],
@@ -5932,7 +7363,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
                 valid_root,
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -5978,14 +7409,14 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
         ),
         suffix="r4-distinct-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-distinct-root-diamond-old")
     return Fixture(
         "R4-02-distinct-valid-root-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -5999,7 +7430,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
             "adoptions": [
                 wrappers[0]["adoption"],
                 wrappers[1]["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 wrappers[0]["neutral"],
@@ -6017,7 +7448,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
                 wrappers[0]["adoption"],
                 valid_roots[1],
                 wrappers[1]["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -6066,14 +7497,14 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
         absent_parents=(first["adoption"], second["adoption"]),
         suffix="r4-equal-final",
     )
-    M = final["adoption"]
+    candidate_landmark = final["adoption"]
     N = feature(repo, "r4-equal-root-plus-invalid-old")
     return Fixture(
         "R4-03-equal-root-plus-invalid-diamond",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6087,7 +7518,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
             "adoptions": [
                 first["adoption"],
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
             "neutral_parents": [
                 first["neutral"],
@@ -6105,7 +7536,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
                 first["adoption"],
                 invalid_root,
                 second["adoption"],
-                M,
+                candidate_landmark,
             ],
         },
     )
@@ -6132,7 +7563,7 @@ def r5_reintroduced_supplier_history(
     )
     repo.branch(f"{label}-carrier", C)
     carrier = feature(repo, f"{label}-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (valid_root, carrier),
         "adopt initial supplier absence",
         removes=(path,),
@@ -6166,20 +7597,20 @@ def r5_reintroduced_supplier_history(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
             "initial_authority_parent": root_parent,
             "initial_authority_child": valid_root,
             "carrier": carrier,
-            "supplier_adoption": M,
+            "supplier_adoption": candidate_landmark,
             "initial_absent_parent": valid_root,
             "reintroduction": reintroduction,
             "later_authority_parent": later_parent,
             "later_authority_child": redeletion,
             "later_authority_valid": later_valid,
-            "reason_children": [valid_root, M, redeletion],
+            "reason_children": [valid_root, candidate_landmark, redeletion],
         },
     )
 
@@ -6227,7 +7658,7 @@ def r6_all_absent_roots(
                 )
         roots.append(deletion)
         statuses.append(kind)
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         tuple(roots),
         "join all-absent causal roots",
         removes=(path,),
@@ -6243,9 +7674,13 @@ def r6_all_absent_roots(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
-        "blocking-finding",
+        (
+            "no-finding"
+            if first_valid and second_kind == "ambiguous"
+            else "blocking-finding"
+        ),
         {
             "causal_events": roots,
             "causal_statuses": statuses,
@@ -6253,6 +7688,12 @@ def r6_all_absent_roots(
                 status != "valid" for status in statuses
             ),
             "legacy_sole_valid_false_green": first_valid,
+            "r17_disposition": (
+                "outside-C all-absent boundary is neutral at multiplicity "
+                "zero; its ambiguous ancestor root stays unopened"
+                if first_valid and second_kind == "ambiguous"
+                else None
+            ),
         },
     )
 
@@ -6284,7 +7725,7 @@ def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
         )
         for index in (1, 2)
     ]
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         tuple(wrapper["adoption"] for wrapper in wrappers),
         "join equal-root all-absent wrappers",
         removes=(path,),
@@ -6295,7 +7736,7 @@ def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6344,7 +7785,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
     supplier = repo.commit("fix finding and clear generated retry")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx15-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt generated retry clearance",
         removes=(retry,),
@@ -6363,7 +7804,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6425,7 +7866,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
     supplier = repo.commit("atomically claim task and delete pickup")
     repo.branch("carrier", C)
     carrier = feature(repo, "pcx16-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (supplier, carrier),
         "adopt task-pickup supplier",
         removes=(pickup,),
@@ -6436,7 +7877,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {"pickup_path": pickup, "active_task": active},
@@ -6486,12 +7927,12 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
     resolved = f"# Evidence {label}: resolved\n"
     if variant == "forward":
         parents = (authority_child, carrier)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents, "forward supplier support adoption", removes=(path,)
         )
     elif variant == "reverse-preserved":
         parents = (carrier, authority_child)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "reverse supplier support adoption with projection",
             writes={evidence: resolved},
@@ -6499,7 +7940,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     elif variant == "source-evolution":
         parents = (carrier, source_parent)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "copy evolved source support at adoption",
             writes={
@@ -6509,7 +7950,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     elif variant == "adoption-drift":
         parents = (authority_child, carrier)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "invent support state in adoption commit",
             writes={evidence: f"# Evidence {label}: adoption-drift\n"},
@@ -6523,7 +7964,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
         repo.branch("second-support-carrier", C)
         second_carrier = claim(repo, (path,), "second support carrier")
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             (second_carrier, first),
             "nested adoption drops source support",
             removes=(path,),
@@ -6550,7 +7991,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
             repo, (path,), "final diamond support carrier"
         )
         parents = (second, final_carrier, first)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "join equal support roots through both parent orders",
             writes={evidence: resolved},
@@ -6558,7 +7999,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         )
     else:
         parents = (carrier, authority_child)
-        M = repo.merge_commit(
+        candidate_landmark = repo.merge_commit(
             parents,
             "reverse supplier support adoption",
             removes=(path,),
@@ -6576,7 +8017,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         variants[variant],
         {
@@ -6630,7 +8071,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
     authority_child = repo.commit("delete using admitted earlier evidence")
     repo.branch("earlier-evidence-carrier", C)
     carrier = claim(repo, (path,), "claim stale evidence carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (carrier, authority_child),
         "reverse adoption reverts earlier evidence",
         removes=(path,),
@@ -6647,14 +8088,14 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
             authority_child,
         )
         replay_problem = RECONCILE.queue_deletion_problem(
-            path, authority_text, authority_parent, M
+            path, authority_text, authority_parent, candidate_landmark
         )
     return Fixture(
         "R16-earlier-landed-evidence-reversal",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6665,7 +8106,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
             "expected_evidence": repo.tree_entry_oid(
                 authority_child, evidence
             ),
-            "reverted_evidence": repo.tree_entry_oid(M, evidence),
+            "reverted_evidence": repo.tree_entry_oid(candidate_landmark, evidence),
         },
     )
 
@@ -6712,7 +8153,7 @@ def r16_pickup_evolution(
         )
     repo.branch("pickup-carrier", C)
     carrier = feature(repo, f"r16-pickup-{slug}-carrier")
-    M = repo.merge_commit(
+    candidate_landmark = repo.merge_commit(
         (carrier, source_parent),
         "copy current pickup support projection",
         writes=adoption_writes,
@@ -6725,7 +8166,7 @@ def r16_pickup_evolution(
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         (
             "blocking-finding"
@@ -6760,7 +8201,7 @@ def p19_identities(root: Path) -> Fixture:
     repo.branch("old", C)
     O = feature(repo, "p19-old")
     repo.branch("candidate", C)
-    M = feature(repo, "p19-base")
+    candidate_landmark = feature(repo, "p19-base")
     N = feature(repo, "p19-old")
     ordinary_first = RECONCILE.queue_action_identity(first, text)
     ordinary_second = RECONCILE.queue_action_identity(second, text)
@@ -6775,7 +8216,7 @@ def p19_identities(root: Path) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6824,14 +8265,14 @@ def p20_lifecycle_types(root: Path) -> Fixture:
     repo.remove(agent)
     repo.remove(human)
     repo.remove(retry)
-    M = repo.commit("resolve every lifecycle type")
+    candidate_landmark = repo.commit("resolve every lifecycle type")
     N = feature(repo, "p20-old")
     return Fixture(
         "P20-lifecycle-types",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "no-finding",
         {
@@ -6863,7 +8304,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
         repo.run(
             "cherry-pick", K, D, env=repo._commit_environment()
         )
-        M = repo.oid("HEAD")
+        candidate_landmark = repo.oid("HEAD")
         expected = "no-finding"
     elif mode == "deletion-only":
         conflicted = repo.run("cherry-pick", D, check=False)
@@ -6877,14 +8318,14 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
             "--continue",
             env=repo._commit_environment(),
         )
-        M = repo.oid("HEAD")
+        candidate_landmark = repo.oid("HEAD")
         expected = "blocking-finding"
     elif mode == "squash":
         final_tree = repo.oid(f"{D}^{{tree}}")
-        M = repo.commit_tree(
+        candidate_landmark = repo.commit_tree(
             final_tree, "squash claim and deletion", C
         )
-        repo.branch("candidate-squash", M)
+        repo.branch("candidate-squash", candidate_landmark)
         expected = "blocking-finding"
     else:
         raise ValueError(mode)
@@ -6898,7 +8339,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         expected,
         {"source_K": K, "source_D": D, "mode": mode},
@@ -6931,14 +8372,14 @@ def pcx18_many_actions(root: Path) -> Fixture:
             evidence_path(label), f"# Evidence {label}: resolved\n"
         )
         repo.remove(path)
-    M = repo.commit("delete all sixteen actions")
+    candidate_landmark = repo.commit("delete all sixteen actions")
     N = feature(repo, "many-old")
     return Fixture(
         "P22-PCX-18-one-pass-many-actions",
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
         "blocking-finding",
         {
@@ -6948,6 +8389,31 @@ def pcx18_many_actions(root: Path) -> Fixture:
             "expected_findings": 8,
         },
     )
+
+
+def r17_precharge_many_actions_budget(root: Path) -> Fixture:
+    """Refuse P22's first over-budget operation before later work starts."""
+    fixture = pcx18_many_actions(root)
+    reference = Classifier(fixture).run()["metrics"]
+    fixture.scenario = "R17-precharge-P22-budget"
+    fixture.expected = "blocking-finding"
+    fixture.budget_limits = {"object_reads": 133}
+    fixture.details.update(
+        {
+            "budget_counter_policy": "charge before measured work",
+            "budget_limit": 133,
+            "budget_counter": "object_reads",
+            "later_counters_unchanged": [
+                "authority_calls",
+                "support_adoption_checks",
+                "support_certificate_calls",
+                "support_serialized_bytes",
+            ],
+            "posthoc_reference_metrics": reference,
+            "transactional_zero_results": True,
+        }
+    )
+    return fixture
 
 
 def p18_missing_tip(root: Path) -> Fixture:
@@ -6979,7 +8445,7 @@ def p18_unrelated_tip(root: Path) -> Fixture:
     fixture.N = fixture.repo.commit_tree(
         empty, "unrelated child", unrelated
     )
-    fixture.M = unrelated
+    fixture.candidate_landmark = unrelated
     fixture.expected = "unreadable"
     return fixture
 
@@ -6989,7 +8455,7 @@ def p18_shallow(root: Path) -> Fixture:
         root, "P18d-shallow-required-region", valid=True
     )
     (fixture.repo.root / ".git/shallow").write_text(
-        fixture.C + "\n", encoding="ascii"
+        fixture.expected_C + "\n", encoding="ascii"
     )
     fixture.expected = "unreadable"
     return fixture
@@ -7000,7 +8466,7 @@ def p18_missing_blob(root: Path) -> Fixture:
         root, "P18e-missing-queue-blob", valid=True
     )
     path = queue_path(fixture.scenario.lower())
-    blob = fixture.repo.tree_entry_oid(fixture.C, path)
+    blob = fixture.repo.tree_entry_oid(fixture.expected_C, path)
     fixture.repo.hide_loose_object(blob)
     fixture.expected = "unreadable"
     fixture.details["missing_blob_oid"] = blob
@@ -7011,7 +8477,9 @@ def p18_missing_tree(root: Path) -> Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18f-missing-queue-tree", valid=True
     )
-    tree = fixture.repo.tree_entry_oid(fixture.C, "message-queue")
+    tree = fixture.repo.tree_entry_oid(
+        fixture.expected_C, "message-queue"
+    )
     fixture.repo.hide_loose_object(tree)
     fixture.expected = "unreadable"
     fixture.details["missing_tree_oid"] = tree
@@ -7036,110 +8504,17 @@ def p18_multiple_bases(root: Path) -> Fixture:
     repo.branch("old", X)
     O = feature(repo, "p18g-old")
     repo.branch("candidate", Y)
-    M = feature(repo, "p18g-base")
+    candidate_landmark = feature(repo, "p18g-base")
     N = feature(repo, "p18g-old")
     return Fixture(
         "P18g-multiple-merge-bases",
         repo,
         R,
         O,
-        M,
+        candidate_landmark,
         N,
         "unreadable",
         {"expected_merge_bases": [A, B]},
-    )
-
-
-def p18_missing_M(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18h-missing-M", valid=True
-    )
-    fixture.M = "f" * len(fixture.M)
-    fixture.expected = "unreadable"
-    fixture.details["M_failure"] = "missing-object"
-    return fixture
-
-
-def p18_noncommit_M(root: Path, kind: str) -> Fixture:
-    letter = {"blob": "i", "tree": "j", "tag": "k"}[kind]
-    fixture = ordinary_linear_fixture(
-        root, f"P18{letter}-noncommit-M-{kind}", valid=True
-    )
-    if kind == "blob":
-        M = fixture.repo.run(
-            "hash-object", "-w", "--stdin", input_text="not M\n"
-        ).stdout.strip()
-    elif kind == "tree":
-        M = fixture.repo.run("mktree", input_text="").stdout.strip()
-    elif kind == "tag":
-        blob = fixture.repo.run(
-            "hash-object", "-w", "--stdin", input_text="tag target\n"
-        ).stdout.strip()
-        M = fixture.repo.run(
-            "mktag",
-            input_text=(
-                f"object {blob}\n"
-                "type blob\n"
-                "tag selected-base\n"
-                "tagger Production Contract POC "
-                "<production-contract@example.invalid> "
-                "1800000000 +0000\n\n"
-                "non-commit selected base\n"
-            ),
-        ).stdout.strip()
-    else:
-        raise ValueError(kind)
-    fixture.M = M
-    fixture.expected = "unreadable"
-    fixture.details.update({"M_failure": "non-commit", "M_kind": kind})
-    return fixture
-
-
-def p18_unrelated_M(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18l-unrelated-M", valid=True
-    )
-    empty = fixture.repo.run("mktree", input_text="").stdout.strip()
-    fixture.M = fixture.repo.commit_tree(empty, "unrelated M root")
-    fixture.expected = "blocking-finding"
-    fixture.details["M_failure"] = "unrelated-readable-commit"
-    return fixture
-
-
-def p18_M_after_N(root: Path) -> Fixture:
-    fixture = ordinary_linear_fixture(
-        root, "P18m-M-after-N", valid=True
-    )
-    fixture.repo.branch("after-N", fixture.N)
-    fixture.M = feature(fixture.repo, "p18m-after-N")
-    fixture.expected = "blocking-finding"
-    fixture.details["M_failure"] = "C-descendant-after-N"
-    return fixture
-
-
-def p18_M_endpoint(root: Path, endpoint: str) -> Fixture:
-    scenario = f"P18{'n' if endpoint == 'C' else 'o'}-M-equals-{endpoint}"
-    repo = GitRepository(root)
-    initialize(repo)
-    path = add_agent(repo, scenario.lower())
-    C = repo.commit("create endpoint-equality action at C")
-    repo.branch("old", C)
-    O = feature(repo, f"{scenario.lower()}-old")
-    repo.branch("candidate", C)
-    N = feature(repo, f"{scenario.lower()}-candidate")
-    M = C if endpoint == "C" else N
-    return Fixture(
-        scenario,
-        repo,
-        C,
-        O,
-        M,
-        N,
-        "no-finding",
-        {
-            "M_endpoint": endpoint,
-            "preserved_path": path,
-        },
     )
 
 
@@ -7150,7 +8525,7 @@ def pcx19_missing_claim_blob(root: Path) -> Fixture:
     label = fixture.scenario.lower()
     path = queue_path(label)
     parents = fixture.repo.run(
-        "rev-list", "--parents", "-n", "1", fixture.M
+        "rev-list", "--parents", "-n", "1", fixture.candidate_landmark
     ).stdout.split()
     claim_commit = parents[1]
     blob = fixture.repo.tree_entry_oid(claim_commit, path)
@@ -7187,28 +8562,181 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
     claim(repo, (path,))
     for index in range(5 + int(overflow)):
         feature(repo, f"budget-unrelated-{index}")
-    M = delete_with_evidence(
+    candidate_landmark = delete_with_evidence(
         repo, ((scenario.lower(), path),), "budget fixture deletion"
     )
     N = feature(repo, "budget-old")
-    measured = int(
-        repo.run("rev-list", "--count", O, N, f"^{C}").stdout.strip()
-    ) + 1
-    limit = measured - 1 if overflow else measured
-    return Fixture(
+    fixture = Fixture(
         scenario,
         repo,
         C,
         O,
-        M,
+        candidate_landmark,
         N,
-        "blocking-finding" if overflow else "no-finding",
+        "no-finding",
+    )
+    probe = Classifier(fixture).run()
+    measured = probe["metrics"]
+    max_work = max(measured.values())
+    fixture.expected = "blocking-finding" if overflow else "no-finding"
+    fixture.budget_limit = max_work - 1 if overflow else max_work
+    fixture.details = {
+        "measured_work_counters": measured,
+        "measured_max_work": max_work,
+        "max_work_counter_names": sorted(
+            name for name, value in measured.items() if value == max_work
+        ),
+        "demonstration_limit": fixture.budget_limit,
+        "overflow_by_one": overflow,
+        "budget_counter_policy": "every emitted work counter",
+    }
+    return fixture
+
+
+def configure_typed_budget_fixture(
+    fixture: Fixture,
+    *,
+    scenario: str,
+    counter: str,
+    overflow: bool,
+) -> Fixture:
+    """Derive one deterministic exact or exact-minus-one typed work cap."""
+    probe = Classifier(fixture).run()
+    if probe["classification"] != fixture.expected:
+        raise AssertionError(
+            f"unbudgeted probe for {scenario} changed classification"
+        )
+    measured = probe["metrics"][counter]
+    if measured <= 0:
+        raise AssertionError(f"{scenario} did not exercise {counter}")
+    limit = measured - int(overflow)
+    fixture.scenario = scenario
+    fixture.expected = "blocking-finding" if overflow else fixture.expected
+    fixture.budget_limits = {counter: limit}
+    fixture.details.update(
         {
-            "measured_graph_commits": measured,
-            "demonstration_limit": limit,
-            "limit_is_launch_ceiling": False,
-        },
-        budget_limit=limit,
+            "typed_budget_counter": counter,
+            "typed_budget_limit": limit,
+            "unbudgeted_counter_value": measured,
+            "overflow_by_one": overflow,
+            "transactional_zero_results": overflow,
+        }
+    )
+    return fixture
+
+
+def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r17-large-object"
+    path = add_agent(repo, label)
+    text = repo.read(path)
+    initial_bytes = 999_995
+    target_bytes = 1_000_000
+    padding = initial_bytes - len(text.encode("utf-8"))
+    if padding <= 0:
+        raise AssertionError("large-object fixture base unexpectedly large")
+    repo.write(path, text + ("x" * padding))
+    if len(repo.read(path).encode("utf-8")) != initial_bytes:
+        raise AssertionError("large-object fixture initial size drifted")
+    C = repo.commit("create one million byte queue object")
+    repo.branch("old", C)
+    O = feature(repo, "r17-large-object-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,))
+    candidate_landmark = delete_with_evidence(
+        repo, ((label, path),), "delete large queue object"
+    )
+    N = feature(repo, "r17-large-object-old")
+    fixture = Fixture(
+        "probe-large-object",
+        repo,
+        C,
+        O,
+        candidate_landmark,
+        N,
+        "no-finding",
+        {"largest_queue_blob_bytes": target_bytes},
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-object-payload-peak-plus-one-refused"
+            if overflow
+            else "R17-object-payload-peak-exact"
+        ),
+        counter="object_payload_peak_bytes",
+        overflow=overflow,
+    )
+
+
+def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r17-wide-tree"
+    path = add_agent(repo, label)
+    for index in range(1000):
+        repo.write(f"wide-tree/{index:04d}.txt", f"{index}\n")
+    C = repo.commit("create one thousand path tree")
+    repo.branch("old", C)
+    O = feature(repo, "r17-wide-tree-old")
+    repo.branch("candidate", C)
+    claim(repo, (path,))
+    candidate_landmark = delete_with_evidence(
+        repo, ((label, path),), "delete action beside wide tree"
+    )
+    N = feature(repo, "r17-wide-tree-old")
+    fixture = Fixture(
+        "probe-wide-tree",
+        repo,
+        C,
+        O,
+        candidate_landmark,
+        N,
+        "no-finding",
+        {"fixture_leaf_paths": 1000},
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-flat-tree-peak-plus-one-refused"
+            if overflow
+            else "R17-flat-tree-peak-exact"
+        ),
+        counter="flat_tree_peak_paths",
+        overflow=overflow,
+    )
+
+
+def r17_support_serialization_budget(
+    root: Path, *, overflow: bool
+) -> Fixture:
+    fixture = ordinary_linear_fixture(
+        root, "probe-support-serialization", valid=True
+    )
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-support-serialized-plus-one-refused"
+            if overflow
+            else "R17-support-serialized-exact"
+        ),
+        counter="support_serialized_bytes",
+        overflow=overflow,
+    )
+
+
+def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> Fixture:
+    fixture = pcx16_task_pickup(root)
+    return configure_typed_budget_fixture(
+        fixture,
+        scenario=(
+            "R17-dynamic-support-traversal-plus-one-refused"
+            if overflow
+            else "R17-dynamic-support-traversal-exact"
+        ),
+        counter="dynamic_support_paths_traversed",
+        overflow=overflow,
     )
 
 
@@ -7270,18 +8798,11 @@ def scenario_builders():
         p18_missing_blob,
         p18_missing_tree,
         p18_multiple_bases,
-        p18_missing_M,
-        lambda root: p18_noncommit_M(root, "blob"),
-        lambda root: p18_noncommit_M(root, "tree"),
-        lambda root: p18_noncommit_M(root, "tag"),
-        p18_unrelated_M,
-        p18_M_after_N,
-        lambda root: p18_M_endpoint(root, "C"),
-        lambda root: p18_M_endpoint(root, "N"),
         p19_identities,
         p20_lifecycle_types,
         lambda root: pcx17_cherry_pick(root, "squash"),
         pcx18_many_actions,
+        r17_precharge_many_actions_budget,
         lambda root: direct_merge_fixture(
             root,
             "PCX-01-neutral-parent",
@@ -7358,9 +8879,33 @@ def scenario_builders():
         pcx19_missing_claim_blob,
         lambda root: budget_fixture(root, overflow=False),
         lambda root: budget_fixture(root, overflow=True),
+        *[
+            lambda root, overflow=overflow: r17_large_object_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_wide_tree_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_support_serialization_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            lambda root, overflow=overflow: r17_dynamic_support_budget(
+                root, overflow=overflow
+            )
+            for overflow in (False, True)
+        ],
         r3_two_invalid_sources,
         r3_invalid_valid_competition,
-        r3_unrelated_invalid_does_not_poison,
+        r3_valid_plus_invalid_at_N,
         r4_same_root_diamond,
         r4_distinct_root_diamond,
         r4_equal_root_plus_invalid,
@@ -7508,6 +9053,79 @@ def scenario_builders():
         lambda root: r14_persisted_merge_carriers(
             root, conflict=True
         ),
+        r17_outside_c_neutral_parent,
+        lambda root: r17_carry_merge_fixture(
+            root, variant="compatible"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="compatible", reverse_parents=True
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="incompatible"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="absent-arm"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="outside-single"
+        ),
+        lambda root: r17_carry_merge_fixture(
+            root, variant="outside-duplicate"
+        ),
+        *[
+            (
+                lambda root, variant=variant, reverse=reverse:
+                r17_persisted_carry_fixture(
+                    root,
+                    variant=variant,
+                    reverse_parents=reverse,
+                )
+            )
+            for variant in (
+                "outside-single",
+                "outside-duplicate",
+                "valid-absent-arm",
+                "unauthorized-absent-arm",
+            )
+            for reverse in (False, True)
+        ],
+        r17_boundary_budget_fixture,
+        r17_graph_parent_tokens_exact,
+        r17_graph_parent_tokens_plus_one,
+        *[
+            (
+                lambda root, counter=counter, limit=limit, overflow=overflow:
+                r17_graph_dimension_budget(
+                    root,
+                    counter=counter,
+                    limit=limit - int(overflow),
+                    overflow=overflow,
+                )
+            )
+            for counter, limit in (
+                ("graph_output_bytes", 2952),
+                ("graph_line_peak_bytes", 2705),
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            (
+                lambda root, case=case:
+                r17_workflow_input_case(root, case)
+            )
+            for case in (
+                "fast-forward",
+                "pre-pr-push",
+                "base-advance-retarget",
+                "multiple-pr-api-race",
+                "stale-rerun",
+                "missing-old",
+                "zero-endpoints",
+                "pr-synchronize",
+            )
+        ],
+        r17_unreadable_boundary,
+        r17_unopened_outside_c_ancestor,
         *[
             (
                 lambda root, variant=variant:
@@ -7521,12 +9139,28 @@ def scenario_builders():
                 "continuous-preserved",
             )
         ],
-        r8_adapter_M_variants,
-        r8_adapter_M_endpoint_counterexample,
     ]
 
 
 CONTROL_NAMES = (
+    "buffered-graph-output",
+    "stream-malformed-truncated-final-line",
+    "unmetered-object-payload",
+    "unmetered-tree-paths",
+    "unmetered-dynamic-support",
+    "unmetered-support-construction",
+    "restore-universal-ancestor-carry-scan",
+    "ignore-outside-C-carrier",
+    "ignore-absent-C-arm",
+    "ignore-persisted-outside-C-collision",
+    "ignore-persisted-absent-C-arm",
+    "first-parent-carry-proof",
+    "skip-carry-compatibility",
+    "unmetered-cone-work",
+    "posthoc-budget-accounting",
+    "locale-git-error-stream-equality",
+    "reopen-outside-C-boundary-ancestry",
+    "ignore-invalid-N-root",
     "missing-all-parent-direct-validation",
     "supplier-authority-borrowing",
     "identity-multiplicity-collapsed-to-set",
@@ -7591,34 +9225,16 @@ SCENARIO_ALIASES = {
 
 
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
-    if "adapter_M_variants" in fixture.details:
-        if damage is not None:
-            raise ValueError("adapter-input fixture does not accept damage mode")
-        results = {}
-        for name, M in fixture.details["adapter_M_variants"].items():
-            variant = dataclasses.replace(fixture, M=M)
-            results[name] = Classifier(variant).run()
-        primary = results["explicit_candidate_M"]
-        primary["adapter_input_evidence"] = {
-            name: {
-                "C": result["C"],
-                "O": result["O"],
-                "M": result["M"],
-                "N": result["N"],
-                "classification": result["classification"],
-                "evidence_status": result["evidence_verdict"]["status"],
-                "event_mode": result["event_mode"],
-                "range_base_validation": result["range_base_validation"],
-                "authority_edges": result["authority_edges"],
-                "propagation_edges": result["propagation_edges"],
-                "support_checks": result["support_checks"],
-                "metrics": result["metrics"],
-            }
-            for name, result in results.items()
-        }
-        return primary
     if "restore_hidden" not in fixture.details:
-        return Classifier(fixture, damage).run()
+        result = Classifier(fixture, damage).run()
+        workflow = fixture.details.get("workflow_contract", {})
+        if workflow.get("repeat_exact_inputs") and damage is None:
+            repeated = Classifier(fixture).run()
+            result["workflow_input_evidence"] = {
+                "exact_O_N_repeated": [fixture.O, fixture.N],
+                "raw_results_equal": result == repeated,
+            }
+        return result
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
     missing_oid = fixture.details["missing_claim_blob_oid"]
@@ -7679,12 +9295,17 @@ def validate_result(result: dict):
     status = result["evidence_verdict"]["status"]
     if status not in {"valid", "invalid", "none", "ambiguous", "unreadable"}:
         errors.append(f"unstructured evidence status {status}")
-    for name in ("C", "O", "M", "N"):
+    for name in ("O", "N"):
         oid = result[name]
         if len(oid) not in {40, 64} or any(
             char not in "0123456789abcdef" for char in oid
         ):
             errors.append(f"{name} is not a full OID")
+    if result["C"] is not None and (
+        len(result["C"]) not in {40, 64}
+        or any(char not in "0123456789abcdef" for char in result["C"])
+    ):
+        errors.append("derived C is not a full OID")
     authority = {
         (edge["parent"], edge["child"])
         for edge in result["authority_edges"]
@@ -7699,6 +9320,273 @@ def validate_result(result: dict):
     if scenario == "P1-direct-linear-valid":
         if result["event_mode"] != "direct" or len(authority) != 1:
             errors.append("P1 did not select one direct authority edge")
+    if scenario == "R17-outside-C-neutral-parent-valid-restack":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        if (
+            details["unique_merge_base"] != [result["C"]]
+            or not details["task_patch_equal"]
+            or details["production_deletion_problem"] is not None
+            or status != "valid"
+            or result["event_mode"] != "direct"
+            or len(authority) != 1
+            or action is None
+            or details["F"] not in action["neutral_parents"]
+        ):
+            errors.append(
+                "R17 legal outside-C neutral-parent restack did not stay clean"
+            )
+    if scenario.startswith("R17-carry-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        proofs = action["carry_proofs"] if action is not None else []
+        merge_edges = [
+            edge
+            for proof in proofs
+            for edge in proof["edges"]
+            if edge["child"] == details["merge"]
+        ]
+        collisions = [
+            collision
+            for proof in proofs
+            for collision in proof["outside_collisions"]
+        ]
+        absent = {
+            parent
+            for proof in proofs
+            for parent in proof["absent_c_parents"]
+        }
+        if details["variant"] == "compatible":
+            if (
+                status != "valid"
+                or len(merge_edges) != 2
+                or sorted(edge["role"] for edge in merge_edges)
+                != ["compatible-carrier", "source"]
+                or any(edge["problem"] for edge in merge_edges)
+            ):
+                errors.append(
+                    "R17 compatible carry merge lost canonical edge roles"
+                )
+        elif details["variant"] == "incompatible":
+            if (
+                status != "ambiguous"
+                or len(merge_edges) != 2
+                or sum(edge["problem"] is not None for edge in merge_edges)
+                != 1
+            ):
+                errors.append("R17 incompatible carry merge false-greened")
+        elif details["variant"] == "absent-arm":
+            if status != "ambiguous" or details["second"] not in absent:
+                errors.append("R17 absent C-descendant arm false-greened")
+        else:
+            expected_multiplicity = (
+                2 if details["variant"] == "outside-duplicate" else 1
+            )
+            if (
+                status != "ambiguous"
+                or len(collisions) != 1
+                or collisions[0]["parent"] != details["second"]
+                or collisions[0]["multiplicity"] != expected_multiplicity
+            ):
+                errors.append("R17 outside-C collision false-greened")
+    if scenario.startswith("R17-persisted-"):
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        proofs = action["carry_proofs"] if action is not None else []
+        collisions = [
+            collision
+            for proof in proofs
+            for collision in proof["outside_collisions"]
+        ]
+        absent = {
+            parent
+            for proof in proofs
+            for parent in proof["absent_c_parents"]
+        }
+        if (
+            result["classification"] != "blocking-finding"
+            or status != "ambiguous"
+            or result["audit_exit"] != 1
+            or action is None
+            or len(proofs) != 2
+        ):
+            errors.append("R17 persisted carry competitor false-greened")
+        elif details["variant"].startswith("outside-"):
+            expected = (
+                2 if details["variant"] == "outside-duplicate" else 1
+            )
+            if (
+                action["reason_code"] != "persisted-outside-C-collision"
+                or len(collisions) != 1
+                or collisions[0]["parent"] != details["second"]
+                or collisions[0]["multiplicity"] != expected
+            ):
+                errors.append("R17 persisted outside-C collision was lost")
+        elif (
+            action["reason_code"] != "persisted-delete-recreate"
+            or details["D"] not in absent
+        ):
+            errors.append("R17 persisted absent C arm was lost")
+        references = details.get("review_reference_oids")
+        if details["variant"] == "outside-single" and references != {
+            "C": "843634959ac1156ef81ee7ccbf1f703261bbde1f",
+            "O": "c0ec07829f6aa4e1207a680a0354deb8a8f0c162",
+            "A": "426b485efa3b5f85a678600795a20b1e91c6049f",
+            "F": "e10a4eb3208c44000e7363c2894e2a77b74828fa",
+            "P": "60f5448337b6f9a114c0231b86242474dd34873b",
+            "N": "af48cf172570a08d65c12dc467b2226dfbe8981a",
+        }:
+            errors.append("R17 persisted outside-C reviewer OIDs changed")
+        if details["variant"] == "valid-absent-arm" and references != {
+            "C": "0ddb561a40c84c0590d9abe8a3036521b239de25",
+            "O": "17ef4a3d8c518778d62c635864670319efd03754",
+            "A": "90de0b5af2ad8baec036ddaed2842eda86c2c556",
+            "K": "f03d61cc931d7c860e7fd6f166c60d09596b48e5",
+            "D": "161d7ed2d7bc121ce5331fed2e1ecb0dd650041e",
+            "P": "1847cdbe8298d5895ad566c03abc870064ca711b",
+            "N": "76cf3354a913effec09cac7b183684159dfd0b84",
+        }:
+            errors.append("R17 persisted absent-arm reviewer OIDs changed")
+    if scenario == "R17-wide-outside-C-boundary-budget":
+        details = result["details"]
+        if (
+            status != "ambiguous"
+            or result["audit_exit"] != 2
+            or actions
+            or authority
+            or propagation
+            or len(details["outside_parents"]) != 64
+            or result["metrics"]["graph_commits"] > 7
+            or result["metrics"]["graph_parent_tokens"] != 8
+            or "graph_parent_tokens" not in result["evidence_verdict"]["reason"]
+            or result["metrics"]["graph_output_bytes"]
+            >= details["budget_contract"]["raw_graph_bytes"]
+            or result["metrics"]["graph_process_reaps"] != 1
+            or result["metrics"]["graph_process_cleanup_checks"] < 2
+        ):
+            errors.append("R17 wide boundary escaped transactional budget")
+        if details["review_reference_oids"] != {
+            "C": "b066accf737c901fd1ee314fcf310afb70c8fe87",
+            "O": "ba894e5a1c019e3b2c29ee8319eebfb4b0aaa9a3",
+            "P": "b79ff7a4036270fed4a70d82ad226817ae94e662",
+            "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
+        }:
+            errors.append("R17 wide-boundary reviewer OIDs changed")
+    if scenario == "R17-graph-parent-tokens-exact":
+        details = result["details"]["budget_contract"]
+        if (
+            status != "none"
+            or result["audit_exit"] != 0
+            or result["metrics"]["graph_parent_tokens"] != 68
+            or result["metrics"]["graph_output_bytes"] != details["raw_graph_bytes"]
+            or result["metrics"]["graph_lines"] != 4
+        ):
+            errors.append("R17 exact graph parent-token budget did not pass")
+    if scenario.startswith("W"):
+        contract = result["details"]["workflow_contract"]
+        if (
+            result["input_contract"]["authoritative_endpoints"]
+            != ["O", "N"]
+            or contract["classifier_parameters"] != ["O", "N"]
+            or contract["provider_api_calls"] != 0
+            or contract["authoritative_inputs"]
+            != {"O": result["O"], "N": result["N"]}
+        ):
+            errors.append("workflow case escaped the exact O,N input API")
+        if scenario == "W0-fast-forward-return" and (
+            result["C"] != result["O"]
+            or status != "none"
+            or actions
+            or result["metrics"]["identity_calls"] != 0
+        ):
+            errors.append("W0 did not return before provenance attribution")
+        if scenario == "W1-pre-PR-push-exact-endpoints" and (
+            contract["event_before"] != result["O"]
+            or contract["event_after"] != result["N"]
+            or contract["github_sha"] == result["N"]
+            or contract["github_sha_is_authoritative"]
+            or not contract["pre_PR"]
+        ):
+            errors.append("W1 push transport selected a mutable endpoint")
+        if scenario == "W2-base-advance-retarget-invariant" and (
+            not contract["variants_keep_exact_O_N"]
+            or len(contract["provider_state_variants"]) != 3
+        ):
+            errors.append("W2 provider state changed classifier endpoints")
+        if scenario == "W3-multiple-PR-API-zero-calls" and (
+            contract["PR_lookup"]
+            or len(contract["provider_states"]) != 5
+        ):
+            errors.append("W3 retained provider lookup authority")
+        if scenario == "W4-stale-rerun-exact-inputs":
+            repeat = result.get("workflow_input_evidence", {})
+            if (
+                not repeat.get("raw_results_equal")
+                or repeat.get("exact_O_N_repeated")
+                != [result["O"], result["N"]]
+            ):
+                errors.append("W4 stale rerun did not reuse exact O,N")
+        if scenario == "W5-missing-O-coverage-unavailable" and (
+            status != "unreadable"
+            or contract["coverage_classification"]
+            != "coverage-unavailable"
+            or contract["old_object_fetch_exit"] != 2
+            or contract["fallback"] is not None
+            or actions
+        ):
+            errors.append("W5 missing O guessed a fallback endpoint")
+        if scenario == "W6-created-deleted-zero-endpoints" and any(
+            item["classification"] != "coverage-unavailable"
+            for item in contract["event_classifications"]
+        ):
+            errors.append("W6 zero endpoint was not coverage-unavailable")
+        if scenario == "W7-PR-synchronize-top-level-endpoints" and (
+            contract["top_level_before"] != result["O"]
+            or contract["top_level_after"] != result["N"]
+            or contract["top_level_after"]
+            != contract["pull_request_head_sha"]
+            or not contract["after_matches_head"]
+            or contract["PR_lookup"]
+            or contract["mismatch_classification"]
+            != "coverage-unavailable"
+        ):
+            errors.append("W7 synchronize endpoints are not self-contained")
+    if scenario == "R17-unreadable-outside-C-boundary" and (
+        status != "unreadable"
+        or result["audit_exit"] != 2
+        or result["evidence_verdict"]["reason"]
+        != "missing-or-malformed-commit:"
+        + result["details"]["unreadable_boundary"]
+        or actions
+        or authority
+        or propagation
+        or result["metrics"]["identity_calls"] != 0
+        or result["metrics"]["authority_calls"] != 0
+    ):
+        errors.append("R17 unreadable boundary returned partial results")
+    if scenario == "R17-unreadable-outside-C-ancestor-stays-unopened":
+        action = actions[0] if len(actions) == 1 else None
+        references = result["details"]["attacker_reference_oids"]
+        if (
+            status != "valid"
+            or result["audit_exit"] != 0
+            or action is None
+            or result["details"]["F"] not in action["neutral_parents"]
+            or not result["details"]["same_identity"]
+            or not result["details"]["ancestor_blob_is_unique"]
+            or references != {
+                "G": "b838a677f5753a45bff2d33f6e94b3a80cc92905",
+                "G_blob": "88ce173dddc1914b0e7ccd52f5b89fb4742a713d",
+                "C": "52c16e3ace5b2fb945b2e8fc42b7485536ea1a47",
+                "O": "5ff93e594d8689fe44774a9728a882c846e1833e",
+                "F": "4afa966344cb99e6a72a10997b10572072e7cccb",
+                "P": "6564e680097653cebcc008a0bfee8587c644057f",
+                "K": "245d7de3ef54645d32fbcf8bbda7d69f426ce6d2",
+                "D": "595acd03b0c0f5cee214599587247d1115b2fc40",
+                "N": "61d97651036a8cc9da10662ca7560bce14ce9ce5",
+            }
+        ):
+            errors.append("R17 reopened an outside-C neutral ancestor")
     if scenario == "P2-direct-linear-invalid" and status != "invalid":
         errors.append("P2 did not name invalid production authority")
     if scenario == "P3-genuine-old-loss" and status != "none":
@@ -7775,57 +9663,8 @@ def validate_result(result: dict):
             result["evidence_verdict"]["reason"]
         ):
             errors.append("P17 did not fail on post-event reintroduction")
-    M_unreadable = {
-        "P18h-missing-M",
-        "P18i-noncommit-M-blob",
-        "P18j-noncommit-M-tree",
-        "P18k-noncommit-M-tag",
-    }
-    M_ambiguous = {
-        "P18l-unrelated-M",
-        "P18m-M-after-N",
-    }
-    M_endpoints = {
-        "P18n-M-equals-C",
-        "P18o-M-equals-N",
-    }
-    if (
-        scenario.startswith("P18")
-        and scenario not in M_ambiguous | M_endpoints
-        and status != "unreadable"
-    ):
+    if scenario.startswith("P18") and status != "unreadable":
         errors.append("P18 did not return structured unreadable")
-    if scenario in M_unreadable | M_ambiguous:
-        expected_M_status = (
-            "unreadable" if scenario in M_unreadable else "ambiguous"
-        )
-        range_verdict = result["range_base_validation"]
-        if (
-            status != expected_M_status
-            or range_verdict["status"] != expected_M_status
-            or range_verdict["M"] != result["M"]
-            or result["M"] not in range_verdict["reason"]
-            or result["M"] not in result["evidence_verdict"]["reason"]
-            or actions
-            or result["event_mode"] != "none"
-            or authority
-            or propagation
-            or result["metrics"]["identity_calls"] != 0
-            or result["metrics"]["authority_calls"] != 0
-        ):
-            errors.append("P18 M gate did not fail before classification")
-    if scenario in M_endpoints:
-        endpoint = result["details"]["M_endpoint"]
-        expected_M = result[endpoint]
-        if (
-            result["range_base_validation"]["status"] != "valid"
-            or result["M"] != expected_M
-            or result["classification"] != "no-finding"
-            or status != "none"
-            or authority
-            or propagation
-        ):
-            errors.append("P18 rejected a permitted M endpoint equality")
     if scenario == "P19-production-identities":
         details = result["details"]
         for key in (
@@ -8134,7 +9973,7 @@ def validate_result(result: dict):
             for oid in all_oids
         ):
             errors.append("R3-02 emitted a non-full causal OID")
-    if scenario == "R3-03-unrelated-invalid-does-not-poison":
+    if scenario == "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks":
         details = result["details"]
         action = actions[0] if len(actions) == 1 else None
         serialized_evidence = json.dumps(
@@ -8150,17 +9989,25 @@ def validate_result(result: dict):
         )
         if (
             action is None
-            or status != "valid"
-            or result["event_mode"] != "supplier"
-            or len(authority) != 1
+            or status != "ambiguous"
+            or result["event_mode"] != "ambiguous"
+            or action["reason_code"] != "competing-final-absence-roots"
+            or len(authority) != 2
             or len(propagation) != 1
-            or result["authority_edges"][0]["child"]
-            != details["supplier"]
+            or {
+                edge["child"] for edge in result["authority_edges"]
+            }
+            != {details["supplier"], details["unrelated_invalid"]}
+            or sum(
+                edge["problem"] is not None
+                for edge in result["authority_edges"]
+            )
+            != 1
             or result["metrics"]["authority_calls"] < 4
         ):
-            errors.append("R3-03 did not select the unique valid supplier")
-        if details["unrelated_invalid"] in serialized_evidence:
-            errors.append("R3-03 was poisoned by an unrelated invalid source")
+            errors.append("R3-03 did not retain valid and invalid N roots")
+        if details["unrelated_invalid"] not in serialized_evidence:
+            errors.append("R3-03 hid the invalid root that reaches N")
         if (
             not details["unrelated_reachable_from_N"]
             or details["unrelated_ancestor_of_supplier"]
@@ -8321,9 +10168,19 @@ def validate_result(result: dict):
             errors.append(
                 "R5 reintroduction history lost a causal occurrence"
             )
+    if scenario == "R6-02-valid-plus-ambiguous-all-absent":
+        if (
+            result["classification"] != "no-finding"
+            or status != "valid"
+            or result["details"]["r17_disposition"]
+            != (
+                "outside-C all-absent boundary is neutral at multiplicity "
+                "zero; its ambiguous ancestor root stays unopened"
+            )
+        ):
+            errors.append("R6 outside-C zero boundary reopened ancestry")
     if scenario in {
         "R6-01-valid-plus-invalid-all-absent",
-        "R6-02-valid-plus-ambiguous-all-absent",
         "R6-03-two-invalid-all-absent",
     }:
         details = result["details"]
@@ -8606,9 +10463,17 @@ def validate_result(result: dict):
                 action["reason_records"] if action is not None else []
             )
         }
+        edge_proof_code = "foreign-or-discontinuous-carrier"
+        binding_blocked = (
+            status == "invalid"
+            and "old-tip-human-binding-conflict" in reason_codes
+        ) or (
+            status == "ambiguous"
+            and edge_proof_code in reason_codes
+        )
         if (
             action is None
-            or status != "invalid"
+            or not binding_blocked
             or result["classification"] != "blocking-finding"
             or result["event_mode"] != details["mode"]
             or len(result["authority_edges"]) != 1
@@ -8619,7 +10484,6 @@ def validate_result(result: dict):
             or result["authority_edges"][0]["problem"] is not None
             or len(propagation)
             != (1 if details["mode"] == "supplier" else 0)
-            or "old-tip-human-binding-conflict" not in reason_codes
             or old_reason_token not in action["reason"]
             or details["candidate_value"] not in action["reason"]
             or Classifier.explicit_review_pending(details["old_value"])
@@ -9160,61 +11024,6 @@ def validate_result(result: dict):
                 )
             ):
                 errors.append("R16 pickup receipt projection is incomplete")
-    if scenario == "R8-adapter-M-input-variants":
-        details = result["details"]
-        variants = result.get("adapter_input_evidence", {})
-        workflow = variants.get("workflow_M_equals_O", {})
-        explicit = variants.get("explicit_candidate_M", {})
-        endpoint = variants.get("endpoint_M_equals_N", {})
-        same_graph = all(
-            variant.get(name) == result[name]
-            for variant in variants.values()
-            for name in ("C", "O", "N")
-        )
-        if (
-            details["poc_changes_adapter"]
-            or not same_graph
-            or workflow.get("M") != result["O"]
-            or workflow.get("classification") != "blocking-finding"
-            or workflow.get("evidence_status") != "ambiguous"
-            or workflow.get("event_mode") != "none"
-            or workflow.get("range_base_validation", {}).get("status")
-            != "ambiguous"
-            or workflow.get("authority_edges")
-            or workflow.get("propagation_edges")
-            or workflow.get("metrics", {}).get("identity_calls") != 0
-            or workflow.get("metrics", {}).get("authority_calls") != 0
-            or explicit.get("M")
-            != details["adapter_M_variants"]["explicit_candidate_M"]
-            or explicit.get("classification") != "no-finding"
-            or explicit.get("evidence_status") != "valid"
-            or explicit.get("event_mode") != "direct"
-            or len(explicit.get("authority_edges", [])) != 1
-            or endpoint.get("M") != result["N"]
-            or endpoint.get("classification") != "no-finding"
-            or endpoint.get("evidence_status") != "valid"
-            or endpoint.get("event_mode") != "direct"
-            or len(endpoint.get("authority_edges", [])) != 1
-        ):
-            errors.append("R8 adapter M-input evidence is incomplete")
-    if scenario == "R8-adapter-M-N-frontier-counterexample":
-        details = result["details"]
-        variants = result.get("adapter_input_evidence", {})
-        explicit = variants.get("explicit_candidate_M", {})
-        endpoint = variants.get("endpoint_M_equals_N", {})
-        if (
-            details["poc_changes_adapter"]
-            or details["automatic_M_equals_N_safe"]
-            or explicit.get("M") != result["M"]
-            or explicit.get("classification") != "no-finding"
-            or explicit.get("evidence_status") != "valid"
-            or endpoint.get("M") != result["N"]
-            or endpoint.get("range_base_validation", {}).get("status")
-            != "valid"
-            or endpoint.get("classification") != "blocking-finding"
-            or endpoint.get("evidence_status") != "ambiguous"
-        ):
-            errors.append("R8 automatic M=N frontier widening was not blocked")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
@@ -9252,6 +11061,86 @@ def validate_result(result: dict):
             errors.append("many-action graph is shorter than 128 commits")
         if metrics["snapshot_cache_hits"] < 128:
             errors.append("many-action case did not reuse snapshots")
+        if metrics["production_parent_queries"] != 129:
+            errors.append(
+                "many-action composition did not preserve 129 parent queries"
+            )
+    if scenario.startswith(
+        (
+            "R17-object-payload-peak-",
+            "R17-flat-tree-peak-",
+            "R17-support-serialized-",
+            "R17-dynamic-support-traversal-",
+            "R17-graph-output-bytes-",
+            "R17-graph-line-peak-bytes-",
+            "R17-graph-parent-tokens-",
+        )
+    ):
+        counter = result["details"]["typed_budget_counter"]
+        limit = result["details"]["typed_budget_limit"]
+        overflow = result["details"]["overflow_by_one"]
+        empty_result = not any(
+            result[key]
+            for key in (
+                "actions",
+                "authority_edges",
+                "carry_proofs",
+                "mutation_edges",
+                "propagation_edges",
+                "support_checks",
+            )
+        )
+        if overflow:
+            if (
+                result["audit_exit"] != 2
+                or status != "ambiguous"
+                or result["metrics"][counter] != limit + 1
+                or not empty_result
+                or counter not in result["evidence_verdict"]["reason"]
+            ):
+                errors.append(
+                    f"{scenario} did not refuse exact-plus-one work transactionally"
+                )
+        elif (
+            result["audit_exit"] != 0
+            or result["classification"] != "no-finding"
+            or result["metrics"][counter] != limit
+        ):
+            errors.append(f"{scenario} did not admit its exact work budget")
+        if scenario.startswith("R17-object-payload-peak-") and (
+            result["details"]["largest_queue_blob_bytes"] != 1_000_000
+            or result["details"]["unbudgeted_counter_value"] != 1_000_000
+        ):
+            errors.append("one-million-byte object admission fixture drifted")
+        if scenario.startswith("R17-graph-") and (
+            result["metrics"]["graph_stream_peak_chunk_bytes"] > 256
+            or result["metrics"]["graph_buffered_bytes"] != 0
+            or result["metrics"]["graph_process_reaps"] != 1
+        ):
+            errors.append("graph budget did not retain its streaming bound")
+    if scenario == "R17-precharge-P22-budget":
+        metrics = result["metrics"]
+        limit = result["details"]["budget_limit"]
+        counter = result["details"]["budget_counter"]
+        if (
+            result["audit_exit"] != 2
+            or result["classification"] != "blocking-finding"
+            or status != "ambiguous"
+            or metrics[counter] != limit + 1
+            or metrics["git_processes"] > 4
+            or actions
+            or authority
+            or result["carry_proofs"]
+            or result["mutation_edges"]
+            or result["propagation_edges"]
+            or result["support_checks"]
+            or counter not in result["evidence_verdict"]["reason"]
+            or any(
+                metrics[name] != 0
+                for name in result["details"]["later_counters_unchanged"]
+            )
+        ):
+            errors.append("P22 budget did not refuse the first excess work")
     if scenario == "PCX-19-missing-claim-blob-recovery":
         recovery = result.get("recovery", {})
         if (
@@ -9269,12 +11158,25 @@ def validate_result(result: dict):
         ):
             errors.append("PCX-19 missing object recovery failed")
     if scenario == "PCX-20b-budget-overflow":
+        limit = result["details"]["demonstration_limit"]
+        overflows = sorted(
+            (key, value)
+            for key, value in result["metrics"].items()
+            if value > limit
+        )
         if (
             actions
             or status != "ambiguous"
-            or result["metrics"]["authority_calls"] != 0
+            or result["audit_exit"] != 2
+            or len(overflows) != 1
+            or overflows[0][1] != limit + 1
+            or result["authority_edges"]
+            or result["propagation_edges"]
+            or result["mutation_edges"]
+            or result["support_checks"]
+            or result["carry_proofs"]
         ):
-            errors.append("budget overflow selected an event")
+            errors.append("budget overflow leaked a partial result")
     if scenario == "PCX-20a-budget-below-limit":
         if status != "valid" or not actions:
             errors.append("below-limit budget did not return normal verdict")
@@ -9282,6 +11184,105 @@ def validate_result(result: dict):
 
 
 def control_builder(name: str, root: Path):
+    if name == "buffered-graph-output":
+        return (
+            r17_boundary_budget_fixture(root),
+            Damage(buffered_graph_output=True),
+            "blocking-finding",
+        )
+    if name == "unmetered-object-payload":
+        return (
+            r17_large_object_budget(root, overflow=True),
+            Damage(unmetered_object_bytes=True),
+            "no-finding",
+        )
+    if name == "unmetered-tree-paths":
+        return (
+            r17_wide_tree_budget(root, overflow=True),
+            Damage(unmetered_tree_paths=True),
+            "no-finding",
+        )
+    if name == "unmetered-dynamic-support":
+        return (
+            r17_dynamic_support_budget(root, overflow=True),
+            Damage(unmetered_dynamic_support=True),
+            "no-finding",
+        )
+    if name == "unmetered-support-construction":
+        return (
+            r17_support_serialization_budget(root, overflow=True),
+            Damage(unmetered_support_construction=True),
+            "no-finding",
+        )
+    if name == "restore-universal-ancestor-carry-scan":
+        return (
+            r17_outside_c_neutral_parent(root),
+            Damage(
+                universal_ancestor_carry_scan=True,
+                reopen_outside_c_boundary_ancestry=True,
+            ),
+            "blocking-finding",
+        )
+    if name == "ignore-outside-C-carrier":
+        return (
+            r17_carry_merge_fixture(root, variant="outside-single"),
+            Damage(ignore_outside_c_collision=True),
+            "no-finding",
+        )
+    if name == "ignore-absent-C-arm":
+        return (
+            r17_carry_merge_fixture(root, variant="absent-arm"),
+            Damage(ignore_absent_c_arm=True),
+            "no-finding",
+        )
+    if name == "ignore-persisted-outside-C-collision":
+        return (
+            r17_persisted_carry_fixture(root, variant="outside-single"),
+            Damage(ignore_outside_c_collision=True),
+            "no-finding",
+        )
+    if name == "ignore-persisted-absent-C-arm":
+        return (
+            r17_persisted_carry_fixture(root, variant="valid-absent-arm"),
+            Damage(ignore_absent_c_arm=True),
+            "no-finding",
+        )
+    if name == "first-parent-carry-proof":
+        return (
+            r17_carry_merge_fixture(root, variant="incompatible"),
+            Damage(first_parent_carry_only=True),
+            "no-finding",
+        )
+    if name == "skip-carry-compatibility":
+        return (
+            r17_carry_merge_fixture(root, variant="incompatible"),
+            Damage(skip_carry_compatibility=True),
+            "no-finding",
+        )
+    if name == "unmetered-cone-work":
+        return (
+            r17_boundary_budget_fixture(root),
+            Damage(unmetered_cone_work=True),
+            "no-finding",
+        )
+    if name == "posthoc-budget-accounting":
+        return (
+            r17_precharge_many_actions_budget(root),
+            Damage(posthoc_budget_accounting=True),
+            "blocking-finding",
+        )
+    if name == "reopen-outside-C-boundary-ancestry":
+        return (
+            r17_unopened_outside_c_ancestor(root),
+            Damage(reopen_outside_c_boundary_ancestry=True),
+            "unreadable",
+        )
+    if name == "ignore-invalid-N-root":
+        return (
+            r3_valid_plus_invalid_at_N(root),
+            Damage(sole_valid_ignores_competitors=True),
+            "no-finding",
+        )
     if name == "missing-all-parent-direct-validation":
         return (
             direct_merge_fixture(
@@ -9411,20 +11412,193 @@ def control_builder(name: str, root: Path):
 
 
 def run_control(name: str, root: Path):
+    if name == "stream-malformed-truncated-final-line":
+        root.mkdir(parents=True, exist_ok=True)
+        observations = {}
+        for variant, payload in {
+            "malformed": (b"a" * 40) + b"\nnot-an-oid\n",
+            "truncated": (b"a" * 40) + b"\n" + (b"b" * 39),
+        }.items():
+            metrics = Metrics()
+            local_rows = []
+
+            def receive(line: bytes):
+                if not re.fullmatch(rb"[0-9a-f]{40}|[0-9a-f]{64}", line):
+                    raise Unreadable(f"{variant} graph line")
+                local_rows.append(line.decode("ascii"))
+
+            script = (
+                "import sys;sys.stdout.buffer.write("
+                + repr(payload)
+                + ");sys.stdout.flush()"
+            )
+            reason = None
+            try:
+                bounded_git_lines(
+                    root,
+                    metrics,
+                    ("-c", script),
+                    counter_prefix="graph",
+                    line_callback=receive,
+                    command_prefix=(sys.executable,),
+                )
+            except Unreadable as error:
+                reason = str(error)
+            observations[variant] = {
+                "reason": reason,
+                "local_rows_before_failure": len(local_rows),
+                "published_rows": 0,
+                "metrics": metrics.as_dict(),
+            }
+        observed = all(
+            item["reason"] == f"{variant} graph line"
+            and item["local_rows_before_failure"] == 1
+            and item["published_rows"] == 0
+            and item["metrics"]["graph_process_reaps"] == 1
+            and item["metrics"]["graph_process_cleanup_checks"] == 1
+            for variant, item in observations.items()
+        )
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": "0" * 40,
+            "O": "0" * 40,
+            "N": "0" * 40,
+            "baseline_classification": "unreadable",
+            "damaged_classification": "partial-graph",
+            "expected_baseline": "unreadable",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "stream_observation": observations,
+        }
+    if name == "locale-git-error-stream-equality":
+        fixture = r17_unreadable_boundary(root)
+        stable = {}
+        ambient = {}
+        for locale in ("C", "fr_FR.UTF-8"):
+            with temporary_environment(
+                LANG=locale, LANGUAGE=locale, LC_ALL=locale, TZ="UTC"
+            ):
+                stable[locale] = Classifier(fixture).run()
+                ambient[locale] = Classifier(
+                    fixture, Damage(ambient_git_diagnostics=True)
+                ).run()
+        stable_reasons = {
+            locale: result["evidence_verdict"]["reason"]
+            for locale, result in stable.items()
+        }
+        ambient_reasons = {
+            locale: result["evidence_verdict"]["reason"]
+            for locale, result in ambient.items()
+        }
+        baseline = stable["C"]
+        damaged = ambient["fr_FR.UTF-8"]
+        observed = bool(
+            stable["C"] == stable["fr_FR.UTF-8"]
+            and len(set(stable_reasons.values())) == 1
+            and stable_reasons["C"].startswith(
+                "missing-or-malformed-commit:"
+            )
+            and len(set(ambient_reasons.values())) == 2
+        )
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": baseline["C"],
+            "O": fixture.O,
+            "N": fixture.N,
+            "baseline_classification": baseline["classification"],
+            "damaged_classification": damaged["classification"],
+            "expected_baseline": fixture.expected,
+            "authority_edges": damaged["authority_edges"],
+            "propagation_edges": damaged["propagation_edges"],
+            "locale_observation": {
+                "ambient_reasons": ambient_reasons,
+                "stable_full_results_equal": (
+                    stable["C"] == stable["fr_FR.UTF-8"]
+                ),
+                "stable_reasons": stable_reasons,
+            },
+        }
     fixture, damage, damaged_expected = control_builder(name, root)
     baseline = Classifier(fixture).run()
     damaged = Classifier(fixture, damage).run()
-    observed = bool(
-        baseline["classification"] == fixture.expected
-        and damaged["classification"] == damaged_expected
-        and damaged["classification"] != fixture.expected
-    )
-    return {
+    budget_observation = None
+    if name == "buffered-graph-output":
+        raw_bytes = fixture.details["budget_contract"]["raw_graph_bytes"]
+        budget_observation = {
+            "baseline_graph_metrics": {
+                key: value
+                for key, value in baseline["metrics"].items()
+                if key.startswith("graph_")
+            },
+            "damaged_graph_metrics": {
+                key: value
+                for key, value in damaged["metrics"].items()
+                if key.startswith("graph_")
+            },
+            "raw_graph_bytes": raw_bytes,
+        }
+        observed = bool(
+            baseline["audit_exit"] == 2
+            and damaged["audit_exit"] == 2
+            and baseline["metrics"]["graph_parent_tokens"] == 8
+            and damaged["metrics"]["graph_parent_tokens"] == 8
+            and baseline["metrics"]["graph_output_bytes"] < raw_bytes
+            and damaged["metrics"]["graph_output_bytes"] == raw_bytes
+            and baseline["metrics"]["graph_process_reaps"] == 1
+            and damaged["metrics"]["graph_process_reaps"] == 1
+            and not baseline["actions"]
+            and not damaged["actions"]
+        )
+    elif name == "posthoc-budget-accounting":
+        limit = fixture.details["budget_limit"]
+        counter = fixture.details["budget_counter"]
+        baseline_overflows = [(counter, baseline["metrics"][counter])]
+        reference = fixture.details["posthoc_reference_metrics"]
+        budget_observation = {
+            "baseline_metrics": baseline["metrics"],
+            "baseline_overflows": baseline_overflows,
+            "damaged_metrics": damaged["metrics"],
+            "limit": limit,
+            "posthoc_reference_metrics": reference,
+        }
+        observed = bool(
+            baseline["classification"] == fixture.expected
+            and damaged["classification"] == damaged_expected
+            and baseline["audit_exit"] == 2
+            and damaged["audit_exit"] == 2
+            and len(baseline_overflows) == 1
+            and baseline_overflows[0][1] == limit + 1
+            and damaged["metrics"] == reference
+            and baseline["metrics"][counter] == limit + 1
+            and all(
+                baseline["metrics"][metric] == 0
+                for metric in fixture.details["later_counters_unchanged"]
+            )
+            and not any(
+                baseline[key]
+                for key in (
+                    "actions",
+                    "authority_edges",
+                    "carry_proofs",
+                    "mutation_edges",
+                    "propagation_edges",
+                    "support_checks",
+                )
+            )
+        )
+    else:
+        observed = bool(
+            baseline["classification"] == fixture.expected
+            and damaged["classification"] == damaged_expected
+            and damaged["classification"] != fixture.expected
+        )
+    result = {
         "control": name,
         "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
-        "C": fixture.C,
+        "C": baseline["C"],
         "O": fixture.O,
-        "M": fixture.M,
         "N": fixture.N,
         "baseline_classification": baseline["classification"],
         "damaged_classification": damaged["classification"],
@@ -9432,6 +11606,9 @@ def run_control(name: str, root: Path):
         "authority_edges": damaged["authority_edges"],
         "propagation_edges": damaged["propagation_edges"],
     }
+    if budget_observation is not None:
+        result["budget_observation"] = budget_observation
+    return result
 
 
 def prepare_root(path: Path):
@@ -9498,6 +11675,98 @@ def run_suite(root: Path):
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+    by_scenario = {result["scenario"]: result for result in results}
+    permutation_results = [
+        by_scenario.get("R17-carry-compatible"),
+        by_scenario.get("R17-carry-compatible-reversed"),
+    ]
+    permutation_signatures = []
+    for result in permutation_results:
+        if result is None:
+            continue
+        merge = result["details"]["merge"]
+        permutation_signatures.append(
+            {
+                "classification": result["classification"],
+                "evidence_status": result["evidence_verdict"]["status"],
+                "event_mode": result["event_mode"],
+                "merge_role_multiset": sorted(
+                    edge["role"]
+                    for proof in result["carry_proofs"]
+                    for edge in proof["edges"]
+                    if edge["child"] == merge
+                ),
+                "outside_collision_multiplicities": sorted(
+                    collision["multiplicity"]
+                    for proof in result["carry_proofs"]
+                    for collision in proof["outside_collisions"]
+                ),
+                "absent_arm_count": sum(
+                    len(proof["absent_c_parents"])
+                    for proof in result["carry_proofs"]
+                ),
+            }
+        )
+    permutation_ok = (
+        len(permutation_signatures) == 2
+        and permutation_signatures[0] == permutation_signatures[1]
+    )
+    persisted_permutations = {}
+    for variant in (
+        "outside-single",
+        "outside-duplicate",
+        "valid-absent-arm",
+        "unauthorized-absent-arm",
+    ):
+        signatures = []
+        for suffix in ("", "-reversed"):
+            result = by_scenario.get(f"R17-persisted-{variant}{suffix}")
+            if result is None:
+                continue
+            action = result["actions"][0] if result["actions"] else None
+            signatures.append(
+                {
+                    "classification": result["classification"],
+                    "evidence_status": result["evidence_verdict"]["status"],
+                    "reason_code": (
+                        action["reason_code"] if action is not None else None
+                    ),
+                    "outside_collision_multiplicities": sorted(
+                        collision["multiplicity"]
+                        for proof in result["carry_proofs"]
+                        for collision in proof["outside_collisions"]
+                    ),
+                    "absent_arm_count": sum(
+                        len(proof["absent_c_parents"])
+                        for proof in result["carry_proofs"]
+                    ),
+                }
+            )
+        persisted_permutations[variant] = signatures
+    persisted_permutation_ok = all(
+        len(signatures) == 2 and signatures[0] == signatures[1]
+        for signatures in persisted_permutations.values()
+    )
+    permutation_ok = permutation_ok and persisted_permutation_ok
+    if not permutation_ok:
+        failures.append(
+            {
+                "scenario": "R17-parent-permutation-invariance",
+                "errors": ["verdict or carry role multiset changed"],
+            }
+        )
+    print(
+        json.dumps(
+            {
+                "r17_parent_permutation": permutation_signatures,
+                "r17_persisted_parent_permutations": (
+                    persisted_permutations
+                ),
+                "status": "PASS" if permutation_ok else "FAIL",
+            },
+            sort_keys=True,
+        )
+    )
     alias_inventory, alias_failures = validate_scenario_aliases(results)
     failures.extend(alias_failures)
     print(
@@ -9529,6 +11798,7 @@ def run_suite(root: Path):
             item["status"] == "PASS" for item in alias_inventory
         ),
         "aliases_total": len(alias_inventory),
+        "r17_parent_permutation": "PASS" if permutation_ok else "FAIL",
         "python": sys.version.split()[0],
         "git": REAL_RUN(
             ["git", "--version"],
@@ -9542,14 +11812,89 @@ def run_suite(root: Path):
     return 0 if not failures else 1
 
 
+def ordinary_audit(
+    root: Path, O: str, N: str, budget_limit: int | None
+) -> dict:
+    """Audit exactly two immutable O,N commit IDs in an existing repository."""
+    valid_oid = lambda value: (
+        len(value) in {40, 64}
+        and all(char in "0123456789abcdef" for char in value)
+    )
+    if not valid_oid(O) or not valid_oid(N) or (
+        budget_limit is not None and budget_limit <= 0
+    ):
+        reason = (
+            "O and N must be full lowercase hexadecimal object IDs"
+            if not valid_oid(O) or not valid_oid(N)
+            else "budget must be a positive integer"
+        )
+        return {
+            "scenario": "ordinary-audit",
+            "C": None,
+            "O": O,
+            "N": N,
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
+            },
+            "audit_exit": 2,
+            "classification": "unreadable",
+            "evidence_verdict": {"status": "unreadable", "reason": reason},
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+            "metrics": Metrics().as_dict(),
+        }
+    fixture = Fixture(
+        "ordinary-audit",
+        RepositoryView(root),
+        "",
+        O,
+        "",
+        N,
+        "",
+        budget_limit=budget_limit,
+    )
+    result = Classifier(fixture).run()
+    result.pop("expected_result", None)
+    result.pop("details", None)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--control", choices=CONTROL_NAMES)
     parser.add_argument("--fixtures-dir", type=Path)
+    parser.add_argument("--repo", type=Path)
+    parser.add_argument("--old", metavar="O")
+    parser.add_argument("--new", metavar="N")
+    parser.add_argument("--budget", type=int)
     arguments = parser.parse_args(argv)
-    if not arguments.self_test and not arguments.control:
-        parser.error("choose --self-test or --control")
+    ordinary = any(
+        value is not None
+        for value in (arguments.repo, arguments.old, arguments.new)
+    )
+    selected = int(arguments.self_test) + int(arguments.control is not None) + int(
+        ordinary
+    )
+    if selected != 1:
+        parser.error("choose exactly one of --self-test, --control, or --repo/--old/--new")
+    if ordinary and None in (arguments.repo, arguments.old, arguments.new):
+        parser.error("ordinary audit requires --repo, --old O, and --new N")
+    if ordinary:
+        result = ordinary_audit(
+            arguments.repo.resolve(),
+            arguments.old,
+            arguments.new,
+            arguments.budget,
+        )
+        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        return result["audit_exit"]
 
     if arguments.fixtures_dir is not None:
         prepare_root(arguments.fixtures_dir)
