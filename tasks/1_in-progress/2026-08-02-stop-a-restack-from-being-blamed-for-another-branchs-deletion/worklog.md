@@ -77,3 +77,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   continuity CLI; separates ordinary `B...N` checks from paired `O,N`; specifies common
   push/PR/fork/human cycles; and makes full classification a pre-writer transaction.
 - Production implementation remains gated on a fresh five-lens review of the amendment.
+
+## 2026-09-01 — Failed design panel and two-sided correction (codex)
+
+- Fixed the first amended design at `09b9e08` and ran five independent review lenses.
+  Four blocked it: the text had dropped the POC's `C..O` proof, omitted Findings for
+  failed persisted identities, left standalone/repeated CLI shapes open, contradicted the
+  existing synthetic PR checkout, merged creation with deletion, left fork-conflict and
+  fetch security unresolved, started an unbounded global snapshot before preflight, and
+  omitted measured helper/result budget families. Core-fit alone accepted the boundary.
+- Preserved that failed panel in `verification.md` and appended a correction rather than
+  rewriting the rejected record. The corrected contract restores the two-sided graph with
+  new-side-only authority, closes CLI/writer composition, moves continuity before global
+  snapshot work, adds pre-work helper/result bounds, selects trusted-base data-only fork
+  inspection, defines executable canary evidence, and spells out the exact-lease repair
+  cycle.
+- Production remains unopened pending a new five-lens review of the corrected immutable
+  revision. GitHub adapter work also remains gated on a bounded-transport POC and live
+  same-repository/fork/conflicted-fork canaries.

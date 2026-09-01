@@ -609,3 +609,199 @@ fresh immutable-revision adversarial panel.
 **User-global writes:** none
 **Why AgentFold core:** rewritten-history continuity and queue lifecycle authority are reconciler invariants, not local configuration, a service, private overlay, or separate plugin
 **Thin adapter:** canonical=.github/workflows/harness.yml; optional=yes; policy=none; writes=repo-only
+
+## 2026-09-01 correction amendment — two-sided proof and trusted transport
+
+The five-lens review of `09b9e08cfbe127ebdb886a5a4438c0ba3391e1ce`
+rejected that revision four votes to one. This correction supersedes the amended graph,
+Finding projection, CLI composition, budget, GitHub-adapter, production-gate, and human
+workflow paragraphs above. The O/N-only causal model and the accepted POC remain selected;
+production work is still unopened.
+
+### Two-sided graph and one-sided authority
+
+The bounded graph is the union `(C..O) ∪ (C..N)`, plus the `C` snapshot. One streaming
+`rev-list --parents --topo-order O N ^C` child supplies every intrinsic parent record and
+each commit is marked old-side, new-side, or shared. Both sides share one aggregate budget.
+The old side proves that each identity present at `O` has one continuous occurrence from
+`C` to `O`; endpoint byte equality alone is not continuity. Old-side deletion/recreation,
+binding removal/restoration, hidden-byte restoration, collision, or unreadable history is
+a failed proof.
+
+Only new-side children can be resolution events or causal roots. Only `N` is the final
+frontier. Old-side commits cannot authorize, compete with, or suppress a new-side root;
+they establish the integrity of the displaced endpoint. Immediate parents outside the
+union remain boundary snapshots, and their ancestors remain unread. The one streamed map
+serves every parent consumer, so additional parent subprocess queries have a hard limit of
+zero.
+
+Every identity at `O` receives one complete proof, whether it disappears or remains at
+`N`. A disappeared identity without exactly one valid explanation produces one stable
+Finding. A persisted identity with an invalid, ambiguous, duplicate, outside-collision,
+absent-arm, delete/recreate, mutation, or binding proof also produces one stable Finding.
+The Finding key is the domain-separated old identity. One canonically sorted typed-reason
+tuple carries every failure family, so one identity produces one Finding even when its
+evidence contains several failing edges or families.
+Ordinary `B...N` checks remain independent and may report their own different invariant.
+
+### Closed CLI and checkout composition
+
+`--ref-update` has exactly one grammar: one occurrence followed by exactly two non-zero
+full object-format OIDs, and accompanied by one non-root `--range B...N`. Duplicate
+occurrences, a partial pair, zero OIDs, `root:N`, a range head other than `N`, an unknown
+old `--displaced-tip` option, and an unreadable/non-commit endpoint are exit 2 before any
+snapshot, Finding, or writer. There is no standalone or compatibility mode.
+
+Read-only CI may have either `HEAD == N` or an exact two-parent synthetic merge candidate
+whose second parent is `N` and whose first parent contains the event base. The ordinary
+reconciler range remains `B...N`; candidate-policy checks may separately use the
+candidate-headed range. Candidate binding failure is incomplete. A ref-update invocation
+with any writer flag additionally requires `HEAD == N`, preventing historical provenance
+from mutating an unrelated checkout. Parser/help, duplicate-option, retired-option,
+N-not-HEAD, synthetic-candidate, and every-writer cases are production admission tests.
+
+Argument parsing and the minimal ref-update preflight occur before the global Git snapshot
+cache starts. On divergence, the complete bounded continuity result is committed to a
+transaction-local immutable value before the global index, HEAD path list, ignore list,
+ordinary Findings, output, retry state, generated indexes, open-actions, or queue fold is
+read or changed. Incomplete classification publishes only one bounded stable diagnostic
+and exit 2. Every writer combination, including an invocation that would otherwise have
+earlier Findings, proves byte-identical worktree and index state on incomplete preflight.
+
+### Closed historical interface and result bounds
+
+Historical authority is refactored onto the same budget object, streamed graph, bounded
+object reader, tree walker, snapshot cache, and typed obligation evaluator as occurrence
+proof. It cannot recursively invoke Git history, buffer `git log` or `ls-tree -r`, or enter
+an arbitrary registered checker. Generated-retry authority calls a bounded historical
+checker interface; helper inputs, outputs, records, nodes, invocations, and obligation
+replays are charged before work. A live child is terminated and reaped on every refusal.
+
+The following rows extend the earlier production table and make it exhaustive. A later
+implementation may lower a number, but every retained counter has an exact and a
+limit-plus-one test before the design can be amended upward.
+
+| Additional dimension | Limit |
+|---|---:|
+| Graph lines / commit tokens | 4,096 / 4,096 |
+| Merge-base stdout / peak line bytes | 64 KiB / 4 KiB |
+| Merge-base lines / tokens | 64 / 64 |
+| Shallow-probe stdout / peak line bytes | 64 / 16 |
+| Shallow-probe lines / tokens | 2 / 2 |
+| Git stderr bytes across children | 256 KiB |
+| Object-header bytes | 4 MiB |
+| Object-cache hits | 262,144 |
+| Raw tree-entry name bytes | 8 MiB |
+| Graph stream chunks / peak chunk bytes | 65,536 / 1 MiB |
+| Whole-graph buffered bytes | 0 |
+| Queue snapshot requests / cache hits | 262,144 / 262,144 |
+| Queue subtree reads | 4,096 |
+| Identity derivations / mutation checks | 262,144 / 262,144 |
+| Production helper calls | 16,384 |
+| Production helper input / output bytes | 8 MiB / 16 MiB |
+| Production helper output records | 262,144 |
+| Historical helper nodes | 4,096 |
+| Additional parent subprocess queries | 0 |
+| Historical checker invocations | 8,192 |
+| Support-adoption checks / obligation replays | 8,192 / 65,536 |
+| Carry-proof nodes / edges | 262,144 / 262,144 |
+| Immutable result rows / references | 262,144 / 524,288 |
+| Immutable retained result bytes | 32 MiB total / 1 MiB per row |
+| Result serialization bytes / peak chunk | 32 MiB / 1 MiB |
+
+Rows and references use deduplicated proof IDs rather than copied aggregate structures.
+Each row, reference, payload, cache entry, and serialization chunk is pre-charged before
+allocation or retention. Result overflow discards the result and transaction-local caches,
+publishes no partial Finding or evidence, and records only the bounded incomplete
+diagnostic. Exact/+1 gates cover both graph arms, every table row here and above, the
+historical generated-retry path, result retention, serialization, and child cleanup.
+
+### GitHub event matrix and trust boundary
+
+Push continuity applies only when `github.event.ref` is a `refs/heads/*` branch and uses
+the payload's exact `before` and `after`; `github.ref_name` and `github.sha` are observations,
+not endpoint authority. Creation has zero `before` and real `after`: ordinary checks run
+against `after` and continuity is omitted. Deletion has `deleted=true` and zero `after`:
+deleted-ref candidate checking is skipped, the zero value is cross-checked, and repository
+tests may still run against the default-branch checkout without naming it as the deleted
+branch. Fast-forward and divergent pushes use the exact non-zero pair.
+
+PR synchronize continuity uses trusted base-repository workflow code under
+`pull_request_target` only as a data inspector. It never checks out, imports, or executes
+candidate code. The event's top-level `before/after`, `pull_request.head.sha`, head
+repository identity, and branch identity are mandatory and cross-checked; missing or
+contradictory fields are coverage-unavailable exit 2. Exact O/N objects are fetched only
+from the event-named GitHub repository into an isolated object directory, then parsed by
+the trusted base reconciler. The candidate-controlled `pull_request` lane remains useful
+for repository tests but is not continuity authority.
+
+The trusted lane has read-only permissions, `persist-credentials: false`, no secrets,
+quoted environment transport, GitHub-host/repository-identity validation, no mutable ref
+fallback, and an adapter timeout. A transport POC must select and demonstrate a numeric
+pack-input and temporary-disk limit that refuses before unbounded unpack or object
+admission; core object budgets do not substitute for that network boundary. The adapter
+implementation stays gated until that POC is observed red at limit-plus-one. Candidate
+objects are data even when a fork supplies them, and `pull_request_target` never executes
+candidate repository code.
+
+GitHub documents conflicting behavior for fork payload fields, so fork support remains
+unverified until live canaries pass. Same-repository, fork, and conflicted-fork synchronize
+canaries each record the fixture repository, event/run URL, trigger action, raw field
+presence, exact O/N, expected classification/exit, observed classification/exit, cleanup,
+and immutable evidence digest. The fixture procedure creates O, rewrites to N, captures
+the event, asserts `after == head.sha`, and tests one unavailable old O as exit 2. The
+conflicted-fork case proves that the trusted lane runs without executing fork code. The
+canary scripts and fixture README own setup, assertions, and cleanup so the gate is
+rerunnable rather than prose.
+
+The executable surface is
+`python3 automation/canaries/github_ref_update.py <provision|capture|assert|cleanup>
+--fixture automation/canaries/github-ref-update-fixture.json --run-id <id>`.
+The checked-in fixture names one writable base repository, one separately owned fork, the
+base branch, and the deterministic `refs/heads/agentfold-canary-<run-id>` prefix; missing
+or identical repository identities fail before provisioning. `provision` prints and
+records the created refs/PRs and O/N pairs, `capture` downloads event artifacts by run ID,
+`assert` expects same-repository and fork synchronize classification at the recorded pair,
+conflicted-fork trusted-lane execution, unavailable-old-O exit 2, read-only permissions,
+and no candidate checkout, and `cleanup` deletes only identities in that signed run
+manifest. The evidence artifact is the canonicalized manifest plus payload-field digest,
+run URLs, exact command output, and cleanup result. Production admission requires all four
+commands to exit 0; an absent fixture, credential, event, or artifact is unverified rather
+than skipped.
+
+A fork update made while the PR is closed remains uncovered because no synchronize event
+exists; reopening does not reconstruct the displaced pair. A provider that omits the
+required fork payload also remains coverage-unavailable. Base advance or retarget is
+ordinary-only and does not itself guarantee a new PR workflow run. A remote continuity
+check cannot prevent or undo a push; once configured as a required check it can block the
+subsequent merge.
+
+### Human development and repair cycle
+
+The local cycle fetches both the current base and remote task ref, records exact remote
+`O`, rewrites and inspects the branch to `N`, and runs the paired local diagnosis against
+`B...N` and `O N`. Publication uses
+`--force-with-lease=<ref>:<O>`. A rejected lease means another actor moved the ref; the new
+remote O is fetched and the classification is repeated rather than overridden.
+
+An invalid or ambiguous CI result is repaired by creating `N'`, running the local paired
+check against the now-current remote tip, and pushing `N'` with its exact lease. Only an
+unchanged retry is invalid; a repaired branch necessarily has another push. When remote CI
+cannot fetch old O, the developer's still-present local O remains useful for diagnosis,
+while the remote result remains coverage-unavailable until the object becomes exactly
+fetchable or a later rewritten update supplies a new checkable pair.
+
+### Corrected production gates
+
+Production starts only after a new immutable revision receives the complete five-lens
+review. Its tests include old-side deletion/recreation, binding restore, hidden-byte
+restore, two-arm aggregate budgets, stable persisted Findings and counts, the closed CLI
+grammar, synthetic read-only checkout, writer checkout binding, pre-snapshot transaction
+ordering, every exhaustive exact/+1 dimension, bounded historical generated-retry work,
+and removal of every active `--displaced-tip` source/document/workflow assertion.
+
+The GitHub adapter remains a separate gate after its bounded-transport POC and executable
+same-repository/fork/conflicted-fork canaries. A missing credential or fixture records
+unverified coverage rather than a fabricated pass. Core classification can proceed in its
+own non-overlapping implementation unit only after the corrected design review; adapter
+completion cannot be claimed until all transport and canary evidence exists.
