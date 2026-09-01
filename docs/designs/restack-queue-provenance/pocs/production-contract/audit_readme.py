@@ -17,15 +17,29 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v3"
+SCHEMA = "agentfold-production-contract-evidence/v4"
 SUPERSEDED_EVIDENCE = {
-    "commit": "0b80c342feb310d73de6564aab2224a899f42486",
-    "disposition": (
-        "superseded and burned after later persisted-carry and measured-budget "
-        "semantic blockers; history is preserved and v2 is never reused"
-    ),
+    "artifacts": [
+        {
+            "commit": "0b80c342feb310d73de6564aab2224a899f42486",
+            "disposition": (
+                "superseded and burned after later persisted-carry and "
+                "measured-budget semantic blockers; history is preserved "
+                "and v2 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v2",
+        },
+        {
+            "commit": "7f4a1ffacd1cf8163f597daa186f801e9ce06a3a",
+            "disposition": (
+                "superseded and burned after pre-charge budget, localized "
+                "Git diagnostic, and permissive raw-grammar blockers; "
+                "history is preserved and v3 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v3",
+        },
+    ],
     "replacement_schema": SCHEMA,
-    "schema": "agentfold-production-contract-evidence/v2",
 }
 METRIC_KEYS = (
     "authority_calls", "batch_processes", "git_processes", "graph_commits",
@@ -37,6 +51,48 @@ METRIC_KEYS = (
     "support_adoption_checks", "support_certificate_calls",
     "support_paths_checked",
 )
+PRECHARGE_P22_METRICS = {
+    "authority_calls": 0,
+    "batch_processes": 1,
+    "carry_proof_edges": 1,
+    "carry_proof_nodes": 2,
+    "git_processes": 4,
+    "graph_commits": 133,
+    "graph_enumerations": 1,
+    "graph_parent_edges": 132,
+    "identity_calls": 32,
+    "mutation_calls": 1,
+    "object_cache_hits": 25,
+    "object_reads": 134,
+    "per_action_history_walks": 0,
+    "queue_snapshots_requested": 59,
+    "queue_subtree_reads": 3,
+    "snapshot_cache_hits": 55,
+    "support_adoption_checks": 0,
+    "support_certificate_calls": 0,
+    "support_paths_checked": 0,
+}
+POSTHOC_P22_METRICS = {
+    "authority_calls": 32,
+    "batch_processes": 1,
+    "carry_proof_edges": 2080,
+    "carry_proof_nodes": 2112,
+    "git_processes": 135,
+    "graph_commits": 133,
+    "graph_enumerations": 1,
+    "graph_parent_edges": 132,
+    "identity_calls": 32,
+    "mutation_calls": 2080,
+    "object_cache_hits": 24736,
+    "object_reads": 300,
+    "per_action_history_walks": 0,
+    "queue_snapshots_requested": 10973,
+    "queue_subtree_reads": 3,
+    "snapshot_cache_hits": 10970,
+    "support_adoption_checks": 0,
+    "support_certificate_calls": 16,
+    "support_paths_checked": 0,
+}
 SCENARIO_IDS = tuple(sorted((
     "P1-direct-linear-valid",
     "P2-direct-linear-invalid",
@@ -171,6 +227,7 @@ SCENARIO_IDS = tuple(sorted((
     "R17-carry-outside-duplicate",
     "R17-carry-outside-single",
     "R17-outside-C-neutral-parent-valid-restack",
+    "R17-precharge-P22-budget",
     "R17-persisted-outside-duplicate",
     "R17-persisted-outside-duplicate-reversed",
     "R17-persisted-outside-single",
@@ -201,11 +258,13 @@ CONTROL_IDS = tuple(sorted((
     "ignore-persisted-outside-C-collision",
     "identity-multiplicity-collapsed-to-set",
     "literal-review-pending-treated-concrete",
+    "locale-git-error-stream-equality",
     "missing-all-parent-direct-validation",
     "missing-post-event-continuity",
     "omit-old-tip-human-binding",
     "omit-supplier-carrier-human-binding",
     "omit-unanswered-published-review-binding",
+    "posthoc-budget-accounting",
     "reopen-outside-C-boundary-ancestry",
     "reopen-pre-C-genealogy",
     "restore-universal-ancestor-carry-scan",
@@ -308,6 +367,197 @@ FIXTURE_CLAIMS = (
     ("r10-malformed-bound-revision", "R10-supplier-review-revision-generic-placeholder-rejected", ("details", "candidate_value")),
 )
 
+# Generated once from the closed v4 catalog after the semantic implementation
+# was committed.  Each digest binds the complete recursive object-key, list,
+# and scalar-type shape of one raw JSONL row.  Values remain observations; the
+# grammar cannot learn new fields from the stream it is auditing.
+RAW_SHAPE_SHA256 = {
+    "aliases": "sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3",
+    "control:broad-review-pending-normalization": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
+    "control:first-parent-carry-proof": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:identity-multiplicity-collapsed-to-set": "sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190",
+    "control:ignore-absent-C-arm": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:ignore-invalid-N-root": "sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab",
+    "control:ignore-outside-C-carrier": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:ignore-persisted-absent-C-arm": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:ignore-persisted-outside-C-collision": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:literal-review-pending-treated-concrete": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
+    "control:locale-git-error-stream-equality": "sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4",
+    "control:missing-all-parent-direct-validation": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:missing-post-event-continuity": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:omit-old-tip-human-binding": "sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414",
+    "control:omit-supplier-carrier-human-binding": "sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb",
+    "control:omit-unanswered-published-review-binding": "sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb",
+    "control:posthoc-budget-accounting": "sha256:d6614abe8fe0948afc2d92eee3ad3589110a23d9e90d919df0add5a5b42f8e19",
+    "control:reopen-outside-C-boundary-ancestry": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:reopen-pre-C-genealogy": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:restore-universal-ancestor-carry-scan": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:skip-carry-compatibility": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:skip-old-side-continuity": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:skip-persisted-candidate-continuity": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:skip-persisted-frozen-skeleton": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:skip-preserved-state-validation": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "control:skip-supplier-support-certificate": "sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab",
+    "control:sole-valid-ignores-invalid-root": "sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4",
+    "control:supplier-authority-borrowing": "sha256:889c75da0848d6f89f4d98b22ac05d36d45c3a1d4888d64ae67d9316869049f4",
+    "control:unmetered-cone-work": "sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2",
+    "parent-permutation": "sha256:ff2c5187a2f005aefb4e390ee296b9fb51f90077a07b7e52b90e26a54bcc27d6",
+    "scenario:P1-direct-linear-valid": "sha256:4f57c411153ac91e0f28e3cc64dac2f23410bb94fc1c840713da76b0a93fa218",
+    "scenario:P10-direct-invalid-parent": "sha256:01e6260085ff5eb2334602eb098ff771dc09269a8cb63a6200145ca4eef4a57e",
+    "scenario:P11-direct-three-parent-valid": "sha256:1ee423dc5b8305ffccc4722d757c6371b0b19a7f1b5217e7aeb724367efe94f3",
+    "scenario:P12-merge-supplier-valid": "sha256:00565c9d4a4a7d25da4e80f148302fef53f4c259ef64349144faf419eec02364",
+    "scenario:P13-merge-supplier-invalid": "sha256:62da7d196d8bad9c166bfa2eafad724e1584b07e8d4a4e8eb7c40e2e4cb949b9",
+    "scenario:P14-supplier-reintroduced": "sha256:310db656a21015f6567a328a7c64b2c3419e275b6d6774dc1fb40ed4f302ce27",
+    "scenario:P15-competing-suppliers": "sha256:09c89a51aa5e43c70b659c1659cfe28b2e9a5ec47703a54e8087c135ef204bd1",
+    "scenario:P16-PCX-08-invalid-supplier-claimed-carrier": "sha256:4488cd3c1a2c4d5994c6bb46cb824d6c68e6d58a2aa3abfd6eed76f68aaef5ce",
+    "scenario:P17-post-event-reintroduction": "sha256:cda7200a0d7e880d074374340589fbe9d2997b6fc47b6ad737cbda83c6c51f14",
+    "scenario:P18a-missing-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
+    "scenario:P18b-noncommit-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
+    "scenario:P18c-unrelated-tip": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
+    "scenario:P18d-shallow-required-region": "sha256:3fe0878772693203523bd6e3b20f2ea446029febe6fe067507a847a619563014",
+    "scenario:P18e-missing-queue-blob": "sha256:419b4356e1f0d1678126caf65937db1bd48e6a58ad64c664f42e378b44a1bdeb",
+    "scenario:P18f-missing-queue-tree": "sha256:1806ccf6466ed9b923dde9fa4d8d3b137514c17184cb80ff24aaa438b4fe7d6e",
+    "scenario:P18g-multiple-merge-bases": "sha256:26d72e01367fbc7cb11697d189ba4b627be68ca9441fc8b7c117c872ccaf78e6",
+    "scenario:P19-production-identities": "sha256:3b8c74a04de8f6aa19ad2b1df9f36300ef1cfc5d896253cd26b67649a23e0895",
+    "scenario:P2-direct-linear-invalid": "sha256:5e07c2f06a7385d29bfc4cd95d9452d283d6a9cab08e542f1b66d2a529b72ffd",
+    "scenario:P20-lifecycle-types": "sha256:790b95cca795de94037a8733edbd66394e7bdc35e4bdefac71aeaecadf08a741",
+    "scenario:P21-PCX-17c-squash-erasure": "sha256:93c8b68b97875346777b7b84de1224dd540b7c77d2ee3362e1291bd48aa7c8c2",
+    "scenario:P22-PCX-18-one-pass-many-actions": "sha256:3eb7a914f658d0c7fd8d69bca1bbe6067d1a43df36e06016a7dbf6ebf87bb5ce",
+    "scenario:P3-genuine-old-loss": "sha256:a097a6969d953ee800774c16742065afcf8a7e0076f37f4d04c4c43a9416c85a",
+    "scenario:P4-pre-C-identical-origins": "sha256:f4e23b44a040c258896440326857f7725a87c4146f55d0575841fccedfe5a57a",
+    "scenario:P5-duplicate-at-C": "sha256:95cc7ab17d7aca33d21dc7c590b899afb8edab5bf76c338662e9ae6ba02f7dd3",
+    "scenario:P6a-old-delete-recreate": "sha256:9b77d06b33492cf733db6be995c8d2d6d190695154d469fad9686c9d15b202ed",
+    "scenario:P6b-candidate-delete-recreate": "sha256:2f0ea2af2d4a5f4dcf4a9aa51b6a3f5bf0c9743f18f5d2730fc35905c3d3e2bb",
+    "scenario:P7-immutable-payload-change": "sha256:6c68e56ba7b340e4e2b00e7cd2e6313411762a44c56044025aaf2ce0d34737fa",
+    "scenario:P8-path-timing-move": "sha256:c6c94e4d9e9e39903bbc992112d4e9c05f25933fa9f2b56010023368337fc9f9",
+    "scenario:P9-direct-two-parent-valid": "sha256:1122c4dcafa80445178261be2e8aae86edf3200d65598d0bca1a0c875a765922",
+    "scenario:PCX-01-neutral-parent": "sha256:fe2e59559b9be8c45637262fd5208f402a9e7d8a3d21808f881981ba9a43e143",
+    "scenario:PCX-02-neutral-plus-invalid-carrier": "sha256:b19bbd151828efe888d10aafabe4f2e4e29a7454f9b954bc038ebaf40b87d44e",
+    "scenario:PCX-03-foreign-exact-identity": "sha256:9853e0ce9f9ac92b90c93c732f074fa2b97e7e0e51f268a2d0ac9045eeae3a28",
+    "scenario:PCX-04-several-absent-one-supplier": "sha256:197755aff25d09a8ea136cc8ec93ecb853a176764fce34fc0cf450f4dd731a74",
+    "scenario:PCX-05-competing-later-supplier": "sha256:85298e9b8db840e57d058dcf7e7539122ac790bbd87c1921134d2932cc50a0ef",
+    "scenario:PCX-06-nested-supplier-over-direct": "sha256:d0d9b0eafcfca30ef00bd59475ef485f0475fab33dc56d145d6fffc62593619e",
+    "scenario:PCX-07-overqualified-propagation": "sha256:e128695a0477b946986adcda4961cc1becb92fe0093d6020db51e79831a222a6",
+    "scenario:PCX-09-recreated-claimed-bytes": "sha256:8c51b761094c1b31602eb7c12b4f70b920216b4e7891a28025206d944dbfd29b",
+    "scenario:PCX-10-transient-multiplicity": "sha256:cf935303af710635a962719a21ac46a27192aa77b44e979d41a9dd40a0b079d6",
+    "scenario:PCX-11-different-payload-same-path": "sha256:7682c4c604b83b9d03ef378a2115fc0da8863d6efcc69cfbe6208406a4b63523",
+    "scenario:PCX-12-timing-rename-supplier": "sha256:ac9480dc82b0b2d963c2ba2a1aca74ba5860774274ba380f9369aef70f2aac84",
+    "scenario:PCX-13-conflicting-human-response": "sha256:341d1d6491c2aceeddcbca08545b8e4946b81dc4d2d98d5e9ddda17e40076cf0",
+    "scenario:PCX-14-valid-human-supplier": "sha256:d6c4cf6e8e0412edc029a17dcc079126191a51a8a87d725b5ae21fadf67dcc30",
+    "scenario:PCX-15-generated-retry-supplier": "sha256:1d82c960d0ae56079ca0f67ee6a502a3059b6e62b0d82b5794257c0f9961d73d",
+    "scenario:PCX-16-task-pickup-supplier": "sha256:ae56073e6626fa418b0eaa3dfdc47f5df86cfa12e8c1fd250c93a4f391051e8f",
+    "scenario:PCX-17-complete-cherry-pick": "sha256:0f0fa982a491381f67eaba898f5a3a5040efacbe696de8e3a20e4c740bb65322",
+    "scenario:PCX-17-deletion-only-cherry-pick": "sha256:93c8b68b97875346777b7b84de1224dd540b7c77d2ee3362e1291bd48aa7c8c2",
+    "scenario:PCX-19-missing-claim-blob-recovery": "sha256:dcb05057ea8f97dc971659734c1523121d21ff5067a892aeed07e479342b4de8",
+    "scenario:PCX-20a-budget-below-limit": "sha256:749fc3aa6ff630c31dc0660afb7529847bff9c004b3f45f9233376fafe660325",
+    "scenario:PCX-20b-budget-overflow": "sha256:eecfab76b9cb1eb756c4ce5b185090b28ef3ff32636e2f05daefabdada64e20a",
+    "scenario:R10-direct-review-target-backtick-dotless-rejected": "sha256:eaee6ac70be223bc9c06f1e6c60d3db0507fe7ae97c33e1badbcf2e7835f6280",
+    "scenario:R10-supplier-review-revision-generic-placeholder-rejected": "sha256:003105c4970f78686dbbf6b8d8156609e6c04f3ea0434587d36e20f67afcfa40",
+    "scenario:R13-direct-review-binding-identical": "sha256:02c4fbb02e15cc114e07af0c8fe7d6127426af458ff2a993cbb7c4ca8e11c0e1",
+    "scenario:R13-direct-review-binding-revision": "sha256:2423eeae5e3c75f2a378dfd0f4c6fd8b60597df6508728614f60543c6218fcc6",
+    "scenario:R13-direct-review-binding-target": "sha256:e0d718638a9333744e5a01da72747bc38f4706a89c05a4fa399da7ba64029073",
+    "scenario:R13-direct-review-binding-terminal": "sha256:104db72d76b254600903259c6c7c528dec5e881d84bb1e8e40ea848373654117",
+    "scenario:R13-persisted-claim-loss": "sha256:d1acd512cf5d33e1201fa9d3013799264a7efc04bd936985e13923447f246b0f",
+    "scenario:R13-persisted-pending-fill": "sha256:b4ca4de60fbd3cf3a1c6bedbfb41a07d3383a7bdc06418273b6d227634cd78e2",
+    "scenario:R13-persisted-response-change": "sha256:cd1fadee6fb0b335319a7b248058039500885d7b4e3e53fd8c4b118b13fd9083",
+    "scenario:R13-persisted-response-removal": "sha256:af55228232f3fd868fdb24ecdb7db33c4ae3a2ecaa776788b536552e263b1b73",
+    "scenario:R13-persisted-review-outcome-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
+    "scenario:R13-persisted-review-revision-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
+    "scenario:R13-persisted-review-target-change": "sha256:e114232ad2ff4fa0930ee14714d2a0ad41a6c5a0b7eb1582ebcbd0093b2a3298",
+    "scenario:R13-persisted-same-state": "sha256:5789876e350a0b65dea7d7f1d32b3cdb774720c163913b848187fbcd6639d099",
+    "scenario:R13-persisted-terminal-fill": "sha256:0cb17b65d0a617f1d65035996835ebb05e8ee3ba2de88cd07c52432ff832d5fe",
+    "scenario:R13-supplier-review-binding-identical": "sha256:595e4d1fc5132756fdfdb57fc68f816bd54df3edbe5c6246e6e647bfe5f8f299",
+    "scenario:R13-supplier-review-binding-revision": "sha256:bd502a2056f7af102fdfefb846f8f0bdc7fd5ccd5ef4bc362c4ce6c0d6616d6d",
+    "scenario:R13-supplier-review-binding-target": "sha256:bd502a2056f7af102fdfefb846f8f0bdc7fd5ccd5ef4bc362c4ce6c0d6616d6d",
+    "scenario:R13-supplier-review-binding-terminal": "sha256:d52d0ed325a22d955a0935cb120decf090d66ffbd0891ba1d76b5e5ab9e2df64",
+    "scenario:R14-direct-old-unanswered-carrier-same": "sha256:51300b0922cdd5f2a96cfb2f4d817de7ff8f0fe4d422d7f4abacd663d1792825",
+    "scenario:R14-direct-old-unanswered-carrier-target": "sha256:51300b0922cdd5f2a96cfb2f4d817de7ff8f0fe4d422d7f4abacd663d1792825",
+    "scenario:R14-persisted-delete-recreate": "sha256:67bdeb1a089804f5250d8783f5d54828ea96d407e2569905ecc33dfc2b909b54",
+    "scenario:R14-persisted-hidden-bytes-low-similarity": "sha256:2c1e1263df499554656e50b0982695179e4a42c0374fe8c1ef22e60180d7dde7",
+    "scenario:R14-persisted-intermediate-claim-regression": "sha256:87e4b6dbde420a89905893ab03c43cfcfe2f9ce457127ef76d63b87e64d3942b",
+    "scenario:R14-persisted-intermediate-review-regression": "sha256:67f47c44ed293296af1aaa69e2d86d62f3bb9adbd79c3684636dd486581542dc",
+    "scenario:R14-persisted-merge-carrier-conflict": "sha256:e0b93f8a10cad2a02fec9334c53a067064984a0ad278c52940e43df6d10af5ce",
+    "scenario:R14-persisted-merge-carrier-pending": "sha256:2ddd38d288e6c4b4530136d6335d6c4ad502363af270c117a39d266ec4eb812b",
+    "scenario:R14-persisted-valid-first-response-low-similarity": "sha256:687af1371e90781fa0e39a6aa3aed534e1e87a63d5b09526060f5f830d865857",
+    "scenario:R14-persisted-valid-review-retraction": "sha256:b6c65b358e94d1eb65bda1a91eb4bf0a4ea0eba808a22ce7fcb295014a532b64",
+    "scenario:R14-supplier-old-answered-carrier-pending": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
+    "scenario:R14-supplier-old-answered-carrier-revision": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
+    "scenario:R14-supplier-old-answered-carrier-same": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
+    "scenario:R14-supplier-old-answered-carrier-target": "sha256:c8697ede5a532dfc45249823dc2dfa3c5c100da09ebfdbd29ded58673a3bc3a2",
+    "scenario:R14-supplier-old-unanswered-carrier-same": "sha256:0bec2193b838acdae28891d496208d05aacb5fbe1fc056a2a085e73f73956c18",
+    "scenario:R14-supplier-old-unanswered-carrier-target": "sha256:0bec2193b838acdae28891d496208d05aacb5fbe1fc056a2a085e73f73956c18",
+    "scenario:R15-old-continuous-preserved": "sha256:bae77b8a677a42073e15ae5658725e4fada94ab54e2bcb233ce30555afcf3134",
+    "scenario:R15-old-hidden-bytes-restore": "sha256:86d14691b56c11bce08a523b6a0e6e32d35d288058b2cd4c0f86ce0590977b49",
+    "scenario:R15-old-human-binding-restore": "sha256:d7ac26397564d28615a0d41ae0b68ca1ea96d8cc53871941dc53eb7adaf59cb8",
+    "scenario:R15-old-invalid-delete-recreate": "sha256:eb90596b6ad0a878496032692dc5c3c189e7215049f3a10cba12732d15586068",
+    "scenario:R15-old-valid-delete-recreate": "sha256:2d32f225c59dfa1b8de4355958c65e0686b127c0f9bbbee2e41b509f17aadab6",
+    "scenario:R16-earlier-landed-evidence-reversal": "sha256:077b449fb3e8d73dcbd714f6c0188607b5796754f48b2cb9df5a1a5f1540778d",
+    "scenario:R16-pickup-evolution-0-backlog": "sha256:1d950653f0896f02fea932383fdd8a8c4dabc0a3fcf1ae9b3bbc3ba097903912",
+    "scenario:R16-pickup-evolution-2-blocked": "sha256:35c3ce120c33f21dcceb9ef41f29e584e4f77cd7de93af1f91e1b1d4bc951d2d",
+    "scenario:R16-pickup-evolution-3-in-review": "sha256:d26737780d5ebb99a3ae0afc552af97c282e1605bbd23df3341ee9acd5c3730e",
+    "scenario:R16-pickup-evolution-3-in-review-drop-artifact": "sha256:197a861f07746080595245007c358da0d1613c19d0f8a72fea91c085b9a3f872",
+    "scenario:R16-pickup-evolution-4-done": "sha256:d26737780d5ebb99a3ae0afc552af97c282e1605bbd23df3341ee9acd5c3730e",
+    "scenario:R16-support-adoption-drift": "sha256:33ef07dbb366437494a1247bce0444626aee60395a11df59d4fa73146fce4308",
+    "scenario:R16-support-forward": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
+    "scenario:R16-support-invalid-source": "sha256:ea29f88cfe864594d08adadc3c1d17406d2fe55f28af7fb767ae8f889e9c696d",
+    "scenario:R16-support-nested-drop": "sha256:db17f56780ee0f42b76d0fd73732921b3153e7bba24a08b67459f85ea094a286",
+    "scenario:R16-support-permutation-diamond": "sha256:51575a5d034d4971b8a4b0b63c7ffd315dfac66b8a259f3838206899a763adbc",
+    "scenario:R16-support-reverse-drop": "sha256:9c9fb80a9a5bc32bd24461119a74fe3df417c6b996985962ec65972e1883ee60",
+    "scenario:R16-support-reverse-preserved": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
+    "scenario:R16-support-source-evolution": "sha256:2eb7498e19ae8f6e6465e3b291fdce68498d7e90461ab0b7b4f1973b99c815d1",
+    "scenario:R17-carry-absent-arm": "sha256:2b36235d404f2e30de846c5ef434afe73bc7ce27b430dc48cd93062bc59c9403",
+    "scenario:R17-carry-compatible": "sha256:4a0f93dc5e1fe684db1e62f38d5aea709a1eb086e5d36a0c1f57fb9faec10866",
+    "scenario:R17-carry-compatible-reversed": "sha256:4a0f93dc5e1fe684db1e62f38d5aea709a1eb086e5d36a0c1f57fb9faec10866",
+    "scenario:R17-carry-incompatible": "sha256:3d8bad52383985f3babc7220c73037474e80b36ea5333c15847024f9401202e0",
+    "scenario:R17-carry-outside-duplicate": "sha256:46483c584c34860d9338b833bdc86937c67a4e2e8e01b9175f8c4b2316f5d230",
+    "scenario:R17-carry-outside-single": "sha256:81c18794fb4209b8ae6cb2102eec4fb4f2b8b1e2ae8d61d1ef062f4cfd4dbc8b",
+    "scenario:R17-outside-C-neutral-parent-valid-restack": "sha256:bda3673abdccea83e0a8ca4d22a4a3c1edc3c9e130a6bd7cfbf5250465806abb",
+    "scenario:R17-persisted-outside-duplicate": "sha256:ff58edd51c5b1c689fee6f6221de0022adc49829287173d5ea58d04d9091fa35",
+    "scenario:R17-persisted-outside-duplicate-reversed": "sha256:ff58edd51c5b1c689fee6f6221de0022adc49829287173d5ea58d04d9091fa35",
+    "scenario:R17-persisted-outside-single": "sha256:d5a5cd78fc590781a325257a722e162c184046f7cb1266bb00a823d99a759501",
+    "scenario:R17-persisted-outside-single-reversed": "sha256:d5a5cd78fc590781a325257a722e162c184046f7cb1266bb00a823d99a759501",
+    "scenario:R17-persisted-unauthorized-absent-arm": "sha256:f4d241be4323e6dce40925b832f61714b2ac2153f6eaba225820c8a4218990cd",
+    "scenario:R17-persisted-unauthorized-absent-arm-reversed": "sha256:f4d241be4323e6dce40925b832f61714b2ac2153f6eaba225820c8a4218990cd",
+    "scenario:R17-persisted-valid-absent-arm": "sha256:e41aa6c81a7fa7e3c02c96e112c7d2e6fd01ed2918134676999b56d1df564241",
+    "scenario:R17-persisted-valid-absent-arm-reversed": "sha256:e41aa6c81a7fa7e3c02c96e112c7d2e6fd01ed2918134676999b56d1df564241",
+    "scenario:R17-precharge-P22-budget": "sha256:9c7bd9ae7aa964f30a7c4d0e577b6d57635feaaaaa71fb127f36e06215707b92",
+    "scenario:R17-unreadable-outside-C-ancestor-stays-unopened": "sha256:17f6fd8afc206ca4e2b3964befab6447313e3770ecc5363974aa64dff65a3588",
+    "scenario:R17-unreadable-outside-C-boundary": "sha256:e673018ad139d1a7f8ed888cc6c16f3c2e84e316fd4b059a68f3f29fabdff237",
+    "scenario:R17-wide-outside-C-boundary-budget": "sha256:2867bc57efb2b0221bca74aafeaf358afc7a4d883b43c9bd073c476be3a904f9",
+    "scenario:R3-01-two-invalid-causal-sources": "sha256:7c378db43468cac30ea7fce66d72d9de851c0f32b1d5c05bf24b1a8f93564d27",
+    "scenario:R3-02-invalid-valid-causal-competition": "sha256:3b930f9cfb4fa87405f8ce377aa564122c3191280d9df81005e87fae4d4d5814",
+    "scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks": "sha256:e3acfdb297fb6ce6c9d9a7d3c0baaa924cd6cac13bf459b55b488c0f43774ad6",
+    "scenario:R4-01-same-root-valid-diamond": "sha256:891a1f2c942a00a5753b1d9d26147294e4ee5733ca1b7f3eadad38b27018f325",
+    "scenario:R4-02-distinct-valid-root-diamond": "sha256:cb7fde6b9985018f94e8413ed82b19967247b87bbd7e13fc03072c6892acd208",
+    "scenario:R4-03-equal-root-plus-invalid-diamond": "sha256:9c3a634056f76695bc84a64af33420a8b102899b7d6c29ffe2d3add9d000e55d",
+    "scenario:R5-01-invalid-redelete-after-supplier-reintroduction": "sha256:da16e53f0f9ae04416789ee89801ec4a84edbb8a3655e92ea7a5795309f06fec",
+    "scenario:R5-02-valid-redelete-after-supplier-reintroduction": "sha256:1acf1c491fd554e63c8d60a8b16dd2f82a22da4e7286f24b13c7042246f9f1b4",
+    "scenario:R6-01-valid-plus-invalid-all-absent": "sha256:c429b988ca123c5143c4b2cbdaa146a01a4109cbf725157caa57bcd1d8310cdf",
+    "scenario:R6-02-valid-plus-ambiguous-all-absent": "sha256:dd79df51b4a874bb0ded5274030b377219c00cd8ce2fd5e67cb0a0400ca6e731",
+    "scenario:R6-03-two-invalid-all-absent": "sha256:5d9698b080641a9099a1866a566a72a523839ed6a99d5321e154d4c35a159d18",
+    "scenario:R6-04-same-valid-root-all-absent-wrappers": "sha256:72ea57333c828a357c0a98edfd5ffc54efac83ca74c845e764f1a2c2593dc0a9",
+    "scenario:R8-direct-human-response-conflict": "sha256:4bd8010dbf13661aa4d59be70c723e610674cd72764ba1d4b6ef6810a8b14f90",
+    "scenario:R8-direct-human-response-identical": "sha256:4bd8010dbf13661aa4d59be70c723e610674cd72764ba1d4b6ef6810a8b14f90",
+    "scenario:R8-review-binding-divergent": "sha256:96c0541d4d19623284d5dfddbe84a3c07712fd3ff697b3133bcf190661f45e07",
+    "scenario:R8-review-binding-identical": "sha256:d5e167d6454eead0aa2a088556b0b86e996819181ccf79464b03f850822b01d7",
+    "scenario:R8-review-binding-terminal-conflict": "sha256:e984e1d561ccdcf64edbaec1a63682f7caf0c2d8c6295b466163f28bb4ae89e4",
+    "scenario:R8-supplier-human-response-conflict": "sha256:d8b11bd684f85a55b66ca1e6b140442d7c42c0dd131079a582957d92eb0b752a",
+    "scenario:R8-supplier-human-response-identical": "sha256:ec79fc727033970fcf46b1fc8c58155967c630152b2efbe5e6db142bb52fe713",
+    "scenario:R9-direct-review-revision-pending-fill": "sha256:c33593ea512f318b1ab2245804f0d06dcfae4761e14c6b619ffd37cc768af74e",
+    "scenario:R9-direct-review-target-pending-fill": "sha256:c33593ea512f318b1ab2245804f0d06dcfae4761e14c6b619ffd37cc768af74e",
+    "scenario:R9-supplier-review-revision-pending-fill": "sha256:d917492aa1b894b51e47ecce7aa3cc0757c60c8de1851328242aeddd11e97dde",
+    "scenario:R9-supplier-review-target-pending-fill": "sha256:d917492aa1b894b51e47ecce7aa3cc0757c60c8de1851328242aeddd11e97dde",
+    "scenario:W0-fast-forward-return": "sha256:edc44c732d297925125d6452e8bf153ed77fc230e40d502615297e011788f671",
+    "scenario:W1-pre-PR-push-exact-endpoints": "sha256:942ab6af246282eabbbfe25bba5bec68790db7a1809dbf5a6f97e3c695b90574",
+    "scenario:W2-base-advance-retarget-invariant": "sha256:461aecac9b5e2c60cd7230d2c88e6921e17c0963b8a0e21cce6ecabf847a8a91",
+    "scenario:W3-multiple-PR-API-zero-calls": "sha256:a408175b54af46684a7ef5bf452f18597223c8ec93715b25b5dfcd51313b2572",
+    "scenario:W4-stale-rerun-exact-inputs": "sha256:bc502957024f6c6be437996e2a4885a627fef4f0702963cb16e849117ff86c46",
+    "scenario:W5-missing-O-coverage-unavailable": "sha256:0636fb6f185403300874dbe5800c7c32c1a91f5547d8c0fbfaf4652936993305",
+    "scenario:W6-created-deleted-zero-endpoints": "sha256:19cbca9efc9f9260ed57f369cd02425dff1db1e4db458bde21b7f8ebb72a9396",
+    "scenario:W7-PR-synchronize-top-level-endpoints": "sha256:cbdc63d66cdd0476712d63d55f891ed3f182bd71fb5eb795be1b62edd2e21cb4",
+    "summary": "sha256:74a7f9e3ab72663556d8c067e825e9ac744fd232524bfcbd337a2e8fd7fce00b",
+}
+
 
 class EvidenceError(ValueError):
     pass
@@ -344,6 +594,52 @@ def digest_bytes(raw: bytes) -> str:
 
 def record_digest(value: Any) -> str:
     return digest_bytes(canonical_bytes(value))
+
+
+def raw_shape(value: Any) -> Any:
+    """Return the exact recursive key/type grammar of a raw JSON value."""
+
+    if isinstance(value, dict):
+        return [
+            "object",
+            [[key, raw_shape(value[key])] for key in sorted(value)],
+        ]
+    if isinstance(value, list):
+        return ["array", [raw_shape(item) for item in value]]
+    if value is None:
+        return "null"
+    if type(value) is bool:
+        return "boolean"
+    if type(value) is int:
+        return "integer"
+    if type(value) is float:
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    raise EvidenceError(f"raw value has unsupported type {type(value).__name__}")
+
+
+def raw_shape_digest(value: Any) -> str:
+    return digest_bytes(canonical_bytes(raw_shape(value)))
+
+
+def raw_record_key(value: dict) -> str:
+    candidates = []
+    if "scenario" in value:
+        candidates.append(f"scenario:{value['scenario']}")
+    if "control" in value:
+        candidates.append(f"control:{value['control']}")
+    if "scenario_alias_inventory" in value:
+        candidates.append("aliases")
+    if "summary" in value:
+        candidates.append("summary")
+    elif "r17_parent_permutation" in value:
+        candidates.append("parent-permutation")
+    if len(candidates) != 1:
+        raise EvidenceError(
+            f"raw row kind is missing or ambiguous: {sorted(candidates)}"
+        )
+    return candidates[0]
 
 
 def repo_root() -> Path:
@@ -450,6 +746,12 @@ def normalized_record(value: dict) -> dict:
     if "summary" in result:
         result.pop("git", None)
         result.pop("python", None)
+    if result.get("control") == "locale-git-error-stream-equality":
+        observation = result["locale_observation"]
+        ambient = observation.pop("ambient_reasons")
+        observation["ambient_reasons_differ"] = (
+            ambient["C"] != ambient["fr_FR.UTF-8"]
+        )
     return result
 
 
@@ -457,6 +759,17 @@ class Stream:
     def __init__(self, path: Path):
         self.path = path
         self.raw = path.read_bytes()
+        self._load()
+
+    @classmethod
+    def from_bytes(cls, raw: bytes, label: str):
+        stream = cls.__new__(cls)
+        stream.path = Path(label)
+        stream.raw = raw
+        stream._load()
+        return stream
+
+    def _load(self):
         self.objects = []
         for number, line in enumerate(self.raw.splitlines(), start=1):
             if not line:
@@ -464,6 +777,18 @@ class Stream:
             value = load_json(line)
             if not isinstance(value, dict):
                 raise EvidenceError(f"JSONL line {number} is not an object")
+            key = raw_record_key(value)
+            expected_shape = RAW_SHAPE_SHA256.get(key)
+            if expected_shape is None:
+                raise EvidenceError(
+                    f"raw row {number} {key!r} is outside the closed grammar"
+                )
+            observed_shape = raw_shape_digest(value)
+            if observed_shape != expected_shape:
+                raise EvidenceError(
+                    f"raw row {number} {key!r} grammar differs: "
+                    f"expected {expected_shape}, observed {observed_shape}"
+                )
             self.objects.append(value)
         self.scenarios = self._unique("scenario")
         self.controls = self._unique("control")
@@ -493,6 +818,17 @@ class Stream:
         return result
 
     def _validate(self):
+        expected_shape_keys = {
+            *(f"scenario:{name}" for name in SCENARIO_IDS),
+            *(f"control:{name}" for name in CONTROL_IDS),
+            "aliases",
+            "parent-permutation",
+            "summary",
+        }
+        if set(RAW_SHAPE_SHA256) != expected_shape_keys:
+            raise EvidenceError(
+                "raw grammar catalog differs from the closed row inventory"
+            )
         if tuple(sorted(self.scenarios)) != SCENARIO_IDS:
             raise EvidenceError("scenario catalog differs from closed inventory")
         if tuple(sorted(self.controls)) != CONTROL_IDS:
@@ -605,14 +941,43 @@ def scenario_projection(row, failed):
 
 
 def control_projection(row):
+    observation = None
+    if row["control"] == "posthoc-budget-accounting":
+        observation = {
+            "baseline_metrics": row["budget_observation"][
+                "baseline_metrics"
+            ],
+            "baseline_overflows": row["budget_observation"][
+                "baseline_overflows"
+            ],
+            "damaged_metrics": row["budget_observation"][
+                "damaged_metrics"
+            ],
+            "kind": "precharge-budget",
+            "limit": row["budget_observation"]["limit"],
+            "posthoc_reference_metrics": row["budget_observation"][
+                "posthoc_reference_metrics"
+            ],
+        }
+    elif row["control"] == "locale-git-error-stream-equality":
+        locale = normalized_record(row)["locale_observation"]
+        observation = {
+            "ambient_reasons_differ": locale["ambient_reasons_differ"],
+            "kind": "locale-git-diagnostics",
+            "stable_full_results_equal": locale[
+                "stable_full_results_equal"
+            ],
+            "stable_reasons": locale["stable_reasons"],
+        }
     return {
         "authority_edges": [edge_projection(x) for x in row["authority_edges"]],
         "baseline_classification": row["baseline_classification"],
         "damaged_classification": row["damaged_classification"],
         "endpoints": endpoints(row), "expected_baseline": row["expected_baseline"],
-        "id": row["control"],
+        "id": row["control"], "observation": observation,
         "propagation_edges": [propagation_projection(x) for x in row["propagation_edges"]],
-        "record_sha256": record_digest(row), "status": row["status"],
+        "record_sha256": record_digest(normalized_record(row)),
+        "status": row["status"],
     }
 
 
@@ -685,6 +1050,25 @@ def budget_case_projection(row):
     }
 
 
+def precharge_budget_projection(row):
+    return {
+        "audit_exit": row["audit_exit"],
+        "classification": row["classification"],
+        "counter_policy": row["details"]["budget_counter_policy"],
+        "evidence_reason": row["evidence_verdict"]["reason"],
+        "evidence_status": row["evidence_verdict"]["status"],
+        "limit": row["details"]["budget_limit"],
+        "posthoc_reference_metrics": row["details"][
+            "posthoc_reference_metrics"
+        ],
+        "precharge_expected_metrics": row["details"][
+            "precharge_expected_metrics"
+        ],
+        "record_sha256": record_digest(normalized_record(row)),
+        "transactional_zero_results": zero_partial_result(row),
+    }
+
+
 def core_claim_projection(stream):
     boundary = stream.scenarios[
         "R17-unreadable-outside-C-ancestor-stays-unopened"
@@ -703,7 +1087,9 @@ def core_claim_projection(stream):
     ]
     exact_budget = stream.scenarios["PCX-20a-budget-below-limit"]
     overflow_budget = stream.scenarios["PCX-20b-budget-overflow"]
+    precharge_budget = stream.scenarios["R17-precharge-P22-budget"]
     wide_budget = stream.scenarios["R17-wide-outside-C-boundary-budget"]
+    locale_control = stream.controls["locale-git-error-stream-equality"]
     workflow_ids = [name for name in SCENARIO_IDS if name.startswith("W")]
     return {
         "boundary_ancestry": {
@@ -746,6 +1132,9 @@ def core_claim_projection(stream):
         "measured_budget": {
             "exact": budget_case_projection(exact_budget),
             "limit_plus_one": budget_case_projection(overflow_budget),
+            "precharge_P22": precharge_budget_projection(
+                precharge_budget
+            ),
             "wide_boundary": {
                 "audit_exit": wide_budget["audit_exit"],
                 "budget_contract": wide_budget["details"]["budget_contract"],
@@ -818,6 +1207,14 @@ def core_claim_projection(stream):
             "disposition": RETIRED_DISPOSITION,
             "scenario_ids": list(RETIRED_SCENARIO_IDS),
         },
+        "raw_grammar": {
+            "catalog_sha256": digest_bytes(
+                canonical_bytes(RAW_SHAPE_SHA256)
+            ),
+            "enforcement": "recursive exact key/list/type shape before projection",
+            "record_kinds": len(RAW_SHAPE_SHA256),
+            "unknown_field_exit": 1,
+        },
         "reviewer_dag": {
             "classification": reviewer["classification"],
             "derived_C": reviewer["C"],
@@ -831,6 +1228,26 @@ def core_claim_projection(stream):
             ],
             "task_patch_equal": reviewer["details"]["task_patch_equal"],
             "unique_merge_base": reviewer["details"]["unique_merge_base"],
+        },
+        "stable_git_diagnostics": {
+            "ambient_reasons_differ": normalized_record(locale_control)[
+                "locale_observation"
+            ]["ambient_reasons_differ"],
+            "forced_environment": {
+                "LANG": "C",
+                "LANGUAGE": "C",
+                "LC_ALL": "C",
+                "TZ": "UTC",
+            },
+            "record_sha256": record_digest(
+                normalized_record(locale_control)
+            ),
+            "stable_full_results_equal": locale_control[
+                "locale_observation"
+            ]["stable_full_results_equal"],
+            "stable_reasons": locale_control["locale_observation"][
+                "stable_reasons"
+            ],
         },
         "workflow_input_matrix": {
             name: stream.scenarios[name]["details"]["workflow_contract"]
@@ -1045,7 +1462,7 @@ def validate_manifest(manifest):
         raise EvidenceError("manifest control inventory/order differs")
     control_keys = (
         "authority_edges", "baseline_classification", "damaged_classification",
-        "endpoints", "expected_baseline", "id", "propagation_edges",
+        "endpoints", "expected_baseline", "id", "observation", "propagation_edges",
         "record_sha256", "status",
     )
     for index, row in enumerate(controls):
@@ -1056,8 +1473,72 @@ def validate_manifest(manifest):
             raise EvidenceError(f"{context} did not observe red")
         if row["baseline_classification"] != row["expected_baseline"]:
             raise EvidenceError(f"{context} baseline differs")
-        if row["damaged_classification"] == row["expected_baseline"]:
+        if (
+            row["id"] not in {
+                "locale-git-error-stream-equality",
+                "posthoc-budget-accounting",
+            }
+            and row["damaged_classification"] == row["expected_baseline"]
+        ):
             raise EvidenceError(f"{context} damage did not change verdict")
+        if row["id"] == "posthoc-budget-accounting":
+            observation = row["observation"]
+            require_keys(
+                observation,
+                (
+                    "baseline_metrics", "baseline_overflows",
+                    "damaged_metrics", "kind", "limit",
+                    "posthoc_reference_metrics",
+                ),
+                f"{context}.observation",
+            )
+            if (
+                row["baseline_classification"] != "blocking-finding"
+                or row["damaged_classification"] != "blocking-finding"
+                or observation != {
+                    "baseline_metrics": PRECHARGE_P22_METRICS,
+                    "baseline_overflows": [["object_reads", 134]],
+                    "damaged_metrics": POSTHOC_P22_METRICS,
+                    "kind": "precharge-budget",
+                    "limit": 133,
+                    "posthoc_reference_metrics": POSTHOC_P22_METRICS,
+                }
+            ):
+                raise EvidenceError(
+                    f"{context} post-hoc budget observation changed"
+                )
+        elif row["id"] == "locale-git-error-stream-equality":
+            observation = row["observation"]
+            require_keys(
+                observation,
+                (
+                    "ambient_reasons_differ", "kind",
+                    "stable_full_results_equal", "stable_reasons",
+                ),
+                f"{context}.observation",
+            )
+            require_keys(
+                observation["stable_reasons"],
+                ("C", "fr_FR.UTF-8"),
+                f"{context}.observation.stable_reasons",
+            )
+            stable_reasons = observation["stable_reasons"]
+            if (
+                row["baseline_classification"] != "unreadable"
+                or row["damaged_classification"] != "unreadable"
+                or observation["kind"] != "locale-git-diagnostics"
+                or observation["ambient_reasons_differ"] is not True
+                or observation["stable_full_results_equal"] is not True
+                or stable_reasons["C"] != stable_reasons["fr_FR.UTF-8"]
+                or not stable_reasons["C"].startswith(
+                    "missing-or-malformed-commit:"
+                )
+            ):
+                raise EvidenceError(
+                    f"{context} stable Git diagnostic observation changed"
+                )
+        elif row["observation"] is not None:
+            raise EvidenceError(f"{context} has an unknown observation")
         require_digest(row["record_sha256"], f"{context}.record_sha256")
         for i, edge in enumerate(row["authority_edges"]):
             validate_edge(edge, f"{context}.authority_edges[{i}]")
@@ -1111,8 +1592,10 @@ def validate_manifest(manifest):
     require_keys(core, (
         "boundary_ancestry", "endpoint_contract", "evidence_supersession",
         "measured_budget", "parent_permutation", "persisted_carry",
+        "raw_grammar",
         "r3_full_frontier", "r6_outside_boundary_disposition",
-        "retired_catalog", "reviewer_dag", "workflow_input_matrix",
+        "retired_catalog", "reviewer_dag", "stable_git_diagnostics",
+        "workflow_input_matrix",
     ), "core_claims")
     boundary = core["boundary_ancestry"]
     require_keys(boundary, (
@@ -1172,10 +1655,23 @@ def validate_manifest(manifest):
         raise EvidenceError("core endpoint contract changed")
     if core["evidence_supersession"] != SUPERSEDED_EVIDENCE:
         raise EvidenceError("evidence schema supersession changed")
-    require_oid(
-        core["evidence_supersession"]["commit"],
-        "evidence_supersession.commit",
+    require_keys(
+        core["evidence_supersession"],
+        ("artifacts", "replacement_schema"),
+        "evidence_supersession",
     )
+    for index, artifact in enumerate(
+        core["evidence_supersession"]["artifacts"]
+    ):
+        require_keys(
+            artifact,
+            ("commit", "disposition", "schema"),
+            f"evidence_supersession.artifacts[{index}]",
+        )
+        require_oid(
+            artifact["commit"],
+            f"evidence_supersession.artifacts[{index}].commit",
+        )
     permutation = core["parent_permutation"]
     validate_permutation_record(
         permutation, "core_claims.parent_permutation"
@@ -1254,7 +1750,8 @@ def validate_manifest(manifest):
 
     measured = core["measured_budget"]
     require_keys(
-        measured, ("exact", "limit_plus_one", "wide_boundary"),
+        measured,
+        ("exact", "limit_plus_one", "precharge_P22", "wide_boundary"),
         "measured_budget",
     )
     for name, scenario in (
@@ -1319,6 +1816,48 @@ def validate_manifest(manifest):
         ):
             raise EvidenceError(f"{context} exact/+1 claim changed")
         require_digest(claim["record_sha256"], f"{context}.record_sha256")
+    precharge = measured["precharge_P22"]
+    require_keys(
+        precharge,
+        (
+            "audit_exit", "classification", "counter_policy",
+            "evidence_reason", "evidence_status", "limit",
+            "posthoc_reference_metrics", "precharge_expected_metrics",
+            "record_sha256", "transactional_zero_results",
+        ),
+        "measured_budget.precharge_P22",
+    )
+    require_keys(
+        precharge["precharge_expected_metrics"],
+        METRIC_KEYS,
+        "measured_budget.precharge_P22.precharge_expected_metrics",
+    )
+    require_keys(
+        precharge["posthoc_reference_metrics"],
+        METRIC_KEYS,
+        "measured_budget.precharge_P22.posthoc_reference_metrics",
+    )
+    precharge_row = by_id["R17-precharge-P22-budget"]
+    if (
+        precharge["audit_exit"] != 2
+        or precharge["classification"] != "blocking-finding"
+        or precharge["counter_policy"] != "charge before measured work"
+        or precharge["evidence_reason"]
+        != "measured work budget exceeded: object_reads=134>133"
+        or precharge["evidence_status"] != "ambiguous"
+        or precharge["limit"] != 133
+        or precharge["precharge_expected_metrics"]
+        != PRECHARGE_P22_METRICS
+        or precharge["posthoc_reference_metrics"]
+        != POSTHOC_P22_METRICS
+        or precharge["transactional_zero_results"] is not True
+        or precharge["record_sha256"] != precharge_row["record_sha256"]
+    ):
+        raise EvidenceError("pre-charge P22 budget claim changed")
+    require_digest(
+        precharge["record_sha256"],
+        "measured_budget.precharge_P22.record_sha256",
+    )
     wide = measured["wide_boundary"]
     require_keys(
         wide,
@@ -1353,8 +1892,12 @@ def validate_manifest(manifest):
             "overflow_classification": "budget-exceeded",
             "transactional_zero_results": True,
         }
-        or wide["metrics"]["graph_commits"] > 7
-        or wide["metrics"]["graph_parent_edges"] <= 7
+        or wide["metrics"] != {
+            "graph_commits": 4,
+            "graph_parent_edges": 8,
+            "object_reads": 3,
+            "queue_snapshots_requested": 0,
+        }
         or wide["reference_oids"] != WIDE_BUDGET_REFERENCE_OIDS
         or wide["transactional_zero_results"] is not True
         or wide["record_sha256"] != wide_row["record_sha256"]
@@ -1389,6 +1932,26 @@ def validate_manifest(manifest):
         or retired["scenario_ids"] != list(RETIRED_SCENARIO_IDS)
     ):
         raise EvidenceError("retired endpoint scenario disposition changed")
+    raw_grammar_claim = core["raw_grammar"]
+    require_keys(
+        raw_grammar_claim,
+        (
+            "catalog_sha256", "enforcement", "record_kinds",
+            "unknown_field_exit",
+        ),
+        "raw_grammar",
+    )
+    if raw_grammar_claim != {
+        "catalog_sha256": digest_bytes(canonical_bytes(RAW_SHAPE_SHA256)),
+        "enforcement": "recursive exact key/list/type shape before projection",
+        "record_kinds": len(RAW_SHAPE_SHA256),
+        "unknown_field_exit": 1,
+    }:
+        raise EvidenceError("raw stream grammar claim changed")
+    require_digest(
+        raw_grammar_claim["catalog_sha256"],
+        "raw_grammar.catalog_sha256",
+    )
     reviewer = core["reviewer_dag"]
     require_keys(reviewer, (
         "classification", "derived_C", "neutral_parent",
@@ -1422,6 +1985,54 @@ def validate_manifest(manifest):
     ):
         raise EvidenceError("reviewer DAG result claim changed")
     require_oid(reviewer["neutral_parent"], "reviewer_dag.neutral_parent")
+    stable_git = core["stable_git_diagnostics"]
+    require_keys(
+        stable_git,
+        (
+            "ambient_reasons_differ", "forced_environment",
+            "record_sha256", "stable_full_results_equal",
+            "stable_reasons",
+        ),
+        "stable_git_diagnostics",
+    )
+    require_keys(
+        stable_git["forced_environment"],
+        ("LANG", "LANGUAGE", "LC_ALL", "TZ"),
+        "stable_git_diagnostics.forced_environment",
+    )
+    require_keys(
+        stable_git["stable_reasons"],
+        ("C", "fr_FR.UTF-8"),
+        "stable_git_diagnostics.stable_reasons",
+    )
+    locale_control = next(
+        row
+        for row in controls
+        if row["id"] == "locale-git-error-stream-equality"
+    )
+    expected_stable_reason = stable_git["stable_reasons"]["C"]
+    if (
+        stable_git["ambient_reasons_differ"] is not True
+        or stable_git["forced_environment"] != {
+            "LANG": "C",
+            "LANGUAGE": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+        }
+        or stable_git["stable_full_results_equal"] is not True
+        or stable_git["stable_reasons"]["fr_FR.UTF-8"]
+        != expected_stable_reason
+        or not expected_stable_reason.startswith(
+            "missing-or-malformed-commit:"
+        )
+        or stable_git["record_sha256"]
+        != locale_control["record_sha256"]
+    ):
+        raise EvidenceError("stable Git diagnostic claim changed")
+    require_digest(
+        stable_git["record_sha256"],
+        "stable_git_diagnostics.record_sha256",
+    )
     r3 = core["r3_full_frontier"]
     require_keys(r3, (
         "authority_children", "classification", "event_mode",
@@ -1509,7 +2120,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schema v2 at commit `{core['evidence_supersession']['commit']}` is superseded and burned by later semantic blockers; its history is preserved, v2 is never reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.", "",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}` and v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}` are superseded and burned by their later semantic/evidence blockers; both histories are preserved, neither identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
         "`N`, and derives the unique merge base `C`. It enumerates the full C-rooted",
@@ -1555,6 +2166,9 @@ def render_readme(manifest):
         f"R6-02 is explicitly dispositioned clean and record-bound by `{core['r6_outside_boundary_disposition']['record_sha256']}` because its outside-C boundary is absent; the ambiguous ancestor behind it is not reopened.",
         "All eight persisted-state attacker cases block in both parent orders: outside-C exact carriers retain multiplicity 1 or 2 as collisions, while valid and unauthorized absent C-descendant arms both remain deletion/reintroduction competitors.",
         f"The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `{core['measured_budget']['wide_boundary']['record_sha256']}`; no action, edge, support, or carry-proof result leaks past the exceeded parent-edge budget.",
+        f"The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at {core['measured_budget']['precharge_P22']['precharge_expected_metrics']['git_processes']}, freezes later counters, and is record-bound by `{core['measured_budget']['precharge_P22']['record_sha256']}`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.",
+        f"Unreadable Git objects use the stable typed reason `{core['stable_git_diagnostics']['stable_reasons']['C']}`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.",
+        f"Before any projection or digest, all {core['raw_grammar']['record_kinds']} raw rows must match the static recursive key/list/type grammar catalog `{core['raw_grammar']['catalog_sha256']}`; an unknown top-level or nested field exits {core['raw_grammar']['unknown_field_exit']}.",
         "The parent-order pair has identical verdicts and the same role multiset:",
         f"`{core['parent_permutation']['r17_parent_permutation'][0]['merge_role_multiset']}`. The four persisted parent-order pairs are also byte-equal by semantic signature.", "",
         "Reviewer-supplied reference OIDs (bound as review input, not regenerated fixture IDs):", "",
@@ -1614,28 +2228,32 @@ def render_readme(manifest):
     m = p22["metrics"]
     exact_budget = core["measured_budget"]["exact"]
     overflow_budget = core["measured_budget"]["limit_plus_one"]
+    precharge_budget = core["measured_budget"]["precharge_P22"]
     wide_budget = core["measured_budget"]["wide_boundary"]
     lines += ["", "## Measured cost and object recovery", "",
               f"P22 measured {m['graph_commits']} graph commits and 16 disappeared actions with exactly {m['graph_enumerations']} POC graph enumeration, {m['per_action_history_walks']} POC-owned per-action history walks, {m['queue_snapshots_requested']} snapshot requests, {m['snapshot_cache_hits']} snapshot-cache hits, and {m['git_processes']} actual Git processes.",
               "The process count includes imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. The POC's single budget consistently caps every emitted work counter.",
               f"PCX-20a passes at its exact measured maximum {exact_budget['measured_max_work']} with limit {exact_budget['limit']}; PCX-20b exits 2 with zero partial results when measured maximum {overflow_budget['measured_max_work']} exceeds limit {overflow_budget['limit']} by one.",
+              f"R17-precharge-P22-budget charges before work and aborts on `{precharge_budget['evidence_reason']}` with exact bounded counters; the post-hoc reference vector is retained only as a damaged control.",
               f"The 64-parent boundary case measures {wide_budget['metrics']['graph_commits']} intrinsic graph commits and {wide_budget['metrics']['graph_parent_edges']} parent edges against limit {wide_budget['budget_contract']['limit']}; parent-edge work is therefore metered even while graph commits remain below the limit.", "",
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-seed1 > /tmp/production-contract-r17-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=en_US.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-seed777 > /tmp/production-contract-r17-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-seed1.jsonl --compare /tmp/production-contract-r17-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-seed1.jsonl --damage-test",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed1 > /tmp/production-contract-r17-v4-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed777 > /tmp/production-contract-r17-v4-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --compare /tmp/production-contract-r17-v4-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --damage-test",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
               "The auditor requires raw and semantic equality for comparison, rejects",
-              "duplicate keys/IDs, enforces exact catalogs/key sets, compares a fresh",
+              "duplicate keys/IDs, enforces a static recursive raw key/list/type grammar",
+              "before projection, compares a fresh",
               "manifest byte-for-byte, and regenerates this README in full. Its damage",
               "matrix covers invented/duplicate/missing rows, same-region OID swaps, tuple",
               "relabels, false verdicts/counters, contradictory transcripts/digests,",
-              "unknown cost rows, noncanonical ordering, BOM, CRLF, and missing newline.", "",
+              "unknown raw fields/cost rows, locale error drift, post-hoc budget work,",
+              "noncanonical ordering, BOM, CRLF, and missing newline.", "",
               "## Nonclaims and integration gates", "",
               "- This POC changes no production reconciler, restack adapter, workflow input, schema, task, or run record.",
               "- A post-push check can only be advisory; prevention requires a pre-push or server-side production gate.",
@@ -1703,7 +2321,7 @@ def stream_differences(first, second):
             "raw_equal": first.raw == second.raw}
 
 
-def damage_matrix(expected):
+def damage_matrix(expected, stream):
     evidence, readme = canonical_bytes(expected), render_readme(expected)
     cases = []
     def append(name, text):
@@ -1881,6 +2499,22 @@ def damage_matrix(expected):
         "exact/+1 claim changed",
     )
     manifest_case(
+        "precharge-P22-restored-posthoc",
+        lambda d: d["core_claims"]["measured_budget"][
+            "precharge_P22"
+        ].update(counter_policy="post hoc measured work"),
+        "pre-charge P22 budget claim changed",
+    )
+    manifest_case(
+        "precharge-P22-later-work-leaks",
+        lambda d: d["core_claims"]["measured_budget"][
+            "precharge_P22"
+        ]["precharge_expected_metrics"].update(
+            snapshot_cache_hits=56
+        ),
+        "pre-charge P22 budget claim changed",
+    )
+    manifest_case(
         "superseded-v2-reused",
         lambda d: d["core_claims"]["evidence_supersession"].update(
             replacement_schema="agentfold-production-contract-evidence/v2"
@@ -1889,10 +2523,24 @@ def damage_matrix(expected):
     )
     manifest_case(
         "superseded-v2-commit-erased",
-        lambda d: d["core_claims"]["evidence_supersession"].update(
-            commit="0" * 40
-        ),
+        lambda d: d["core_claims"]["evidence_supersession"][
+            "artifacts"
+        ][0].update(commit="0" * 40),
         "evidence schema supersession changed",
+    )
+    manifest_case(
+        "superseded-v3-commit-erased",
+        lambda d: d["core_claims"]["evidence_supersession"][
+            "artifacts"
+        ][1].update(commit="0" * 40),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
+        "locale-stable-error-drift",
+        lambda d: d["core_claims"]["stable_git_diagnostics"][
+            "stable_reasons"
+        ].update(**{"fr_FR.UTF-8": "localized raw Git stderr"}),
+        "stable Git diagnostic claim changed",
     )
     manifest_case(
         "r6-outside-boundary-false-block",
@@ -2032,6 +2680,32 @@ def damage_matrix(expected):
             "observed_failure": failures[0] if failures else None,
             "status": "OBSERVED_RED" if matched else "FALSE_GREEN",
         })
+    raw_lines = stream.raw.splitlines()
+    unknown = load_json(raw_lines[0])
+    unknown["unknown_machine_claim"] = True
+    unknown_raw = canonical_bytes(unknown) + b"\n".join(raw_lines[1:]) + b"\n"
+    observed_failure = None
+    observed_exit = 0
+    try:
+        Stream.from_bytes(unknown_raw, "<raw-unknown-field-damage>")
+    except EvidenceError as error:
+        observed_failure = str(error)
+        observed_exit = 1
+    matched = (
+        observed_exit == 1
+        and observed_failure is not None
+        and "grammar differs" in observed_failure
+    )
+    results.append(
+        {
+            "damage": "raw-unknown-machine-claim",
+            "expected_exit": 1,
+            "expected_failure": "grammar differs",
+            "observed_exit": observed_exit,
+            "observed_failure": observed_failure,
+            "status": "OBSERVED_RED" if matched else "FALSE_GREEN",
+        }
+    )
     return {"audit_damage": "PASS" if all(x["status"] == "OBSERVED_RED" for x in results) else "FAIL",
             "cases": results, "observed_red": sum(x["status"] == "OBSERVED_RED" for x in results), "total": len(results)}
 
@@ -2068,7 +2742,7 @@ def main(argv=None):
                   "inputs": len(expected["inputs"]), "scenarios": len(expected["scenarios"])}
         print(json.dumps(result, sort_keys=True))
         if args.damage_test:
-            damaged = damage_matrix(expected)
+            damaged = damage_matrix(expected, first)
             print(json.dumps(damaged, sort_keys=True))
             if damaged["audit_damage"] != "PASS":
                 failures.append("audit damage matrix false-greened")

@@ -5,14 +5,14 @@ This file is generated in full by `audit_readme.py` from the closed
 
 ## Result
 
-The real-Git self-test passed 152/152 scenarios, 4/4 executable aliases, and 26/26 damaged-mode controls.
+The real-Git self-test passed 153/153 scenarios, 4/4 executable aliases, and 28/28 damaged-mode controls.
 It imports and calls the worktree's actual `queue_action_identity` and
 `queue_deletion_problem`; it never invents an Action-ID or lifecycle verdict.
 
-Canonical evidence artifact: `sha256:42265f2b38851f26ff275d99d46d17eba110561ee057714f8693e8c747287d41`.
-Canonical semantic stream: `sha256:f17d5a49f858ad4f155edbd685707489987b6602874f867c518750989d4cbb34`.
+Canonical evidence artifact: `sha256:f899e94961c573a50976ed2a747c8b4e1dfaf11d3c656477ffa219e7539aa102`.
+Canonical semantic stream: `sha256:299e6639c941ea0162fbbead8e24de09959200ee55e6706ab5ddc11931cf2e98`.
 The raw JSONL stream is ephemeral and has no stored hash claim.
-Evidence schema v2 at commit `0b80c342feb310d73de6564aab2224a899f42486` is superseded and burned by later semantic blockers; its history is preserved, v2 is never reused, and this artifact closes `agentfold-production-contract-evidence/v3`.
+Evidence schemas v2 at commit `0b80c342feb310d73de6564aab2224a899f42486` and v3 at commit `7f4a1ffacd1cf8163f597daa186f801e9ce06a3a` are superseded and burned by their later semantic/evidence blockers; both histories are preserved, neither identifier is reused, and this artifact closes `agentfold-production-contract-evidence/v4`.
 
 ## Contract exercised
 
@@ -66,7 +66,10 @@ R3-03 is blocking at the fixed N frontier with one invalid authority edge and is
 The hidden-G attacker is clean at exit 0 and record-bound by `sha256:056377eb166a54c2a70fae073e36d8b1b2425da4394dac6e5dbc063ddf115756`: F is the neutral boundary, G carries the same identity in a unique missing blob, and G ancestry remains unopened.
 R6-02 is explicitly dispositioned clean and record-bound by `sha256:646206f033211903160c7f6103f3d0b5a3d727db374764df1cb20d9bcdfc295b` because its outside-C boundary is absent; the ambiguous ancestor behind it is not reopened.
 All eight persisted-state attacker cases block in both parent orders: outside-C exact carriers retain multiplicity 1 or 2 as collisions, while valid and unauthorized absent C-descendant arms both remain deletion/reintroduction competitors.
-The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `sha256:a007704be2fd5b4320b8713c56515738b33f8d79f2ac7881d742e97acd29f689`; no action, edge, support, or carry-proof result leaks past the exceeded parent-edge budget.
+The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `sha256:fdc63639f7e46a6576855bbbdc30e0f699c9f0ef8a9cf5f2d42ad191707019d4`; no action, edge, support, or carry-proof result leaks past the exceeded parent-edge budget.
+The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at 4, freezes later counters, and is record-bound by `sha256:48c997a5f7d2f26622408474b66b004ee001bf2b7f84255bbaea5c662410fd38`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.
+Unreadable Git objects use the stable typed reason `missing-or-malformed-commit:b5fcd8d0260da07b741462af3e3e2b49b546d600`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.
+Before any projection or digest, all 184 raw rows must match the static recursive key/list/type grammar catalog `sha256:6e9fdf26259f62fece167ae99bfd55b909bdb351fd6ebb6fd91c0b12a7ee8d49`; an unknown top-level or nested field exits 1.
 The parent-order pair has identical verdicts and the same role multiset:
 `['compatible-carrier', 'source']`. The four persisted parent-order pairs are also byte-equal by semantic signature.
 
@@ -134,8 +137,8 @@ Wide-boundary budget reference OIDs (bound review input):
 |---|---:|---|
 | `docs/AGENTS.md` | 675 | `sha256:5342de9cada318428ea9b091e2434ad4d1e19e173a87295fe978651dc1a04b14` |
 | `docs/designs/AGENTS.md` | 709 | `sha256:0e8c04dea40750971f0a567e84dd33ae5529960629abee9323234046105649e8` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 94760 | `sha256:757b675c4bd8575aa5266b29b344486e3adbd152474461133311d39aee66821f` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 373814 | `sha256:a5616ebe0acaddd2f7651880e411029a3890d7a9a494ed8f3f22611c04b7986d` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 136294 | `sha256:edd9a6d2a5357bb6205b0f4e98c56035a6109fe9e52c26ad39306ed55ddbcb4f` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 386860 | `sha256:077aac0d663750dd7144238156a82dc9dc17c9cb52b61a35ea39fa738e3dc585` |
 | `automation/check_action_projection.py` | 123062 | `sha256:bd9f73b79b3fac94f36d8248b4ce23c6fa7826da45d562a85bd9b1e14255e0c1` |
 | `automation/markdown_semantics.py` | 33735 | `sha256:a5f58a99e739af4e3e61109caa880cb68dc739d93c727b74b8e2456220641c63` |
 | `automation/reconcile/reconcile.py` | 499357 | `sha256:0436489bf3bb9a52ff80e6e36962393413d626d034b029e938876f4ddd84c0b7` |
@@ -171,7 +174,7 @@ carry proofs, and workflow input contracts. It is not an OID-pool membership che
 | `P17-post-event-reintroduction` | `ec84d0800c660f6379b21cfd721122fa06162999` | `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` | `258e858010ccd1e43716ab0269faa86ae08808a7` | 1 | `blocking-finding` | `ambiguous` | `ambiguous` | 2/0/1/0 | `PASS` | `sha256:9446c62d9180ae9f8d89bc67543638c8c63757a8bdf8ea0f42354b8bbe3640dc` |
 | `P18a-missing-tip` | `None` | `ffffffffffffffffffffffffffffffffffffffff` | `907f5d5221680a4ff7eccd647bcf26bcd5e9c4d5` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:3fbd6661684d72f660a839240c4182bd7dd3cdea7fc900c2269e65fc5956e6fa` |
 | `P18b-noncommit-tip` | `None` | `90db16de6c0119c0c924c80d206b1e80bc3d2331` | `22be33aff3fad75ef91ab1e1cae2f2f8da2987d3` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:436bfc1e61f477d044089d1d00ef7143e3b7ee0c362f5ea732cf46e77f1425a4` |
-| `P18c-unrelated-tip` | `None` | `22628ae24f01e250d30bb4cf9c2a7832f217677e` | `e46c2df2b7bdeeedf09b55b74a3745ea6d7f5139` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:21e3b24ade6791de2d20ca2c355c5e736068ba985c77dedc4a492519608d07ce` |
+| `P18c-unrelated-tip` | `None` | `22628ae24f01e250d30bb4cf9c2a7832f217677e` | `e46c2df2b7bdeeedf09b55b74a3745ea6d7f5139` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:2be89ef4e6deb5ea59223916b0d0a83574c83ea126b44a40cf9bb97e897717e0` |
 | `P18d-shallow-required-region` | `None` | `e68bb90fcc341adde9f4372caff5ecc6f9b1e340` | `4303d2f9587973759de42362a6c20b4b48170ab5` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:5161658fe06c02399c3814716e9c11e1fe4bbf57cdaf1e62f2098acdd3c183f1` |
 | `P18e-missing-queue-blob` | `a668e725d1233ee7d5930c077268d222dd27c277` | `8d7223893ec84e193595fe975a53d36f893502cb` | `ec9f29e0560c60e66700496cee9ce14858aebb4d` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:d0873007175a8995e03af83039a4e39715c6c622ca0b88f3b04ed254fbd6275c` |
 | `P18f-missing-queue-tree` | `80ee9796305f288404f4aab5960193d8555c5e5a` | `61e6b7c9b52f0ea9ecb35c5bb8da8211aa7232d5` | `4f08ffcf2930d3d3a121b453b4b16a5b5f0bfa73` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:9e7dd29cecc655a77916dd6ce22256eab8a65bff1b14843bce0d221c36bbc1ae` |
@@ -206,9 +209,9 @@ carry proofs, and workflow input contracts. It is not an OID-pool membership che
 | `PCX-16-task-pickup-supplier` | `ab3f73cb72be2389d566fb06118bc841facffc86` | `be2b18037fbd9785128edb1af215d459b7be8b9c` | `fcf1b089a8cf59a77e3d1740409e12b12815f7fc` | 0 | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:83c7c47a83999ea1ead52864ef1070a520b0c5af5de08f1fa7e2d4c59ade2049` |
 | `PCX-17-complete-cherry-pick` | `33db81167dcecdaa77e3c6e97ea6305b99d13346` | `8385f0c8c1094932a794ebb94b32b4d872806cd2` | `855eaa3b813900caaa0e523baa198491cb4bc47b` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:b635b59e1e694ff5757b172c8b0c5c5133230e8f5e44af441f1829ca2e4af45a` |
 | `PCX-17-deletion-only-cherry-pick` | `56008eecc6492c2c091a516834d675e283cc40bd` | `35b9163866f1c9cf6ab2435eeba3abfc0b9fd1fa` | `5da95440d2c9065d8b6f4506d2108a3f97bed539` | 1 | `blocking-finding` | `invalid` | `direct` | 1/0/1/0 | `PASS` | `sha256:433431a3d0c7771818b11fe7a6099d06509ce1706f00f036ccd212b53bd24b12` |
-| `PCX-19-missing-claim-blob-recovery` | `759e2f27b42fa1f3bf68d8b436eed022ee8f1f5c` | `90aed2b3f8214a269d6421e6f4fe63ad3a61b091` | `dd34454f3204840ae81e2f273772c00488e681ea` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:c2863e4bd6458668aa53d13d17260d20fb563cc2a52dc0522f1a29a91369b18c` |
+| `PCX-19-missing-claim-blob-recovery` | `759e2f27b42fa1f3bf68d8b436eed022ee8f1f5c` | `90aed2b3f8214a269d6421e6f4fe63ad3a61b091` | `dd34454f3204840ae81e2f273772c00488e681ea` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:824e0da528869df0b67e25e6e310937f4a13b4763821551c3dc85333aa760bbc` |
 | `PCX-20a-budget-below-limit` | `c957293f54b1b960b7b7f351087c77ac874eb253` | `ad76497bc5fa23076fff741b5d419a2ccd714637` | `ce775146b901f12bc2c05d22f06343da4d2c66d0` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:b831e3bde0d0f6c44508b47e55aff48b555853a88da221e1214206810e06fe9a` |
-| `PCX-20b-budget-overflow` | `a018c90c3dbe1374339730ede5c7b76e21fee985` | `fb2043655802898f2561cc21431580a2609aef9c` | `06abdb0e773f19b6acc2ecf85d17e6c1770e7295` | 2 | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:4028d5817f073ee6c5250878c71c86ef2399c6eb5e8a1cf5c073e3e646ed9e8c` |
+| `PCX-20b-budget-overflow` | `a018c90c3dbe1374339730ede5c7b76e21fee985` | `fb2043655802898f2561cc21431580a2609aef9c` | `06abdb0e773f19b6acc2ecf85d17e6c1770e7295` | 2 | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:66c129b35b593a092bc1f77bd7f7ab5e271fbb49e4af66f3256550c21f27ef45` |
 | `R10-direct-review-target-backtick-dotless-rejected` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` | `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` | `ba4edb8f323adba9645e47c2536f2b621bed7855` | 1 | `blocking-finding` | `ambiguous` | `direct` | 1/0/2/0 | `PASS` | `sha256:5e798b3785b6e6c3ed47a6b69f721c338c1906318927b37bc11a960c24d186cf` |
 | `R10-supplier-review-revision-generic-placeholder-rejected` | `b13043f4864a963aee7af4e3e3a913313f9f7b19` | `9d96a7eecc2b34704ef588142e4b48111849f3a9` | `02371c1e8f0eebe4e567694cfe6677c8b872a7a8` | 1 | `blocking-finding` | `ambiguous` | `supplier` | 1/1/2/0 | `PASS` | `sha256:2a57143f4b730fd4652247063ab954db189d4744ef668b153cfb2c340b79527a` |
 | `R13-direct-review-binding-identical` | `d6d18f0c56d196748c9a94adad1191e68722eb4a` | `7e0284f9a2354f44218502da59ca365cff918285` | `88dc201a2aae2ad0b8984b58fff19f45c78d7859` | 0 | `no-finding` | `valid` | `direct` | 2/0/4/0 | `PASS` | `sha256:303fccb5b56683d84f0f010cb868762fa05d13be75688bff1191814316922628` |
@@ -278,9 +281,10 @@ carry proofs, and workflow input contracts. It is not an OID-pool membership che
 | `R17-persisted-unauthorized-absent-arm-reversed` | `91dcb08637806181435c1f391f3e2db35fefeef0` | `cfe02192e79b2fb37f7278844446c987345c369e` | `6a55c69bf40bfcd9abe33bababdae51ad111eeca` | 1 | `blocking-finding` | `ambiguous` | `none` | 0/0/2/0 | `PASS` | `sha256:f65f345c21b63cd9a3a1d1b0c50ff4fa60457ac6f49bdf159a5f5a59754b9d70` |
 | `R17-persisted-valid-absent-arm` | `be75a50c3ceea41059aa954effb358348455b9d7` | `1f0d7b897a4a09e5c8273ddcd4fb25ef7a69f656` | `501cc5ef6cb38be7a83d37b9f47d26cf2acebdec` | 1 | `blocking-finding` | `ambiguous` | `none` | 0/0/2/0 | `PASS` | `sha256:75fdad8cb25b4881a7b8bfe8f6bd42038c720d727ae34c99a74f6e445f342315` |
 | `R17-persisted-valid-absent-arm-reversed` | `be75a50c3ceea41059aa954effb358348455b9d7` | `1f0d7b897a4a09e5c8273ddcd4fb25ef7a69f656` | `12f08cf66b77738190f29720044039af1fcc10ec` | 1 | `blocking-finding` | `ambiguous` | `none` | 0/0/2/0 | `PASS` | `sha256:5051d05990b63298b75a64b2b34ade78bc181bd3bae5be20a950d5a505fe64cc` |
+| `R17-precharge-P22-budget` | `df53962cd25ebbb38830454e977caf65252ce009` | `8533fdc2d343b168d822c683379bfabbb49c0d28` | `466dae5f060fd0aa74cf71db38fa694686afd7ae` | 2 | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:48c997a5f7d2f26622408474b66b004ee001bf2b7f84255bbaea5c662410fd38` |
 | `R17-unreadable-outside-C-ancestor-stays-unopened` | `33f9ad5aab42435cc63bf59f2b38294666dce16f` | `9490a5097490e4a7e38d8b76dded28f7d370d22d` | `508323236873cfbdf04254316378e7748f4a3959` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:056377eb166a54c2a70fae073e36d8b1b2425da4394dac6e5dbc063ddf115756` |
-| `R17-unreadable-outside-C-boundary` | `None` | `42b178114baa052d7ee7ffb1c8814a8d916b7911` | `19fbc24144d0298bca24978ad439e9deb1c7fd87` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:2a1d91e663e48f10677d4c8d70fdfc90650f873725a8954312d13ba19ba9c40b` |
-| `R17-wide-outside-C-boundary-budget` | `c2080829aec4e8ae17a17e29fd823b80e74d99d0` | `a2659af5918566489ae4ea08c86925a0b276ad90` | `0f42c9312d8a41d51c1e17d3776a6ec5a8e657e2` | 2 | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:a007704be2fd5b4320b8713c56515738b33f8d79f2ac7881d742e97acd29f689` |
+| `R17-unreadable-outside-C-boundary` | `None` | `42b178114baa052d7ee7ffb1c8814a8d916b7911` | `19fbc24144d0298bca24978ad439e9deb1c7fd87` | 2 | `unreadable` | `unreadable` | `none` | 0/0/0/0 | `PASS` | `sha256:bddb5288c1ec7fa19ee601b0655415c092b9f68d2b80609e8a81c4f6478b2b90` |
+| `R17-wide-outside-C-boundary-budget` | `c2080829aec4e8ae17a17e29fd823b80e74d99d0` | `a2659af5918566489ae4ea08c86925a0b276ad90` | `0f42c9312d8a41d51c1e17d3776a6ec5a8e657e2` | 2 | `blocking-finding` | `ambiguous` | `none` | 0/0/0/0 | `PASS` | `sha256:fdc63639f7e46a6576855bbbdc30e0f699c9f0ef8a9cf5f2d42ad191707019d4` |
 | `R3-01-two-invalid-causal-sources` | `73373ac5106e43d8643b5b616268d77a5ca1d264` | `8f89d0fc4c063c0bbabb284434f74bcf244fb5d3` | `8ed846d60715d845a5e19ab6b299ce853a592614` | 1 | `blocking-finding` | `ambiguous` | `supplier` | 2/3/1/2 | `PASS` | `sha256:5051062da918df28c0d32e366cd681452464234a18bee49bf0edfb3591e0470b` |
 | `R3-02-invalid-valid-causal-competition` | `16722b83a642e40f2157c752a07adffddfaa709d` | `35e767d91f32b96f8f8308b431b5c6a0b35be23f` | `ff42531aadc6ffa000560bc56d995993ffa8e62c` | 1 | `blocking-finding` | `ambiguous` | `supplier` | 2/2/1/1 | `PASS` | `sha256:81e25ed0fcc07b7358c073790705c840f6e80b4e0c46e408cfcf9b62e1757c05` |
 | `R3-03-valid-supplier-plus-invalid-parent-at-N-blocks` | `1e44d8c3cba4bdd091bd1ae218a504f5b7d938fd` | `ba83bd926d133cee0384ae4b8fd577de5d14e835` | `433bb31a23f524c2a61cd0084e0a1ecda0af8c3c` | 1 | `blocking-finding` | `ambiguous` | `ambiguous` | 2/1/1/1 | `PASS` | `sha256:65d4b02857bfef6bf3cd8f84a1600237d236f979f45624ab459d599ce339f543` |
@@ -337,11 +341,13 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 | `ignore-persisted-absent-C-arm` | `be75a50c3ceea41059aa954effb358348455b9d7` | `1f0d7b897a4a09e5c8273ddcd4fb25ef7a69f656` | `501cc5ef6cb38be7a83d37b9f47d26cf2acebdec` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:b5a60b9898d9fabd6d22870af82214ea6692dc94c68f297735bc18d994a3e4ff` |
 | `ignore-persisted-outside-C-collision` | `f87a6d73b61852cb9487b0f1ebf6febd0e72c35c` | `6062aa2350b2611b66c70feda73ec2f005a969ab` | `32a88f55e904d1892fd473b62f3d30a4bf2faf24` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:db79757d9c07fd27faa50b16aad799d190bc584e23a910badd7c2aed36f19100` |
 | `literal-review-pending-treated-concrete` | `7a613196cb22eb565e0f85194f7e2b8251a1484e` | `4263506464cbffb20b5f550fa142ebd391669ca1` | `8f2d8945b9ee6ffc11a714efefad9f8c1d708410` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:13d112385cf15c651e998e536dc1094018aa7eed5bcb3a8e7462bcbbbda7a5eb` |
+| `locale-git-error-stream-equality` | `None` | `42b178114baa052d7ee7ffb1c8814a8d916b7911` | `19fbc24144d0298bca24978ad439e9deb1c7fd87` | `unreadable` | `unreadable` | `OBSERVED_RED` | `sha256:5c034618ea0b830c69aa5591031431f90a390b243a064353150941fb215c4cf9` |
 | `missing-all-parent-direct-validation` | `d7dc739a275601572c26fadc522a2ae4b71d3b12` | `ff1d9fce8cf6d941f7e0210a9cc6b3380df94741` | `bd005f27951b3bae6225e8cc736936db93667388` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:a71ef07baa481ad097d61471eb45665ceb58881ef0384a019692ee0ce15b4493` |
 | `missing-post-event-continuity` | `ec84d0800c660f6379b21cfd721122fa06162999` | `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` | `258e858010ccd1e43716ab0269faa86ae08808a7` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:84f5b3d73899c5a20ffd97d5252f388df00d154afd64a4aa9c5f049befdb76a1` |
 | `omit-old-tip-human-binding` | `cd64224f775f16bc2099816c594012a9592f8536` | `356f3f37cdffaf8f6c568a158a32c478f55a0e13` | `2c972bd770f520e2a62aaf928c8731a4a5b9b7ee` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:ef4a25a4aabc01d7d532866e6426b0e835bb764ddba91dee3bb799907a9d4ecf` |
 | `omit-supplier-carrier-human-binding` | `874d2e356033d133cd409bc9deb8e93198d0ec78` | `adf1ce7876b84e595992f5865f871b59ea892234` | `8c3e7d42c53baf018d30c895ecd64b799edb5d45` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:7ddbab84dee6c41351e232629529ef9126fe57025c9ef664213926ed748ccdd4` |
 | `omit-unanswered-published-review-binding` | `3436d4ba5dc72f9837516e4155c0c9da9f44dd90` | `8a2de576d9304a51988bfbd943749129f828f882` | `b952d0de4952cb720e3056abe78c7ad8ee52d50f` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:58344243b4503b74ca823588324cfb10c725a5cc25ad5dca23f7469369210de8` |
+| `posthoc-budget-accounting` | `df53962cd25ebbb38830454e977caf65252ce009` | `8533fdc2d343b168d822c683379bfabbb49c0d28` | `466dae5f060fd0aa74cf71db38fa694686afd7ae` | `blocking-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:a7daaf1e7e0313252ef775c662715d320253243a71659f048a0e6d035bd53a6b` |
 | `reopen-outside-C-boundary-ancestry` | `33f9ad5aab42435cc63bf59f2b38294666dce16f` | `9490a5097490e4a7e38d8b76dded28f7d370d22d` | `508323236873cfbdf04254316378e7748f4a3959` | `no-finding` | `unreadable` | `OBSERVED_RED` | `sha256:157181b097f4d2be8cab789883086861525fd654134a838a42f564e262280b66` |
 | `reopen-pre-C-genealogy` | `cd13c47983b0624a824f5fc583f7de647b240504` | `03c76bf6661f670a705245479f406a1d3ba7b279` | `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:a009eb9b4b50291d7cd9be8722192ad2e66090801ed093a14cf27e9469b3bb8a` |
 | `restore-universal-ancestor-carry-scan` | `d3d362d37559714b75cea48eef7f44a4547f4e2f` | `42b178114baa052d7ee7ffb1c8814a8d916b7911` | `19fbc24144d0298bca24978ad439e9deb1c7fd87` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:af433f685f3710f1c9a8c5488bf5581df374b7c6aad0a536cf9c5ea5a500d04b` |
@@ -360,19 +366,20 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 P22 measured 133 graph commits and 16 disappeared actions with exactly 1 POC graph enumeration, 0 POC-owned per-action history walks, 10973 snapshot requests, 10970 snapshot-cache hits, and 135 actual Git processes.
 The process count includes imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. The POC's single budget consistently caps every emitted work counter.
 PCX-20a passes at its exact measured maximum 156 with limit 156; PCX-20b exits 2 with zero partial results when measured maximum 166 exceeds limit 165 by one.
-The 64-parent boundary case measures 5 intrinsic graph commits and 68 parent edges against limit 7; parent-edge work is therefore metered even while graph commits remain below the limit.
+R17-precharge-P22-budget charges before work and aborts on `measured work budget exceeded: object_reads=134>133` with exact bounded counters; the post-hoc reference vector is retained only as a damaged control.
+The 64-parent boundary case measures 4 intrinsic graph commits and 8 parent edges against limit 7; parent-edge work is therefore metered even while graph commits remain below the limit.
 
-PCX-19 is replay-bound by `sha256:c2863e4bd6458668aa53d13d17260d20fb563cc2a52dc0522f1a29a91369b18c`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.
+PCX-19 is replay-bound by `sha256:824e0da528869df0b67e25e6e310937f4a13b4763821551c3dc85333aa760bbc`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.
 
 ## Reproducible audit
 
 Use two fresh, empty scratch roots:
 
 ```sh
-PYTHONHASHSEED=1 LC_ALL=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-seed1 > /tmp/production-contract-r17-seed1.jsonl
-PYTHONHASHSEED=777 LC_ALL=en_US.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-seed777 > /tmp/production-contract-r17-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-seed1.jsonl --compare /tmp/production-contract-r17-seed777.jsonl
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-seed1.jsonl --damage-test
+PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed1 > /tmp/production-contract-r17-v4-seed1.jsonl
+PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v4-seed777 > /tmp/production-contract-r17-v4-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --compare /tmp/production-contract-r17-v4-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v4-seed1.jsonl --damage-test
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N
 python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
 python3 automation/run_tests.py
@@ -380,11 +387,13 @@ python3 automation/reconcile/reconcile.py --check
 ```
 
 The auditor requires raw and semantic equality for comparison, rejects
-duplicate keys/IDs, enforces exact catalogs/key sets, compares a fresh
+duplicate keys/IDs, enforces a static recursive raw key/list/type grammar
+before projection, compares a fresh
 manifest byte-for-byte, and regenerates this README in full. Its damage
 matrix covers invented/duplicate/missing rows, same-region OID swaps, tuple
 relabels, false verdicts/counters, contradictory transcripts/digests,
-unknown cost rows, noncanonical ordering, BOM, CRLF, and missing newline.
+unknown raw fields/cost rows, locale error drift, post-hoc budget work,
+noncanonical ordering, BOM, CRLF, and missing newline.
 
 ## Nonclaims and integration gates
 
