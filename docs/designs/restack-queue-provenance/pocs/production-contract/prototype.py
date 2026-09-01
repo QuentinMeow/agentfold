@@ -593,6 +593,11 @@ class Graph:
     def between(self, start: str, end: str) -> set[str]:
         return self.descendants(start).intersection(self.ancestors(end))
 
+    def ordered(self, commits: Iterable[str]) -> list[str]:
+        """Return a commit set in the one enumerated topological order."""
+        selected = set(commits)
+        return [commit for commit in self.order if commit in selected]
+
 
 class Classifier:
     """In-memory provenance over one enumerated graph and cached snapshots."""
@@ -649,7 +654,7 @@ class Classifier:
         region = self.graph.ancestors(tip)
         if self.graph.C not in region:
             return f"carrying parent {tip} is not rooted at C"
-        for commit in region:
+        for commit in self.graph.ordered(region):
             multiplicity = len(self.states(commit, identity))
             if multiplicity != 1:
                 paths = [
@@ -668,7 +673,7 @@ class Classifier:
         region = self.graph.between(start, end)
         if not region:
             return f"{start} is not on an ancestry path to {end}"
-        for commit in region:
+        for commit in self.graph.ordered(region):
             multiplicity = len(self.states(commit, identity))
             if multiplicity:
                 return (
@@ -1503,8 +1508,8 @@ class Classifier:
             and event.child is not None
             and any(
                 commit != event.child and self.states(commit, identity)
-                for commit in self.graph.between(
-                    event.child, self.fixture.N
+                for commit in self.graph.ordered(
+                    self.graph.between(event.child, self.fixture.N)
                 )
             )
         )
@@ -1906,7 +1911,7 @@ class Classifier:
             return None
         candidate_states = [
             commit
-            for commit in self.graph.candidate_nodes
+            for commit in self.graph.ordered(self.graph.candidate_nodes)
             if self.states(commit, identity)
         ]
         if not candidate_states:
@@ -2036,7 +2041,9 @@ class Classifier:
                 ]
                 seen = set(old_snapshot)
                 candidate_identities = set()
-                for commit in self.graph.candidate_nodes:
+                for commit in self.graph.ordered(
+                    self.graph.candidate_nodes
+                ):
                     candidate_identities.update(objects.snapshot(commit))
                 for identity in sorted(
                     candidate_identities - seen, key=repr
@@ -4682,7 +4689,9 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
     D = delete_with_evidence(repo, ((label, path),), "D deletion")
     repo.branch("candidate", C)
     if mode == "complete":
-        repo.run("cherry-pick", K, D)
+        repo.run(
+            "cherry-pick", K, D, env=repo._commit_environment()
+        )
         M = repo.oid("HEAD")
         expected = "no-finding"
     elif mode == "deletion-only":
@@ -4979,8 +4988,12 @@ def pcx19_missing_claim_blob(root: Path) -> Fixture:
         {
             "claim_commit": claim_commit,
             "missing_claim_blob_oid": blob,
-            "restore_hidden": str(hidden),
-            "restore_target": str(restored),
+            "restore_hidden": hidden.relative_to(
+                fixture.repo.root
+            ).as_posix(),
+            "restore_target": restored.relative_to(
+                fixture.repo.root
+            ).as_posix(),
         }
     )
     fixture.expected = "no-finding"
@@ -5298,8 +5311,8 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
     first = Classifier(fixture).run()
-    hidden = Path(fixture.details["restore_hidden"])
-    target = Path(fixture.details["restore_target"])
+    hidden = fixture.repo.root / fixture.details["restore_hidden"]
+    target = fixture.repo.root / fixture.details["restore_target"]
     if hidden.is_file():
         hidden.rename(target)
     second = Classifier(fixture).run()

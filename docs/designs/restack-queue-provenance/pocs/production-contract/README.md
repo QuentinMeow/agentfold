@@ -663,27 +663,47 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 
 ## Evidence audit
 
-The r11 evidence pass pinned one fresh 95-line deterministic self-test stream:
-84 scenario records, one alias inventory, nine control records, and one summary.
-Its SHA-256 is
-`97f4b2da465498bb3789a20e3b144403982c8c1190b0e5fc34212955367e3df5`.
-A from-scratch temporary audit mapped every README Git OID to its named
-scenario/control region, checked every scenario/control table row against the
-matching JSON record, compared result words and measured counters, and refused
-unmapped values. The temporary script was deliberately not added to this POC;
-the repair remains README-only. No historical-OID exemption was needed: every
-control OID maps to one of the nine pinned control records, and every scenario
-OID maps to current output. Its final output was:
+The committed [audit_readme.py](audit_readme.py) is a standard-library-only
+checker for this evidence. It reads a self-test JSONL stream and verifies all
+295 README Git OID occurrences against their named scenario/control regions,
+all seven fixture identity SHA claims, scenario and control result rows, the 20
+PCX attack rows, measured counters, totals, aliases, controls, and nonclaims.
+It rejects an OID that merely occurs in some unrelated record and rejects every
+unmapped README OID. No historical-OID exemption is used.
+
+Two fresh 95-record streams were generated in different scratch roots with
+`PYTHONHASHSEED=1` and `PYTHONHASHSEED=777`. They had zero differing records and
+zero differing fields. Their raw bytes happened to match in the tested macOS,
+Python 3.14.7, and Git 2.55.0 environment, at
+`f8d874824d4374ebbc779caeef0bc981f1cbe31b9f02a981c2a9a9368217a820`.
+That raw digest is an observed replay result, not a portable contract: the raw
+summary includes the Python and Git version strings. The auditor also defines
+a canonical semantic stream by removing only those two summary fields and
+canonicalizing JSON object serialization. It retains every Git OID, reason,
+path, result, edge, and metric. Canonical semantic SHA-256:
+`ad6d69bea355f93d06469e628991e12e75534b3137699310105b10f9d8f667cd`.
+
+The ordinary two-stream audit output was:
 
 ```json
-{"audit": "PASS", "counter_checks": 23, "failures": [], "oid_occurrences": 295, "pinned_controls": 9, "pinned_scenarios": 84, "record_rows": 64, "region_oid_claims": 295, "semantic_row_checks": 79, "sha256_claims": 7, "unique_oids": 255}
+{"audit": "PASS", "checks_passed": 1016, "checks_total": 1016, "comparison": {"canonical_equal": true, "comparison": "PASS", "differing_fields": 0, "differing_records": 0, "raw_equal": true}, "counter_checks": 23, "failures": [], "fixture_sha256_claims": 7, "oid_occurrences": 295, "pcx_rows": 20, "pinned_controls": 9, "pinned_scenarios": 84, "record_rows": 65, "region_oid_claims": 295, "semantic_row_checks": 92, "unique_oids": 255}
 ```
+
+The audit damage control makes three disposable README copies and changes one
+current OID, the PCX-01 result, or the 133-commit counter. All three damaged
+copies returned audit `FAIL`. It also changes one semantic result field in a
+disposable comparison stream; strict comparison reports one differing record
+and one differing field. The wrapper returned `PASS` with four `OBSERVED_RED`
+records. These audit-only controls are separate from the nine classifier
+damaged-mode controls and do not change the 84-scenario/9-control self-test
+inventory.
 
 ## Commands run
 
 ```sh
 python3 automation/install.py
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py
+PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-all-parent-direct-validation
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control supplier-authority-borrowing
@@ -694,9 +714,12 @@ PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/re
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control omit-old-tip-human-binding
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control literal-review-pending-treated-concrete
 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control broad-review-pending-normalization
-PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test > /tmp/production-contract-r11-selftest.jsonl
-python3 /tmp/production_contract_readme_audit.py docs/designs/restack-queue-provenance/pocs/production-contract/README.md /tmp/production-contract-r11-selftest.jsonl
-shasum -a 256 /tmp/production-contract-r11-selftest.jsonl
+root_a="$(mktemp -d /tmp/production-contract-r12-seed1.XXXXXX)"
+root_b="$(mktemp -d /tmp/production-contract-r12-seed777.XXXXXX)"
+PYTHONHASHSEED=1 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_a" > /tmp/production-contract-r12-seed1.jsonl
+PYTHONHASHSEED=777 PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir "$root_b" > /tmp/production-contract-r12-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r12-seed1.jsonl --compare /tmp/production-contract-r12-seed777.jsonl
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --jsonl /tmp/production-contract-r12-seed1.jsonl --damage-control
 python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
 ```
@@ -708,8 +731,8 @@ findings and six pre-existing advisories about frozen human-action records. The
 first commit hook selected no repository test files because this directory is a
 design record path. A commit-message-only amend then selected the full lane
 because its staged diff was empty; all 16/16 repository test files passed.
-The r11 evidence pass explicitly reran that full lane; 16/16 files passed in
-54.80 seconds.
+The r12 evidence pass explicitly reran that full lane; 16/16 files passed in
+56.50 seconds.
 
 ## Nonclaims and tests not run
 
