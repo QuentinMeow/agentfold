@@ -113,6 +113,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Exact hash and provider-lane correction (codex)
+
+- The latest panel accepted semantic behavior, then found one exact-limit arithmetic error
+  and five workflow composition gaps: no arbitrary fork credential exists, a conflicted
+  fork has no ordinary PR run, push/creation ordinary B was open, a closed same-repository
+  branch still emits push events, and normal fast-forward work lacked the exact workflow.
+- Appended separate policy payload/framing counters; anonymous credential-free public-fork
+  fetch; two stable non-aggregating lane results; exact event-stable ordinary bases and
+  unavailable creation behavior; closed same-repository versus fork coverage; and one
+  manual exact-lease sequence for every non-zero update.
+- Production remains unopened pending another full five-lens immutable-revision review.
+
 ## 2026-09-01 — Policy-version and provider-procedure correction (codex)
 
 - The next panel accepted semantic/DAG parity after rerunning all 167 scenarios and 34

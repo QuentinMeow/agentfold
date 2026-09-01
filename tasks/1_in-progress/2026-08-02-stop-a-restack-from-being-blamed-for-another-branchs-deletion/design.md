@@ -1269,3 +1269,103 @@ The implementation gate remains a new immutable five-lens acceptance. Core units
 closed before it. The optional adapter remains separately gated on bounded transport and
 live canaries, including SHA-like suppression and retention-limited evidence; no missing
 run, expired record, or later green edge is promoted into cumulative success.
+
+## 2026-09-01 correction amendment 5 — exact hash framing and per-event lanes
+
+The review of `927a48825962d0b3923751f0e3ce152f3806b697` accepted semantic/DAG
+behavior and blocked budget arithmetic plus provider-lane composition. This section
+supersedes policy hash counters, fork credentials, universal two-result wording, ordinary
+base selection, closed-update coverage, and the rewrite-only human sequence above.
+
+### Policy payload and framing counters
+
+`policy_payload_hash_bytes` counts only the three sources' policy payload bytes and has a
+12 MiB limit. `policy_framing_hash_bytes` separately counts the domain separator, source
+labels, ordered manifest path bytes, and every length prefix, with a 64 KiB limit.
+`policy_total_hash_bytes` has the exact aggregate limit `12 MiB + 64 KiB` (12,648,448
+bytes). Framing is constructed and charged incrementally; it is never an unmetered
+temporary buffer.
+
+The exact maximum test uses three 4 MiB payload sources and the maximum 64 KiB framing and
+succeeds. The next payload byte, framing byte, or total byte independently refuses before
+hash input. This replaces the ambiguous 12 MiB `Hash input bytes` row and preserves all
+other policy-bootstrap limits.
+
+### Anonymous production fork transport
+
+The trusted production workflow fetches public fork O/N anonymously. Its fork-fetch child
+inherits no token, authorization/header variable, credential helper, cookie, proxy
+credential, SSH agent, alternate object directory, or base-workflow environment. Terminal
+prompting and redirects are disabled, the HTTPS host is fixed to GitHub, and the repository
+path is constructed from the already validated head full name rather than a payload URL.
+The base `GITHUB_TOKEN` is never sent to or made visible to the fork transport.
+
+An inaccessible private/internal fork is coverage-unavailable unless GitHub documents and
+provides an event-bound credential scoped to that exact head repository. No repository or
+user secret is introduced to simulate such access. `GH_CANARY_FORK_TOKEN` exists only in
+the local canary controller for provisioning/cleanup and never enters the trusted workflow
+or its artifacts.
+
+### Provider lanes and stable conclusions
+
+The workflow exposes two non-aggregating stable results:
+`agentfold-continuity-edge` and `agentfold-ordinary-range`. Each has its own success,
+blocking, or unavailable domain status and evidence. The provider check conclusion is
+success only for domain success and failure for blocking or unavailable. One lane never
+changes the other's name, conclusion, exit code, or summary.
+
+| Provider case | Continuity lane | Ordinary lane |
+|---|---|---|
+| same-repository non-zero push | exact event O/N | `B=O`, range `O...N` |
+| same-repository branch creation | none | unavailable without an authenticated immutable B |
+| same-repository branch deletion | none | no deleted-candidate check |
+| mergeable same-repository PR | push lane is primary; synchronize may repeat edge | unprivileged `B=event base.sha`, `N=head.sha` |
+| mergeable fork synchronize | trusted anonymous data-only O/N | unprivileged `pull_request` range at event base/head |
+| conflicted fork synchronize | trusted anonymous data-only O/N | unavailable because `pull_request` is suppressed |
+| SHA-like fork synchronize | unavailable because trusted event is suppressed | unprivileged ordinary only if that event actually runs |
+| fork update while closed | uncovered | unavailable |
+
+For a non-zero branch push, O is the immutable ordinary base as well as the continuity old
+endpoint, without becoming continuity policy. Creation has no event-stable B and never
+falls back to a later default ref or merge base; remote ordinary coverage is unavailable,
+while repository tests may still run and local prepublication uses the developer's chosen
+immutable base. PR ordinary B is the payload's immutable `pull_request.base.sha`; base
+advance after event capture cannot replace it. Direct/synthetic checkout binding remains a
+separate candidate-code validation.
+
+Workflow steps capture each result even if the other exits non-zero. Same-repository,
+mergeable-fork, conflicted-fork, SHA-like-fork, creation-without-base, and base-advance race
+tests assert the exact pair of lane conclusions. No generic promise of two successful or
+even two runnable results remains.
+
+### Closed same-repository versus fork updates
+
+A non-zero same-repository head push is observed by the repository push event regardless
+of whether its PR is open, closed, conflicted, or absent. Closing or reopening never
+reconstructs another pair. An external/fork push while its PR is closed has no base
+repository push or synchronize observation and remains uncovered. A later reopen can run
+ordinary candidate checks but cannot synthesize the closed-period edge.
+
+### Manual sequence for every non-zero update
+
+Fast-forward work, a rewrite, and a repair use the same manual boundary:
+
+1. the developer fetches the current remote ref and chosen immutable ordinary base, records
+   and retains exact O;
+2. local work produces and inspects N;
+3. read-only O→N continuity and the event-appropriate ordinary range run as two commands;
+4. publication uses `--force-with-lease=<ref>:<O>` even for a fast-forward;
+5. lease rejection stops without refresh or retry, and a later attempt observes a new O
+   and repeats the complete sequence.
+
+Incomplete continuity does not prevent the second read-only ordinary diagnostic and that
+diagnostic never relabels the edge. The N→N' repair, empty-expect first publication, and
+exact-tip retirement procedures remain authoritative. Local success never clears a remote
+unavailable record or proves cumulative coverage.
+
+### Gate boundary
+
+The new immutable five-lens review remains the core gate. Adapter admission additionally
+depends on observed provider-lane matrices, anonymous bounded fork transport, negative
+SHA-like coverage, and exact budget/canary results. No private-fork, creation-base,
+conflicted-ordinary, closed-fork, or cumulative protection is inferred from a missing lane.

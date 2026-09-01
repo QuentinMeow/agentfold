@@ -28,6 +28,17 @@ The four-to-one panel rejected the revision. No production implementation began 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded split-transaction design review
+
+**Reviewed revision:** `927a48825962d0b3923751f0e3ce152f3806b697`
+
+- semantic/DAG / r18-semantic-design: `approve` — policy ordering, fast-forward ownership, two-arm divergence, boundary, persisted, and mixed-root fixtures matched the accepted POC.
+- budgets/transaction/composition / receipt-contract: `block` — the 12 MiB hash-input cap omitted non-empty domain/path/length framing and made its exact maximum unsatisfiable.
+- workflow/adapter/human / r18-workflow-design: `block` — production fork credentials, conflicted lane availability, ordinary B, closed same-repository pushes, and fast-forward human workflow were incorrect or incomplete.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded edge-scoped design review
 
 **Reviewed revision:** `db720d3321ee25f09c82def46d77fd418735e904`
