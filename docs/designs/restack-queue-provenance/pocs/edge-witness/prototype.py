@@ -48,6 +48,8 @@ RECONCILE = load_reconciler()
 class Metrics:
     git_processes: int = 0
     scanner_tree_entry_reads: int = 0
+    old_commits_scanned: int = 0
+    old_parent_edges_scanned: int = 0
     candidate_commits: int = 0
     candidate_parent_edges: int = 0
     semantic_validation_calls: int = 0
@@ -203,6 +205,7 @@ class Fixture:
     N: str
     expected_verdict: str
     expected_findings: tuple[str, ...] = ()
+    old_resolution: str | None = None
 
 
 def queue_path(label: str) -> str:
@@ -481,6 +484,96 @@ def fixture_independent_identical_incarnation(root: Path) -> Fixture:
     )
 
 
+def fixture_old_delete_recreate_identical(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("old-delete-recreate",))
+    repo.branch("old", C)
+    repo.remove(queue_path("old-delete-recreate"))
+    repo.commit("old side deletes original action")
+    repo.write(
+        queue_path("old-delete-recreate"),
+        action_text("old-delete-recreate"),
+    )
+    O = repo.commit("old side recreates byte-identical action")
+    repo.branch("candidate", C)
+    M = claim(repo, "old-delete-recreate")
+    N = resolve(repo, "old-delete-recreate")
+    return Fixture(
+        "old-delete-recreate-identical-incarnation", repo, C, O, M, N,
+        "blocking-finding", (queue_path("old-delete-recreate"),),
+    )
+
+
+def fixture_old_legal_resolve_recreate_identical(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    C = create_common(repo, ("old-legal-recreate",))
+    repo.branch("old", C)
+    claim(repo, "old-legal-recreate")
+    old_resolution = resolve(repo, "old-legal-recreate")
+    repo.write(
+        evidence_path("old-legal-recreate"),
+        "# Evidence old-legal-recreate: pending\n",
+    )
+    repo.write(
+        queue_path("old-legal-recreate"),
+        action_text("old-legal-recreate"),
+    )
+    O = repo.commit("old side creates a new byte-identical action")
+    repo.branch("candidate", C)
+    M = claim(repo, "old-legal-recreate")
+    N = resolve(repo, "old-legal-recreate")
+    return Fixture(
+        "old-legal-resolve-recreate-identical-incarnation",
+        repo, C, O, M, N, "blocking-finding",
+        (queue_path("old-legal-recreate"),),
+        old_resolution=old_resolution,
+    )
+
+
+def fixture_old_rename_round_trip(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "old-rename-roundtrip"
+    original = queue_path(label)
+    alternate = queue_path("old-rename-roundtrip-alternate")
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    repo.write(alternate, action_text(label))
+    repo.remove(original)
+    repo.commit("old side renames action away from its canonical path")
+    repo.write(original, action_text(label))
+    repo.remove(alternate)
+    O = repo.commit("old side renames action back to its original path")
+    repo.branch("candidate", C)
+    M = claim(repo, label)
+    N = resolve(repo, label)
+    return Fixture(
+        "old-rename-round-trip-incarnation-ambiguity",
+        repo, C, O, M, N, "blocking-finding", (original,),
+    )
+
+
+def fixture_old_identity_mutation_round_trip(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    label = "old-mutation-roundtrip"
+    path = queue_path(label)
+    C = create_common(repo, (label,))
+    repo.branch("old", C)
+    repo.write(
+        path,
+        action_text(label, action="resolve a different old-side obligation"),
+    )
+    repo.commit("old side mutates the action identity")
+    repo.write(path, action_text(label))
+    O = repo.commit("old side reintroduces the original action identity")
+    repo.branch("candidate", C)
+    M = claim(repo, label)
+    N = resolve(repo, label)
+    return Fixture(
+        "old-identity-mutation-round-trip-incarnation",
+        repo, C, O, M, N, "blocking-finding", (path,),
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -532,6 +625,10 @@ BASE_FIXTURES = (
     fixture_activation_laundering,
     fixture_claimed_tip_laundering,
     fixture_independent_identical_incarnation,
+    fixture_old_delete_recreate_identical,
+    fixture_old_legal_resolve_recreate_identical,
+    fixture_old_rename_round_trip,
+    fixture_old_identity_mutation_round_trip,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -571,23 +668,138 @@ def action_identity(path: str, text: str):
     return RECONCILE.queue_action_identity(path, text)
 
 
+def alternate_lineage_paths(
+    repo: GitRepository,
+    revision: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    target = action_identity(path, old_text)
+    matches = []
+    for candidate in queue_paths_at(repo, revision, metrics):
+        if candidate == path:
+            continue
+        candidate_text = text_at(revision, candidate, metrics)
+        if candidate_text is not None and action_identity(
+            candidate, candidate_text
+        ) == target:
+            matches.append(candidate)
+    return tuple(matches)
+
+
+def old_only_commits(
+    repo: GitRepository,
+    old_tip: str,
+    merge_bases: Iterable[str],
+    metrics: Metrics,
+):
+    bases = tuple(merge_bases)
+    result = measured_git(
+        repo,
+        metrics,
+        "--no-replace-objects",
+        "rev-list",
+        "--reverse",
+        "--topo-order",
+        old_tip,
+        "--not",
+        *bases,
+    )
+    commits = tuple(result.stdout.splitlines())
+    metrics.old_commits_scanned += len(commits)
+    return commits
+
+
+def old_edge_event(before_state, after_state, before_alternates, after_alternates):
+    if before_state == "matching" and after_state == "absent":
+        return "rename-ambiguity" if after_alternates else "deletion"
+    if before_state == "absent" and after_state == "matching":
+        return "rename-ambiguity" if before_alternates else "reintroduction"
+    if before_state == "matching" and after_state == "different":
+        return "identity-mutation"
+    if before_state == "different" and after_state == "matching":
+        return "identity-reintroduction"
+    if before_state == "absent" and after_state == "absent":
+        return "lineage-absent"
+    return "identity-divergence"
+
+
 def old_lineage(
+    repo: GitRepository,
     old_tip: str,
     merge_bases: Iterable[str],
     path: str,
     old_text: str,
     metrics: Metrics,
+    enforce_edge_continuity: bool,
 ):
     old_identity = action_identity(path, old_text)
+    bases_tuple = tuple(merge_bases)
+    base_texts = []
     bases = []
-    for base in merge_bases:
+    for base in bases_tuple:
         base_text = text_at(base, path, metrics)
+        base_texts.append(base_text)
         bases.append(None if base_text is None else action_identity(path, base_text))
     if not bases or all(identity is None for identity in bases):
-        return "old-tip-authored"
-    if all(identity == old_identity for identity in bases):
-        return "inherited-unchanged-on-old-tip"
-    return "old-tip-authored-or-mutated"
+        endpoint_lineage = "old-tip-authored"
+    elif all(identity == old_identity for identity in bases):
+        endpoint_lineage = "inherited-unchanged-on-old-tip"
+    else:
+        endpoint_lineage = "old-tip-authored-or-mutated"
+
+    commits = old_only_commits(repo, old_tip, bases_tuple, metrics)
+    allowed_parents = set(commits) | set(bases_tuple)
+    breaks = []
+    for commit in commits:
+        for parent in RECONCILE.revision_parents(
+            commit, f"old-side parents of {commit}"
+        ):
+            if parent not in allowed_parents:
+                continue
+            metrics.old_parent_edges_scanned += 1
+            before = text_at(parent, path, metrics)
+            after = text_at(commit, path, metrics)
+            before_state = (
+                "absent" if before is None else
+                "matching" if action_identity(path, before) == old_identity else
+                "different"
+            )
+            after_state = (
+                "absent" if after is None else
+                "matching" if action_identity(path, after) == old_identity else
+                "different"
+            )
+            if before_state == "matching" and after_state == "matching":
+                continue
+            before_alternates = alternate_lineage_paths(
+                repo, parent, path, old_text, metrics
+            )
+            after_alternates = alternate_lineage_paths(
+                repo, commit, path, old_text, metrics
+            )
+            breaks.append({
+                "after": after_state,
+                "before": before_state,
+                "child": commit,
+                "event": old_edge_event(
+                    before_state, after_state,
+                    before_alternates, after_alternates,
+                ),
+                "parent": parent,
+                "possible_prior_paths": before_alternates,
+                "possible_result_paths": after_alternates,
+            })
+    lineage = endpoint_lineage
+    if enforce_edge_continuity and breaks and endpoint_lineage == (
+        "inherited-unchanged-on-old-tip"
+    ):
+        lineage = "old-tip-discontinuous-incarnation"
+    endpoint_blob_equal = bool(base_texts) and all(
+        base_text == old_text for base_text in base_texts
+    )
+    return lineage, endpoint_lineage, endpoint_blob_equal, breaks
 
 
 def candidate_commits(
@@ -655,7 +867,8 @@ def classification_reason(items, fast_forward=False):
         elif verdict == "different-incarnation-witness":
             parts.append(
                 f"{path} has a valid candidate-side deletion edge for byte-identical "
-                "content, but the old-tip action was authored after the shared boundary"
+                "content, but the old-tip obligation is not one uninterrupted "
+                "incarnation from the shared boundary"
             )
         elif verdict == "ambiguous-real-edges":
             parts.append(f"{path} has multiple matching deletion edges, so the prototype fails closed")
@@ -666,7 +879,11 @@ def classification_reason(items, fast_forward=False):
     return "; ".join(parts) + "."
 
 
-def classify(fixture: Fixture, enforce_incarnation_provenance=True):
+def classify(
+    fixture: Fixture,
+    enforce_incarnation_provenance=True,
+    enforce_old_edge_continuity=True,
+):
     metrics = Metrics()
     items = {}
     with reconciler_repository(fixture.repo.root), count_reconciler_git(metrics):
@@ -723,8 +940,19 @@ def classify(fixture: Fixture, enforce_incarnation_provenance=True):
                     raise RECONCILE.GitSnapshotError(
                         f"could not read old-tip action `{path}`"
                     )
-                lineage = old_lineage(
-                    fixture.O, merge_bases, path, old_text, metrics
+                (
+                    lineage,
+                    endpoint_lineage,
+                    endpoint_blob_equal,
+                    old_edge_breaks,
+                ) = old_lineage(
+                    fixture.repo,
+                    fixture.O,
+                    merge_bases,
+                    path,
+                    old_text,
+                    metrics,
+                    enforce_old_edge_continuity,
                 )
                 if path in new_paths:
                     new_text = text_at(fixture.N, path, metrics)
@@ -733,7 +961,10 @@ def classify(fixture: Fixture, enforce_incarnation_provenance=True):
                     ) == action_identity(path, old_text):
                         items[path] = {
                             "authoring_lineage": lineage,
+                            "endpoint_blob_equal": endpoint_blob_equal,
+                            "endpoint_lineage": endpoint_lineage,
                             "evidence_verdict": "candidate-carries-action",
+                            "old_edge_breaks": old_edge_breaks,
                             "problem": None,
                             "witnesses": [],
                             "finding": False,
@@ -741,7 +972,10 @@ def classify(fixture: Fixture, enforce_incarnation_provenance=True):
                     else:
                         items[path] = {
                             "authoring_lineage": lineage,
+                            "endpoint_blob_equal": endpoint_blob_equal,
+                            "endpoint_lineage": endpoint_lineage,
                             "evidence_verdict": "rewritten-live-action",
+                            "old_edge_breaks": old_edge_breaks,
                             "problem": "candidate path carries a distinct action identity",
                             "witnesses": [],
                             "finding": True,
@@ -760,10 +994,16 @@ def classify(fixture: Fixture, enforce_incarnation_provenance=True):
                         "inherited-unchanged-on-old-tip"
                     ):
                         verdict = "different-incarnation-witness"
-                        problem = (
-                            "old-tip action was authored or changed after every "
-                            "shared merge boundary"
-                        )
+                        if lineage == "old-tip-discontinuous-incarnation":
+                            problem = (
+                                "old-tip action identity was deleted, recreated, "
+                                "renamed ambiguously, or reintroduced after mutation"
+                            )
+                        else:
+                            problem = (
+                                "old-tip action was authored or changed after every "
+                                "shared merge boundary"
+                            )
                         finding = True
                     else:
                         verdict = "valid-real-edge"
@@ -783,11 +1023,38 @@ def classify(fixture: Fixture, enforce_incarnation_provenance=True):
                     finding = True
                 items[path] = {
                     "authoring_lineage": lineage,
+                    "endpoint_blob_equal": endpoint_blob_equal,
+                    "endpoint_lineage": endpoint_lineage,
                     "evidence_verdict": verdict,
+                    "old_edge_breaks": old_edge_breaks,
                     "problem": problem,
                     "witnesses": witnesses,
                     "synthetic_edge_problem": synthetic_edge_problem,
                     "finding": finding,
+                }
+            if fixture.old_resolution is not None:
+                path = fixture.expected_findings[0]
+                parents = RECONCILE.revision_parents(
+                    fixture.old_resolution,
+                    f"old-side resolution parents of {fixture.old_resolution}",
+                )
+                if len(parents) != 1:
+                    raise RECONCILE.GitSnapshotError(
+                        "old-side resolution control is not a one-parent edge"
+                    )
+                prior = parents[0]
+                before = text_at(prior, path, metrics)
+                if before is None:
+                    raise RECONCILE.GitSnapshotError(
+                        "old-side resolution control lost its parent action"
+                    )
+                metrics.semantic_validation_calls += 1
+                items[path]["old_resolution_witness"] = {
+                    "child": fixture.old_resolution,
+                    "parent": prior,
+                    "problem": RECONCILE.queue_deletion_problem(
+                        path, before, prior, fixture.old_resolution
+                    ),
                 }
             findings = sorted(
                 path for path, item in items.items() if item["finding"]
@@ -873,6 +1140,42 @@ def verify_result(fixture: Fixture, result):
             problems.append("byte-identical candidate incarnation borrowed authorization")
         if len(item["witnesses"]) != 1 or item["witnesses"][0]["problem"] is not None:
             problems.append("independent candidate lifecycle was not actually valid")
+    old_break_expectations = {
+        "old-delete-recreate-identical-incarnation": {
+            "deletion", "reintroduction",
+        },
+        "old-legal-resolve-recreate-identical-incarnation": {
+            "deletion", "reintroduction",
+        },
+        "old-rename-round-trip-incarnation-ambiguity": {
+            "rename-ambiguity",
+        },
+        "old-identity-mutation-round-trip-incarnation": {
+            "identity-mutation", "identity-reintroduction",
+        },
+    }
+    if fixture.scenario_id in old_break_expectations:
+        path = fixture.expected_findings[0]
+        item = result["items"][path]
+        if item["endpoint_lineage"] != "inherited-unchanged-on-old-tip":
+            problems.append("old reincarnation endpoints did not remain identical")
+        if not item["endpoint_blob_equal"]:
+            problems.append("old reincarnation C/O queue blobs were not byte-identical")
+        if item["authoring_lineage"] != "old-tip-discontinuous-incarnation":
+            problems.append("old parent-edge continuity break was not binding")
+        events = {event["event"] for event in item["old_edge_breaks"]}
+        if not old_break_expectations[fixture.scenario_id].issubset(events):
+            problems.append("expected old-side continuity breaks were not observed")
+        if item["evidence_verdict"] != "different-incarnation-witness":
+            problems.append("candidate lifecycle borrowed the recreated old obligation")
+        if len(item["witnesses"]) != 1 or item["witnesses"][0]["problem"] is not None:
+            problems.append("candidate lifecycle in reincarnation control was not valid")
+    if fixture.scenario_id == (
+        "old-legal-resolve-recreate-identical-incarnation"
+    ):
+        item = result["items"][fixture.expected_findings[0]]
+        if item["old_resolution_witness"]["problem"] is not None:
+            problems.append("old-side resolve-before-recreate lifecycle was not valid")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
@@ -916,6 +1219,34 @@ def executable_controls(fixtures, results):
         "control": "observed-red-incarnation-provenance",
         "damaged_classification": damaged["classification"],
         "expected": independent.expected_verdict,
+        "status": "OBSERVED_RED",
+    })
+
+    recreated = fixtures[
+        "old-legal-resolve-recreate-identical-incarnation"
+    ]
+    damaged_old_walk = classify(
+        recreated, enforce_old_edge_continuity=False
+    )
+    recreated_path = queue_path("old-legal-recreate")
+    if damaged_old_walk["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged old-edge control did not reproduce the endpoint false green"
+        )
+    damaged_item = damaged_old_walk["items"][recreated_path]
+    if damaged_item["endpoint_lineage"] != (
+        "inherited-unchanged-on-old-tip"
+    ):
+        raise AssertionError("old-edge control did not retain equal C/O endpoints")
+    controls.append({
+        "control": "observed-red-old-edge-continuity",
+        "damaged_classification": damaged_old_walk["classification"],
+        "endpoint_blob_equal": damaged_item["endpoint_blob_equal"],
+        "endpoint_lineage": damaged_item["endpoint_lineage"],
+        "expected": recreated.expected_verdict,
+        "old_edge_events": [
+            event["event"] for event in damaged_item["old_edge_breaks"]
+        ],
         "status": "OBSERVED_RED",
     })
 
@@ -974,7 +1305,9 @@ def run_self_test(fixtures_root: Path, factories=BASE_FIXTURES):
         "total": len(results),
         "controls_passed": len(controls),
         "controls_total": len(controls),
-        "observed_red": 1,
+        "observed_red": sum(
+            control["status"] == "OBSERVED_RED" for control in controls
+        ),
         "git": REAL_RUN(
             ["git", "--version"],
             text=True,
