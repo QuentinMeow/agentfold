@@ -348,22 +348,74 @@ def same_id(snapshot: dict[str, Action], action_id: str) -> list[Action]:
     return [action for action in snapshot.values() if action.action_id == action_id]
 
 
-def claim_transition_exists(
-    repo: GitRepo, deletion_parent: str, incarnation: str
-) -> bool:
-    for child in repo.revisions("--topo-order", deletion_parent):
-        child_actions = occurrences(repo.snapshot(child), incarnation)
-        if len(child_actions) != 1:
+def normalize_action_status(raw: str) -> str:
+    return re.sub(r"^Status:.*$", "Status: <claim-status>", raw, flags=re.M)
+
+
+def bounded_claim_transition_problem(
+    repo: GitRepo,
+    deletion_parent: str,
+    incarnation: str,
+    action_id: str,
+) -> str | None:
+    """Find a claim only inside the occurrence live at the deletion parent.
+
+    A fingerprint can recur after an absence.  Walking every ancestor would let a
+    later byte-identical occurrence borrow an earlier occurrence's claim.  Walk
+    backward only while exactly one matching action remains continuously present;
+    absence or another incarnation ends that branch, while duplicate identity or
+    ambiguous rename state fails closed.
+    """
+
+    stack = [deletion_parent]
+    seen: set[str] = set()
+    claim_found = False
+    while stack:
+        child = stack.pop()
+        if child in seen:
             continue
-        for parent in repo.parents(child):
-            parent_actions = occurrences(repo.snapshot(parent), incarnation)
+        seen.add(child)
+        child_snapshot = repo.snapshot(child)
+        child_matches = occurrences(child_snapshot, incarnation)
+        child_same_id = same_id(child_snapshot, action_id)
+        if len(child_matches) != 1 or len(child_same_id) != 1:
+            return f"current occurrence is ambiguous at {child}"
+        child_action = child_matches[0]
+        parents = repo.parents(child)
+        for parent in parents:
+            parent_snapshot = repo.snapshot(parent)
+            parent_matches = occurrences(parent_snapshot, incarnation)
+            parent_same_id = same_id(parent_snapshot, action_id)
+            if len(parent_matches) > 1 or len(parent_same_id) > 1:
+                return f"current occurrence has ambiguous ancestry at {parent}"
+            if len(parent_matches) != 1 or len(parent_same_id) != 1:
+                # Absence, recreation, or another incarnation is the beginning of
+                # this occurrence.  Do not inspect ancestors across that boundary.
+                continue
+            parent_action = parent_matches[0]
+            if parent_action.path != child_action.path:
+                if len(parents) != 1 or parent_action.path in child_snapshot:
+                    return (
+                        "current occurrence has ambiguous rename ancestry on edge "
+                        f"{parent}->{child}"
+                    )
             if (
-                len(parent_actions) == 1
-                and parent_actions[0].status == "open"
-                and child_actions[0].status == "in-repair"
+                normalize_action_status(parent_action.raw)
+                != normalize_action_status(child_action.raw)
             ):
-                return True
-    return False
+                return (
+                    "current occurrence mutated outside status on edge "
+                    f"{parent}->{child}"
+                )
+            if (
+                parent_action.status == "open"
+                and child_action.status == "in-repair"
+            ):
+                claim_found = True
+            stack.append(parent)
+    if claim_found:
+        return None
+    return "no committed open-to-in-repair claim exists in the current occurrence"
 
 
 def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
@@ -375,8 +427,14 @@ def validate_edge(repo: GitRepo, edge: Edge, incarnation: str) -> None:
     if action.status != "in-repair":
         edge.problem = "action was not committed as in-repair before deletion"
         return
-    if not claim_transition_exists(repo, edge.parent, incarnation):
-        edge.problem = "no committed open-to-in-repair claim edge"
+    claim_problem = bounded_claim_transition_problem(
+        repo,
+        edge.parent,
+        incarnation,
+        action.action_id,
+    )
+    if claim_problem is not None:
+        edge.problem = claim_problem
         return
     before = repo.blob(edge.parent, action.evidence_path)
     after = repo.blob(edge.child, action.evidence_path)
@@ -1186,6 +1244,69 @@ def scenario_old_duplicate_then_collapses(root: Path) -> dict[str, object]:
     )
 
 
+def scenario_cross_boundary_claim_reuse(root: Path) -> dict[str, object]:
+    repo, first_open = base_repo(root)
+    first_claim = repo.commit(
+        "claim first occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.commit("delete first occurrence", {DEFAULT_PATH: None})
+    common = repo.commit(
+        "recreate preclaimed occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    new_base = repo.commit(
+        "delete second occurrence without its own claim",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    record = make_record(
+        "A9-cross-boundary-claim-reuse",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+    record["first_occurrence_open"] = first_open
+    record["first_occurrence_claim"] = first_claim
+    return record
+
+
+def scenario_recreated_occurrence_own_claim(root: Path) -> dict[str, object]:
+    repo, _first_open = base_repo(root)
+    repo.commit(
+        "claim first occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    repo.commit("delete first occurrence", {DEFAULT_PATH: None})
+    common = repo.commit(
+        "recreate open occurrence",
+        {DEFAULT_PATH: action_text()},
+    )
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    own_claim = repo.commit(
+        "claim second occurrence",
+        {DEFAULT_PATH: action_text(status="in-repair")},
+    )
+    new_base = repo.commit(
+        "delete second occurrence after its own claim",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    record = make_record(
+        "A10-recreated-occurrence-own-claim",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+    record["current_occurrence_claim"] = own_claim
+    return record
+
+
 def scenario_multiple_bases(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("a", common)
@@ -1317,6 +1438,8 @@ INITIAL_SCENARIOS = (
     scenario_old_recreated_same_bytes,
     scenario_old_mutates_then_reverts,
     scenario_old_duplicate_then_collapses,
+    scenario_cross_boundary_claim_reuse,
+    scenario_recreated_occurrence_own_claim,
     scenario_multiple_bases,
     scenario_shallow,
     scenario_long_history,
