@@ -17,7 +17,16 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v2"
+SCHEMA = "agentfold-production-contract-evidence/v3"
+SUPERSEDED_EVIDENCE = {
+    "commit": "0b80c342feb310d73de6564aab2224a899f42486",
+    "disposition": (
+        "superseded and burned after later persisted-carry and measured-budget "
+        "semantic blockers; history is preserved and v2 is never reused"
+    ),
+    "replacement_schema": SCHEMA,
+    "schema": "agentfold-production-contract-evidence/v2",
+}
 METRIC_KEYS = (
     "authority_calls", "batch_processes", "git_processes", "graph_commits",
     "graph_enumerations", "graph_parent_edges", "identity_calls",
@@ -162,8 +171,17 @@ SCENARIO_IDS = tuple(sorted((
     "R17-carry-outside-duplicate",
     "R17-carry-outside-single",
     "R17-outside-C-neutral-parent-valid-restack",
+    "R17-persisted-outside-duplicate",
+    "R17-persisted-outside-duplicate-reversed",
+    "R17-persisted-outside-single",
+    "R17-persisted-outside-single-reversed",
+    "R17-persisted-unauthorized-absent-arm",
+    "R17-persisted-unauthorized-absent-arm-reversed",
+    "R17-persisted-valid-absent-arm",
+    "R17-persisted-valid-absent-arm-reversed",
     "R17-unreadable-outside-C-ancestor-stays-unopened",
     "R17-unreadable-outside-C-boundary",
+    "R17-wide-outside-C-boundary-budget",
     "W0-fast-forward-return",
     "W1-pre-PR-push-exact-endpoints",
     "W2-base-advance-retarget-invariant",
@@ -179,6 +197,8 @@ CONTROL_IDS = tuple(sorted((
     "ignore-absent-C-arm",
     "ignore-invalid-N-root",
     "ignore-outside-C-carrier",
+    "ignore-persisted-absent-C-arm",
+    "ignore-persisted-outside-C-collision",
     "identity-multiplicity-collapsed-to-set",
     "literal-review-pending-treated-concrete",
     "missing-all-parent-direct-validation",
@@ -200,6 +220,12 @@ CONTROL_IDS = tuple(sorted((
     "unmetered-cone-work",
 )))
 ALIAS_IDS = ("S1", "S12", "S2", "S3")
+PERSISTED_VARIANTS = (
+    "outside-duplicate",
+    "outside-single",
+    "unauthorized-absent-arm",
+    "valid-absent-arm",
+)
 RETIRED_SCENARIO_IDS = (
     "P18h-missing-M",
     "P18i-noncommit-M-blob",
@@ -235,6 +261,29 @@ ATTACKER_REFERENCE_OIDS = {
     "N": "61d97651036a8cc9da10662ca7560bce14ce9ce5",
     "O": "5ff93e594d8689fe44774a9728a882c846e1833e",
     "P": "6564e680097653cebcc008a0bfee8587c644057f",
+}
+PERSISTED_OUTSIDE_REFERENCE_OIDS = {
+    "A": "426b485efa3b5f85a678600795a20b1e91c6049f",
+    "C": "843634959ac1156ef81ee7ccbf1f703261bbde1f",
+    "F": "e10a4eb3208c44000e7363c2894e2a77b74828fa",
+    "N": "af48cf172570a08d65c12dc467b2226dfbe8981a",
+    "O": "c0ec07829f6aa4e1207a680a0354deb8a8f0c162",
+    "P": "60f5448337b6f9a114c0231b86242474dd34873b",
+}
+PERSISTED_ABSENT_REFERENCE_OIDS = {
+    "A": "90de0b5af2ad8baec036ddaed2842eda86c2c556",
+    "C": "0ddb561a40c84c0590d9abe8a3036521b239de25",
+    "D": "161d7ed2d7bc121ce5331fed2e1ecb0dd650041e",
+    "K": "f03d61cc931d7c860e7fd6f166c60d09596b48e5",
+    "N": "76cf3354a913effec09cac7b183684159dfd0b84",
+    "O": "17ef4a3d8c518778d62c635864670319efd03754",
+    "P": "1847cdbe8298d5895ad566c03abc870064ca711b",
+}
+WIDE_BUDGET_REFERENCE_OIDS = {
+    "C": "b066accf737c901fd1ee314fcf310afb70c8fe87",
+    "N": "412c2f8c5a8be93d1e0ffc5983d607bf750bb2f0",
+    "O": "ba894e5a1c019e3b2c29ee8319eebfb4b0aaa9a3",
+    "P": "b79ff7a4036270fed4a70d82ad226817ae94e662",
 }
 R6_OUTSIDE_BOUNDARY_DISPOSITION = (
     "outside-C all-absent boundary is neutral at multiplicity zero; its "
@@ -337,6 +386,65 @@ def require_nonnegative_int(value: Any, context: str):
         raise EvidenceError(f"{context} is not an exact nonnegative integer")
 
 
+def validate_permutation_record(value: Any, context: str):
+    require_keys(
+        value,
+        (
+            "r17_parent_permutation",
+            "r17_persisted_parent_permutations",
+            "status",
+        ),
+        context,
+    )
+    signatures = value["r17_parent_permutation"]
+    if (
+        value["status"] != "PASS"
+        or not isinstance(signatures, list)
+        or len(signatures) != 2
+        or signatures[0] != signatures[1]
+    ):
+        raise EvidenceError(f"{context} carry-parent pair differs")
+    for index, signature in enumerate(signatures):
+        require_keys(
+            signature,
+            (
+                "absent_arm_count",
+                "classification",
+                "event_mode",
+                "evidence_status",
+                "merge_role_multiset",
+                "outside_collision_multiplicities",
+            ),
+            f"{context}.r17_parent_permutation[{index}]",
+        )
+    persisted = value["r17_persisted_parent_permutations"]
+    if not isinstance(persisted, dict) or tuple(sorted(persisted)) != PERSISTED_VARIANTS:
+        raise EvidenceError(f"{context} persisted permutation catalog differs")
+    for variant in PERSISTED_VARIANTS:
+        pair = persisted[variant]
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or pair[0] != pair[1]
+        ):
+            raise EvidenceError(
+                f"{context} persisted permutation differs for {variant}"
+            )
+        for index, signature in enumerate(pair):
+            require_keys(
+                signature,
+                (
+                    "absent_arm_count",
+                    "classification",
+                    "evidence_status",
+                    "outside_collision_multiplicities",
+                    "reason_code",
+                ),
+                f"{context}.r17_persisted_parent_permutations."
+                f"{variant}[{index}]",
+            )
+
+
 def normalized_record(value: dict) -> dict:
     result = copy.deepcopy(value)
     if "summary" in result:
@@ -404,14 +512,7 @@ class Stream:
         for key, value in expected.items():
             if self.summary.get(key) != value:
                 raise EvidenceError(f"stream summary {key} is not {value!r}")
-        signatures = self.permutation.get("r17_parent_permutation")
-        if (
-            self.permutation.get("status") != "PASS"
-            or not isinstance(signatures, list)
-            or len(signatures) != 2
-            or signatures[0] != signatures[1]
-        ):
-            raise EvidenceError("r17 parent permutation evidence differs")
+        validate_permutation_record(self.permutation, "stream permutation")
 
     def semantic_bytes(self):
         return b"".join(canonical_bytes(normalized_record(x)) for x in self.objects)
@@ -532,6 +633,58 @@ def input_projection():
     ]
 
 
+def zero_partial_result(row):
+    return not any(
+        row[key]
+        for key in (
+            "actions",
+            "authority_edges",
+            "carry_proofs",
+            "mutation_edges",
+            "propagation_edges",
+            "support_checks",
+        )
+    )
+
+
+def persisted_case_projection(row):
+    return {
+        "absent_arm_count": sum(
+            len(proof["absent_c_parents"])
+            for proof in row["carry_proofs"]
+        ),
+        "audit_exit": row["audit_exit"],
+        "classification": row["classification"],
+        "collision_multiplicities": sorted(
+            collision["multiplicity"]
+            for proof in row["carry_proofs"]
+            for collision in proof["outside_collisions"]
+        ),
+        "evidence_status": row["evidence_verdict"]["status"],
+        "id": row["scenario"],
+        "reason_codes": [action["reason_code"] for action in row["actions"]],
+        "record_sha256": record_digest(normalized_record(row)),
+        "reverse_parents": row["details"]["reverse_parents"],
+        "variant": row["details"]["variant"],
+    }
+
+
+def budget_case_projection(row):
+    return {
+        "audit_exit": row["audit_exit"],
+        "classification": row["classification"],
+        "counter_policy": row["details"]["budget_counter_policy"],
+        "evidence_status": row["evidence_verdict"]["status"],
+        "limit": row["details"]["demonstration_limit"],
+        "max_work_counter_names": row["details"]["max_work_counter_names"],
+        "measured_max_work": row["details"]["measured_max_work"],
+        "measured_work_counters": row["details"]["measured_work_counters"],
+        "overflow_by_one": row["details"]["overflow_by_one"],
+        "record_sha256": record_digest(normalized_record(row)),
+        "transactional_zero_results": zero_partial_result(row),
+    }
+
+
 def core_claim_projection(stream):
     boundary = stream.scenarios[
         "R17-unreadable-outside-C-ancestor-stays-unopened"
@@ -545,6 +698,12 @@ def core_claim_projection(stream):
     r3 = stream.scenarios[
         "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks"
     ]
+    persisted_ids = [
+        name for name in SCENARIO_IDS if name.startswith("R17-persisted-")
+    ]
+    exact_budget = stream.scenarios["PCX-20a-budget-below-limit"]
+    overflow_budget = stream.scenarios["PCX-20b-budget-overflow"]
+    wide_budget = stream.scenarios["R17-wide-outside-C-boundary-budget"]
     workflow_ids = [name for name in SCENARIO_IDS if name.startswith("W")]
     return {
         "boundary_ancestry": {
@@ -583,7 +742,56 @@ def core_claim_projection(stream):
             "frontier": "N",
             "schema": "restack-provenance-input/v2",
         },
+        "evidence_supersession": SUPERSEDED_EVIDENCE,
+        "measured_budget": {
+            "exact": budget_case_projection(exact_budget),
+            "limit_plus_one": budget_case_projection(overflow_budget),
+            "wide_boundary": {
+                "audit_exit": wide_budget["audit_exit"],
+                "budget_contract": wide_budget["details"]["budget_contract"],
+                "classification": wide_budget["classification"],
+                "evidence_status": wide_budget["evidence_verdict"]["status"],
+                "metrics": {
+                    key: wide_budget["metrics"][key]
+                    for key in (
+                        "graph_commits",
+                        "graph_parent_edges",
+                        "object_reads",
+                        "queue_snapshots_requested",
+                    )
+                },
+                "outside_parent_count": len(
+                    wide_budget["details"]["outside_parents"]
+                ),
+                "record_sha256": record_digest(
+                    normalized_record(wide_budget)
+                ),
+                "reference_oids": wide_budget["details"][
+                    "review_reference_oids"
+                ],
+                "transactional_zero_results": zero_partial_result(
+                    wide_budget
+                ),
+            },
+        },
         "parent_permutation": stream.permutation,
+        "persisted_carry": {
+            "cases": [
+                persisted_case_projection(stream.scenarios[name])
+                for name in persisted_ids
+            ],
+            "parent_permutations": stream.permutation[
+                "r17_persisted_parent_permutations"
+            ],
+            "reference_oids": {
+                "outside_single": stream.scenarios[
+                    "R17-persisted-outside-single"
+                ]["details"]["review_reference_oids"],
+                "valid_absent_arm": stream.scenarios[
+                    "R17-persisted-valid-absent-arm"
+                ]["details"]["review_reference_oids"],
+            },
+        },
         "r6_outside_boundary_disposition": {
             "ambiguous_ancestor_root": r6["details"]["causal_events"][1],
             "classification": r6["classification"],
@@ -901,7 +1109,8 @@ def validate_manifest(manifest):
     by_id = {x["id"]: x for x in scenarios}
     core = manifest["core_claims"]
     require_keys(core, (
-        "boundary_ancestry", "endpoint_contract", "parent_permutation",
+        "boundary_ancestry", "endpoint_contract", "evidence_supersession",
+        "measured_budget", "parent_permutation", "persisted_carry",
         "r3_full_frontier", "r6_outside_boundary_disposition",
         "retired_catalog", "reviewer_dag", "workflow_input_matrix",
     ), "core_claims")
@@ -961,18 +1170,201 @@ def validate_manifest(manifest):
         "schema": "restack-provenance-input/v2",
     }:
         raise EvidenceError("core endpoint contract changed")
-    permutation = core["parent_permutation"]
-    require_keys(
-        permutation, ("r17_parent_permutation", "status"),
-        "core_claims.parent_permutation",
+    if core["evidence_supersession"] != SUPERSEDED_EVIDENCE:
+        raise EvidenceError("evidence schema supersession changed")
+    require_oid(
+        core["evidence_supersession"]["commit"],
+        "evidence_supersession.commit",
     )
-    signatures = permutation["r17_parent_permutation"]
-    if (
-        permutation["status"] != "PASS"
-        or len(signatures) != 2
-        or signatures[0] != signatures[1]
+    permutation = core["parent_permutation"]
+    validate_permutation_record(
+        permutation, "core_claims.parent_permutation"
+    )
+    persisted = core["persisted_carry"]
+    require_keys(
+        persisted, ("cases", "parent_permutations", "reference_oids"),
+        "persisted_carry",
+    )
+    persisted_ids = [
+        name for name in SCENARIO_IDS if name.startswith("R17-persisted-")
+    ]
+    cases = persisted["cases"]
+    if [case.get("id") for case in cases] != persisted_ids:
+        raise EvidenceError("persisted carry case catalog changed")
+    require_keys(
+        persisted["reference_oids"],
+        ("outside_single", "valid_absent_arm"),
+        "persisted_carry.reference_oids",
+    )
+    if persisted["reference_oids"] != {
+        "outside_single": PERSISTED_OUTSIDE_REFERENCE_OIDS,
+        "valid_absent_arm": PERSISTED_ABSENT_REFERENCE_OIDS,
+    }:
+        raise EvidenceError("persisted carry reviewer OID catalog changed")
+    for group, references in persisted["reference_oids"].items():
+        for label, oid in references.items():
+            require_oid(oid, f"persisted_carry.reference_oids.{group}.{label}")
+    expected_persisted_permutations = permutation[
+        "r17_persisted_parent_permutations"
+    ]
+    if persisted["parent_permutations"] != expected_persisted_permutations:
+        raise EvidenceError("persisted carry parent permutations changed")
+    for index, case in enumerate(cases):
+        context = f"persisted_carry.cases[{index}]"
+        require_keys(
+            case,
+            (
+                "absent_arm_count", "audit_exit", "classification",
+                "collision_multiplicities", "evidence_status", "id",
+                "reason_codes", "record_sha256", "reverse_parents",
+                "variant",
+            ),
+            context,
+        )
+        row = by_id[case["id"]]
+        variant = case["id"][len("R17-persisted-"):]
+        reversed_case = variant.endswith("-reversed")
+        if reversed_case:
+            variant = variant[:-len("-reversed")]
+        expected_reason = (
+            "persisted-outside-C-collision"
+            if variant.startswith("outside-")
+            else "persisted-delete-recreate"
+        )
+        expected_collisions = {
+            "outside-duplicate": [2],
+            "outside-single": [1],
+            "unauthorized-absent-arm": [],
+            "valid-absent-arm": [],
+        }[variant]
+        expected_absent = int(variant.endswith("absent-arm"))
+        if (
+            case["classification"] != "blocking-finding"
+            or case["audit_exit"] != 1
+            or case["evidence_status"] != "ambiguous"
+            or case["reason_codes"] != [expected_reason]
+            or case["collision_multiplicities"] != expected_collisions
+            or case["absent_arm_count"] != expected_absent
+            or case["reverse_parents"] is not reversed_case
+            or case["variant"] != variant
+            or case["record_sha256"] != row["record_sha256"]
+        ):
+            raise EvidenceError(f"{context} semantic claim changed")
+        require_digest(case["record_sha256"], f"{context}.record_sha256")
+
+    measured = core["measured_budget"]
+    require_keys(
+        measured, ("exact", "limit_plus_one", "wide_boundary"),
+        "measured_budget",
+    )
+    for name, scenario in (
+        ("exact", "PCX-20a-budget-below-limit"),
+        ("limit_plus_one", "PCX-20b-budget-overflow"),
     ):
-        raise EvidenceError("core parent permutation claim changed")
+        claim = measured[name]
+        context = f"measured_budget.{name}"
+        require_keys(
+            claim,
+            (
+                "audit_exit", "classification", "counter_policy",
+                "evidence_status", "limit", "max_work_counter_names",
+                "measured_max_work", "measured_work_counters",
+                "overflow_by_one", "record_sha256",
+                "transactional_zero_results",
+            ),
+            context,
+        )
+        require_keys(
+            claim["measured_work_counters"], METRIC_KEYS,
+            f"{context}.measured_work_counters",
+        )
+        for key, value in claim["measured_work_counters"].items():
+            require_nonnegative_int(
+                value, f"{context}.measured_work_counters.{key}"
+            )
+        require_nonnegative_int(claim["limit"], f"{context}.limit")
+        require_nonnegative_int(
+            claim["measured_max_work"], f"{context}.measured_max_work"
+        )
+        maximum = max(claim["measured_work_counters"].values())
+        names = sorted(
+            key
+            for key, value in claim["measured_work_counters"].items()
+            if value == maximum
+        )
+        expected = {
+            "exact": {
+                "audit_exit": 0,
+                "classification": "no-finding",
+                "evidence_status": "valid",
+                "overflow_by_one": False,
+                "transactional_zero_results": False,
+            },
+            "limit_plus_one": {
+                "audit_exit": 2,
+                "classification": "blocking-finding",
+                "evidence_status": "ambiguous",
+                "overflow_by_one": True,
+                "transactional_zero_results": True,
+            },
+        }[name]
+        if (
+            any(claim[key] != value for key, value in expected.items())
+            or claim["counter_policy"] != "every emitted work counter"
+            or claim["measured_max_work"] != maximum
+            or claim["max_work_counter_names"] != names
+            or claim["measured_max_work"]
+            != claim["limit"] + int(claim["overflow_by_one"])
+            or claim["record_sha256"] != by_id[scenario]["record_sha256"]
+        ):
+            raise EvidenceError(f"{context} exact/+1 claim changed")
+        require_digest(claim["record_sha256"], f"{context}.record_sha256")
+    wide = measured["wide_boundary"]
+    require_keys(
+        wide,
+        (
+            "audit_exit", "budget_contract", "classification",
+            "evidence_status", "metrics", "outside_parent_count",
+            "record_sha256", "reference_oids",
+            "transactional_zero_results",
+        ),
+        "measured_budget.wide_boundary",
+    )
+    require_keys(
+        wide["metrics"],
+        (
+            "graph_commits", "graph_parent_edges", "object_reads",
+            "queue_snapshots_requested",
+        ),
+        "measured_budget.wide_boundary.metrics",
+    )
+    for key, value in wide["metrics"].items():
+        require_nonnegative_int(
+            value, f"measured_budget.wide_boundary.metrics.{key}"
+        )
+    wide_row = by_id["R17-wide-outside-C-boundary-budget"]
+    if (
+        wide["audit_exit"] != 2
+        or wide["classification"] != "blocking-finding"
+        or wide["evidence_status"] != "ambiguous"
+        or wide["outside_parent_count"] != 64
+        or wide["budget_contract"] != {
+            "limit": 7,
+            "overflow_classification": "budget-exceeded",
+            "transactional_zero_results": True,
+        }
+        or wide["metrics"]["graph_commits"] > 7
+        or wide["metrics"]["graph_parent_edges"] <= 7
+        or wide["reference_oids"] != WIDE_BUDGET_REFERENCE_OIDS
+        or wide["transactional_zero_results"] is not True
+        or wide["record_sha256"] != wide_row["record_sha256"]
+    ):
+        raise EvidenceError("wide outside-C boundary budget claim changed")
+    for label, oid in wide["reference_oids"].items():
+        require_oid(oid, f"measured_budget.wide_boundary.reference_oids.{label}")
+    require_digest(
+        wide["record_sha256"], "measured_budget.wide_boundary.record_sha256"
+    )
     r6 = core["r6_outside_boundary_disposition"]
     require_keys(r6, (
         "ambiguous_ancestor_root", "classification", "disposition",
@@ -1116,7 +1508,8 @@ def render_readme(manifest):
         "`queue_deletion_problem`; it never invents an Action-ID or lifecycle verdict.", "",
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
-        "The raw JSONL stream is ephemeral and has no stored hash claim.", "",
+        "The raw JSONL stream is ephemeral and has no stored hash claim.",
+        f"Evidence schema v2 at commit `{core['evidence_supersession']['commit']}` is superseded and burned by later semantic blockers; its history is preserved, v2 is never reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
         "`N`, and derives the unique merge base `C`. It enumerates the full C-rooted",
@@ -1160,8 +1553,10 @@ def render_readme(manifest):
         f"R3-03 is blocking at the fixed N frontier with one invalid authority edge and is record-bound by `{core['r3_full_frontier']['record_sha256']}`.",
         f"The hidden-G attacker is clean at exit 0 and record-bound by `{core['boundary_ancestry']['record_sha256']}`: F is the neutral boundary, G carries the same identity in a unique missing blob, and G ancestry remains unopened.",
         f"R6-02 is explicitly dispositioned clean and record-bound by `{core['r6_outside_boundary_disposition']['record_sha256']}` because its outside-C boundary is absent; the ambiguous ancestor behind it is not reopened.",
+        "All eight persisted-state attacker cases block in both parent orders: outside-C exact carriers retain multiplicity 1 or 2 as collisions, while valid and unauthorized absent C-descendant arms both remain deletion/reintroduction competitors.",
+        f"The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `{core['measured_budget']['wide_boundary']['record_sha256']}`; no action, edge, support, or carry-proof result leaks past the exceeded parent-edge budget.",
         "The parent-order pair has identical verdicts and the same role multiset:",
-        f"`{core['parent_permutation']['r17_parent_permutation'][0]['merge_role_multiset']}`.", "",
+        f"`{core['parent_permutation']['r17_parent_permutation'][0]['merge_role_multiset']}`. The four persisted parent-order pairs are also byte-equal by semantic signature.", "",
         "Reviewer-supplied reference OIDs (bound as review input, not regenerated fixture IDs):", "",
         "| Role | OID |", "|---|---|",
     ]
@@ -1170,6 +1565,18 @@ def render_readme(manifest):
     lines += ["", "Boundary-attacker reference OIDs (bound review input):", "",
               "| Role | OID |", "|---|---|"]
     for label, oid in core["boundary_ancestry"]["reference_oids"].items():
+        lines.append(f"| `{label}` | `{oid}` |")
+    lines += ["", "Persisted outside-C collision reference OIDs (bound review input):", "",
+              "| Role | OID |", "|---|---|"]
+    for label, oid in core["persisted_carry"]["reference_oids"]["outside_single"].items():
+        lines.append(f"| `{label}` | `{oid}` |")
+    lines += ["", "Persisted absent-arm reference OIDs (bound review input):", "",
+              "| Role | OID |", "|---|---|"]
+    for label, oid in core["persisted_carry"]["reference_oids"]["valid_absent_arm"].items():
+        lines.append(f"| `{label}` | `{oid}` |")
+    lines += ["", "Wide-boundary budget reference OIDs (bound review input):", "",
+              "| Role | OID |", "|---|---|"]
+    for label, oid in core["measured_budget"]["wide_boundary"]["reference_oids"].items():
         lines.append(f"| `{label}` | `{oid}` |")
     lines += ["",
         "## Input byte identities", "",
@@ -1205,9 +1612,14 @@ def render_readme(manifest):
         e = row["endpoints"]
         lines.append(f"| `{row['id']}` | `{e['C']['oid']}` | `{e['O']['oid']}` | `{e['N']['oid']}` | `{row['baseline_classification']}` | `{row['damaged_classification']}` | `{row['status']}` | `{row['record_sha256']}` |")
     m = p22["metrics"]
+    exact_budget = core["measured_budget"]["exact"]
+    overflow_budget = core["measured_budget"]["limit_plus_one"]
+    wide_budget = core["measured_budget"]["wide_boundary"]
     lines += ["", "## Measured cost and object recovery", "",
               f"P22 measured {m['graph_commits']} graph commits and 16 disappeared actions with exactly {m['graph_enumerations']} POC graph enumeration, {m['per_action_history_walks']} POC-owned per-action history walks, {m['queue_snapshots_requested']} snapshot requests, {m['snapshot_cache_hits']} snapshot-cache hits, and {m['git_processes']} actual Git processes.",
-              "The process count includes imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. Production must reuse its parent cache and set a measured process budget. This POC sets no guessed ceiling.", "",
+              "The process count includes imported production `git rev-list --parents -n 1` queries; zero applies only to POC-owned per-action walks. The POC's single budget consistently caps every emitted work counter.",
+              f"PCX-20a passes at its exact measured maximum {exact_budget['measured_max_work']} with limit {exact_budget['limit']}; PCX-20b exits 2 with zero partial results when measured maximum {overflow_budget['measured_max_work']} exceeds limit {overflow_budget['limit']} by one.",
+              f"The 64-parent boundary case measures {wide_budget['metrics']['graph_commits']} intrinsic graph commits and {wide_budget['metrics']['graph_parent_edges']} parent edges against limit {wide_budget['budget_contract']['limit']}; parent-edge work is therefore metered even while graph commits remain below the limit.", "",
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
@@ -1383,6 +1795,106 @@ def damage_matrix(expected):
         "outside-C boundary ancestry claim changed",
     )
     manifest_case(
+        "persisted-outside-false-clean",
+        lambda d: d["core_claims"]["persisted_carry"]["cases"][
+            next(
+                index for index, row in enumerate(
+                    d["core_claims"]["persisted_carry"]["cases"]
+                )
+                if row["id"] == "R17-persisted-outside-single"
+            )
+        ].update(classification="no-finding"),
+        "semantic claim changed",
+    )
+    manifest_case(
+        "persisted-outside-collapse-multiplicity",
+        lambda d: d["core_claims"]["persisted_carry"]["cases"][
+            next(
+                index for index, row in enumerate(
+                    d["core_claims"]["persisted_carry"]["cases"]
+                )
+                if row["id"] == "R17-persisted-outside-duplicate"
+            )
+        ].update(collision_multiplicities=[1]),
+        "semantic claim changed",
+    )
+    manifest_case(
+        "persisted-absent-arm-false-clean",
+        lambda d: d["core_claims"]["persisted_carry"]["cases"][
+            next(
+                index for index, row in enumerate(
+                    d["core_claims"]["persisted_carry"]["cases"]
+                )
+                if row["id"] == "R17-persisted-valid-absent-arm"
+            )
+        ].update(classification="no-finding"),
+        "semantic claim changed",
+    )
+    manifest_case(
+        "persisted-absent-arm-reason-erased",
+        lambda d: d["core_claims"]["persisted_carry"]["cases"][
+            next(
+                index for index, row in enumerate(
+                    d["core_claims"]["persisted_carry"]["cases"]
+                )
+                if row["id"]
+                == "R17-persisted-unauthorized-absent-arm"
+            )
+        ].update(reason_codes=[]),
+        "semantic claim changed",
+    )
+    manifest_case(
+        "persisted-parent-permutation-first-parent",
+        lambda d: d["core_claims"]["parent_permutation"][
+            "r17_persisted_parent_permutations"
+        ]["outside-single"][1].update(
+            outside_collision_multiplicities=[]
+        ),
+        "persisted permutation differs",
+    )
+    manifest_case(
+        "wide-budget-false-clean",
+        lambda d: d["core_claims"]["measured_budget"][
+            "wide_boundary"
+        ].update(classification="no-finding"),
+        "wide outside-C boundary budget claim changed",
+    )
+    manifest_case(
+        "wide-budget-unmetered-parent-edges",
+        lambda d: d["core_claims"]["measured_budget"][
+            "wide_boundary"
+        ]["metrics"].update(graph_parent_edges=7),
+        "wide outside-C boundary budget claim changed",
+    )
+    manifest_case(
+        "exact-budget-only-graph-commits",
+        lambda d: d["core_claims"]["measured_budget"]["exact"].update(
+            counter_policy="graph_commits only"
+        ),
+        "exact/+1 claim changed",
+    )
+    manifest_case(
+        "budget-plus-one-leaks-partial-result",
+        lambda d: d["core_claims"]["measured_budget"][
+            "limit_plus_one"
+        ].update(transactional_zero_results=False),
+        "exact/+1 claim changed",
+    )
+    manifest_case(
+        "superseded-v2-reused",
+        lambda d: d["core_claims"]["evidence_supersession"].update(
+            replacement_schema="agentfold-production-contract-evidence/v2"
+        ),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
+        "superseded-v2-commit-erased",
+        lambda d: d["core_claims"]["evidence_supersession"].update(
+            commit="0" * 40
+        ),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
         "r6-outside-boundary-false-block",
         lambda d: d["core_claims"][
             "r6_outside_boundary_disposition"
@@ -1413,7 +1925,7 @@ def damage_matrix(expected):
         lambda d: d["core_claims"]["parent_permutation"][
             "r17_parent_permutation"
         ][1].update(merge_role_multiset=["source"]),
-        "core parent permutation claim changed",
+        "carry-parent pair differs",
     )
     manifest_case(
         "push-github-sha-authoritative",
