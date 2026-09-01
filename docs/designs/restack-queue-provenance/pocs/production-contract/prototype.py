@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -169,6 +170,7 @@ class Damage:
     skip_carry_compatibility: bool = False
     unmetered_cone_work: bool = False
     posthoc_budget_accounting: bool = False
+    ambient_git_diagnostics: bool = False
     reopen_outside_c_boundary_ancestry: bool = False
 
 
@@ -197,13 +199,55 @@ def is_git_command(command) -> bool:
     )
 
 
+def stable_git_environment(environment=None):
+    result = dict(os.environ if environment is None else environment)
+    result.update(
+        {
+            "LANG": "C",
+            "LANGUAGE": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+        }
+    )
+    return result
+
+
+def stable_git_failure(arguments, stderr: str) -> str:
+    oids = re.findall(r"(?<![0-9a-f])[0-9a-f]{40,64}(?![0-9a-f])", stderr)
+    if oids:
+        return f"missing-or-malformed-commit:{oids[0]}"
+    operation = next(
+        (argument for argument in arguments if not argument.startswith("-")),
+        "unknown",
+    )
+    return f"git-command-failed:{operation}"
+
+
 @contextlib.contextmanager
-def count_production_git(metrics: Metrics):
+def temporary_environment(**updates):
+    saved = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@contextlib.contextmanager
+def count_production_git(
+    metrics: Metrics, *, stable_git_diagnostics: bool = True
+):
     """Count each Git child spawned by imported production helpers once."""
 
     def counted_popen(command, *args, **kwargs):
         if is_git_command(command):
             metrics.charge("git_processes")
+            if stable_git_diagnostics:
+                kwargs["env"] = stable_git_environment(kwargs.get("env"))
         return REAL_POPEN(command, *args, **kwargs)
 
     original_popen = subprocess.Popen
@@ -257,7 +301,7 @@ class GitRepository:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
+            env=stable_git_environment(env),
             check=False,
         )
         if check and result.returncode:
@@ -362,7 +406,13 @@ class GitRepository:
         return hidden, source
 
 
-def run_git(root: Path, metrics: Metrics, *arguments, check=True):
+def run_git(
+    root: Path,
+    metrics: Metrics,
+    *arguments,
+    check=True,
+    stable_git_diagnostics=True,
+):
     # count_production_git observes this subprocess at the Popen boundary.
     result = REAL_RUN(
         ["git", *arguments],
@@ -370,12 +420,17 @@ def run_git(root: Path, metrics: Metrics, *arguments, check=True):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=(stable_git_environment() if stable_git_diagnostics else None),
         check=False,
     )
     if check and result.returncode:
         raise Unreadable(
-            result.stderr.strip()
-            or f"git {' '.join(arguments)} failed ({result.returncode})"
+            stable_git_failure(arguments, result.stderr)
+            if stable_git_diagnostics
+            else (
+                result.stderr.strip()
+                or f"git {' '.join(arguments)} failed ({result.returncode})"
+            )
         )
     return result
 
@@ -383,7 +438,13 @@ def run_git(root: Path, metrics: Metrics, *arguments, check=True):
 class ObjectDatabase:
     """One cat-file process plus immutable object/tree/snapshot caches."""
 
-    def __init__(self, root: Path, metrics: Metrics):
+    def __init__(
+        self,
+        root: Path,
+        metrics: Metrics,
+        *,
+        stable_git_diagnostics: bool = True,
+    ):
         self.root = root
         self.metrics = metrics
         metrics.charge("git_processes")
@@ -394,6 +455,11 @@ class ObjectDatabase:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=(
+                stable_git_environment()
+                if stable_git_diagnostics
+                else None
+            ),
         )
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
@@ -593,6 +659,7 @@ class Graph:
         metrics: Metrics,
         *,
         reopen_outside_c_boundary_ancestry: bool = False,
+        stable_git_diagnostics: bool = True,
     ):
         self.root = root
         self.O = O
@@ -600,7 +667,11 @@ class Graph:
         self.objects = objects
         self.metrics = metrics
         shallow = run_git(
-            root, metrics, "rev-parse", "--is-shallow-repository"
+            root,
+            metrics,
+            "rev-parse",
+            "--is-shallow-repository",
+            stable_git_diagnostics=stable_git_diagnostics,
         ).stdout.strip()
         if shallow == "true":
             raise Unreadable("required post-C history is shallow")
@@ -618,10 +689,18 @@ class Graph:
             O,
             N,
             check=False,
+            stable_git_diagnostics=stable_git_diagnostics,
         )
         if bases.returncode:
             raise Unreadable(
-                bases.stderr.strip() or "could not determine the merge base"
+                stable_git_failure(
+                    ("merge-base", "--all", O, N), bases.stderr
+                )
+                if stable_git_diagnostics
+                else (
+                    bases.stderr.strip()
+                    or "could not determine the merge base"
+                )
             )
         merge_bases = tuple(line for line in bases.stdout.splitlines() if line)
         if len(merge_bases) != 1:
@@ -644,7 +723,13 @@ class Graph:
             listing_arguments.append("--ancestry-path")
         metrics.charge("graph_enumerations")
         listing = run_git(
-            root, metrics, *listing_arguments, O, N, f"^{self.C}"
+            root,
+            metrics,
+            *listing_arguments,
+            O,
+            N,
+            f"^{self.C}",
+            stable_git_diagnostics=stable_git_diagnostics,
         )
         self.order = [self.C]
         self.parents: dict[str, tuple[str, ...]] = {self.C: ()}
@@ -3279,8 +3364,19 @@ class Classifier:
         try:
             with reconciler_repository(
                 fixture.repo.root
-            ), count_production_git(self.metrics):
-                objects = ObjectDatabase(fixture.repo.root, self.metrics)
+            ), count_production_git(
+                self.metrics,
+                stable_git_diagnostics=(
+                    not self.damage.ambient_git_diagnostics
+                ),
+            ):
+                objects = ObjectDatabase(
+                    fixture.repo.root,
+                    self.metrics,
+                    stable_git_diagnostics=(
+                        not self.damage.ambient_git_diagnostics
+                    ),
+                )
                 self.objects = objects
                 self.graph = Graph(
                     fixture.repo.root,
@@ -3290,6 +3386,9 @@ class Classifier:
                     self.metrics,
                     reopen_outside_c_boundary_ancestry=(
                         self.damage.reopen_outside_c_boundary_ancestry
+                    ),
+                    stable_git_diagnostics=(
+                        not self.damage.ambient_git_diagnostics
                     ),
                 )
                 base["C"] = self.graph.C
@@ -8268,6 +8367,7 @@ CONTROL_NAMES = (
     "skip-carry-compatibility",
     "unmetered-cone-work",
     "posthoc-budget-accounting",
+    "locale-git-error-stream-equality",
     "reopen-outside-C-boundary-ancestry",
     "ignore-invalid-N-root",
     "missing-all-parent-direct-validation",
@@ -8649,6 +8749,9 @@ def validate_result(result: dict):
     if scenario == "R17-unreadable-outside-C-boundary" and (
         status != "unreadable"
         or result["audit_exit"] != 2
+        or result["evidence_verdict"]["reason"]
+        != "missing-or-malformed-commit:"
+        + result["details"]["unreadable_boundary"]
         or actions
         or authority
         or propagation
@@ -10419,6 +10522,55 @@ def control_builder(name: str, root: Path):
 
 
 def run_control(name: str, root: Path):
+    if name == "locale-git-error-stream-equality":
+        fixture = r17_unreadable_boundary(root)
+        stable = {}
+        ambient = {}
+        for locale in ("C", "fr_FR.UTF-8"):
+            with temporary_environment(
+                LANG=locale, LANGUAGE=locale, LC_ALL=locale, TZ="UTC"
+            ):
+                stable[locale] = Classifier(fixture).run()
+                ambient[locale] = Classifier(
+                    fixture, Damage(ambient_git_diagnostics=True)
+                ).run()
+        stable_reasons = {
+            locale: result["evidence_verdict"]["reason"]
+            for locale, result in stable.items()
+        }
+        ambient_reasons = {
+            locale: result["evidence_verdict"]["reason"]
+            for locale, result in ambient.items()
+        }
+        baseline = stable["C"]
+        damaged = ambient["fr_FR.UTF-8"]
+        observed = bool(
+            stable["C"] == stable["fr_FR.UTF-8"]
+            and len(set(stable_reasons.values())) == 1
+            and stable_reasons["C"].startswith(
+                "missing-or-malformed-commit:"
+            )
+            and len(set(ambient_reasons.values())) == 2
+        )
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": baseline["C"],
+            "O": fixture.O,
+            "N": fixture.N,
+            "baseline_classification": baseline["classification"],
+            "damaged_classification": damaged["classification"],
+            "expected_baseline": fixture.expected,
+            "authority_edges": damaged["authority_edges"],
+            "propagation_edges": damaged["propagation_edges"],
+            "locale_observation": {
+                "ambient_reasons": ambient_reasons,
+                "stable_full_results_equal": (
+                    stable["C"] == stable["fr_FR.UTF-8"]
+                ),
+                "stable_reasons": stable_reasons,
+            },
+        }
     fixture, damage, damaged_expected = control_builder(name, root)
     baseline = Classifier(fixture).run()
     damaged = Classifier(fixture, damage).run()
