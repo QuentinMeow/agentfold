@@ -1489,3 +1489,103 @@ Core admission remains a fresh full five-lens acceptance. Adapter evidence addit
 distinguishes trusted default-branch runs, candidate-controlled advice, explicit
 not-applicability, and absent observation. No candidate workflow or missing provider result
 can satisfy the trusted edge gate.
+
+## 2026-09-01 correction amendment 7 — derived counters and bounded ordinary history
+
+The review of `10e2d6a1cf2e7983301cdb10dd9ba1dbd976de81` accepted semantic/DAG
+behavior and blocked derived-counter tests, unbounded ordinary root history, SHA-like
+same-repository suppression, and provider-visible trust aliasing. This section supersedes
+those subjects above.
+
+### Derived policy counters
+
+`policy_payload_hash_bytes`, `policy_framing_hash_bytes`, and
+`policy_total_hash_bytes` are informational derived counters, not independent gates.
+Payload safety is enforced by the per-file, per-source, and all-source byte limits;
+framing safety is enforced by file-count and path-byte limits; total is their checked sum.
+There is no claim that a structurally valid fixture can exceed only one derived counter.
+
+Exact structural tests reach all payload and manifest maxima. Instrumentation damage
+controls inject an `observed - 1` test-only limit for each derived counter while leaving
+the same valid transcript unchanged; each refusal proves the counter is charged before
+hashing, but it is recorded as an observed-red gate mutation rather than a production
+limit-plus-one fixture.
+
+### Ordinary historical-range preflight
+
+Any non-empty `--range`, including `root:N`, receives a read-only historical preflight
+before the global snapshot cache, ordinary Findings, output, or writer. One streamed
+`rev-list --parents --topo-order --reverse` child supplies a shared immutable revision and
+parent map for `queue_revision_edges`, task admission, handover history, and every other
+ordinary parent consumer. No consumer buffers another whole revision list or launches a
+per-commit parent query.
+
+Queue-edge comparisons use bounded committed-object/tree readers and a shared typed delta
+map rather than one unbounded diff subprocess per commit. The historical preflight has
+these numeric aggregate limits:
+
+| Ordinary historical dimension | Limit |
+|---|---:|
+| Revisions | 4,096 |
+| Parent edges/tokens | 8,192 |
+| Rev-list stdout / peak line | 16 MiB / 1 MiB |
+| Rev-list stream chunks | 65,536 |
+| Historical edge deltas | 8,192 |
+| Delta records | 262,144 |
+| Delta path bytes | 8 MiB |
+| Delta payload bytes / peak payload | 32 MiB / 4 MiB |
+| Historical object reads / cache hits | 65,536 / 262,144 |
+| Historical object-header bytes | 4 MiB |
+| Historical object payload bytes / peak | 32 MiB / 4 MiB |
+| Historical tree entries / name bytes | 131,072 / 8 MiB |
+| Historical Git children | 32 |
+| Historical Git stderr | 256 KiB |
+| Per-child / aggregate deadline | 30 s / 120 s |
+
+Every dimension is pre-charged, streaming, terminated/reaped on refusal, and exact/+1
+tested. Range preflight incomplete is exit 2 with zero ordinary Findings/writers and
+byte-identical state. When combined with continuity, continuity completes first, ordinary
+range preflight completes second, and only then can the global snapshot or writer phase
+begin. The separate ordinary workflow invocation has the same range preflight.
+
+This bounds the historical work newly exercised by creation `root:N`; it does not claim a
+fixed upper bound for every current-worktree file scan in the whole reconciler. A history
+beyond the configured limit is ordinary coverage-unavailable rather than a clean result or
+an exhausted runner. Existing ordinary semantics and Finding identities remain unchanged.
+
+### Source-distinct provider names and trust
+
+Provider-visible names are distinct by source:
+
+- `agentfold-continuity-edge/advisory-push`
+- `agentfold-ordinary-range/advisory-push`
+- `agentfold-continuity-edge/trusted-prt`
+- `agentfold-ordinary-range/unprivileged-pr`
+
+Candidate N can control only the two advisory-push names and the unprivileged PR code. It
+cannot emit a trusted-prt record through the default-branch workflow. Even the trusted
+name and conclusion are not sufficient authentication: the trusted evidence binding also
+requires event `pull_request_target`, exact base repository ID, expected default-branch
+workflow path/ref, immutable workflow/evaluator SHA, run_id, run_attempt, candidate head
+repository ID, and O/N. Ordinary branch-protection status contexts cannot authenticate
+that complete binding, so this task defines no trusted required-check gate.
+
+Creation ordinary output is explicitly candidate-controlled advisory `root:N`. A missing,
+tampered, or suppressed creation workflow is no-observation; local prepublication remains
+the authoritative diagnosis.
+
+### SHA-like heads in both repository shapes
+
+SHA-like head-name suppression applies to `pull_request_target` for both same-repository
+and fork PRs. An open same-repository SHA-like head therefore has trusted continuity
+no-observation; candidate-controlled push advice may exist, and unprivileged ordinary PR
+coverage exists only if its event actually runs. The fork row has the same trusted
+no-observation without a base push. Negative live canaries cover both repository shapes and
+never translate the missing trusted tuple into success.
+
+### Gate boundary
+
+The complete five-lens immutable review remains unopened for implementation until a new
+revision accepts the ordinary historical preflight, source-distinct trust binding, and all
+prior semantic/transaction contracts. Adapter evidence remains optional and separately
+gated by live provider behavior.

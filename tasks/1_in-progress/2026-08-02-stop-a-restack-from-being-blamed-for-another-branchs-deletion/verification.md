@@ -39,6 +39,17 @@ and no production implementation began from this revision.
 The panel stopped after two independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded observable-provider design review
+
+**Reviewed revision:** `10e2d6a1cf2e7983301cdb10dd9ba1dbd976de81`
+
+- semantic/DAG / r18-semantic-design: `approve` — graph, policy, fast-forward, creation, root competition, and persisted/disappeared fixtures remained POC-equivalent.
+- budgets/transaction/composition / receipt-contract: `block` — derived-counter +1 promises were unreachable and creation `root:N` used an unbounded buffered ordinary history traversal.
+- workflow/adapter/human / r18-workflow-design: `block` — same-repository SHA-like suppression, provider-visible trust aliasing, and creation trust labeling remained incorrect.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded per-event-lane design review
 
 **Reviewed revision:** `22e1c00ce0fcec05da9ea6842db9d31128e2571a`

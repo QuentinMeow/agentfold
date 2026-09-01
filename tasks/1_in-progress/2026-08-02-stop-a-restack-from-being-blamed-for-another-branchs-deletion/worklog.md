@@ -113,6 +113,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Derived-counter and bounded ordinary-history correction (codex)
+
+- Semantic review accepted again. The other lenses found unreachable independent +1
+  claims for derived hash counters, unbounded buffered/per-commit ordinary root history,
+  SHA-like same-repository PRT suppression, shared trusted/advisory check names, and
+  candidate-controlled creation output lacking its trust label.
+- Appended structurally enforced derived policy counters; a transactional shared streaming
+  ordinary historical-range preflight with exact limits; source-distinct provider names
+  and immutable trusted-run metadata; candidate-controlled creation labeling; and negative
+  SHA-like canaries for both repository shapes.
+- Production remains unopened pending another full five-lens immutable-revision review.
+
 ## 2026-09-01 — Canonical policy and observable-provider correction (codex)
 
 - Semantic review accepted again. Budget review found that the aggregate hash +1 case was
