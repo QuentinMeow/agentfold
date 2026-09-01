@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Iterable
+import time
 
 
 QUEUE_ROOT = "message-queue/"
@@ -215,6 +215,21 @@ class GitRepo:
             extra_env={"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
         )
         return self.oid("HEAD")
+
+    def commit_tree(self, tree: str, parents: tuple[str, ...], subject: str) -> str:
+        self._clock += 1
+        stamp = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc) + dt.timedelta(
+            seconds=self._clock
+        )
+        date = stamp.isoformat()
+        args = ["commit-tree", tree]
+        for parent in parents:
+            args.extend(("-p", parent))
+        args.extend(("-m", subject))
+        return self.run(
+            *args,
+            extra_env={"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+        ).stdout.decode().strip()
 
     def oid(self, revision: str) -> str:
         return self.run("rev-parse", f"{revision}^{{commit}}").stdout.decode().strip()
@@ -675,6 +690,173 @@ def scenario_same_path(root: Path) -> dict[str, object]:
     )
 
 
+def scenario_changed_action(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit(
+        "old replaces action identity",
+        {
+            DEFAULT_PATH: action_text(
+                action_id="Q-branch", payload="branch-authored replacement"
+            )
+        },
+    )
+    repo.switch_new("new", common)
+    repo.commit("claim original", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "resolve original",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new feature", {"feature.txt": "new\n"})
+    return make_record(
+        "S4-changed-action",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
+def scenario_mixed(root: Path) -> dict[str, object]:
+    q1 = DEFAULT_PATH
+    q2 = "message-queue/needs-agent/requests/non-blocking-second.md"
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit(
+        "old adds second action",
+        {q2: action_text(action_id="Q2", payload="branch obligation")},
+    )
+    repo.switch_new("new", common)
+    repo.commit("claim first", {q1: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "resolve first",
+        {q1: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new feature", {"feature.txt": "new\n"})
+    first = classify(repo, old, new, q1)
+    second = classify(repo, old, new, q2)
+    combined = Verdict(
+        "finding",
+        "mixed inherited resolution and old-side loss",
+        f"Q1={first.evidence_verdict}; Q2={second.evidence_verdict}",
+        first.witness_cardinality + second.witness_cardinality,
+        "Q1 is justified by exactly one valid candidate-side resolution, while Q2 "
+        "was introduced only by the old task lineage and remains a blocking loss.",
+        first.edges + second.edges,
+        first.git_processes + second.git_processes,
+        first.tree_reads + second.tree_reads,
+    )
+    record = make_record(
+        "S5-mixed-actions",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        combined,
+        "finding",
+    )
+    record["path_results"] = {
+        q1: first.result,
+        q2: second.result,
+    }
+    return record
+
+
+def scenario_unrelated_queue(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    repo.switch_new("new", common)
+    new_base = repo.commit("base feature", {"base.txt": "base\n"})
+    new = repo.commit("replay old feature", {"old.txt": "old\n"})
+    return make_record(
+        "S7-unrelated-restack",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+
+
+def scenario_fast_forward(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    new = repo.commit("ordinary extension", {"next.txt": "next\n"})
+    return make_record(
+        "S8-fast-forward-replacement",
+        {"C": common, "O": old, "M": old, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+
+
+def scenario_missing_tip(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    repo.commit("old feature", {"old.txt": "old\n"})
+    missing = "f" * 40
+    repo.switch_new("new", common)
+    new_base = repo.commit("base feature", {"base.txt": "base\n"})
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "S9-missing-tip",
+        {"C": common, "O": missing, "M": new_base, "N": new},
+        classify(repo, missing, new, DEFAULT_PATH),
+        "fail-closed",
+    )
+
+
+def scenario_unrelated_tip(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    old = repo.commit("old feature", {"old.txt": "old\n"})
+    repo.run("switch", "-q", "--orphan", "unrelated")
+    # Git 2.55 already empties the index and worktree for switch --orphan;
+    # older versions may leave tracked paths staged for removal.
+    repo.run("rm", "-r", "-q", ".", check=False)
+    new_base = repo.commit(
+        "unrelated root",
+        {
+            "README.md": "unrelated\n",
+            EVIDENCE_PATH: "unrelated evidence\n",
+        },
+    )
+    new = repo.commit("unrelated head", {"head.txt": "head\n"})
+    return make_record(
+        "S9-unrelated-tip",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "fail-closed",
+    )
+
+
+def scenario_non_commit_tip(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.write("loose-blob.txt", "this object is not a commit\n")
+    blob = repo.run("hash-object", "-w", "loose-blob.txt").stdout.decode().strip()
+    repo.switch_new("new", common)
+    new_base = repo.commit("base feature", {"base.txt": "base\n"})
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "S9-non-commit-tip",
+        {"C": common, "O": blob, "M": new_base, "N": new},
+        classify(repo, blob, new, DEFAULT_PATH),
+        "fail-closed",
+    )
+
+
+def scenario_pre_v1(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root, live=False)
+    repo.switch_new("old", common)
+    old = repo.commit(
+        "pre-v1 old action",
+        {DEFAULT_PATH: action_text(), "old.txt": "old\n"},
+    )
+    repo.switch_new("new", common)
+    new_base = repo.commit("activate v1", {"docs/queue-v1.txt": "active\n"})
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "S10-pre-v1-old-tip-action",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
 def scenario_rename_carry(root: Path) -> dict[str, object]:
     repo, common = base_repo(root)
     repo.switch_new("old", common)
@@ -690,6 +872,45 @@ def scenario_rename_carry(root: Path) -> dict[str, object]:
         {"C": common, "O": old, "M": new_base, "N": new},
         classify(repo, old, new, DEFAULT_PATH),
         "no-finding",
+    )
+
+
+def scenario_rename_then_delete(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    claimed = action_text(status="in-repair")
+    repo.commit("claim", {DEFAULT_PATH: claimed})
+    repo.commit("rename claimed action", {DEFAULT_PATH: None, RENAMED_PATH: claimed})
+    new_base = repo.commit(
+        "resolve renamed action",
+        {RENAMED_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("replay feature", {"feature.txt": "old\n"})
+    return make_record(
+        "S11-rename-then-delete",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "no-finding",
+    )
+
+
+def scenario_ambiguous_rename(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    new_base = repo.commit(
+        "duplicate action during rename",
+        {RENAMED_PATH: action_text()},
+    )
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "S11-ambiguous-rename",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
     )
 
 
@@ -713,6 +934,29 @@ def scenario_merge_base(root: Path) -> dict[str, object]:
         {"C": common, "O": old, "M": new_base, "N": new},
         classify(repo, old, new, DEFAULT_PATH),
         "no-finding",
+    )
+
+
+def scenario_merge_only_creation(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root, live=False)
+    repo.switch_new("old-left", common)
+    repo.commit("old left", {"left.txt": "left\n"})
+    repo.switch_new("old-right", common)
+    repo.commit("old right", {"right.txt": "right\n"})
+    repo.switch("old-left")
+    old = repo.merge_commit(
+        "old-right",
+        "merge creates action",
+        {DEFAULT_PATH: action_text()},
+    )
+    repo.switch_new("new", common)
+    new_base = repo.commit("new base", {"base.txt": "base\n"})
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "A1-merge-commit-only-action-creation",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
     )
 
 
@@ -775,15 +1019,162 @@ def scenario_competing_edges(root: Path) -> dict[str, object]:
     )
 
 
+def scenario_recreated_incarnation(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    repo.commit("first claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    repo.commit(
+        "first resolution",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    repo.commit("recreate same bytes", {DEFAULT_PATH: action_text()})
+    repo.commit("second claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "second resolution",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v2\n"},
+    )
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    return make_record(
+        "A3-delete-recreate-delete",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "finding",
+    )
+
+
+def scenario_multiple_bases(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("a", common)
+    a1 = repo.commit("a1", {"a.txt": "a\n"})
+    repo.switch_new("b", common)
+    b1 = repo.commit("b1", {"b.txt": "b\n"})
+    tree_a = repo.run("show", "-s", "--format=%T", a1).stdout.decode().strip()
+    tree_b = repo.run("show", "-s", "--format=%T", b1).stdout.decode().strip()
+    a2 = repo.commit_tree(tree_a, (a1, b1), "synthetic merge a")
+    b2 = repo.commit_tree(tree_b, (b1, a1), "synthetic merge b")
+    repo.run("update-ref", "refs/heads/criss-old", a2)
+    repo.run("update-ref", "refs/heads/criss-new", b2)
+    repo.switch("criss-old")
+    old = repo.commit("old criss-cross head", {"old.txt": "old\n"})
+    repo.switch("criss-new")
+    new_base = b2
+    new = repo.commit("new criss-cross head", {"new.txt": "new\n"})
+    bases = repo.merge_bases(old, new)
+    if len(bases) != 2:
+        raise AssertionError(f"fixture expected two merge bases, got {bases}")
+    return make_record(
+        "A4-criss-cross-multiple-bases",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(repo, old, new, DEFAULT_PATH),
+        "fail-closed",
+    )
+
+
+def scenario_shallow(root: Path) -> dict[str, object]:
+    source = root / "source"
+    repo, common = base_repo(source)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    repo.commit("claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "resolve",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new head", {"head.txt": "head\n"})
+
+    clone_path = root / "shallow"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            "--no-local",
+            "--depth=1",
+            "--branch",
+            "new",
+            source.resolve().as_uri(),
+            str(clone_path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    shallow = GitRepo(clone_path, initialize=False)
+    if shallow.run("cat-file", "-e", f"{old}^{{commit}}", check=False).returncode:
+        shallow.run(
+            "fetch",
+            "-q",
+            "--depth=1",
+            "origin",
+            "refs/heads/old:refs/remotes/origin/old",
+        )
+    shallow.validate_commit(old)
+    shallow.validate_commit(new)
+    return make_record(
+        "A5-shallow-both-tips-present",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        classify(shallow, old, new, DEFAULT_PATH),
+        "fail-closed",
+    )
+
+
+def scenario_long_history(root: Path) -> dict[str, object]:
+    repo, common = base_repo(root)
+    repo.switch_new("old", common)
+    old = repo.commit("old feature", {"feature.txt": "old\n"})
+    repo.switch_new("new", common)
+    for index in range(128):
+        repo.commit(
+            f"unrelated history {index:03d}",
+            {f"history/{index:03d}.txt": f"{index}\n"},
+        )
+    repo.commit("claim", {DEFAULT_PATH: action_text(status="in-repair")})
+    new_base = repo.commit(
+        "resolve",
+        {DEFAULT_PATH: None, EVIDENCE_PATH: "evidence v1\n"},
+    )
+    new = repo.commit("new head", {"head.txt": "head\n"})
+    started = time.perf_counter()
+    verdict = classify(repo, old, new, DEFAULT_PATH)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+    record = make_record(
+        "P1-long-history-cost",
+        {"C": common, "O": old, "M": new_base, "N": new},
+        verdict,
+        "no-finding",
+    )
+    record["history_commits"] = 128
+    record["elapsed_ms"] = elapsed_ms
+    return record
+
+
 INITIAL_SCENARIOS = (
     scenario_valid,
     scenario_invalid,
     scenario_old_loss,
+    scenario_changed_action,
+    scenario_mixed,
     scenario_same_path,
+    scenario_unrelated_queue,
+    scenario_fast_forward,
+    scenario_missing_tip,
+    scenario_non_commit_tip,
+    scenario_unrelated_tip,
+    scenario_pre_v1,
     scenario_rename_carry,
+    scenario_rename_then_delete,
+    scenario_ambiguous_rename,
     scenario_merge_base,
+    scenario_merge_only_creation,
     scenario_merge_only_deletion,
     scenario_competing_edges,
+    scenario_recreated_incarnation,
+    scenario_multiple_bases,
+    scenario_shallow,
+    scenario_long_history,
 )
 
 
