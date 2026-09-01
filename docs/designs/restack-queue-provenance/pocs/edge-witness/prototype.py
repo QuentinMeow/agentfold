@@ -52,6 +52,7 @@ class Metrics:
     old_parent_edges_scanned: int = 0
     candidate_commits: int = 0
     candidate_parent_edges: int = 0
+    witness_child_parent_edges_scanned: int = 0
     pre_witness_commits_scanned: int = 0
     pre_witness_parent_edges_scanned: int = 0
     post_witness_commits_scanned: int = 0
@@ -212,6 +213,7 @@ class Fixture:
     old_resolution: str | None = None
     side_resolution: str | None = None
     merge_commit: str | None = None
+    conflicting_parent: str | None = None
 
 
 def queue_path(label: str) -> str:
@@ -225,10 +227,17 @@ def evidence_path(label: str) -> str:
     return f"docs/evidence-{label}.md"
 
 
-def action_text(label: str, status: str = "open", action=None) -> str:
+def action_text(
+    label: str,
+    status: str = "open",
+    action=None,
+    action_id: str | None = None,
+) -> str:
+    action_id_line = f"**Action-ID:** {action_id}\n" if action_id else ""
     return (
         f"# Preserve {label}\n\n"
         f"**Status:** {status}\n"
+        f"{action_id_line}"
         "**Filed:** 2026-08-31\n"
         f"**Action:** {action or f'resolve {label}'}\n"
         f"**Full context:** `{evidence_path(label)}`\n"
@@ -651,6 +660,61 @@ def fixture_candidate_merge_occurrence_ambiguity(root: Path) -> Fixture:
     )
 
 
+def fixture_witness_child_sibling_same_id_conflict(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    action_id = "Q"
+    inherited = "same-id-inherited-a"
+    conflicting = "same-id-conflicting-b"
+    inherited_path = queue_path(inherited)
+    R = create_common(repo)
+
+    repo.write(evidence_path(inherited), "# Evidence inherited A: pending\n")
+    repo.write(
+        inherited_path,
+        action_text(inherited, action_id=action_id),
+    )
+    C = repo.commit("common side adds inherited action A with Action-ID Q")
+    repo.branch("old", C)
+    O = feature(repo, "same-id-old-tip")
+
+    repo.branch("claimed-a", C)
+    claimed_a = claim(repo, inherited)
+    repo.branch("conflicting-b", R)
+    repo.write(evidence_path(conflicting), "# Evidence conflicting B: pending\n")
+    repo.write(
+        queue_path(conflicting),
+        action_text(
+            conflicting,
+            action="resolve the conflicting sibling payload B",
+            action_id=action_id,
+        ),
+    )
+    conflicting_b = repo.commit(
+        "independently add conflicting unclaimed B with Action-ID Q"
+    )
+
+    repo.branch("merge-result-staging", claimed_a)
+    repo.write(evidence_path(inherited), "# Evidence inherited A: repaired\n")
+    repo.remove(inherited_path)
+    repo.write("docs/merge-evidence.md", "# Merge evidence changed\n")
+    repo.run("add", "-A")
+    merge_tree = repo.run("write-tree").stdout.strip()
+    merge_commit = repo.commit_tree(
+        merge_tree,
+        "merge claimed A with conflicting B and delete both",
+        claimed_a,
+        conflicting_b,
+    )
+    repo.branch("candidate", merge_commit)
+    N = feature(repo, "same-id-candidate-descendant")
+    return Fixture(
+        "witness-child-sibling-same-id-conflict",
+        repo, C, O, merge_commit, N, "blocking-finding",
+        (inherited_path,), merge_commit=merge_commit,
+        conflicting_parent=conflicting_b,
+    )
+
+
 def fixture_repeated_incarnation(root: Path) -> Fixture:
     repo = GitRepository(root)
     C = create_common(repo, ("repeated",))
@@ -708,6 +772,7 @@ BASE_FIXTURES = (
     fixture_old_identity_mutation_round_trip,
     fixture_candidate_side_delete_merge_undo_mutate_delete,
     fixture_candidate_merge_occurrence_ambiguity,
+    fixture_witness_child_sibling_same_id_conflict,
     fixture_repeated_incarnation,
     fixture_long_history,
 )
@@ -745,6 +810,40 @@ def text_at(revision: str, path: str, metrics: Metrics):
 
 def action_identity(path: str, text: str):
     return RECONCILE.queue_action_identity(path, text)
+
+
+def declared_action_id(text: str):
+    """Return the POC's explicit cross-path logical ID, when one exists."""
+
+    return RECONCILE.text_fields(text).get("Action-ID", "").strip() or None
+
+
+def same_id_occurrences(
+    repo: GitRepository,
+    revision: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    action_id = declared_action_id(old_text)
+    if action_id is None:
+        return ()
+    target_identity = action_identity(path, old_text)
+    occurrences = []
+    for candidate in queue_paths_at(repo, revision, metrics):
+        candidate_text = text_at(revision, candidate, metrics)
+        if candidate_text is None or declared_action_id(candidate_text) != action_id:
+            continue
+        occurrences.append({
+            "action_id": action_id,
+            "path": candidate,
+            "payload": (
+                "matching"
+                if action_identity(candidate, candidate_text) == target_identity
+                else "conflicting"
+            ),
+        })
+    return tuple(occurrences)
 
 
 def alternate_lineage_paths(
@@ -909,6 +1008,39 @@ def candidate_action_state(
 ):
     target_identity = action_identity(path, old_text)
     current = text_at(revision, path, metrics)
+    occurrences = same_id_occurrences(
+        repo, revision, path, old_text, metrics
+    )
+    if declared_action_id(old_text) is not None:
+        exact = [
+            occurrence for occurrence in occurrences
+            if occurrence["payload"] == "matching"
+        ]
+        conflicting = [
+            occurrence for occurrence in occurrences
+            if occurrence["payload"] == "conflicting"
+        ]
+        alternates = tuple(
+            occurrence["path"] for occurrence in exact
+            if occurrence["path"] != path
+        )
+        if len(occurrences) > 1:
+            state = "ambiguous"
+        elif conflicting:
+            state = "conflicting-id"
+        elif exact and exact[0]["path"] == path:
+            state = "matching"
+        elif exact:
+            state = "renamed"
+        elif current is None:
+            state = "absent"
+        else:
+            state = "different"
+        return {
+            "alternate_paths": alternates,
+            "same_id_occurrences": occurrences,
+            "state": state,
+        }
     alternates = alternate_lineage_paths(
         repo, revision, path, old_text, metrics
     )
@@ -920,7 +1052,62 @@ def candidate_action_state(
         state = "matching"
     else:
         state = "different"
-    return {"alternate_paths": alternates, "state": state}
+    return {
+        "alternate_paths": alternates,
+        "same_id_occurrences": (),
+        "state": state,
+    }
+
+
+def witness_child_parent_breaks(
+    repo: GitRepository,
+    witness_parent: str,
+    witness_child: str,
+    path: str,
+    old_text: str,
+    metrics: Metrics,
+):
+    parents = RECONCILE.revision_parents(
+        witness_child, f"witness-child parents of {witness_child}"
+    )
+    parent_occurrences = []
+    for parent in parents:
+        metrics.witness_child_parent_edges_scanned += 1
+        parent_occurrences.append({
+            "oid": parent,
+            **candidate_action_state(repo, parent, path, old_text, metrics),
+        })
+    by_oid = {
+        occurrence["oid"]: occurrence for occurrence in parent_occurrences
+    }
+    selected = by_oid.get(witness_parent)
+    breaks = []
+    if selected is None or selected["state"] != "matching":
+        breaks.append({
+            "child": witness_child,
+            "event": "witness-parent-occurrence-not-unique",
+            "parent_occurrences": parent_occurrences,
+            "selected_parent": witness_parent,
+        })
+    for occurrence in parent_occurrences:
+        if occurrence["oid"] == witness_parent or occurrence["state"] == "absent":
+            continue
+        state = occurrence["state"]
+        if state == "conflicting-id":
+            event = "witness-child-sibling-same-id-conflict"
+        elif state == "ambiguous":
+            event = "witness-child-sibling-multiple-copies"
+        elif state in {"matching", "renamed"}:
+            event = "witness-child-sibling-occurrence-ambiguity"
+        else:
+            event = "witness-child-sibling-unproven-occurrence"
+        breaks.append({
+            "child": witness_child,
+            "event": event,
+            "parent_occurrence": occurrence,
+            "selected_parent": witness_parent,
+        })
+    return breaks
 
 
 def pre_witness_occurrence_breaks(
@@ -948,21 +1135,27 @@ def pre_witness_occurrence_breaks(
                 repo, parent, path, old_text, metrics
             )
             parent_occurrences.append({"oid": parent, **state})
+        hazards = [
+            occurrence for occurrence in parent_occurrences
+            if occurrence["state"] in {
+                "ambiguous", "conflicting-id", "different", "renamed"
+            }
+        ]
+        if hazards:
+            breaks.append({
+                "child": revision,
+                "event": "pre-witness-parent-occurrence-not-proven",
+                "parent_occurrences": parent_occurrences,
+            })
+            break
         matches = [
             occurrence for occurrence in parent_occurrences
-            if occurrence["state"] in {"matching", "renamed", "ambiguous"}
+            if occurrence["state"] == "matching"
         ]
         if len(matches) > 1:
             breaks.append({
                 "child": revision,
                 "event": "multi-parent-occurrence-ambiguity",
-                "parent_occurrences": parent_occurrences,
-            })
-            break
-        if len(matches) == 1 and matches[0]["state"] != "matching":
-            breaks.append({
-                "child": revision,
-                "event": "pre-witness-rename-ambiguity",
                 "parent_occurrences": parent_occurrences,
             })
             break
@@ -975,6 +1168,10 @@ def pre_witness_occurrence_breaks(
 def post_witness_event(parent_state, child_state, merge):
     before = parent_state["state"]
     after = child_state["state"]
+    if "conflicting-id" in (before, after):
+        return "same-id-conflicting-incarnation"
+    if "ambiguous" in (before, after):
+        return "multiple-same-id-copies"
     if "renamed" in (before, after) or "ambiguous" in (before, after):
         return "rename-ambiguity"
     if merge and before != "absent":
@@ -1079,6 +1276,9 @@ def deletion_witnesses(
             problem = RECONCILE.queue_deletion_problem(
                 path, before, parent, commit
             )
+            witness_parent_breaks = witness_child_parent_breaks(
+                repo, parent, commit, path, old_text, metrics
+            )
             occurrence_breaks = pre_witness_occurrence_breaks(
                 repo, parent, path, old_text, metrics
             )
@@ -1089,11 +1289,13 @@ def deletion_witnesses(
                 {
                     "causally_continuous_to_N": not continuity_breaks,
                     "child": commit,
+                    "deletion_parent_unambiguous": not witness_parent_breaks,
                     "occurrence_unambiguous": not occurrence_breaks,
                     "parent": parent,
                     "post_witness_breaks": continuity_breaks,
                     "pre_witness_occurrence_breaks": occurrence_breaks,
                     "problem": problem,
+                    "witness_child_parent_breaks": witness_parent_breaks,
                 }
             )
     return witnesses
@@ -1128,6 +1330,12 @@ def classification_reason(items, fast_forward=False):
                 f"{path} has a locally valid deletion edge, but its claimed "
                 "occurrence is ambiguous across multiple merge parents"
             )
+        elif verdict == "invalid-witness-child-parent-ambiguity":
+            parts.append(
+                f"{path} has a locally valid deletion edge, but another parent "
+                "of the deletion commit carries a conflicting or unproven "
+                "incarnation"
+            )
         elif verdict == "different-incarnation-witness":
             parts.append(
                 f"{path} has a valid candidate-side deletion edge for byte-identical "
@@ -1147,6 +1355,7 @@ def classify(
     fixture: Fixture,
     enforce_incarnation_provenance=True,
     enforce_old_edge_continuity=True,
+    enforce_witness_child_parents=True,
     enforce_pre_witness_occurrence=True,
     enforce_post_witness_continuity=True,
 ):
@@ -1262,7 +1471,17 @@ def classify(
                 valid = [witness for witness in witnesses if witness["problem"] is None]
                 if len(witnesses) == 1 and len(valid) == 1:
                     witness = witnesses[0]
-                    if enforce_pre_witness_occurrence and witness[
+                    if enforce_witness_child_parents and witness[
+                        "witness_child_parent_breaks"
+                    ]:
+                        verdict = "invalid-witness-child-parent-ambiguity"
+                        problem = (
+                            "a deletion-commit parent carries the same logical "
+                            "Action-ID through a conflicting, duplicated, renamed, "
+                            "or otherwise unproven occurrence"
+                        )
+                        finding = True
+                    elif enforce_pre_witness_occurrence and witness[
                         "pre_witness_occurrence_breaks"
                     ]:
                         verdict = "invalid-witness-occurrence-ambiguity"
@@ -1517,6 +1736,46 @@ def verify_result(fixture: Fixture, result):
                 problems.append("multi-parent occurrence event was not emitted")
             if not witness["causally_continuous_to_N"]:
                 problems.append("occurrence fixture accidentally tested post-causality")
+    if fixture.scenario_id == "witness-child-sibling-same-id-conflict":
+        item = result["items"][fixture.expected_findings[0]]
+        if item["evidence_verdict"] != (
+            "invalid-witness-child-parent-ambiguity"
+        ):
+            problems.append("same-ID sibling-parent conflict was accepted")
+        if len(item["witnesses"]) != 1:
+            problems.append("same-ID fixture did not isolate one deletion witness")
+        else:
+            witness = item["witnesses"][0]
+            if witness["problem"] is not None:
+                problems.append("raw production deletion helper did not false-green")
+            if witness["deletion_parent_unambiguous"]:
+                problems.append("deletion child's parent set was treated as unambiguous")
+            conflicts = [
+                event for event in witness["witness_child_parent_breaks"]
+                if event["event"] == (
+                    "witness-child-sibling-same-id-conflict"
+                )
+            ]
+            if len(conflicts) != 1:
+                problems.append("same-ID sibling conflict event was not isolated")
+            elif conflicts[0]["parent_occurrence"]["oid"] != (
+                fixture.conflicting_parent
+            ):
+                problems.append("same-ID conflict was attributed to the wrong parent")
+            elif conflicts[0]["parent_occurrence"][
+                "same_id_occurrences"
+            ] != ({
+                "action_id": "Q",
+                "path": queue_path("same-id-conflicting-b"),
+                "payload": "conflicting",
+            },):
+                problems.append("same-ID conflict payload/path was not preserved")
+            if result["metrics"]["witness_child_parent_edges_scanned"] != 2:
+                problems.append("scanner did not inspect both deletion-child parents")
+            if witness["pre_witness_occurrence_breaks"]:
+                problems.append("fixture accidentally tested pre-witness continuity")
+            if witness["post_witness_breaks"]:
+                problems.append("fixture accidentally tested post-witness continuity")
     if fixture.scenario_id == "repeated-incarnation-ambiguity":
         item = result["items"][queue_path("repeated")]
         if len(item["witnesses"]) != 2:
@@ -1643,6 +1902,34 @@ def executable_controls(fixtures, results):
         ],
         "raw_production_problem": occurrence_witness["problem"],
         "status": "OBSERVED_RED",
+    })
+
+    sibling_conflict = fixtures[
+        "witness-child-sibling-same-id-conflict"
+    ]
+    damaged_witness_parents = classify(
+        sibling_conflict, enforce_witness_child_parents=False
+    )
+    sibling_path = queue_path("same-id-inherited-a")
+    if damaged_witness_parents["classification"] != "no-finding":
+        raise AssertionError(
+            "damaged witness-child-parent control did not reproduce the false green"
+        )
+    sibling_witness = damaged_witness_parents["items"][sibling_path][
+        "witnesses"
+    ][0]
+    controls.append({
+        "conflicting_parent": sibling_conflict.conflicting_parent,
+        "control": "observed-red-witness-child-same-id-conflict",
+        "damaged_classification": damaged_witness_parents["classification"],
+        "expected": sibling_conflict.expected_verdict,
+        "merge_commit": sibling_conflict.merge_commit,
+        "raw_production_problem": sibling_witness["problem"],
+        "status": "OBSERVED_RED",
+        "witness_child_parent_events": [
+            event["event"]
+            for event in sibling_witness["witness_child_parent_breaks"]
+        ],
     })
 
     s2 = fixtures["S2-invalid-base-deletion"]
