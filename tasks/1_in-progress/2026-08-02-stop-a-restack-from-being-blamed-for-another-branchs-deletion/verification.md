@@ -50,6 +50,17 @@ and no production implementation began from this revision.
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded role-specific ordinary design review
+
+**Reviewed revision:** `6ea2d284a882daebae6f043ba4762bbd80b3b6ea`
+
+- semantic/DAG / r18-semantic-design: `block` — path-history admission omitted unchanged live handovers, so a pre-range v1 mutation followed by an unrelated candidate delta could become falsely clean.
+- budgets/transaction/composition / receipt-contract: `block` — side-marker bytes were undercounted; two byte boundaries were unreachable; path and child caps contradicted each other; the retained snapshot had no aggregate budget; and tracked pre-push hooks could compose an exact publication.
+- workflow/adapter/human / r18-workflow-design: `approve` — source-distinct trust, no-observation states, anonymous fork transport, attempts, canary cleanup, and configuration-closed leases were coherent.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded observable-provider design review
 
 **Reviewed revision:** `10e2d6a1cf2e7983301cdb10dd9ba1dbd976de81`

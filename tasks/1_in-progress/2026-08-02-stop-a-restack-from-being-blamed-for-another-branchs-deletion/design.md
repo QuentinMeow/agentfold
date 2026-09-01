@@ -1749,3 +1749,138 @@ A fresh full five-lens immutable review remains the implementation gate. The ord
 snapshot and result transaction are now part of core scope because they replace existing
 unbounded production history used by Strategy A composition. Optional provider work still
 waits on transport/canary evidence.
+
+## 2026-09-01 correction amendment 9 — complete handover scope and reachable budgets
+
+The review of `6ea2d284a882daebae6f043ba4762bbd80b3b6ea` found that the
+ordinary preflight omitted unchanged live handovers, undercounted side markers, promised
+two unreachable byte boundaries, admitted more path requests than its child budget, left
+the retained snapshot unbounded, and allowed tracked hooks to compose an otherwise exact
+push. This section supersedes the affected handover-input, reachable-graph-accounting,
+ordinary-snapshot-budget, publication-command, and parity-test clauses above. The accepted
+continuity classifier and provider observation model are unchanged.
+
+### Candidate-complete handover request set
+
+Handover history is admitted from the exact bound ordinary candidate, not merely from its
+range delta. The candidate is `N` for a direct checkout and the already validated exact
+two-parent synthetic candidate `H` otherwise. Before launching any path-history child,
+preflight streams this literal candidate-tree query:
+
+```sh
+git --no-replace-objects ls-tree -rz --full-tree <candidate> -- \
+  ':(glob)history/conversations/*/handover.md'
+```
+
+Only regular `100644` or `100755` rows with the exact four-component governed handover
+grammar are retained. A malformed row, duplicate path with conflicting identity, symlink,
+submodule, or path outside that grammar is not silently promoted to a live handover. The
+tree stream is capped at 512 raw rows, 8 MiB total bytes, 8 MiB path bytes, and a 4 MiB
+peak row before a path is retained.
+
+The closed handover request registry is the deduplicated union of:
+
+1. every regular governed live handover in that candidate tree, including one inherited
+   unchanged from `B` or from a synthetic candidate's first parent;
+2. every handover path in candidate admission/mutation edge deltas, including a record
+   added and deleted before the final tree; and
+3. every deleted, restored, or same-path re-created incarnation needed by the existing
+   prior-incarnation checks.
+
+The registry key is `(path, literal command shape, exact scope/head)` rather than just the
+path. It admits at most 256 unique paths and 512 unique request keys. Every key maps to one
+existing literal Git history command and one child; no consumer may issue an unregistered
+query or reinterpret another key's result. The 512 handover-child limit therefore is
+reachable and cannot be exceeded even when one path needs multiple command shapes. An
+over-limit union is ordinary incomplete before any history child, checker, output, or
+writer begins.
+
+This preserves current semantics for an unchanged live v1 handover: its candidate bytes
+are still compared with its current incarnation's add snapshot even when the only
+`B...N` delta is unrelated. Direct and synthetic parity fixtures cover both a valid
+unchanged live handover and a handover mutated before `B` followed by an unrelated
+candidate commit. Removing the live-candidate member from the union makes the latter
+fixture falsely clean and is an observed-red damage control.
+
+### Raw stream accounting and reachable byte observations
+
+The 4,096 revision-token and 8,192 parent-token limits count raw emitted records and raw
+parent OID fields across both ordinary rev-list streams before OID deduplication. Retained
+unique revisions, parent edges, side markers, and consumer-role references are separate
+snapshot charges. Every `--left-right` record's leading `<` or `>` is retained and charged.
+
+Under the raw structural limits, rev-list stdout has derived maxima of 802,816 bytes in
+aggregate and 532,546 bytes for one side-marked octopus line, including delimiters and
+newline. These are derived observations, not separately configurable gates: structural
+token limits own refusal, and observed-minus-one byte observers prove that marker or
+delimiter undercounting is detected. Tests include a side-marked octopus record and
+overlapping `C..N`/`B...N` streams; a token emitted twice is charged twice before retained
+deduplication.
+
+Activation and handover-history stdout bytes are likewise derived from their hash-only
+grammars. Their maxima are 532,480 bytes for 8,192 activation rows and 4,259,840 bytes for
+65,536 handover rows, including one newline per 64-byte OID. The former 1 MiB and 8 MiB
+independent exact/+1 promises are withdrawn. Row grammar and row count own production
+refusal; observed-minus-one byte injections prove complete accounting, while malformed,
+partial, overlong, or non-hex rows refuse independently.
+
+### Aggregate retained snapshot transaction
+
+`OrdinaryHistorySnapshot` is one compact, transaction-local arena. It uses integer indices
+and immutable byte slices rather than a graph of recursively owned Python objects. Before
+retaining anything it charges all revision rows, root rows, tree rows, delta rows,
+activation rows, handover rows, ancestry states/transitions, request keys, parent edges,
+role memberships, cache references, raw payload bytes, index bytes, and fixed record
+framing. The closed aggregate caps are:
+
+| Snapshot dimension | Limit |
+|---|---:|
+| Retained rows | 524,288 |
+| Retained references | 1,048,576 |
+| Arena bytes, including indices and framing | 64 MiB |
+| Peak admitted record | 4 MiB |
+
+These aggregate gates are independent and lower than the sum of compatible family
+maxima. Test-only deterministic stream fixtures reach each aggregate limit while every
+family remains below its own limit, then add exactly one row, reference, byte, or
+peak-record byte. The exact case completes; each +1 case exits 2 with zero ordinary
+Findings/output/writers, closes every reader, kills and reaps every child process group,
+and releases the arena. A `tracemalloc` regression ceiling records implementation overhead
+for the maximum supported fixture; it supplements rather than replaces logical charging.
+
+All prior per-family counters continue to apply, except that the handover path/request
+limits above replace 2,048 paths and make the 512-child ceiling structurally reachable.
+The 1,024 aggregate ordinary-child limit counts root, activation, handover, rev-list,
+delta, object-reader, and any other registered ordinary child across successful and failed
+paths.
+
+### Hook-closed exact publication
+
+Every create, update, repair, and deletion push disables repository and global hooks in
+the trusted invocation itself. The exact update/repair command is now:
+
+```sh
+git -c core.hooksPath=/dev/null \
+  -c push.followTags=false \
+  -c push.recurseSubmodules=no \
+  push --no-follow-tags --recurse-submodules=no \
+  --force-with-lease=refs/heads/<branch>:<O> \
+  origin <N>:refs/heads/<branch>
+```
+
+Creation and deletion use the same trusted `-c` overrides and flags with their previously
+specified empty expected value or empty source. The procedure verifies after applying
+those overrides that `core.hooksPath` resolves exactly to the operating-system null device
+at /dev/null; it does not execute
+an alias, wrapper, or candidate-provided publication script. A hostile tracked executable
+pre-push hook fixture under the tracked hook directory attempts to move a second ref and
+write a sentinel;
+neither effect may occur, and only the exact leased destination ref may change. Existing
+URL, mirror, rewrite, tag, submodule, refspec, and lease hostile tests remain mandatory.
+
+### Gate boundary
+
+Production remains unopened. A fresh five-lens review must accept one immutable revision
+containing this correction and every earlier superseding amendment. Optional GitHub
+adapter implementation still requires bounded transport and live canary evidence; a core
+implementation cannot infer adapter success from the design review.

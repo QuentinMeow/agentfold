@@ -125,6 +125,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   configuration-closed push commands with hostile-config tests.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Complete handover-scope and reachable-budget correction (codex)
+
+- The next panel accepted workflow/provider behavior but found that delta-only handover
+  requests missed unchanged live v1 records, allowing a pre-range mutation plus unrelated
+  delta to become falsely clean.
+- Budget review also found omitted `--left-right` marker bytes, two unreachable exact byte
+  limits, a path/child-cap contradiction, no aggregate retained-snapshot budget, and a
+  tracked pre-push hook path around exact one-ref publication.
+- Appended candidate-tree-complete handover admission with request-key caps; raw-versus-
+  retained stream accounting and reachable derived observations; an independently capped
+  compact snapshot arena; and trusted hook-disabled publication plus hostile-hook parity.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Derived-counter and bounded ordinary-history correction (codex)
 
 - Semantic review accepted again. The other lenses found unreachable independent +1
