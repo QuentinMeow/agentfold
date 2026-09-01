@@ -94,6 +94,7 @@ class Damage:
     collapse_multiplicity: bool = False
     reopen_pre_c_genealogy: bool = False
     enforce_post_event_absence: bool = True
+    sole_valid_ignores_competitors: bool = False
 
 
 @dataclasses.dataclass
@@ -1407,15 +1408,23 @@ class Classifier:
     def final_absence_participants(
         self, identity: tuple, events: list[Event]
     ) -> list[Event]:
-        """Keep every event in a reintroduced occurrence's final history."""
+        """Find the event frontier at M, extended after reintroduction."""
         assert self.graph is not None
+        boundary = (
+            self.fixture.M
+            if self.absence_problem(
+                identity, self.fixture.M, self.fixture.N
+            )
+            is None
+            else self.fixture.N
+        )
         continuous = [
             event
             for event in events
             if (
                 event.child is not None
                 and self.absence_problem(
-                    identity, event.child, self.fixture.N
+                    identity, event.child, boundary
                 )
                 is None
             )
@@ -1450,7 +1459,7 @@ class Classifier:
     def aggregate_blocking_history(
         self, identity: tuple, events: list[Event]
     ) -> Event:
-        """Return non-authorizing evidence for all causal occurrences."""
+        """Merge one root's wrappers or block competing causal roots."""
         assert events
         authority_edges = self.stable_edges(
             edge for event in events for edge in event.authority_edges
@@ -1474,28 +1483,47 @@ class Classifier:
             self.has_reintroduction(identity, event) for event in events
         )
         root_roles_compete = len(causal_roots) != 1
-        ambiguous = (
+        unique_valid_root = bool(
+            len(causal_roots) == 1
+            and causal_roots[0]["status"] == "valid"
+            and all(event.status == "valid" for event in events)
+        )
+        ambiguous = not unique_valid_root and (
             reintroduced
             or root_roles_compete
             or any(event.status == "ambiguous" for event in events)
+            or any(event.status == "valid" for event in events)
             or len({event.status for event in events}) != 1
         )
-        status = "ambiguous" if ambiguous else events[-1].status
-        reason_code = (
-            "reintroduced-competing-occurrences"
-            if reintroduced
-            else "competing-blocking-events"
+        status = (
+            "valid"
+            if unique_valid_root
+            else ("ambiguous" if ambiguous else events[-1].status)
         )
-        reason = (
-            "final absence has multiple causal occurrences: "
-            + "; ".join(
-                f"{event.reason_code}@{event.child}: {event.reason}"
-                for event in events
+        if unique_valid_root:
+            reason_code = "valid-shared-causal-root"
+            reason = (
+                "all final-absence wrappers share exactly one canonical "
+                "valid root: "
             )
+        elif reintroduced:
+            reason_code = "reintroduced-competing-occurrences"
+            reason = "final absence has multiple causal occurrences: "
+        else:
+            reason_code = "competing-final-absence-roots"
+            reason = "final absence has competing causal roots: "
+        reason += "; ".join(
+            f"{event.reason_code}@{event.child}: {event.reason}"
+            for event in events
         )
+        modes = {event.mode for event in events}
         result = Event(
             status,
-            "ambiguous" if status == "ambiguous" else events[-1].mode,
+            (
+                "ambiguous"
+                if status == "ambiguous" or len(modes) != 1
+                else events[-1].mode
+            ),
             events[-1].child,
             authority_edges,
             propagation_edges,
@@ -1511,15 +1539,45 @@ class Classifier:
     def select_event(self, identity: tuple) -> Event:
         events = self.direct_events(identity) + self.supplier_events(identity)
         valid = [event for event in events if event.status == "valid"]
-        participants = self.final_absence_participants(identity, events)
         if (
-            len(participants) > 1
-            and any(
-                self.has_reintroduction(identity, event)
-                for event in participants
+            self.damage.sole_valid_ignores_competitors
+            or not self.damage.enforce_post_event_absence
+        ) and len(valid) == 1:
+            return valid[0]
+        participants = self.final_absence_participants(identity, events)
+        if participants:
+            chosen = (
+                self.aggregate_blocking_history(identity, participants)
+                if len(participants) > 1
+                else participants[0]
             )
-        ):
-            return self.aggregate_blocking_history(identity, participants)
+            if chosen.status == "valid" and not (
+                len(chosen.causal_roots) == 1
+                and chosen.causal_roots[0]["status"] == "valid"
+            ):
+                chosen = self.aggregate_blocking_history(
+                    identity, [chosen]
+                )
+            authority = {
+                (edge["parent"], edge["child"])
+                for edge in chosen.authority_edges
+            }
+            propagation = {
+                (edge["parent"], edge["child"])
+                for edge in chosen.propagation_edges
+            }
+            if (
+                chosen.status == "valid"
+                and authority.intersection(propagation)
+                and not self.damage.allow_supplier_borrow
+            ):
+                return dataclasses.replace(
+                    chosen,
+                    status="ambiguous",
+                    reason_code="mode-edge-overlap",
+                    reason="authority and propagation edge sets overlap",
+                )
+            return chosen
         if len(valid) == 1:
             chosen = valid[0]
             authority = {
@@ -1577,10 +1635,6 @@ class Classifier:
                 ),
             )
         if events:
-            if len(participants) > 1:
-                return self.aggregate_blocking_history(identity, participants)
-            if len(participants) == 1:
-                return participants[0]
             ambiguous = [
                 event for event in events if event.status == "ambiguous"
             ]
@@ -3604,6 +3658,138 @@ def r5_reintroduced_supplier_history(
     )
 
 
+def r6_all_absent_roots(
+    root: Path, *, first_valid: bool, second_kind: str
+) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = f"r6-{first_valid}-{second_kind}"
+    R = repo.commit(f"create {label} pre-C root")
+    path = add_agent(repo, label)
+    text = repo.read(path)
+    C = repo.commit(f"create {label} action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    roots = []
+    statuses = []
+    for index, valid in enumerate((first_valid, False), start=1):
+        kind = "valid" if valid else second_kind
+        if index == 1 and not first_valid:
+            kind = "invalid"
+        if kind == "ambiguous":
+            repo.branch(f"{label}-foreign-{index}", R)
+            add_agent(repo, label, path=path, text=text)
+            claim(repo, (path,), f"claim foreign occurrence {index}")
+            deletion = delete_with_evidence(
+                repo,
+                ((label, path),),
+                f"delete foreign occurrence {index}",
+            )
+        else:
+            repo.branch(f"{label}-root-{index}", C)
+            if kind == "valid":
+                claim(repo, (path,), f"claim valid occurrence {index}")
+                deletion = delete_with_evidence(
+                    repo,
+                    ((label, path),),
+                    f"delete valid occurrence {index}",
+                )
+            else:
+                repo.remove(path)
+                deletion = repo.commit(
+                    f"delete invalid occurrence {index} without authority"
+                )
+        roots.append(deletion)
+        statuses.append(kind)
+    M = repo.merge_commit(
+        tuple(roots),
+        "join all-absent causal roots",
+        removes=(path,),
+    )
+    N = feature(repo, f"{label}-old")
+    scenario = {
+        (True, "invalid"): "R6-01-valid-plus-invalid-all-absent",
+        (True, "ambiguous"): "R6-02-valid-plus-ambiguous-all-absent",
+        (False, "invalid"): "R6-03-two-invalid-all-absent",
+    }[(first_valid, second_kind)]
+    return Fixture(
+        scenario,
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "blocking-finding",
+        {
+            "causal_events": roots,
+            "causal_statuses": statuses,
+            "expected_problem_count": sum(
+                status != "valid" for status in statuses
+            ),
+            "legacy_sole_valid_false_green": first_valid,
+        },
+    )
+
+
+def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r6-same-root-all-absent"
+    R = repo.commit("create same-root all-absent pre-C root")
+    path = add_agent(repo, label)
+    C = repo.commit("create same-root all-absent action at C")
+    repo.branch("old", C)
+    O = feature(repo, f"{label}-old")
+    repo.branch("r6-shared-root", C)
+    claim(repo, (path,), "claim shared all-absent root")
+    valid_root = delete_with_evidence(
+        repo,
+        ((label, path),),
+        "resolve shared all-absent root",
+    )
+    wrappers = [
+        r4_supplier_wrapper(
+            repo,
+            C=C,
+            R=R,
+            path=path,
+            absent_parents=(valid_root,),
+            suffix=f"r6-wrapper-{index}",
+        )
+        for index in (1, 2)
+    ]
+    M = repo.merge_commit(
+        tuple(wrapper["adoption"] for wrapper in wrappers),
+        "join equal-root all-absent wrappers",
+        removes=(path,),
+    )
+    N = feature(repo, f"{label}-old")
+    return Fixture(
+        "R6-04-same-valid-root-all-absent-wrappers",
+        repo,
+        C,
+        O,
+        M,
+        N,
+        "no-finding",
+        {
+            "causal_events": [valid_root],
+            "wrapper_events": [
+                wrapper["adoption"] for wrapper in wrappers
+            ],
+            "carriers": [wrapper["carrier"] for wrapper in wrappers],
+            "neutral_parents": [
+                wrapper["neutral"] for wrapper in wrappers
+            ],
+            "absent_parents": [valid_root],
+            "reason_children": [
+                valid_root,
+                *(wrapper["adoption"] for wrapper in wrappers),
+            ],
+        },
+    )
+
+
 def generated_retry(repo: GitRepository, bad_path: str):
     finding = RECONCILE.Finding(
         "queue-name", Path(bad_path), "bad name", "rename it"
@@ -4319,6 +4505,16 @@ def scenario_builders():
         lambda root: r5_reintroduced_supplier_history(
             root, later_valid=True
         ),
+        lambda root: r6_all_absent_roots(
+            root, first_valid=True, second_kind="invalid"
+        ),
+        lambda root: r6_all_absent_roots(
+            root, first_valid=True, second_kind="ambiguous"
+        ),
+        lambda root: r6_all_absent_roots(
+            root, first_valid=False, second_kind="invalid"
+        ),
+        r6_same_root_all_absent_wrappers,
     ]
 
 
@@ -4328,6 +4524,7 @@ CONTROL_NAMES = (
     "identity-multiplicity-collapsed-to-set",
     "reopen-pre-C-genealogy",
     "missing-post-event-continuity",
+    "sole-valid-ignores-invalid-root",
 )
 
 
@@ -5044,6 +5241,116 @@ def validate_result(result: dict):
             errors.append(
                 "R5 reintroduction history lost a causal occurrence"
             )
+    if scenario in {
+        "R6-01-valid-plus-invalid-all-absent",
+        "R6-02-valid-plus-ambiguous-all-absent",
+        "R6-03-two-invalid-all-absent",
+    }:
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        root_children = [
+            root["root_child"]
+            for root in (
+                action["causal_roots"] if action is not None else []
+            )
+        ]
+        root_statuses = [
+            root["status"]
+            for root in (
+                action["causal_roots"] if action is not None else []
+            )
+        ]
+        reason_children = {
+            record["source_child"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        }
+        if (
+            result["classification"] != "blocking-finding"
+            or status != "ambiguous"
+            or result["event_mode"] != "ambiguous"
+            or action is None
+            or action["reason_code"]
+            != "competing-final-absence-roots"
+            or [
+                edge["child"] for edge in result["authority_edges"]
+            ]
+            != details["causal_events"]
+            or root_children != details["causal_events"]
+            or root_statuses != details["causal_statuses"]
+            or set(details["causal_events"]) - reason_children
+            or len(propagation) != 0
+            or sum(
+                edge["problem"] is not None
+                for edge in result["authority_edges"]
+            )
+            != details["expected_problem_count"]
+        ):
+            errors.append("R6 competing all-absent roots false-greened")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in (
+                details["causal_events"]
+                + [
+                    edge[key]
+                    for edge in result["authority_edges"]
+                    for key in ("parent", "child")
+                ]
+            )
+        ):
+            errors.append("R6 competing roots emitted a non-full OID")
+    if scenario == "R6-04-same-valid-root-all-absent-wrappers":
+        details = result["details"]
+        action = actions[0] if len(actions) == 1 else None
+        roots = action["causal_roots"] if action is not None else []
+        reason_children = [
+            record["source_child"]
+            for record in (
+                action["reason_records"] if action is not None else []
+            )
+        ]
+        if (
+            result["classification"] != "no-finding"
+            or status != "valid"
+            or result["event_mode"] != "supplier"
+            or action is None
+            or action["reason_code"] != "valid-shared-causal-root"
+            or [edge["child"] for edge in result["authority_edges"]]
+            != details["causal_events"]
+            or [
+                (edge["parent"], edge["child"])
+                for edge in result["propagation_edges"]
+            ]
+            != list(
+                zip(
+                    details["carriers"],
+                    details["wrapper_events"],
+                    strict=True,
+                )
+            )
+            or action["neutral_parents"] != details["neutral_parents"]
+            or action["absent_parents"] != details["absent_parents"]
+            or len(roots) != 1
+            or roots[0]["status"] != "valid"
+            or roots[0]["root_child"] != details["causal_events"][0]
+            or reason_children[:3] != details["reason_children"]
+        ):
+            errors.append("R6 collapsed or blocked equal-root wrappers")
+        if any(
+            len(oid) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in oid)
+            for oid in (
+                details["causal_events"]
+                + details["wrapper_events"]
+                + details["carriers"]
+                + details["neutral_parents"]
+                + details["absent_parents"]
+                + details["reason_children"]
+            )
+        ):
+            errors.append("R6 equal-root wrappers emitted a non-full OID")
     if scenario == "PCX-14-valid-human-supplier":
         if result["event_mode"] != "supplier" or status != "valid":
             errors.append("PCX-14 did not validate human supplier")
@@ -5143,6 +5450,14 @@ def control_builder(name: str, root: Path):
         return (
             p17_post_event_reintroduction(root),
             Damage(enforce_post_event_absence=False),
+            "no-finding",
+        )
+    if name == "sole-valid-ignores-invalid-root":
+        return (
+            r6_all_absent_roots(
+                root, first_valid=True, second_kind="invalid"
+            ),
+            Damage(sole_valid_ignores_competitors=True),
             "no-finding",
         )
     raise ValueError(name)

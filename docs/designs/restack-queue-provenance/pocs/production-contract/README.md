@@ -1,7 +1,7 @@
 # Production-contract provenance POC
 
 No reader action is needed: this isolated POC passes all 49 prescribed real-Git
-scenarios, 16 focused contract regressions, and all five damaged-mode controls,
+scenarios, 20 focused contract regressions, and all six damaged-mode controls,
 without changing production code.
 
 Before this POC, the proposed restack exception had no executable proof that it
@@ -27,7 +27,7 @@ worktree's current `automation/reconcile/reconcile.py`:
 The final self-test produced this summary and exited `0`:
 
 ```json
-{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 5, "controls_total": 5, "failures": [], "git": "git version 2.55.0", "passed": 65, "python": "3.14.7", "summary": "PASS", "total": 65}
+{"aliases_passed": 4, "aliases_total": 4, "controls_passed": 6, "controls_total": 6, "failures": [], "git": "git version 2.55.0", "passed": 69, "python": "3.14.7", "summary": "PASS", "total": 69}
 ```
 
 Environment: macOS 26.5.1 on arm64, Python 3.14.7, Git 2.55.0.
@@ -78,6 +78,17 @@ valid roots, multiple invalid roots, or mixed valid and invalid roots are
 ambiguous. Invalid and ambiguous descendants remain traceable for later evidence
 but never enter the authorization set.
 
+Event selection computes the final-absence frontier before considering a sole
+valid event. When the action is absent at `M`, every continuous causal root
+that feeds that absence participates. Authorization requires exactly one
+canonical valid root and no invalid or ambiguous competitor. Several supplier
+wrappers of that same root merge their evidence and may authorize; distinct
+valid, invalid, or ambiguous roots block. A branch that is already absent and
+joins only after an authorized `M` is not retroactively causal. If the identity
+actually reappears, or a later carrying parent otherwise breaks continuous
+absence after `M`, the frontier extends to `N`. Reintroduced earlier and later
+occurrences both participate.
+
 If a supplier-authorized occurrence is later reintroduced and deleted again,
 the classifier does not select only the last deletion. It finds the events in
 the final-absence causal history and stable-aggregates every authority edge,
@@ -115,7 +126,7 @@ The adjudication's S-labels are aliases for four existing P fixtures, not extra
 scenarios. `--self-test` emits a `scenario_alias_inventory` record and compares
 every observed field below with the literal expectations in
 `SCENARIO_ALIASES`. An alias mismatch fails the whole self-test while the
-scenario total remains 65.
+scenario total remains 69.
 
 | Alias | Maps to | Classification | Evidence status | Mode | Authority / propagation edges |
 |---|---|---|---|---|---|
@@ -381,6 +392,49 @@ propagation 295eee5d213e52511863f8a3208b832941959e86 -> 3b0a6316833b818079a00141
 authority2 e1127dd93fc3b2324b7181086232ce6946e44cbe -> b51f3158e90132b85b13544e650101185228505a (valid)
 ```
 
+### All-absent frontier regressions
+
+The r6 fixtures prove that a sole passing edge cannot hide another root feeding
+the same absence at `M`:
+
+| Case | Observed result |
+|---|---|
+| `R6-01-valid-plus-invalid-all-absent` | ambiguous; both authority edges, their valid/invalid root tags, event OIDs, reasons, and the invalid production verdict remain visible |
+| `R6-02-valid-plus-ambiguous-all-absent` | ambiguous; the valid `C`-rooted edge cannot override a foreign/discontinuous root |
+| `R6-03-two-invalid-all-absent` | ambiguous; both invalid roots and both missing-claim verdicts remain visible |
+| `R6-04-same-valid-root-all-absent-wrappers` | valid supplier; two wrappers of one canonical valid root merge to one authority edge, two propagation edges, two neutral parents, and one absent root |
+
+```text
+R6-01  C 566072d117ff7a1e4309949f6a885bd8e26d65d2
+        O 5dc5378fdc316aa30dce282d0388a438d755b067
+        M c1d92f49ddecd5097d7db52863c2b8e990b43810
+        N abe68c6bcfb89b4194e7d9f3ace08a58e985a450
+valid     7a1ee6b0fe01d25adab3131239ad4f7728bae45b -> b3c7cbbaeba2bfa439cd71dea95572e8a2a29d31
+invalid   566072d117ff7a1e4309949f6a885bd8e26d65d2 -> f94d0c965cca8ea6a8405fd160219a9f4ee6fee2
+
+R6-02  C f61617485ff0160e37de559fe752c56ff3bcb5f7
+        O 10a37a2bc559519d6d84f70850b0a78445c3d5ec
+        M bae78a9473f3a719563bfac05f9a815f8003917b
+        N 4ab46009954bb98c5f22629274722667dc21ca37
+roots     59faf341cb5439564cb32ab17c841f121673c12b (valid)
+          5e7f50d8bb733603dbe6f33ff13411f7090c5036 (ambiguous)
+
+R6-03  C f5141f92b29541282cf1ec520470e8c604aeaa6b
+        O eb354df4fb54776834a9dff53f51f496a2bb338f
+        M b5c24e5f55b7a8e0a89d51599153e77ebbbf85b8
+        N 8f769727f1c641bd2587115f2fbcda5fdda816d1
+roots     dc00143829641a9ff403c040c4f3e1f864587df5 (invalid)
+          2ec9cda06efaf587cc9a124d78ad122c947171c1 (invalid)
+
+R6-04  C c4ad2cb41bff8803f0f3d5b81ea0cfd785c9aa59
+        O c3b9fb54026383a350146fb2f25243c9e8c7cb01
+        M 82463b399db3f3fb0aabd0ca1e0b82a61afb96fc
+        N 7bf74330f432155c3c39eedbfc81fa72bface489
+root      dbd3a072a00de50212cd93e44a31cb731ce70360
+wrappers  b858978bbda2e6e8492f2678070a6ce9c34ec176
+          4edb5c9b80bd4504e87b8381e8cb99521552faa1
+```
+
 ## Cost and budget evidence
 
 The cost fixture made 128 unrelated commits and disappeared 16 actions. Eight
@@ -393,11 +447,11 @@ as valid and emitted eight findings. These are measured counts from that run:
 | Graph parent edges | 132 |
 | Graph enumerations | 1 |
 | Per-action history walks | 0 |
-| Queue snapshots requested | 10,876 |
-| Snapshot cache hits | 10,873 |
+| Queue snapshots requested | 10,892 |
+| Snapshot cache hits | 10,889 |
 | Distinct queue subtree reads | 3 |
 | Git object reads | 297 |
-| Object cache hits | 21,499 |
+| Object cache hits | 21,531 |
 | Production identity calls | 32 |
 | Production authority calls | 32 |
 | `cat-file --batch` processes | 1 |
@@ -443,6 +497,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
 ```
 
 | Control | Baseline -> damaged | Status | C / O / M / N |
@@ -452,6 +507,7 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 | `identity-multiplicity-collapsed-to-set` | blocking -> no finding | `OBSERVED_RED` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` / `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` / `f75429c785808a191c0600345870097251ca8f8a` / `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` |
 | `reopen-pre-C-genealogy` | no finding -> blocking | `OBSERVED_RED` | `cd13c47983b0624a824f5fc583f7de647b240504` / `03c76bf6661f670a705245479f406a1d3ba7b279` / `3258b9e2bac9ea4c40a95a8db2cfbdaf5c972b84` / `4d0b2462961d1fa5c64be4f73b533f7e165ad12f` |
 | `missing-post-event-continuity` | blocking -> no finding | `OBSERVED_RED` | `ec84d0800c660f6379b21cfd721122fa06162999` / `ca7b04ae210ede6aaacf66c7c091cefbed16ee3d` / `5b3f0ee9f157786e8392185afa848583d9af19bc` / `258e858010ccd1e43716ab0269faa86ae08808a7` |
+| `sole-valid-ignores-invalid-root` | blocking -> no finding | `OBSERVED_RED` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` / `5dc5378fdc316aa30dce282d0388a438d755b067` / `c1d92f49ddecd5097d7db52863c2b8e990b43810` / `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` |
 
 ## Commands run
 
@@ -464,11 +520,12 @@ python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control identity-multiplicity-collapsed-to-set
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control reopen-pre-C-genealogy
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control missing-post-event-continuity
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control sole-valid-ignores-invalid-root
 python3 automation/reconcile/reconcile.py --check
 ```
 
-The installer and bytecode compilation exited `0`. The self-test passed 65/65
-scenarios, 4/4 executable aliases, and 5/5 controls. Each standalone control
+The installer and bytecode compilation exited `0`. The self-test passed 69/69
+scenarios, 4/4 executable aliases, and 6/6 controls. Each standalone control
 exited `0` with `OBSERVED_RED`. The reconciler exited `0` with zero blocking
 findings and six pre-existing advisories about frozen human-action records. The
 commit hook selected no repository test files because this directory is a design
