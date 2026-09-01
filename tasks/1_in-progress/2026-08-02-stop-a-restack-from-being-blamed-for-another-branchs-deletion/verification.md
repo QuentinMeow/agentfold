@@ -28,6 +28,17 @@ The four-to-one panel rejected the revision. No production implementation began 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded executable-enumeration design review
+
+**Reviewed revision:** `6643bdc0c68282420b9778badfd425d68810a900`
+
+- semantic/DAG + command parity / r19-semantic-design: `approve` — direct N and synthetic H prefix enumeration, unchanged live and prior incarnations, continuity DAG, merge-base/shallow grammars, and raw/retained roles were executable and POC-equivalent.
+- budgets/transaction/composition / r17-production-seam-audit: `block` — continuity and policy children could allocate across unbounded history before first output because only ordinary children had an address-space ceiling.
+- workflow/adapter/human / r20-workflow-design: `block` — `remote.origin.vcs` could select an arbitrary remote helper after the named remote's URL passed validation; receive-pack transport configuration was likewise open.
+
+The panel stopped after two independent blocks. The two remaining lenses were not run,
+and no production implementation began from this revision.
+
 ## Superseded candidate-complete ordinary design review
 
 **Reviewed revision:** `aa872dfb6b27b864b2e9b12f9a542c834c86efb7`

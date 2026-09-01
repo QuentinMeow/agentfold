@@ -113,6 +113,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   and an explicit boundary with the existing publication/retirement backlog task.
 - Production remains unopened pending another full five-lens immutable-revision review.
 
+## 2026-09-01 — Pre-output-memory and literal-transport correction (codex)
+
+- Semantic review accepted the executable prefix enumeration and POC-equivalent role
+  projections. Resource review then showed that merge-base and reverse-topological graph
+  children can allocate across unbounded history before emitting a parent-budgeted row.
+- Workflow review demonstrated that a correct named-remote URL can coexist with
+  `remote.origin.vcs=evil`, causing Git to launch an arbitrary helper despite hook and
+  refspec closure; remote receive-pack selection remained open for the same reason.
+- Extended the pre-exec 512 MiB ceiling to every policy, continuity, historical, and
+  ordinary Git child with OOM controls. Replaced the named-remote push operand with a
+  validated literal URL, rejected remote transport overrides, sanitized Git configuration
+  and exec-path provenance, and added malicious helper/receive-pack controls.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Executable-enumeration and closed-reader correction (codex)
 
 - Fresh review ran amendment 9's literal candidate-tree command and proved Git 2.55.0

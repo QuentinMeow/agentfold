@@ -1974,3 +1974,83 @@ transaction-local caches after refusal, and byte-identical writer state.
 Production remains unopened. The next review begins from a new immutable revision and
 must cover all five independent lenses; passing POC evidence cannot waive an executable
 command or resource-lifecycle defect.
+
+## 2026-09-01 correction amendment 11 — pre-output memory and literal transport
+
+The review of `6643bdc0c68282420b9778badfd425d68810a900` accepted semantic
+and executable-command parity, then found two pre-observation escape paths: a continuity
+Git child can allocate while traversing before it emits a budgeted row, and a named remote
+can select a candidate-controlled transport helper after its URL passes validation. This
+section supersedes every earlier child-resource and publication operand/configuration
+clause that conflicts with it. The O/N classifier, ordinary projections, and provider
+observation states are unchanged.
+
+### Pre-exec memory boundary for every Git child
+
+Every Git process started for authority-policy extraction, endpoint/object validation,
+shallow probing, merge-base discovery, intrinsic continuity enumeration, object/tree batch
+reading, historical evaluation, or ordinary preflight receives a 512 MiB address-space
+ceiling in the child between fork and exec. The ceiling is installed before Git parses the
+repository or traverses one object; failure to install it is incomplete and the command is
+not launched. Process-group, descriptor, stdout/stderr, record, per-exchange, per-child,
+and aggregate deadlines remain cumulative defenses rather than substitutes.
+
+This closes work performed before first output: `merge-base` may walk the reachable graph
+before printing `C`, and `rev-list --topo-order --reverse --ancestry-path` may retain
+topological state before the parent sees a row. A disposable wide/deep repository and a
+fault-injected child allocator exercise each one-shot and batch command family at the
+ceiling and over it. At the ceiling, a supported fixture completes. On allocation/resource
+failure or an injected +1 byte, the parent observes a non-successful child, terminates and
+reaps the process group, discards the whole local transaction, emits one bounded incomplete
+diagnostic, and leaves stdout Findings and every writer byte empty/unchanged. The tests
+also assert no policy or continuity child survives into ordinary work.
+
+The supported execution baseline is macOS and Linux, where the installer verifies an
+enforceable address-space resource limit before enabling Strategy A. A platform that cannot
+install and demonstrate an equivalent pre-exec ceiling reports the classifier unavailable;
+it does not silently rely on timeout or logical output counters.
+
+### Literal-URL, transport-closed publication
+
+The publisher never passes the remote name to `git push`. It first reads exactly one push
+URL for `origin`, validates the expected GitHub HTTPS repository identity and the existing
+no-rewrite/no-mirror constraints, and stores that exact byte string as `<validated-url>`.
+It rejects any present `remote.origin.vcs`, `remote.origin.receivepack`, or additional
+push URL before launch. Creation, update, repair, and deletion then use the literal URL and
+an explicit receive-pack name:
+
+```sh
+git -c core.hooksPath=/dev/null \
+  -c push.followTags=false \
+  -c push.recurseSubmodules=no \
+  push --receive-pack=git-receive-pack \
+  --no-follow-tags --recurse-submodules=no \
+  --force-with-lease=refs/heads/<branch>:<O> \
+  <validated-url> <N>:refs/heads/<branch>
+```
+
+Creation and deletion preserve the previously specified empty expected value or empty
+source. Because the operand is a URL rather than `origin`, Git cannot consult
+`remote.origin.vcs`, `remote.origin.receivepack`, or remote-specific push/refspec behavior
+to choose the transport or destination. The existing URL-rewrite rejection prevents a
+validated literal from being remapped after validation. The trusted launcher supplies a
+sanitized Git configuration environment: it ignores system/global configuration for the
+push subprocess, removes inherited `GIT_CONFIG_*` injection variables, supplies only the
+three shown `-c` values, and uses a prevalidated Git executable and exec-path outside the
+candidate repository. Authentication is supplied as a separately prevalidated ephemeral
+credential/askpass capability outside the repository; candidate or repository-local
+credential helpers are never imported, and absence of that capability stops before
+publication. Failure to construct the environment stops before publication.
+
+A hostile transport fixture installs an observable `git-remote-evil`, sets
+`remote.origin.vcs=evil` and `remote.origin.receivepack` to a sentinel command, and leaves
+the visible push URL correct. The publisher must refuse before either sentinel runs. A
+second test proves the literal-URL command ignores those remote fields even under a
+controlled dry-run transport. Existing malicious hook, URL rewrite, follow-tag, submodule,
+mirror, multiple-pushurl, lease-race, and extra-ref tests remain required; only the exact
+leased destination may move.
+
+### Gate boundary
+
+Production remains unopened. A fresh five-lens immutable review must accept this complete
+superseding design before implementation ownership is added to the orchestration run.
