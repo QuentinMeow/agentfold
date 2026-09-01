@@ -36,7 +36,7 @@ No task claim writes directly to `main`. Before the first planned implementation
 
 Answer in plain words — one sentence is enough. You never need to copy anything; the agent that folds it shows you how it read your words before acting. If this page did not give you enough to decide, say so and say what is missing — that is a complete answer, not a rejection.
 
-**Your answer:** ______
+**Your answer:** Start with proof of concepts (maybe multiple agents doing from multiple worktrees), then after proof of concept is verified, then start implementation based on the best approach using strategy A.
 
 ## For the record
 

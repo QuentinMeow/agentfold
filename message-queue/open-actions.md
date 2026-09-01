@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**1 action stopping work right now.** 17 questions waiting on you, 55 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 55 actions waiting on an agent. 3 others not yours right now.
 
 ## Waiting on you
 
@@ -23,7 +23,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Stops work at a named boundary — 4
+### Stops work at a named boundary — 3
 
 - [Confirm that self-authored acknowledgements may record judgment but may never authorize a confirmed critical finding.](needs-human/reviews/future-blocking-review-guardrail-authority-boundary.md) — blocks transition:start task:2026-07-22-universal-guard-mode-configuration · answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -47,14 +47,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** The implementation must configure real guards and report only observed protection, rather than letting an agent select or claim an assurance label.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the approved conceptual direction remains recorded but the revised design is not accepted.
-
-  </details>
-- [Choose whether atomic task claims keep a narrow direct-main exception or must use a new pull-request transaction.](needs-human/decisions/future-blocking-choose-whether-task-claims-must-use-pull-requests.md) — blocks transition:start task:2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion · answer by 2026-11-29
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** Parallel agents need one immediate winner, while you asked for every piece of progress to remain reviewable as a pull request.
-
-  **If you do nothing:** Parent design and research continue, but the first planned implementation task cannot start; the current task remains safely claimed under the old rule.
 
   </details>
 
@@ -363,6 +355,14 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** A crashed or incomplete scanner must not accidentally become evidence that content is safe.
 
   **If you do nothing:** Guardrail implementation waits at its start boundary; the separate failure state remains a proposal.
+
+  </details>
+- [Choose whether atomic task claims keep a narrow direct-main exception or must use a new pull-request transaction.](needs-human/decisions/future-blocking-choose-whether-task-claims-must-use-pull-requests.md) — already answered — an agent owes the fold
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Parallel agents need one immediate winner, while you asked for every piece of progress to remain reviewable as a pull request.
+
+  **If you do nothing:** Parent design and research continue, but the first planned implementation task cannot start; the current task remains safely claimed under the old rule.
 
   </details>
 - [After the repair is published as one exact revision, judge whether every human-attention file is understandable and answerable on its own, and approve it, name the remaining ambiguity, or reject the format.](needs-human/reviews/non-blocking-rereview-human-action-files.md) — status awaiting-artifact
