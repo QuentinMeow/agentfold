@@ -5102,3 +5102,204 @@ mandatory for trusted provider activation and deliberately permits dormant core 
 while those adapter capabilities remain unavailable. The next immutable revision needs all
 three base-lens accepts on this exact text, followed by independent budget and core-admission
 acceptance. No earlier verdict transfers and no production implementation may start first.
+
+## 2026-09-01 correction amendment 33 — portable core before provider enforcement
+
+Fresh review of `e7032e758e0d4f2efe0b232e2c0bf8e4ecf68be8` unanimously
+rejected amendment 32's provider activation while accepting its phase split. A check was not
+bound to the commit it protected; no authenticated App-bound ruleset or cumulative edge-debt
+store made a missing check fail closed; V7 could not carry post-publication evidence and
+selected its own authenticator; canary acceptance still depended on a not-yet-created
+selector/receipt; the launcher lost O/N at evaluator exec; its cross-process handshakes were
+open; and the public counter registry remained incomplete. Two repair panels independently
+concluded that GitHub App identity, ruleset administration, merge-queue association, durable
+debt, and write-recovery form a stateful provider service, not portable AgentFold core.
+
+This amendment therefore supersedes amendments 27 through 32 wherever they specify a trusted
+launcher/host verifier, execution receipt, deployment slot, selector, provider acceptance,
+A/T/K production authority, Gate 2/3, live projection, or GitHub publication/enforcement.
+Those sections remain rejected design history only; none is an implementation requirement or
+completion claim for this task, and no verdict on them transfers to a future service. Strategy
+A's two-arm O/N graph, old-side continuity proof, new-side causal authority, final N frontier,
+ordinary-check separation, bounded Git/object model, and accepted POC mappings remain selected.
+
+### Delivered boundary is core plus optional advisory evidence
+
+This task may implement only:
+
+1. the provider-neutral Strategy A classifier over one immutable candidate Git object source
+   and exact non-zero O/N commit IDs;
+2. its read-only local reconciler entrypoint and canonical advisory result;
+3. deterministic budgets, transaction cleanup, and mapped regression/fault tests; and
+4. an optional repository workflow that captures the same immutable edge evidence without
+   publishing an authoritative conclusion.
+
+The core trusts the caller to select the executing code and candidate object source. It does
+not claim that code in a mutable checkout authenticates its own first instruction. Local and
+repository-workflow output is diagnostic/advisory for exactly one O/N edge. It proves neither
+cumulative branch continuity nor merge eligibility and cannot authorize a ref update. A
+future trusted host may call the core only after a separate adapter establishes its own
+execution and object capabilities.
+
+No `agentfold-ref-update/verified` check, GitHub App private key, webhook secret,
+`checks:write`, administration credential, provider receipt, active selector, deployment
+slot, or external debt database exists in this task. It installs no ruleset, performs no
+Gate 3 transition, and retires neither the current workflow nor legacy `--displaced-tip`
+protection. Missing, stale, failed, or suppressed advisory evidence is `no-observation`; it
+never becomes clean, mergeable, or activation-ready. Existing legacy behavior stays active
+as a safety boundary, not as a backward-compatibility promise.
+
+The provider-service dependency is owned by the required-server-side-admission step in
+`2026-08-03-plan-multi-worktree-safety-remediation`. Before trusted GitHub activation, a new
+child task and PR must own the host-pinned verifier root, GitHub App/webhook receiver, durable
+per-ref/PR edge-debt ledger, check publisher and uncertain-write recovery, App-bound ruleset
+controller, merge-queue association, canaries, credential rotation, rollback, and human
+operations. That service receives its own provider-specific admission review. Repository
+receipts may not select its App, policy, rule, credential, or storage root.
+
+### Core CLI and result do not depend on the deferred launcher
+
+The dormant entrypoint is the already selected local composition:
+
+```text
+python3 automation/reconcile/reconcile.py --check \
+  --range <B>...<N> --ref-update <O> <N>
+```
+
+`--ref-update` occurs exactly once with two non-zero full OIDs of the opened repository's
+object format; the range is non-root and has head N. The parser, endpoint commits, and
+unique-C preflight complete before the global snapshot, Finding, output, retry, generated
+index, open-actions, queue fold, or writer state is read or changed. The implementation may
+factor one automation/reconcile/ref_update_core.py module, but no separate executable,
+sealed launcher, fd protocol, or runtime-profile contract is part of this task. Current
+workflow call sites do not invoke the new option.
+
+The canonical advisory result is JSON-plus-LF `agentfold-ref-update-core/v1` with exact keys
+`schema,old,new,common,state,rows,counters`. `state` is `clean|blocked`; fast-forward has
+`common=old`, `rows=[]`, and clean. Divergent rows retain the exact
+`identity,paths,status,reasons,finding` shape and `preserved|valid|none|invalid|ambiguous`
+semantics already selected. Unknown/missing/duplicate keys or wrong JSON scalar types refuse.
+Structural/history/resource failure emits no result object, one bounded stable diagnostic,
+and exit 2. Complete clean/blocked exits are 0/1. A serialized result is evidence for tests
+and humans, never a provider acceptance envelope.
+
+### The core counter registry is complete and smaller than execution policy
+
+The old three-source policy counters and amendment-32 authority-source counters are outside
+this unsealed core boundary and do not appear. `CORE_COUNTER_LIMITS_V1` has exactly these 67
+ASCII names and limits, emitted in ASCII sort order; every complete result contains each
+exactly once as `{used,limit}` and no other name:
+
+```text
+additional_parent_subprocess_queries=0
+authority_validations=512
+batch_reader_restarts=8
+carry_proof_edges=262144
+carry_proof_nodes=262144
+causal_roots_per_identity_peak=512
+causal_roots_total=65536
+certificate_anchors=8192
+certificate_obligations=8192
+certificate_peak_serialized_bytes=4194304
+certificate_projection_rows=65536
+certificate_serialized_bytes=33554432
+diagnostic_bytes=262144
+discovered_support_paths=8192
+distinct_object_reads=65536
+distinct_queue_subtree_oids=4096
+dynamic_support_traversal_paths=65536
+endpoint_commits=2
+flattened_path_bytes=8388608
+flattened_tree_entries=131072
+git_children_live_peak=2
+git_children_spawned=512
+git_stderr_bytes=262144
+graph_commit_records=4096
+graph_parent_oid_fields=8192
+graph_peak_line_bytes=532545
+graph_stdout_bytes=798720
+historical_checker_invocations=8192
+historical_helper_nodes=4096
+identity_carry_transitions=262144
+identity_derivations=262144
+identity_mutation_checks=262144
+immutable_peak_result_row_bytes=1048576
+immutable_result_references=524288
+immutable_result_rows=262144
+immutable_retained_result_bytes=33554432
+merge_base_peak_line_bytes=65
+merge_base_rows=2
+merge_base_stdout_bytes=130
+merge_base_tokens=2
+object_cache_hits=262144
+object_header_bytes=4194304
+obligation_replays=65536
+occurrences_per_identity_peak=16
+peak_object_payload_bytes=4194304
+production_helper_calls=16384
+production_helper_input_bytes=8388608
+production_helper_output_bytes=16777216
+production_helper_output_records=262144
+production_identities=2048
+queue_blob_bytes=33554432
+queue_path_bytes=4194304
+queue_snapshot_cache_hits=262144
+queue_snapshot_entries=65536
+queue_snapshot_requests=262144
+queue_subtree_reads=4096
+raw_tree_entry_name_bytes=8388608
+result_peak_serialization_chunk_bytes=1048576
+result_serialization_bytes=33554432
+shallow_probe_peak_line_bytes=6
+shallow_probe_rows=1
+shallow_probe_stdout_bytes=6
+shallow_probe_tokens=1
+support_adoption_checks=8192
+support_certificates=512
+support_path_bytes=1048576
+unique_object_payload_bytes=33554432
+```
+
+`used` is an integer, never Boolean/float, with `0 <= used <= limit`; a zero limit therefore
+requires zero. Fast-forward performs endpoint/preflight/result work and reports zero for all
+unexercised graph/action families. Structural counters remain independent gates. Derived
+byte observations retain their observed-minus-one controls and do not invent unreachable
+schema-valid +1 fixtures. Wall-clock, OS fragmentation, cgroup, transport, and provider work
+are absent from canonical counters.
+
+`result_serialization_bytes.used` equals the final canonical line length. The encoder finds
+the unique length-field fixed point by bounded iteration from zero before allocating output,
+then encodes once into the precharged cap and verifies the measured length. Peak serialization
+uses deterministic logical chunks of at most 1 MiB, never pipe fragmentation. Unknown,
+missing, duplicate, legacy, negative, over-limit, or inconsistent counters make an advisory
+result invalid and cannot be projected as clean.
+
+### Human and workflow effect of the split
+
+- A developer can run the paired local command to distinguish a valid inherited resolution
+  from a genuine or ambiguous queue loss before pushing.
+- An optional CI job may attach the canonical edge result and exact O/N to a workflow artifact
+  named as evidence. Its UI may be green only for successful artifact capture; it must display
+  the classifier state separately and must not use a required-check or `verified` name.
+- A pushed clean advisory edge does not clear an earlier blocked, unavailable, or missed edge.
+  This task has no debt store and makes no cumulative statement.
+- A genuine deletion remains actionable in the local result: restore the action or complete
+  one valid lifecycle. Re-running or pushing a later commit is not documented as clearance.
+- Provider/fork/no-observation behavior is reported honestly as unavailable evidence. No
+  branch-protection, live trusted canary, or automatic publication claim is in scope.
+
+Verification for this task may prove the 167 accepted semantic scenarios, 34 damaged-mode
+controls, 4 aliases, 68 evidence attacks, local CLI/reconciler parity, every core exact/+1
+budget, zero partial result/mutation, child cleanup, ordinary-check composition, targeted and
+full suites, reconciler, and cold clone. It may not cite a trusted provider check, V7 receipt,
+live cumulative coverage, App issuer, ruleset, merge queue, or legacy retirement as passed.
+
+### Core implementation gate
+
+Production activation remains unopened, but provider-neutral **dormant core implementation**
+may begin after one immutable revision containing amendment 33 receives the three fresh base
+lens accepts followed by budget and core-admission accepts. Those reviews judge Strategy A,
+the local transaction, exact result/counter contract, and the explicit scope split; they do
+not approve the rejected provider/launcher history. Provider adapter/service implementation,
+selector activation, workflow replacement, and legacy retirement remain separate PRs and
+cannot borrow this task's review or POC receipt.

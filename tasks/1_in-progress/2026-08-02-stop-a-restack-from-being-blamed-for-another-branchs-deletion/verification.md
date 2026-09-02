@@ -283,6 +283,38 @@ spelling by the one-byte-longer bundle spelling changes the launcher-policy maxi
 642 to 614 bytes including LF. The two phase projections contain at most nine rows, so their
 tree transcript cap is `9*78 + 4,096 = 4,798` bytes.
 
+## Superseded external-acceptance review
+
+**Reviewed revision:** `e7032e758e0d4f2efe0b232e2c0bf8e4ecf68be8`
+
+- semantic/authority / a32-semantic-acceptance: `block` — the published check response did
+  not bind its head to event N; Gate 3 did not authenticate an exact App-bound enforcement
+  rule; and changed historical registries could pass an undefined compatibility proof.
+  The A/T/K/O/N phase split itself was acyclic.
+- workflow/provider / a32-workflow-activation: `block` — required-check enforcement was not
+  cumulative, V7 could not represent post-publication proof, pre-activation ruleset arming
+  and App rotation were cyclic, receipts selected their own authenticator, and the stated
+  permission set did not define one signed-event route. It recommended moving the whole
+  enforcement plane to a separate provider service.
+- CLI/resource / a32-cli-budget: `block` — evaluator exec lost O/N; canary acceptance
+  depended on the future selector/receipt; SCM_RIGHTS and ready/continue bytes were open;
+  and result v2 had no complete machine-name/limit registry. It independently accepted all
+  amendment-32 arithmetic.
+
+All three reviews were read-only and named the same immutable SHA. Budget and core-fit were
+not run, no production implementation began, and the worktree stayed clean until amendment
+33 was written.
+
+The amendment-33 registry was counted mechanically after removing the seven unexecuted
+authority-source counters from the independently proposed 74-name closed registry:
+
+```text
+$ sed -n '/additional_parent_subprocess_queries=0/,/unique_object_payload_bytes=33554432/p' tasks/1_in-progress/2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion/design.md | rg -c '^[a-z_]+=[0-9]+$'
+67
+```
+
+This is the real output of the exact command above.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

@@ -565,3 +565,24 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   migration protocol.
 - Production remains unopened. Amendment 32 must receive three fresh exact-SHA accepts,
   then budget and core-admission accepts, before any dormant production implementation.
+
+## 2026-09-01 — Portable-core scope correction (codex)
+
+- Three fresh exact-SHA reviews blocked amendment 32's provider activation: check responses
+  were not head-bound, no App-bound ruleset or durable edge debt made absence fail closed,
+  the receipt selected its own verifier and could not carry post-publication evidence, the
+  initial required-check path remained cyclic, O/N vanished at evaluator exec, descriptor
+  handshakes were open, and the canonical counter registry was incomplete.
+- Two independent repair reviews recommended the same architectural split already selected
+  by the multi-worktree parent: causal Git classification is portable core; App identity,
+  webhook receipt, check publication, ruleset administration, merge-queue association, and
+  durable debt are a provider service.
+- Amendment 33 withdrew every trusted provider/launcher/selector/Gate-3 claim from this task.
+  It permits only the dormant Strategy A classifier, local read-only entrypoint, canonical
+  advisory evidence, complete 67-name core counter registry, and tests.
+- Kept all GitHub output explicitly evidence-only: no `verified` context, no missing-check
+  fail-closed claim, no cumulative clearance, no workflow replacement, and no legacy
+  retirement. The provider-service dependency remains under the parent plan's required-
+  server-side-admission step and needs its own task and PR before activation.
+- Production remains unopened. The new immutable revision still needs three base accepts,
+  then budget and core-admission accepts, before dormant core implementation begins.
