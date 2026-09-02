@@ -319,3 +319,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   every activated adapter/capture/invocation byte. The activation commit cannot change any
   tested byte; a difference invalidates the receipt and returns to the adapter proof gate.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Direct-evaluator and external-receipt correction (codex)
+
+- Semantic review accepted amendment 17, but workflow and CLI attacks found an escapable
+  nested process tree, understated aggregate memory, open adapter framing, partial workflow
+  binding, candidate-controlled receipts, counter ambiguity, and omitted live docs.
+- Removed the wrapper/evaluator nesting. Local CLI and provider adapter now call one core in
+  process and directly own at most two Git child groups, with a 1.5 GiB composed address-
+  space maximum and exact process-registry damage tests.
+- Defined the adapter digest byte-for-byte, including its literal domain, raw authority
+  digest, field widths/order, complete reusable workflow and full activation-file template,
+  budgets, and independent golden vectors.
+- Split dormant landing, trusted live canaries, canonical receipt landing, and activation.
+  Gate 3 reads the receipt from its default-branch base, revalidates the original provider
+  artifact, and cannot modify either receipt or any digest-covered byte.
+- Expanded the atomic migration to every live workflow, source, help, instruction, handbook,
+  test, and ownership reference; a final-tree scan requires zero live displaced-tip names.
+- Production remains unopened pending another full five-lens immutable-revision review.

@@ -50,6 +50,17 @@ and no production implementation began from this revision.
 
 The three-to-two panel rejected the revision. No production implementation began from it.
 
+## Superseded canary-bound design review
+
+**Reviewed revision:** `2f43c7d024b046600ded34c2e0b93430ae29d0ba`
+
+- semantic/DAG/executable / a15-semantic-review: `approve` — two-stage endpoint preflight, empty-row fast-forward, divergent POC mapping, exact identity framing, and removal of the open public evidence digest were semantically closed.
+- workflow/provider/human / r19-semantic-design: `block` — the digest omitted full workflow execution semantics and the activation candidate could replace an unauthenticated, unpinned canary receipt.
+- CLI/contracts/testability / final-cli-panel: `block` — the nested wrapper could not contain separately grouped grandchildren or its true memory peak, adapter framing was not exact, fast-forward counter membership conflicted, and activation omitted live public contracts.
+
+The revision was rejected after two independent blocks; the remaining lenses were not run.
+No production implementation began from it.
+
 ## Superseded observer-only design review
 
 **Reviewed revision:** `a79425b7de1234b390ed0c495b6ed774a6b32c51`

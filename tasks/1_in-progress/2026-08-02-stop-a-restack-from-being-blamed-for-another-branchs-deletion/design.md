@@ -2628,3 +2628,144 @@ refusal before legacy protection is removed.
 
 Production remains unopened. The full five-lens review must accept a new immutable revision
 before dormant implementation units begin; approvals on the rejected revision do not carry.
+
+## 2026-09-01 correction amendment 18 — direct evaluators and external receipt authority
+
+Review of `2f43c7d024b046600ded34c2e0b93430ae29d0ba` accepted semantic
+behavior but rejected workflow and CLI closure. The extra capture process could not contain
+separately grouped Git grandchildren and omitted them from aggregate memory; adapter framing
+and full workflow execution bytes remained open; fast-forward counters conflicted; the
+activation allowlist omitted live documentation; and the activation candidate could replace
+its own canary receipt. This section supersedes amendment 17's wrapper, composed-process,
+adapter transcript/projection, receipt, and activation clauses plus the affected fast-forward
+counter wording. Endpoint, identity, row, divergent, and accepted-delivery semantics remain.
+
+### One evaluator process, no nested classifier
+
+There is no ref_update_capture.py and no evaluator that spawns another evaluator.
+automation/reconcile/ref_update.py is the sole local continuity CLI and calls
+ref_update_core in process. It validates the complete immutable result object, serializes it,
+strictly decodes and re-encodes that bounded buffer, checks schema/O/N/policy/state, and only
+then begins amendment 16's bounded delivery. For a human, the documented authority result is
+the exact canonical line plus the CLI's final 0/1 exit; exit 2 or a missing/truncated line is
+incomplete. No shell parser, `tee`, or second Python process is required.
+
+The GitHub adapter also imports the same ref_update_core entrypoint in its own evaluator
+process. It validates the in-memory result and canonical bytes before provider projection;
+it never launches ref_update.py. Golden parity runs the local CLI and adapter entrypoint over
+the same immutable repositories and requires byte-identical result buffers before delivery.
+Thus provider and local paths share classifier authority without a parent/classifier/Git
+grandchild hierarchy.
+
+The evaluator and every Git child each install the probed 512 MiB address-space ceiling.
+The runtime permits at most two simultaneous direct Git children: one long-lived bounded
+object batch reader and one one-shot graph/policy/historical child. A third live child is a
+pre-spawn budget refusal. The evaluator is the direct parent of both, assigns each its own
+killable group, and on every refusal terminates, drains, waits, and reaps both before exit.
+The closed simultaneous address-space maximum is therefore 1,610,612,736 bytes (512 MiB
+evaluator plus two 512 MiB Git children), plus the already capped two OS pipes per child;
+provider transport completes and is reaped before classifier children start. Exact process-
+registry and fault tests keep both allowed children live, refuse the third before spawn,
+stall each child independently, and assert no process or descriptor survives.
+
+### Fast-forward emits the complete zero-valued registry
+
+Every complete result still emits every policy-bound counter-registry name exactly once.
+For a same-policy fast-forward, only endpoint and policy counters may be nonzero; every graph,
+snapshot, identity, action, evidence, and serialization-work counter not exercised by the
+empty-row path is present with `used=0` and its normal `limit`. A byte-golden W0 result proves
+the complete key set, zero action values, `common=O`, `rows=[]`, clean state, and exit 0.
+
+### Exact adapter-policy transcript and complete workflow blobs
+
+The adapter digest input is exactly:
+
+```text
+ASCII("agentfold-ref-update-adapter-policy/v1") || 0x00
+|| raw_32_byte_authority_policy_sha256
+|| uint16be(file_count)
+|| for each manifest path in ascending UTF-8 byte order:
+     uint16be(path_byte_length) || path_utf8
+     || uint64be(payload_byte_length) || exact_payload_bytes
+```
+
+The domain is 39 bytes including NUL. The embedded authority value is the 32 decoded digest
+bytes, not its `sha256:` spelling. The manifest has 1–16 unique normalized repository-
+relative strict-UTF-8 paths, no empty/absolute/dot/dot-dot segment, at most 4,096 aggregate
+path bytes, and at most 4 MiB aggregate payload. The exact framing maximum is
+`39 + 32 + 2 + 16 * (2 + 8) + 4,096 = 4,329` bytes; the maximum total digest input is
+4,198,633 bytes. The displayed digest is lowercase `sha256:` plus the 64-hex SHA-256.
+Independent golden vectors cover one file, reordered files, empty payload, non-ASCII paths,
+maximum framing/payload, each +1, and a one-byte authority digest change.
+
+The manifest contains exact complete blobs, not an extracted workflow projection: the
+provider event/O/N and read-only transport code, one reusable trusted Linux workflow, and
+one full dedicated activation-workflow template. The template is the entire future workflow
+file from first byte through final LF, including all triggers/action filters, permissions,
+runner, action pins and checkout source, job/step conditions, dependencies, concurrency,
+environment, shell, timeouts, failure handling, outputs, artifacts, and result publication.
+The reusable workflow is likewise hashed in full. Gate 3 may only install a dedicated
+workflow whose whole file is byte-identical to that template. There is no unprojected YAML
+key or inherited caller setting. Any byte change invalidates the adapter digest; semantic
+damage tests additionally flip each named execution family and prove refusal.
+
+### Canary receipt authority lives before the activation branch
+
+Gate 2 is its own dormant PR. It lands ref_update_core, ref_update.py, the provider adapter,
+the reusable workflow, activation template, guards, and tests on the default branch without
+calling them from production events or retiring legacy continuity. The trusted canary
+workflow then runs from that exact merged default-branch commit and publishes one bounded
+artifact.
+
+A separate trusted verifier downloads that exact artifact through the existing bounded API
+lane and commits a canonical receipt at
+automation/canaries/receipts/ref-update-observer-v1.json in a second records-only PR before
+the activation branch is created or rebased. Its ASCII/sorted-key/no-whitespace/one-LF JSON
+has exactly top-level keys `schema,tested_commit,authority_policy,adapter_policy,fixture,workflow,artifact,rows,cleanup`.
+The nested objects have exactly:
+
+```text
+workflow = repository,workflow_path,workflow_sha,head_sha,run_id,run_attempt,conclusion
+artifact = artifact_id,name,size,sha256
+row      = scenario,source_repository,old,new,state,exit,result_sha256
+cleanup  = manifest_sha256,status
+```
+
+`schema` is `agentfold-ref-update-canary-receipt/v1`; every SHA/OID/digest is full lowercase,
+integers are nonnegative bounded decimals, scenario rows are unique and sorted, and the
+closed scenario registry requires every live matrix row. The trusted verifier requires the
+provider metadata's repository, workflow path/SHA, head SHA, run/attempt, success conclusion,
+artifact ID/name/size/digest, and downloaded canonical payload to agree before proposing the
+receipt. Unknown or missing keys, duplicate JSON keys, stale attempts, copied run IDs, or
+expired artifacts refuse the receipt.
+
+Gate 3 reads receipt bytes from its immutable default-branch base commit, not the candidate
+tree. Its trusted default-branch workflow rejects any candidate diff touching the receipt,
+re-fetches the exact provider run/attempt/artifact, revalidates the artifact hash and metadata,
+and compares candidate authority/adapter/workflow bytes to that authenticated receipt. If
+the artifact has expired or the API is unavailable, activation is unavailable and legacy
+continuity remains. Activation tests/records cannot replace the receipt or its base blob.
+
+### Atomic activation updates every live contract
+
+The activation commit installs the byte-identical dedicated workflow, removes the old
+workflow calls and parser/implementation, and updates every live caller contract, help
+surface, repository instruction, handbook procedure, source guard, test, and test-ownership
+entry that names `--displaced-tip` or its program identifiers. The current mandatory set
+includes .github/workflows/harness.yml, automation/AGENTS.md,
+automation/reconcile/reconcile.py, automation/tests/test_github_action_projection_workflow.py,
+automation/tests/test_markdown_semantics.py, automation/tests/test_reconcile_queue.py, and
+handbook/git-workflow.md, plus any new live hit discovered at activation time. Immutable
+historical POCs, task records, handovers, and captured evidence keep their original text.
+
+A final-tree source scan classifies every occurrence as live or immutable history and fails
+unless live occurrences are zero. The activation diff may update those discovered live
+contract/test paths and task records, but no authority-policy, adapter-policy, canary receipt,
+reusable workflow, or template byte. An unclassified new reference, a changed digest-covered
+byte, or receipt change refuses the whole activation before legacy code is removed.
+
+### Gate boundary
+
+Production remains unopened. A fresh full five-lens review of one immutable revision must
+accept these direct-process, full-workflow, and external-receipt boundaries before dormant
+core implementation starts.
