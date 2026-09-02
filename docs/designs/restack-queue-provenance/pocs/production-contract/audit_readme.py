@@ -23,7 +23,7 @@ import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v8"
+SCHEMA = "agentfold-production-contract-evidence/v9"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -80,6 +80,15 @@ SUPERSEDED_EVIDENCE = {
                 "preserved and v7 is never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v7",
+        },
+        {
+            "commit": "c3793ec53c9b6aebe03b6e1b1cfa7badf3d4828a",
+            "disposition": (
+                "superseded and burned after verified-descriptor-closure and "
+                "externally observable transaction-accounting blockers; "
+                "history is preserved and v8 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v8",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -932,7 +941,7 @@ aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:event-adapter-cli-entrypoint sha256:e67a7a02e0fecbfc9046de3d7848e2cb6723653d895a60e00fc2eddebe3d433b
+control:event-adapter-cli-entrypoint sha256:155310a2028de4e3c60aaa8a83dc07d177bc2150820957314d3f2bddc0e7a8cf
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -940,7 +949,7 @@ control:ignore-invalid-N-root sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfc
 control:ignore-outside-C-carrier sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:ignore-persisted-absent-C-arm sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:ignore-persisted-outside-C-collision sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:leak-object-database-pipes sha256:b9a9cf27587ce52eb12900de2f3a58e410e196e69264bda0ec335aac3c8837b0
+control:leak-object-database-pipes sha256:6c8b322364dbc98cc144ceb34ede01a5b10b97a7aedbd2dfb3b090a79c663101
 control:literal-review-pending-treated-concrete sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:locale-git-error-stream-equality sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4
 control:missing-all-parent-direct-validation sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -2899,8 +2908,8 @@ def validate_manifest(manifest):
                 "typed_U_audit": (
                     "audit_event(root: Path, event_kind: str, payload: "
                     "Mapping[str, Any], *, budget_limit: int | None = None, "
-                    "transaction: Callable[[], ContextManager[None]] | "
-                    "None = None) -> dict"
+                    "transaction: Callable[[], ContextManager["
+                    "GitSpawnObserver | None]] | None = None) -> dict"
                 ),
             }:
                 raise EvidenceError(f"{context} importable adapter API changed")
@@ -2917,9 +2926,10 @@ def validate_manifest(manifest):
                 f"{context}.execution_seam",
             )
             seam_keys = (
-                "adapter_status", "audit_exit", "git_subprocesses",
-                "reason", "result_git_processes", "transaction_entries",
-                "typed_origin_strategy",
+                "adapter_status", "after_spawns", "all_pids_concrete",
+                "audit_exit", "before_spawns", "commands_match",
+                "git_subprocesses", "reason", "result_git_processes",
+                "transaction_entries", "typed_origin_strategy",
             )
             for name in ("invalid", "valid"):
                 item = seam[name]
@@ -2928,6 +2938,12 @@ def validate_manifest(manifest):
                 seam["valid"]["audit_exit"] != 0
                 or seam["valid"]["transaction_entries"] != 1
                 or seam["valid"]["git_subprocesses"] <= 0
+                or seam["valid"]["before_spawns"]
+                != seam["valid"]["git_subprocesses"]
+                or seam["valid"]["after_spawns"]
+                != seam["valid"]["git_subprocesses"]
+                or seam["valid"]["commands_match"] is not True
+                or seam["valid"]["all_pids_concrete"] is not True
                 or seam["valid"]["git_subprocesses"]
                 != seam["valid"]["result_git_processes"]
                 or seam["valid"]["typed_origin_strategy"] != "U"
@@ -2935,7 +2951,11 @@ def validate_manifest(manifest):
                 or seam["result_owned_by_audit"] is not True
                 or seam["invalid"] != {
                     "adapter_status": "coverage-unavailable",
+                    "after_spawns": 0,
+                    "all_pids_concrete": True,
                     "audit_exit": 2,
+                    "before_spawns": 0,
+                    "commands_match": True,
                     "git_subprocesses": 0,
                     "reason": "coverage-unavailable: local.old is missing",
                     "result_git_processes": 0,
@@ -2972,7 +2992,11 @@ def validate_manifest(manifest):
                     )
                     if (
                         item["adapter_status"] != "coverage-unavailable"
+                        or item["after_spawns"] != 0
+                        or item["all_pids_concrete"] is not True
                         or item["audit_exit"] != 2
+                        or item["before_spawns"] != 0
+                        or item["commands_match"] is not True
                         or item["git_subprocesses"] != 0
                         or item["result_git_processes"] != 0
                         or item["transaction_entries"] != 0
@@ -3017,8 +3041,10 @@ def validate_manifest(manifest):
             require_keys(
                 observation,
                 (
-                    "baseline", "cleanup_failure_closed", "damaged", "kind",
+                    "baseline", "classifier_fallback_closed",
+                    "cleanup_failure_closed", "damaged", "kind",
                     "metrics_published_after_close",
+                    "unclosed_descriptor_failed_closed",
                 ),
                 f"{context}.observation",
             )
@@ -3028,8 +3054,8 @@ def validate_manifest(manifest):
                 )
             baseline = observation["baseline"]
             if set(baseline) != {
-                "abort", "after-exit", "close-live", "stubborn-after-kill",
-                "stubborn-close",
+                "abort", "after-exit", "close-live", "raising-abort",
+                "raising-close", "stubborn-after-kill", "stubborn-close",
             }:
                 raise EvidenceError(
                     f"{context} descriptor baseline modes changed"
@@ -3037,7 +3063,8 @@ def validate_manifest(manifest):
             lifecycle_keys = (
                 "cleanup_failures", "kill_requested", "killed", "mode",
                 "process_reaps", "process_terminations", "returncode_is_set",
-                "stdin_closed", "stdout_closed",
+                "stdin_closed", "stdin_object_closed", "stdout_closed",
+                "stdout_object_closed",
             )
             for mode, item in baseline.items():
                 require_keys(
@@ -3045,6 +3072,7 @@ def validate_manifest(manifest):
                     f"{context}.observation.baseline.{mode}",
                 )
                 ordinary_mode = mode != "stubborn-after-kill"
+                recovered_close = mode in {"raising-close", "raising-abort"}
                 if (
                     item["mode"] != mode
                     or item["stdin_closed"] is not True
@@ -3054,10 +3082,19 @@ def validate_manifest(manifest):
                         and (
                             item["process_reaps"] != 1
                             or item["returncode_is_set"] is not True
-                            or item["cleanup_failures"]
+                            or (
+                                len(item["cleanup_failures"]) != 1
+                                or "raw descriptor recovered"
+                                not in item["cleanup_failures"][0]
+                                if recovered_close
+                                else bool(item["cleanup_failures"])
+                            )
                             or item["killed"] is not (mode == "stubborn-close")
                             or item["process_terminations"]
                             != int(mode in {"abort", "stubborn-close"})
+                            or item["stdin_object_closed"]
+                            is recovered_close
+                            or item["stdout_object_closed"] is not True
                         )
                     )
                     or (
@@ -3093,8 +3130,12 @@ def validate_manifest(manifest):
                 or damaged["killed"] is not False
                 or damaged["process_terminations"] != 0
                 or damaged["cleanup_failures"]
+                or damaged["stdin_object_closed"] is not False
+                or damaged["stdout_object_closed"] is not False
+                or observation["classifier_fallback_closed"] is not True
                 or observation["cleanup_failure_closed"] is not True
                 or observation["metrics_published_after_close"] is not True
+                or observation["unclosed_descriptor_failed_closed"] is not True
             ):
                 raise EvidenceError(
                     f"{context} leak mutant did not remain observed red"
@@ -4233,7 +4274,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, and v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, and v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -4280,8 +4321,11 @@ def render_readme(manifest):
         "use `event_endpoints(event_kind, payload)` and typed-U-only",
         "`audit_event(root, event_kind, payload, *, budget_limit=None, transaction=None)`.",
         "A valid event calls the optional transaction seam once around",
-        "the complete Git-backed audit, so an external evaluator charges every Git",
-        "child; invalid publication calls it zero times. The caller receives neither",
+        "the complete Git-backed audit. Its context may yield a `GitSpawnObserver`;",
+        "production calls `before_spawn(exact_command)` before creating every Git",
+        "child and `after_spawn(exact_command, pid)` afterward. Thus an external",
+        "evaluator precharges and observes the same count published in result metrics;",
+        "invalid publication calls it zero times. The caller receives neither",
         "the operation nor its result, so O/N, Strategy U, and classification remain",
         "owned by the audit. Local, pre-push, push, and PR",
         "synchronize each run a real non-fast-forward clean restack and genuine blocking",
@@ -4351,8 +4395,11 @@ def render_readme(manifest):
         "the old pair. Portable filesystems cannot atomically exchange two paths, so an",
         "unreported process or machine crash between the two replacements remains the",
         "explicit crash boundary; this is namespace rollback, not a durability claim.", "",
-        "The object database closes stdin and stdout on success, abort, an already-exited",
-        "child, and a stubborn child that requires timeout then kill. Even an unproved",
+        "The object database captures, closes, and OS-verifies stdin and stdout on",
+        "success, abort, an already-exited child, and a stubborn child that requires",
+        "timeout then kill. If an object wrapper raises before closing, the raw owned",
+        "descriptor is closed and verified, but the audit still returns unreadable; an",
+        "unclosable descriptor likewise fails closed with no action. Even an unproved",
         "post-kill reap closes both descriptors and returns unreadable without recording",
         "a false reap. Repeated close or abort is idempotent, and published metrics are",
         "snapshotted only after final cleanup. The observed-red leak mutant leaves both",
@@ -4445,11 +4492,11 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r19-v8-seed1 > /tmp/production-contract-r19-v8-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r19-v8-seed777 > /tmp/production-contract-r19-v8-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --compare /tmp/production-contract-r19-v8-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --damage-test",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --generate",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r20-v9-seed1 > /tmp/production-contract-r20-v9-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r20-v9-seed777 > /tmp/production-contract-r20-v9-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r20-v9-seed1.jsonl --compare /tmp/production-contract-r20-v9-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r20-v9-seed1.jsonl --damage-test",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r20-v9-seed1.jsonl --generate",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
@@ -4823,11 +4870,27 @@ def damage_matrix(expected, stream):
         "execution seam escaped accounting",
     )
     manifest_case(
+        "event-valid-observer-misses-child",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["valid"].update(
+            after_spawns=3
+        ),
+        "execution seam escaped accounting",
+    )
+    manifest_case(
         "descriptor-after-exit-leak",
         lambda d: d["core_claims"]["object_database_lifecycle"][
             "observation"
         ]["baseline"]["after-exit"].update(stdout_closed=False),
         "baseline descriptor closure changed",
+    )
+    manifest_case(
+        "descriptor-wrapper-recovery-misreported-clean",
+        lambda d: d["core_claims"]["object_database_lifecycle"][
+            "observation"
+        ].update(classifier_fallback_closed=False),
+        "object database lifecycle projection changed",
     )
     manifest_case(
         "locale-stable-error-drift",

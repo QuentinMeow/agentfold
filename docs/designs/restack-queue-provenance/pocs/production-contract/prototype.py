@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import dataclasses
+import errno
 import hashlib
 import importlib.util
 import json
@@ -21,7 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, ContextManager, Iterable, Mapping
+from typing import Any, Callable, ContextManager, Iterable, Mapping, Protocol
 
 
 HERE = Path(__file__).resolve()
@@ -29,6 +31,23 @@ REPOSITORY = HERE.parents[5]
 RECONCILE_PATH = REPOSITORY / "automation/reconcile/reconcile.py"
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
+
+
+class GitSpawnObserver(Protocol):
+    """Result-blind notifications around each production-owned Git spawn."""
+
+    def before_spawn(self, command: tuple[str, ...]) -> None:
+        """Precharge one exact immutable command before process creation."""
+
+    def after_spawn(
+        self, command: tuple[str, ...], pid: int | None
+    ) -> None:
+        """Observe that production created the process with this PID."""
+
+
+GIT_SPAWN_OBSERVER: contextvars.ContextVar[GitSpawnObserver | None] = (
+    contextvars.ContextVar("production_contract_git_spawn_observer", default=None)
+)
 
 
 def emit_json(value: Any):
@@ -495,6 +514,137 @@ def stable_git_failure(arguments, stderr: str) -> str:
     return f"git-command-failed:{operation}"
 
 
+def descriptor_is_closed(descriptor: int) -> bool:
+    """Prove that one captured OS descriptor is no longer open."""
+    try:
+        os.fstat(descriptor)
+    except OSError as error:
+        if error.errno == errno.EBADF:
+            return True
+        raise
+    return False
+
+
+def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
+    """Close and verify an owned pipe, recovering from wrapper close errors."""
+    if pipe is None:
+        return
+    try:
+        descriptor = pipe.fileno()
+    except (OSError, ValueError) as error:
+        if getattr(pipe, "closed", False):
+            return
+        raise Unreadable(
+            f"cat-file {label} descriptor could not be captured"
+        ) from error
+    if descriptor_is_closed(descriptor):
+        return
+    close_error = None
+    try:
+        pipe.close()
+    except (BrokenPipeError, OSError, ValueError) as error:
+        # A wrapper may raise before delegating.  The captured descriptor is
+        # still ours, so verify it and fall back to an OS close below.
+        close_error = error
+    needed_raw_fallback = not descriptor_is_closed(descriptor)
+    if needed_raw_fallback:
+        try:
+            raw_close(descriptor)
+        except OSError as error:
+            if error.errno != errno.EBADF:
+                raise Unreadable(
+                    f"cat-file {label} descriptor fallback close failed"
+                ) from error
+    if not descriptor_is_closed(descriptor):
+        raise Unreadable(
+            f"cat-file {label} descriptor remained open after close"
+        )
+    if close_error is not None and needed_raw_fallback:
+        raise Unreadable(
+            f"cat-file {label} object close failed before descriptor release; "
+            "raw descriptor recovered"
+        ) from close_error
+
+
+def cleanup_unclaimed_process(process: subprocess.Popen) -> None:
+    """Reap and close a spawned child that an observer refused to accept."""
+    failures = []
+    try:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        if process.poll() is None:
+            failures.append("child was not reaped")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        failures.append(f"child reap failed: {type(error).__name__}")
+    for label in ("stdin", "stdout", "stderr"):
+        try:
+            close_owned_pipe(getattr(process, label, None), label, os.close)
+        except (OSError, Unreadable) as error:
+            failures.append(str(error))
+    if failures:
+        raise Unreadable(
+            "Git spawn observer cleanup failed: " + "; ".join(failures)
+        )
+
+
+def spawn_git_process(
+    command,
+    *args,
+    process_factory: Callable[..., subprocess.Popen] | None = None,
+    **kwargs,
+) -> subprocess.Popen:
+    """Create one production-owned Git child with result-blind observation."""
+    if not is_git_command(command):
+        raise ValueError("spawn_git_process accepts only Git commands")
+    exact_command = tuple(str(argument) for argument in command)
+    observer = GIT_SPAWN_OBSERVER.get()
+    if observer is not None:
+        before = getattr(observer, "before_spawn", None)
+        after = getattr(observer, "after_spawn", None)
+        if not callable(before) or not callable(after):
+            raise Unreadable(
+                "Git spawn observer must provide before_spawn and after_spawn"
+            )
+        try:
+            before(exact_command)
+        except Exception as error:
+            raise Unreadable(
+                "Git spawn observer failed before process creation"
+            ) from error
+    factory = REAL_POPEN if process_factory is None else process_factory
+    process = factory(command, *args, **kwargs)
+    if observer is not None:
+        try:
+            observer.after_spawn(exact_command, getattr(process, "pid", None))
+        except Exception as error:
+            try:
+                cleanup_unclaimed_process(process)
+            except Exception as cleanup_error:
+                raise Unreadable(
+                    "Git spawn observer failed after process creation and "
+                    f"cleanup failed: {cleanup_error}"
+                ) from error
+            raise Unreadable(
+                "Git spawn observer failed after process creation"
+            ) from error
+    return process
+
+
+@contextlib.contextmanager
+def observe_git_spawns(observer: GitSpawnObserver | None):
+    """Bind one caller observer without delegating the audit operation."""
+    token = GIT_SPAWN_OBSERVER.set(observer)
+    try:
+        yield
+    finally:
+        GIT_SPAWN_OBSERVER.reset(token)
+
+
 @contextlib.contextmanager
 def temporary_environment(**updates):
     saved = {key: os.environ.get(key) for key in updates}
@@ -534,7 +684,14 @@ def count_production_git(
             metrics.charge("git_processes")
             if stable_git_diagnostics:
                 kwargs["env"] = stable_git_environment(kwargs.get("env"))
-        return REAL_POPEN(command, *args, **kwargs)
+        if is_git_command(command):
+            return spawn_git_process(
+                command,
+                *args,
+                process_factory=original_popen,
+                **kwargs,
+            )
+        return original_popen(command, *args, **kwargs)
 
     original_popen = subprocess.Popen
     subprocess.Popen = counted_popen
@@ -820,8 +977,11 @@ def bounded_git_lines(
         )
 
     metrics.charge("git_processes")
-    process = REAL_POPEN(
-        [*command_prefix, *arguments],
+    command = [*command_prefix, *arguments]
+    process = (
+        spawn_git_process if is_git_command(command) else REAL_POPEN
+    )(
+        command,
         cwd=root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -945,7 +1105,7 @@ class ObjectDatabase:
         self.damage = damage or Damage()
         metrics.charge("git_processes")
         metrics.charge("batch_processes")
-        self.process = REAL_POPEN(
+        self.process = spawn_git_process(
             ["git", "--no-replace-objects", "cat-file", "--batch"],
             cwd=root,
             stdin=subprocess.PIPE,
@@ -969,13 +1129,27 @@ class ObjectDatabase:
         self.wait_timeout = 5.0
 
     def _close_pipes(self):
-        """Close both owned pipe objects, even after the child has exited."""
+        """Close and verify both owned descriptors after any child outcome."""
         if self.damage.leak_object_database_pipes:
             return
-        for pipe in (self.process.stdin, self.process.stdout):
-            if pipe is not None and not pipe.closed:
-                with contextlib.suppress(BrokenPipeError, OSError):
-                    pipe.close()
+        failures = []
+        for label, pipe in (
+            ("stdin", self.process.stdin),
+            ("stdout", self.process.stdout),
+        ):
+            try:
+                close_owned_pipe(pipe, label, self._raw_close_owned_fd)
+            except (OSError, Unreadable) as error:
+                failures.append(str(error))
+        if failures:
+            raise Unreadable(
+                "cat-file descriptor cleanup failed: "
+                + "; ".join(failures)
+            )
+
+    def _raw_close_owned_fd(self, descriptor: int):
+        """Fallback closure seam retained for a real failure control."""
+        os.close(descriptor)
 
     def _record_reap(self):
         if self.process.poll() is None:
@@ -999,16 +1173,20 @@ class ObjectDatabase:
         self._kill_requested = True
 
     def _shutdown(self, *, graceful: bool):
-        failure = None
+        failures = []
         try:
             # Closing stdin delivers EOF to cat-file.  Pipe closure is
             # independent of liveness: poll() may already report an exited
             # child while Python still owns both descriptor objects.
             if graceful and not self.damage.leak_object_database_pipes:
-                pipe = self.process.stdin
-                if pipe is not None and not pipe.closed:
-                    with contextlib.suppress(BrokenPipeError, OSError):
-                        pipe.close()
+                try:
+                    close_owned_pipe(
+                        self.process.stdin,
+                        "stdin",
+                        self._raw_close_owned_fd,
+                    )
+                except (OSError, Unreadable) as error:
+                    failures.append(str(error))
             if not graceful:
                 self._terminate_once()
             if self.process.poll() is None:
@@ -1023,18 +1201,23 @@ class ObjectDatabase:
                         try:
                             self.process.wait(timeout=self.wait_timeout)
                         except subprocess.TimeoutExpired as error:
-                            failure = Unreadable(
+                            failures.append(
                                 "cat-file child did not exit after kill"
                             )
-                            failure.__cause__ = error
-            if not self._record_reap() and failure is None:
-                failure = Unreadable("cat-file child was not reaped")
+            if (
+                not self._record_reap()
+                and "cat-file child did not exit after kill" not in failures
+            ):
+                failures.append("cat-file child was not reaped")
         finally:
             # Descriptor ownership ends even when wait still times out after
             # kill.  The leak mutant alone deliberately skips this guarantee.
-            self._close_pipes()
-        if failure is not None:
-            raise failure
+            try:
+                self._close_pipes()
+            except (OSError, Unreadable) as error:
+                failures.append(str(error))
+        if failures:
+            raise Unreadable("; ".join(dict.fromkeys(failures)))
 
     def close(self):
         self._shutdown(graceful=True)
@@ -13714,39 +13897,43 @@ def run_control(name: str, root: Path):
             budget_limit: Any = None,
         ):
             transaction_entries = 0
-            git_subprocesses = 0
+            before_spawns = []
+            after_spawns = []
+
+            class AccountingObserver:
+                def before_spawn(self, command):
+                    before_spawns.append(command)
+
+                def after_spawn(self, command, pid):
+                    after_spawns.append((command, pid))
 
             @contextlib.contextmanager
             def transaction():
                 nonlocal transaction_entries
                 transaction_entries += 1
-                yield
+                yield AccountingObserver()
 
-            global REAL_POPEN
-            prior_popen = REAL_POPEN
-
-            def counted_popen(command, *args, **kwargs):
-                nonlocal git_subprocesses
-                if is_git_command(command):
-                    git_subprocesses += 1
-                return prior_popen(command, *args, **kwargs)
-
-            REAL_POPEN = counted_popen
-            try:
-                result = audit_event(
-                    fixtures["clean"].repo.root,
-                    event_kind,
-                    payload,
-                    budget_limit=budget_limit,
-                    transaction=transaction,
-                )
-            finally:
-                REAL_POPEN = prior_popen
+            result = audit_event(
+                fixtures["clean"].repo.root,
+                event_kind,
+                payload,
+                budget_limit=budget_limit,
+                transaction=transaction,
+            )
             return {
                 "audit_exit": result["audit_exit"],
                 "adapter_status": result["event_adapter"]["status"],
                 "transaction_entries": transaction_entries,
-                "git_subprocesses": git_subprocesses,
+                "git_subprocesses": len(after_spawns),
+                "before_spawns": len(before_spawns),
+                "after_spawns": len(after_spawns),
+                "commands_match": [
+                    command for command, _pid in after_spawns
+                ] == before_spawns,
+                "all_pids_concrete": all(
+                    type(pid) is int and pid > 0
+                    for _command, pid in after_spawns
+                ),
                 "result_git_processes": result["metrics"]["git_processes"],
                 "reason": result["evidence_verdict"]["reason"],
                 "typed_origin_strategy": result["input_contract"][
@@ -13797,6 +13984,10 @@ def run_control(name: str, root: Path):
         invalid_shape = {
             "adapter_status": "coverage-unavailable",
             "audit_exit": 2,
+            "after_spawns": 0,
+            "all_pids_concrete": True,
+            "before_spawns": 0,
+            "commands_match": True,
             "git_subprocesses": 0,
             "result_git_processes": 0,
             "transaction_entries": 0,
@@ -13828,6 +14019,10 @@ def run_control(name: str, root: Path):
             )
             and execution_seam["valid"]["transaction_entries"] == 1
             and execution_seam["valid"]["git_subprocesses"] > 0
+            and execution_seam["valid"]["before_spawns"]
+            == execution_seam["valid"]["after_spawns"]
+            and execution_seam["valid"]["commands_match"]
+            and execution_seam["valid"]["all_pids_concrete"]
             and execution_seam["valid"]["git_subprocesses"]
             == execution_seam["valid"]["result_git_processes"]
             and execution_seam["valid"]["typed_origin_strategy"] == "U"
@@ -13872,8 +14067,8 @@ def run_control(name: str, root: Path):
                     "typed_U_audit": (
                         "audit_event(root: Path, event_kind: str, payload: "
                         "Mapping[str, Any], *, budget_limit: int | None = "
-                        "None, transaction: Callable[[], "
-                        "ContextManager[None]] | None = None) -> dict"
+                        "None, transaction: Callable[[], ContextManager["
+                        "GitSpawnObserver | None]] | None = None) -> dict"
                     ),
                 },
                 "payload_grammar": {
@@ -13890,6 +14085,18 @@ def run_control(name: str, root: Path):
         repo = GitRepository(root)
         initialize(repo)
         repo.commit("initialize descriptor lifecycle fixture")
+
+        class CloseRaisesBeforeDelegate:
+            """Keep the real fd open while making the object close fail."""
+
+            def __init__(self, delegate):
+                self.delegate = delegate
+
+            def __getattr__(self, name):
+                return getattr(self.delegate, name)
+
+            def close(self):
+                raise OSError(errno.EIO, "injected close-before-delegate")
 
         def observe(mode: str, damage: Damage | None = None):
             metrics = Metrics()
@@ -13950,28 +14157,54 @@ def run_control(name: str, root: Path):
                             self.child.kill()
 
                     database.process = UnprovableReap(underlying_process)
-                    for operation in (database.close, database.abort):
-                        try:
-                            operation()
-                        except Unreadable as error:
-                            cleanup_failures.append(str(error))
-                else:
-                    database.close()
-                    database.close()
             else:
                 database = ObjectDatabase(root, metrics, damage=damage)
-            if mode == "after-exit":
+            if mode in {"after-exit", "raising-close", "raising-abort"}:
                 database.process.terminate()
                 database.process.wait(timeout=5)
+            if mode in {"raising-close", "raising-abort"}:
+                database.process.stdin = CloseRaisesBeforeDelegate(
+                    database.process.stdin
+                )
+            owned_descriptors = {
+                label: pipe.fileno()
+                for label, pipe in (
+                    ("stdin", database.process.stdin),
+                    ("stdout", database.process.stdout),
+                )
+                if pipe is not None
+            }
+            if mode == "after-exit":
                 database.close()
                 database.close()
             elif mode == "abort":
                 database.abort()
                 database.abort()
+            elif mode == "raising-close":
+                for operation in (database.close, database.close):
+                    try:
+                        operation()
+                    except Unreadable as error:
+                        cleanup_failures.append(str(error))
+            elif mode == "raising-abort":
+                for operation in (database.abort, database.abort):
+                    try:
+                        operation()
+                    except Unreadable as error:
+                        cleanup_failures.append(str(error))
             elif mode == "close-live":
                 database.close()
                 database.close()
-            elif mode not in {"stubborn-close", "stubborn-after-kill"}:
+            elif mode == "stubborn-close":
+                database.close()
+                database.close()
+            elif mode == "stubborn-after-kill":
+                for operation in (database.close, database.abort):
+                    try:
+                        operation()
+                    except Unreadable as error:
+                        cleanup_failures.append(str(error))
+            else:
                 raise ValueError(mode)
             if underlying_process is not None:
                 if underlying_process.poll() is None:
@@ -13989,21 +14222,33 @@ def run_control(name: str, root: Path):
                 "process_reaps": metrics.object_process_reaps,
                 "process_terminations": metrics.object_process_terminations,
                 "returncode_is_set": database.process.poll() is not None,
-                "stdin_closed": bool(
-                    database.process.stdin is not None
-                    and database.process.stdin.closed
+                "stdin_closed": descriptor_is_closed(
+                    owned_descriptors["stdin"]
                 ),
-                "stdout_closed": bool(
-                    database.process.stdout is not None
-                    and database.process.stdout.closed
+                "stdout_closed": descriptor_is_closed(
+                    owned_descriptors["stdout"]
+                ),
+                "stdin_object_closed": bool(
+                    database.process.stdin.closed
+                ),
+                "stdout_object_closed": bool(
+                    database.process.stdout.closed
                 ),
             }
             # The damaged instance intentionally skips its closure path.  Close
             # the observed descriptors directly after recording the leak so the
             # control itself does not leak resources.
+            for descriptor in owned_descriptors.values():
+                if not descriptor_is_closed(descriptor):
+                    os.close(descriptor)
             for pipe in (database.process.stdin, database.process.stdout):
-                if pipe is not None and not pipe.closed:
+                with contextlib.suppress(BrokenPipeError, OSError, ValueError):
                     pipe.close()
+                if isinstance(pipe, CloseRaisesBeforeDelegate):
+                    with contextlib.suppress(
+                        BrokenPipeError, OSError, ValueError
+                    ):
+                        pipe.delegate.close()
             return result
 
         baseline = {
@@ -14012,6 +14257,8 @@ def run_control(name: str, root: Path):
                 "close-live",
                 "after-exit",
                 "abort",
+                "raising-close",
+                "raising-abort",
                 "stubborn-close",
                 "stubborn-after-kill",
             )
@@ -14035,7 +14282,13 @@ def run_control(name: str, root: Path):
                 else (
                     item["returncode_is_set"]
                     and item["process_reaps"] == 1
-                    and not item["cleanup_failures"]
+                    and (
+                        len(item["cleanup_failures"]) == 1
+                        and "raw descriptor recovered"
+                        in item["cleanup_failures"][0]
+                        if mode in {"raising-close", "raising-abort"}
+                        else not item["cleanup_failures"]
+                    )
                     and (
                         item["killed"]
                         if mode == "stubborn-close"
@@ -14058,6 +14311,100 @@ def run_control(name: str, root: Path):
         classification = Classifier(classification_fixture).run()
         metrics_published_after_close = bool(
             classification["metrics"]["object_process_reaps"] == 1
+        )
+        original_init = ObjectDatabase.__init__
+        wrapped_classifier_descriptors = []
+        wrapped_classifier_pipes = []
+
+        def init_with_raising_close(database, *args, **kwargs):
+            original_init(database, *args, **kwargs)
+            wrapped_classifier_descriptors.append(
+                database.process.stdin.fileno()
+            )
+            wrapper = CloseRaisesBeforeDelegate(
+                database.process.stdin
+            )
+            wrapped_classifier_pipes.append(wrapper)
+            database.process.stdin = wrapper
+
+        ObjectDatabase.__init__ = init_with_raising_close
+        try:
+            recovered_close_result = Classifier(
+                ordinary_linear_fixture(
+                    root / "raising-close-classifier",
+                    "raising-close-classifier",
+                    valid=True,
+                )
+            ).run()
+        finally:
+            ObjectDatabase.__init__ = original_init
+            for wrapper in wrapped_classifier_pipes:
+                with contextlib.suppress(
+                    BrokenPipeError, OSError, ValueError
+                ):
+                    wrapper.delegate.close()
+        classifier_fallback_closed = bool(
+            recovered_close_result["audit_exit"] == 2
+            and recovered_close_result["classification"] == "unreadable"
+            and not recovered_close_result["actions"]
+            and "raw descriptor recovered" in recovered_close_result[
+                "evidence_verdict"
+            ]["reason"]
+            and wrapped_classifier_descriptors
+            and all(
+                descriptor_is_closed(descriptor)
+                for descriptor in wrapped_classifier_descriptors
+            )
+        )
+
+        original_raw_close = ObjectDatabase._raw_close_owned_fd
+        unclosed_classifier_descriptors = []
+
+        def init_with_unclosable_pipe(database, *args, **kwargs):
+            init_with_raising_close(database, *args, **kwargs)
+            database.wait_timeout = 0.1
+            unclosed_classifier_descriptors.append(
+                wrapped_classifier_descriptors[-1]
+            )
+
+        def refuse_raw_close(_database, _descriptor):
+            raise OSError(errno.EIO, "injected raw close failure")
+
+        ObjectDatabase.__init__ = init_with_unclosable_pipe
+        ObjectDatabase._raw_close_owned_fd = refuse_raw_close
+        try:
+            unclosed_result = Classifier(
+                ordinary_linear_fixture(
+                    root / "unclosed-classifier",
+                    "unclosed-classifier",
+                    valid=True,
+                )
+            ).run()
+            unclosed_before_control_cleanup = bool(
+                unclosed_classifier_descriptors
+                and not descriptor_is_closed(
+                    unclosed_classifier_descriptors[-1]
+                )
+            )
+        finally:
+            ObjectDatabase.__init__ = original_init
+            ObjectDatabase._raw_close_owned_fd = original_raw_close
+            for descriptor in unclosed_classifier_descriptors:
+                if not descriptor_is_closed(descriptor):
+                    os.close(descriptor)
+            for wrapper in wrapped_classifier_pipes:
+                with contextlib.suppress(
+                    BrokenPipeError, OSError, ValueError
+                ):
+                    wrapper.delegate.close()
+        unclosed_descriptor_failed_closed = bool(
+            unclosed_before_control_cleanup
+            and unclosed_result["audit_exit"] == 2
+            and unclosed_result["classification"] == "unreadable"
+            and not unclosed_result["actions"]
+            and "descriptor cleanup failed" in unclosed_result[
+                "evidence_verdict"
+            ]["reason"]
         )
         original_close = ObjectDatabase.close
 
@@ -14089,6 +14436,8 @@ def run_control(name: str, root: Path):
             baseline_closed
             and damaged_leaked
             and metrics_published_after_close
+            and classifier_fallback_closed
+            and unclosed_descriptor_failed_closed
             and cleanup_failure_closed
         )
         return {
@@ -14107,6 +14456,10 @@ def run_control(name: str, root: Path):
                 "damaged": damaged,
                 "metrics_published_after_close": (
                     metrics_published_after_close
+                ),
+                "classifier_fallback_closed": classifier_fallback_closed,
+                "unclosed_descriptor_failed_closed": (
+                    unclosed_descriptor_failed_closed
                 ),
                 "cleanup_failure_closed": cleanup_failure_closed,
             },
@@ -14730,15 +15083,19 @@ def audit_event(
     payload: Mapping[str, Any],
     *,
     budget_limit: int | None = None,
-    transaction: Callable[[], ContextManager[None]] | None = None,
+    transaction: Callable[
+        [], ContextManager[GitSpawnObserver | None]
+    ] | None = None,
 ) -> dict:
     """Run typed Strategy U from exact endpoints in an immutable event.
 
     ``transaction`` is a narrow accounting seam.  For a valid event, this
-    function enters exactly one caller-supplied context and itself executes the
-    complete Git-backed audit inside it.  Invalid event publication never calls
-    the factory.  Because the caller never receives the operation or result, it
-    cannot select a different origin strategy, endpoints, or classification.
+    function enters exactly one caller-supplied context.  The context may yield
+    a ``GitSpawnObserver`` that sees immutable before/after notifications for
+    each Git child while this function itself constructs commands and executes
+    the complete audit.  Invalid event publication never calls the factory.
+    The caller never receives the operation or result and cannot select a
+    different origin strategy, endpoints, or classification.
     """
     try:
         if not valid_budget_limit(budget_limit):
@@ -14791,10 +15148,11 @@ def audit_event(
         if transaction is None
         else transaction()
     )
-    with scope:
-        result = ordinary_audit(
-            root, endpoints.O, endpoints.N, budget_limit, "U"
-        )
+    with scope as observer:
+        with observe_git_spawns(observer):
+            result = ordinary_audit(
+                root, endpoints.O, endpoints.N, budget_limit, "U"
+            )
     result["event_adapter"] = endpoints.evidence()
     return result
 
