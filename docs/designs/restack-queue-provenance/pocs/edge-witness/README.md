@@ -15,6 +15,159 @@ laundering. Nine executable controls also passed, including seven observed-red r
 of verifier-found incarnation bugs. The prototype deliberately fails closed on repeated
 incarnations, so it is evidence for a design direction rather than production code.
 
+## Canonical semantic evidence versus run telemetry
+
+`semantic_boundary.py` proves that operational budget observations cannot be part of the
+authoritative result. Before this module, a tempting result shape could carry every scan,
+cache, subprocess, allocation, retention, and serialization counter alongside the finding.
+That shape is not unique: an implementation may request each identity/node and cache by
+shared object, while another may resolve the shared object once and batch the remaining
+work. Now both implementations must emit byte-identical semantic result bytes, while each
+run emits a separate receipt whose bytes are allowed to differ. This module changes no
+production behavior.
+
+The semantic result is exactly one JSON value plus one LF with these top-level keys and no
+others:
+
+```text
+schema, old, new, common, state, rows
+```
+
+`old` and `new` bind the invocation's full `O` and `N` object IDs. `common` is exactly one
+full shared-boundary object ID; a run with zero or multiple merge bases fails closed before
+it can emit accepted result bytes. `state` is `clean` only when `rows` is empty and
+`blocked` only when at least one row exists. Each row has exactly
+`identity,paths,status,reasons,finding`, matching the accepted production row surface while
+remaining an illustrative POC projection rather than a claim that this evaluator implements
+all production row semantics. No counter, implementation name, runtime value, limit,
+cleanup claim, or cardinality field is accepted in these bytes.
+
+The strict codec has one representation: repository-canonical ASCII JSON produced with
+sorted keys, non-ASCII characters escaped, no optional whitespace, compact separators, and
+exactly one trailing LF. The decoder rejects semantic bytes over the configured byte bound
+before parsing, then parses with duplicate-key detection, validates exact Python/JSON types
+without depending on parsed object order, re-encodes, and compares every byte. It rejects
+duplicate keys; unknown and legacy keys; wrong types (including JSON booleans where
+integers are required); alternate escapes; unsorted transport key order; whitespace and
+CRLF; prefix or suffix bytes; a missing LF; inconsistent rows, kinds, reasons, or state;
+and `old`/`new` values that differ from the invocation.
+
+### Executable non-uniqueness counterexample
+
+The synthetic and real-Git controls each bind `O`, `N`, and their one common commit to the
+same immutable queue subtree. The two evaluators observe different work while emitting the
+same semantic bytes:
+
+| Evaluator | Snapshot requests | Cache hits | Semantic bytes | Receipt bytes |
+|---|---:|---:|---|---|
+| identity/node cache | 6 | 5 | identical | implementation-specific |
+| shared-object batch | 1 | 0 | identical | implementation-specific |
+
+The exact synthetic semantic result is:
+
+```json
+{"common":"663682aad5cdc7cb63caa74f8f4c976b4d001376","new":"386ce74febd5dc07082d2cbed833e10e15c4b180","old":"7a82f44ff34aa6db4cb1bb8de2b12f77332c68d1","rows":[],"schema":"restack-queue-semantic-result/v1","state":"clean"}
+```
+
+The terminating LF is part of the bytes. Both receipts bind the SHA-256 of those bytes, but
+the receipts differ because they identify the evaluator and preserve its `6/5` or `1/0`
+observations. This is the concrete counterexample to putting operational counters in the
+semantic digest: both implementations conform and reach the same authoritative answer, so
+neither counter pair may make one answer a different result.
+
+### Execution receipt and incomplete runs
+
+The run-scoped receipt is a separately canonical JSON transport with schema
+`restack-queue-execution-receipt/v1`. It records `result_sha256` or `null`, implementation,
+Python/Git/platform, budget profile, limits, used counters, exit, incomplete reason, and
+cleanup observations. A provider projection (the provider-facing clean/blocked/incomplete
+view) accepts a semantic result only when the strict result decoder succeeds and the
+receipt digest matches. Receipt counters never alter the rows or state.
+
+An absent result plus a valid incomplete receipt projects to `incomplete`, never `clean`.
+There is no incomplete semantic result: budget refusal, provider failure, serialization
+refusal, injected fault, digest mismatch, or failed cleanup produces no accepted result
+bytes. A receipt claiming completion without a digest, or incompleteness with a digest, is
+itself invalid.
+
+### Deterministic budgets and cleanup
+
+The POC charges each bounded operation before its callback: snapshot request, read,
+allocation, child spawn, retained bytes, result write, and written bytes. A run with every
+limit set to its observed use succeeds. Seven observed-minus-one controls lower each
+reachable maximum independently and prove that the run refuses before accepting a partial
+result. Seven direct `N+1` controls also prove that the rejected callback is never invoked.
+
+Result bytes remain staged until evaluation and cleanup succeed. On every complete or
+incomplete path, the transaction clears its cache, terminates and reaps live children,
+closes process streams and explicit descriptors, and compares repository refs, worktree
+status, and index bytes with their pre-run fingerprints. The fault controls interrupt after
+the first cached snapshot, after a real child spawn, after a real descriptor open, and
+immediately before result commit. Every interruption emits only an incomplete receipt and
+leaves the real-Git fixture unchanged.
+
+### Cardinality decision
+
+No proof-derived set cardinality belongs in the semantic result at this boundary. The
+provider consumer needs the actual `common` identity to bind and replay the proof, and it
+needs the actual finding rows to project `blocked`; it consumes no count. A run that cannot
+prove exactly one shared boundary is incomplete, while snapshot counts, witness-set sizes,
+cache sizes, and scan totals depend on implementation strategy. Until a consumer
+demonstrates a decision that cannot use the members themselves, every such count remains
+receipt-only telemetry.
+
+### Replayable verification
+
+The new self-test preserves the existing 29-scenario test and independently covers strict
+round trips, the `6/5` versus `1/0` counterexample, fast-forward, divergent clean and
+blocked, provider projection, incomplete runs, exact and `N+1` budgets, observed-minus-one
+maxima, cleanup/fault injection, a 2,048-row result, serialization byte/row bounds, decode
+byte bounds, sorted-key transport, single-common enforcement, and two absolute fixture
+roots:
+
+```sh
+python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --self-test
+python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --self-test
+```
+
+The second command emitted 57 named damage-control records followed by this exact summary
+on 2026-09-02 with Python 3.14.7 and Git 2.55.0:
+
+```json
+{"checks_passed":89,"checks_total":89,"counterexample":"6/5-vs-1/0","damage_controls_passed":57,"damage_controls_total":57,"large_rows":2048,"real_git_cases":4,"summary":"PASS","synthetic_cases":4}
+```
+
+The 57 controls are 23 strict transport/schema rejections, including observed-red probes
+for array `common`, zero or multiple merge bases, unsorted result bytes, and decode byte limits;
+two serialization-bound refusals; seven observed-minus-one incomplete runs; seven `N+1`
+pre-charge refusals plus seven callback-not-run checks; nine fault/cleanup checks; and two
+provider incomplete/digest checks. The self-test prints each name and `PASS`, so no grouped
+total can hide a skipped control.
+
+Cross-implementation comparison:
+
+```sh
+PYTHONPYCACHEPREFIX=/tmp/edge-semantic-pycache python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --emit-semantic-suite --implementation identity-node-cache > /tmp/edge-semantic-identity.jsonl
+PYTHONPYCACHEPREFIX=/tmp/edge-semantic-pycache python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --emit-semantic-suite --implementation shared-object-batch > /tmp/edge-semantic-batch.jsonl
+cmp /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
+shasum -a 256 /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
+```
+
+The comparison exited 0. Each file contained six results and 2,505 bytes with SHA-256
+`0fe3dca2eeb7d6cdf5db483b7862caa7f54ac858154996bf3a971fea6b84fe18`.
+
+Two-environment comparison, changing hash seed, locale, timezone, Python cache root,
+implementation, and absolute fixture root:
+
+```sh
+PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/edge-semantic-pycache-env1 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --emit-semantic-suite --implementation identity-node-cache > /tmp/edge-semantic-env1.jsonl
+PYTHONHASHSEED=777 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/edge-semantic-pycache-env2 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --emit-semantic-suite --implementation shared-object-batch > /tmp/edge-semantic-env2.jsonl
+cmp /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
+shasum -a 256 /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
+```
+
+That comparison also exited 0 with the same six lines, 2,505 bytes, and SHA-256 above.
+
 ## Result
 
 **VERIFIED:** the exact command below exited 0 on 2026-08-31 in the unit worktree with
