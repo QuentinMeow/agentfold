@@ -105,6 +105,24 @@ The provider lane, amendment-25 quoted-path domain, safe-path file-type pairs, a
 four-independent/two-derived scratch model passed their assigned attacks. Budget and
 core-fit lenses were not run. Production remained unopened.
 
+## Superseded authenticated-source review
+
+**Reviewed revision:** `79a4fe9f3e45feac2214509fc2dea17254295859`
+
+- semantic/DAG / a26-design-consistency: `block` — the direct script necessarily executed
+  before its own v2 check, and the host-pinned interpreter/standard-library profile had no
+  exact identity, so authenticated source did not identify all executed semantics.
+- workflow/provider / r19-semantic-design: `approve` — v2 receipt flow, native approval,
+  literal pathspecs, attempt joins, and dormant/canary/receipt/activation ordering remained
+  coherent.
+- CLI/resource / am22-cli-review: `block` — adapter framing and payload aggregate retained
+  impossible independent `+1` fixtures; the direct script lacked an external trust root;
+  and removing `__file__` did not prevent known-path filesystem observation after open.
+
+Literal magic-path Git probes, revised v2 arithmetic, safe unquoted-path classes, and the
+four-independent/two-derived scratch ledger passed. Budget and core-fit lenses were not run.
+Production remained unopened.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

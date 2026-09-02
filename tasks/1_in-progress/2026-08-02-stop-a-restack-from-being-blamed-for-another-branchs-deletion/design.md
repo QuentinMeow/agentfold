@@ -3766,3 +3766,173 @@ execution binding, not a claim that POSIX reports a post-open rename.
 
 Production remains unopened. A new immutable revision must again pass all three base lenses
 before budget and core-fit review; prior accepts and partial positive controls do not carry.
+
+## 2026-09-01 correction amendment 27 — external trust root and sealed evaluator
+
+Fresh review of `79a4fe9f3e45feac2214509fc2dea17254295859` accepted provider
+sequencing and literal Git behavior but rejected three execution claims. An entrypoint cannot
+authenticate bytes before CPython has executed that entrypoint; removing `__file__` does not
+remove `open()` or known-path observation; and the interpreter/standard-library profile was
+unnamed. CLI review also found two more derived adapter values still promised impossible
+independent `+1` fixtures. This amendment supersedes the evaluator launch/root-of-trust,
+source-namespace, runtime-profile, and derived-counter wording. It does not widen classifier
+or provider authority.
+
+### Trust begins outside the mutable evaluator checkout
+
+No repository Python process claims to authenticate its own first instruction. Strategy A
+now requires a **host launcher capability** whose running identity is established before the
+candidate/evaluator checkout is visible. The launcher is an adapter boundary, not classifier
+authority: core defines its closed input/output/capability protocol, and a host either
+attests the exact launcher/runtime identities or reports unavailable. There is no fallback
+to executing a self-verified worktree script.
+
+The admitted launcher artifact is one statically linked Linux executable for the selected
+architecture, at most 16 MiB, with no ELF interpreter, dynamic dependency, plugin, config
+include, executable search, or runtime download. `launcher-policy/v1` binds its architecture,
+size, mode, SHA-256, exact argv/environment schema, and required kernel-capability probe.
+The probe executes mount/user-namespace, read-only-remount, pivot/detach, sealed-volume,
+descriptor, and privilege-drop controls against disposable sentinels before accepting the
+host. Kernel/capability mismatch is unavailable; a version string alone is not evidence.
+
+For GitHub, the trusted default-branch workflow is the prior trust root. Before launching
+Python, its base-authenticated adapter step verifies the launcher artifact ID, SHA-256, mode,
+size, and adapter-policy-v2 membership against the immutable receipt. Candidate code, the
+candidate object source, and a candidate workflow cannot supply or replace it. For local
+diagnosis, `automation/install.py` materializes the same digest-covered launcher in the Git
+common directory outside every worktree and records its source commit/digest; the documented
+command invokes that installed path. A missing, drifted, worktree-resident, or differently
+digested launcher makes continuity unavailable. The installer copy is repository-local and
+optional; it creates no user-global state or provider dependency.
+
+The launcher opens every authority-policy-v2 source with amendment 25's fd-relative
+no-follow checks, compares exact Git mode/size/payload to its base-authenticated manifest,
+and only then constructs the evaluator. `ref_update.py`, its CLI parser, bootstrap, core, and
+support modules are all ordinary authenticated rows. None is executed from its original
+path. A substituted direct script, `python -m`, `-c`, stdin, directory, zipapp, or ordinary
+worktree invocation is not a Strategy A authority entrypoint and cannot produce an accepted
+result.
+
+The launcher creates a sealed memory-backed policy directory from the already opened bytes,
+preserves only authenticated `100644|100755` executable class, fsyncs it, bind-mounts it
+read-only in a new private Linux mount namespace, and verifies every resulting file back to
+the manifest. It then launches the authenticated `ref_update.py` from that sealed path with
+the exact interpreter profile below. Thus CPython's first evaluator byte is the same
+pre-opened, mode-checked, payload-authenticated byte sequence; the in-process loader still
+compiles the remaining rows from retained authenticated buffers and never consults a cache.
+
+Launcher provenance is explicit in `launcher-policy/v1`, and accepted evidence carries
+`launcher_policy_sha256`. The v2 canary artifact/receipt and Gate 3 bind that value beside
+authority-policy-v2 and adapter-policy-v2. A launcher update is a new dormant landing,
+canary, and receipt; a launcher cannot attest a changed copy of itself into an old receipt.
+Local/provider parity is claimed only when the exact launcher, runtime, authority, and
+adapter digests all match.
+
+### The evaluator has no source-checkout namespace
+
+Before evaluator exec, the launcher makes mount propagation private and constructs a fresh
+root containing only:
+
+- the sealed read-only policy directory;
+- the exact read-only runtime-profile files;
+- the read-only isolated Git object directory selected for O/N;
+- the already bounded writable scratch volume; and
+- device/descriptor endpoints explicitly required by the child-launcher contract.
+
+The original evaluator checkout, host root, home, other worktrees, caches, sockets, and
+ambient `/proc` are not mounted. The launcher pivots into the new root, detaches the old
+root, closes every source/host descriptor not named by the protocol, verifies the mount and
+descriptor allowlists, drops setup privilege, and only then execs CPython. A host unable to
+prove private mount propagation, read-only policy/runtime/object mounts, pivot/detach,
+descriptor closure, and no route to the old namespace reports unavailable.
+
+Authority code may retain ordinary Python filesystem APIs, but every spelling of an
+original registry path, `sys.argv[0]`, cwd-relative escape, symlink, hardlink, /proc/self/fd,
+or absolute host path is either absent or outside the sealed root. The only source pathname
+it can observe is the immutable authenticated policy copy. Replacing the original checkout
+before or after the launcher's open cannot change that copy or the compiled buffers. Tests
+attempt rename, symlink, hardlink, bind-mount propagation, descriptor inheritance, proc-fd,
+cwd/root escape, and concurrent host replacement at every launch boundary; accepted result
+bytes remain bound to the sealed copy, and any setup/allowlist drift refuses before Python.
+
+This source-free namespace supersedes amendment 26's claim that a source audit alone removes
+pathname capability. The audit still forbids bytecode/dynamic loaders and catches accidental
+source introspection, but namespace construction is the enforcement boundary.
+
+### Runtime profile is content-addressed
+
+`runtime-profile/v1` is canonical JSON plus LF, independently decoded/re-encoded with the
+receipt encoder. It has exact scalar fields for CPython implementation, full version tuple,
+cache tag, bytecode magic, ABI/SOABI, platform, byte order, and every required `sys.flags`
+value. It records the exact invocation flags `-I -S -B -X utf8`, fixed locale/time-zone,
+and a sorted manifest of every interpreter executable, dynamic loader/library, encoding,
+preloaded standard-library source/extension, and other runtime file mounted in the private
+root. Each file row binds role, normalized relative path, regular mode, size, and SHA-256;
+unknown files, symlinks, writable runtime entries, late imports, or an unlisted loaded mapping
+are unavailable.
+
+Its top-level keys are exactly
+`schema,implementation,version,cache_tag,magic_number,abi,soabi,platform,byteorder,flags,invocation,locale,timezone,files`.
+`schema` is `agentfold-runtime-profile/v1`; `version` is exactly five bounded values for
+major/minor/micro/release-level/serial; `flags` has the closed CPython flag-name registry;
+`invocation` is the exact argument vector; and each file has exactly
+`role,path,mode,size,sha256`. The canonical manifest is at most 2 MiB, with at most 1,024
+files, 4,096 bytes per path, 1 MiB aggregate path bytes, 128 MiB per file, and 512 MiB
+aggregate file bytes. Role and scalar strings use closed registries or the existing 8 KiB
+string bound. Every count, byte, path, and canonical-output limit has exact and `+1` tests;
+derived framing/total values use observed-minus-one controls.
+
+The host launcher verifies the runtime tree before mount and the evaluator rechecks the
+reported profile after preload using the sealed paths and loaded-module/mapping registry.
+After the closed standard-library allowlist is preloaded, filesystem/zip importers are
+removed as in amendment 26. `/proc` is unavailable to classifier code, so loaded native
+mappings are attested by the launcher before detach rather than discovered afterward.
+
+Define:
+
+```text
+execution-policy/v1 = SHA256(
+  ASCII("agentfold-execution-policy/v1") || 00
+  || raw32(launcher_policy_sha256)
+  || raw32(runtime_profile_sha256)
+  || raw32(authority_policy_v2_sha256)
+)
+```
+
+The canonical result, canary rows, artifact, receipt, and activation verifier carry all four
+digests. A runtime/launcher mismatch is a stable incomplete result before graph work; it is
+never a different implementation of the same authority digest. Runtime or stdlib updates
+therefore require a new dormant canary/receipt rather than relying on source parity. Hash
+seed still varies in golden tests and must not change results; it is not treated as hidden
+runtime identity.
+
+Launcher work has its own non-overlapping envelope before evaluator exec: 256 MiB address
+space, 120-second monotonic deadline, 32 processes, 32 descriptors, 64 KiB streaming chunks,
+8,192 runtime-file chunks, a 16 MiB sealed policy-volume quota, 2 MiB retained diagnostics,
+and zero network or writable path outside that volume. Runtime files are verified streaming
+from the host-attested read-only volume and are never copied into policy scratch. `execve`
+replaces the launcher, so launcher and evaluator address-space peaks do not overlap. Every
+setup failure closes descriptors, kills/reaps helpers, unmounts the private root, empties the
+policy volume, and emits unavailable; fault tests cover each limit, mount stage, partial
+copy/hash, interrupted exec, and cleanup residue.
+
+### Adapter totals are derived observations
+
+Authority and adapter framing maxima, adapter payload aggregate, and total digest-input
+maxima are checked derived counters, not independent production gates. The independent
+source gates are registry row/path bytes, authority payload bounds, and the adapter patch,
+manifest, and other-payload categories. Exact/`+1` tests remain on those source gates.
+
+Valid maximum transcripts reach authority framing `27,552`, adapter framing `4,649`, adapter
+payload `27,262,976`, and adapter total `27,267,625`. For each derived value, the unchanged
+maximum transcript is rerun with a test-only `observed - 1` limit and must refuse before
+hashing. There is no claim that framing `4,650` can preserve the 16-row/4,096-path-byte
+limits, or that aggregate payload `27,262,977` can preserve all three category limits.
+Checked arithmetic, exact reported maxima, unknown/double category tags, and per-source
+limit-plus-one damage controls remain.
+
+### Gate boundary
+
+Production remains unopened. The external launcher and sealed-runtime requirements are part
+of core/adapter feasibility review; a new immutable SHA needs all three base lenses before
+the remaining budget and core-fit gates.

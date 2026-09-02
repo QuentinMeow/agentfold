@@ -449,3 +449,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Bound post-open execution to retained descriptor bytes; races before open refuse, while
   races after open cannot affect execution and no longer claim impossible detection.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — External-root and sealed-evaluator correction (codex)
+
+- Fresh review accepted provider sequencing and blocked amendment 26 on its self-executing
+  bootstrap, open source namespace, unnamed runtime, and two derived adapter `+1` promises.
+- Moved first-instruction trust to a host-attested launcher outside mutable worktrees; the
+  same launcher is receipt-bound remotely and materialized repository-locally for diagnosis.
+- Required a private Linux root containing only sealed authenticated policy/runtime, the
+  isolated Git object source, and bounded scratch; the original checkout is never mounted.
+- Added a content-addressed CPython/stdlib/native runtime profile and an execution-policy
+  digest binding launcher, runtime, and authority identities end to end.
+- Reclassified authority/adapter framing, adapter payload aggregate, and total input as
+  source-derived observations with observed-red damage controls.
+- Production remains unopened pending another full five-lens immutable-revision review.
