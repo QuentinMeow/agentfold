@@ -315,6 +315,27 @@ $ sed -n '/additional_parent_subprocess_queries=0/,/unique_object_payload_bytes=
 
 This is the real output of the exact command above.
 
+## Superseded portable-core CLI/result review
+
+**Reviewed revision:** `c0bdc44ae10bfa65a25b961ab5e3970b5bfb6107`
+
+- semantic/DAG / a33-core-semantics: `block` — amendment 33 reinstated the combined
+  `reconcile.py --ref-update` interface that still-active amendment 15 forbids, and one
+  result/exit could not represent continuity-clean plus ordinary-blocked.
+- CLI/budget / a33-core-budget-cli: `block` — the same mixed-result invocation was
+  contradictory; existing writer flags defeated the read-only claim; and an "at most
+  1 MiB" logical chunk rule did not determine one canonical peak counter. This reviewer
+  mechanically confirmed 67 unique ASCII-sorted names and the graph, merge-base, and
+  shallow-probe maxima.
+- workflow/scope / local Codex fresh-context review: `incomplete` — the reviewer found no
+  core/provider or legacy-retirement counterexample in the completed lenses, but repeated
+  response-stream disconnections prevented a final verdict. The process was interrupted
+  after the two independent blocks had already invalidated the revision; this is not an
+  approval.
+
+The panel stopped with two independent blocks and one incomplete review. Budget and core-fit
+admission were not run, and no production implementation began from this revision.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

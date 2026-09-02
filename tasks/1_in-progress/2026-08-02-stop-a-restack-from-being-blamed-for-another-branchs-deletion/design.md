@@ -5303,3 +5303,134 @@ the local transaction, exact result/counter contract, and the explicit scope spl
 not approve the rejected provider/launcher history. Provider adapter/service implementation,
 selector activation, workflow replacement, and legacy retirement remain separate PRs and
 cannot borrow this task's review or POC receipt.
+
+## 2026-09-01 correction amendment 34 — separate advisory commands and unique bytes
+
+Fresh review of `c0bdc44ae10bfa65a25b961ab5e3970b5bfb6107` rejected the
+amendment-33 executable contract without reopening Strategy A or the core/provider split.
+Two independent reviewers found that amendment 33 reintroduced a combined
+`reconcile.py --ref-update` mode even though amendment 15 still forbade it. The combined
+mode also had no truthful result for continuity-clean plus ordinary-blocked, did not reject
+existing writer flags despite calling itself read-only, and left the canonical peak
+serialization counter dependent on an unspecified logical partition.
+
+This amendment supersedes amendment 33's CLI/result subsection, its "paired local command"
+wording, and its implementation-gate revision. It also supersedes amendments 15–16 only
+where their authority-policy field, result schema, or row shape conflicts with the unsealed
+core result below. Amendment 15's two-command boundary and read-only option rejection,
+amendment 16's `preserved` semantics and stable identity-based Finding, amendment 33's
+67-name counter registry, and the amendment-33 core/provider scope split remain selected.
+
+### Continuity and ordinary checking remain separate processes
+
+The only dormant Strategy A CLI is:
+
+```text
+python3 automation/reconcile/ref_update.py \
+  --git-dir <absolute-path> --old <full-oid> --new <full-oid>
+```
+
+It is read-only and Linux-only. Its custom parser accepts exactly one occurrence of each of
+the three displayed options, except that `--help` may appear alone. Before opening the object
+source it rejects missing, duplicate, positional, syntactically partial, zero, or
+unequal-width endpoints and every range, worktree, index, branch, task, provider,
+compatibility, publication, or writer option. After opening the source, its object format
+determines the required full OID width; abbreviated or non-commit endpoints then refuse
+before graph/action work. `--git-dir` must be an absolute path naming the single candidate object source;
+replace refs, lazy fetch, alternates, network and remote helpers remain disabled by the
+selected object boundary. On a host without the selected Linux containment primitives the
+command emits the canonical incomplete diagnostic and exits 2 before history work.
+
+`automation/reconcile/reconcile.py` does not gain `--ref-update`, import the new CLI, or
+change its parser, output, writers, `--range B...N`, `root:N`, `--displaced-tip`, workflow,
+or cross-platform behavior in this dormant task. A separate `ref_update_core.py` library may
+hold the classifier, but only `ref_update.py` calls it in this task. The recursive
+`automation/reconcile/` spawn guard and tests still discover both new files.
+
+A developer who needs both judgments runs two explicit commands with the same inspected N:
+
+```text
+python3 automation/reconcile/ref_update.py \
+  --git-dir <absolute-path> --old <O> --new <N>
+python3 automation/reconcile/reconcile.py --check --range <B>...<N>
+```
+
+The first result answers only whether the exact O→N replacement has one valid continuity
+explanation. The second answers only the existing ordinary candidate checks. They retain
+independent stdout, stderr, and exits: continuity 0/1/2 means clean/blocked/incomplete under
+the contract below, while the ordinary process keeps its current contract. A human or
+non-authoritative wrapper reports the two named results separately; it may summarize the
+pair as usable only when both complete clean, but it may not mint a third canonical result,
+hide either output, reinterpret incomplete as clean, or let either clean result clear the
+other blocked/unavailable result. There is therefore no mixed-result stdout or overloaded
+exit code to define.
+
+An optional evidence-only repository workflow may capture the continuity command's exact
+O/N invocation, stdout, stderr, exit, and artifact digest. If it also runs ordinary checks,
+those bytes remain a separately named artifact/result. Current workflow call sites remain
+unchanged, and neither result is authoritative, cumulative, or merge-enabling.
+
+### The standalone advisory envelope is closed
+
+Every complete continuity result is exactly one canonical UTF-8 JSON line on stdout plus LF,
+with sorted keys, ASCII escaping, compact separators, and empty stderr. Its schema is
+`agentfold-ref-update-core/v1` and its exact top-level keys are
+`schema,old,new,common,state,rows,counters`. Complete clean/blocked exits are 0/1. A
+fast-forward has `common=old`, `rows=[]`, and `state=clean`. Structural, platform, history,
+resource, child, delivery, or serialization incompleteness produces no accepted result,
+attempts one bounded stable JSON-plus-LF diagnostic on stderr with exact keys
+`schema,state,reason`, `schema=agentfold-ref-update-core/v1`, `state=incomplete`, and one
+closed ASCII reason code, and exits 2; partially accepted transport bytes retain amendment
+16's debris rule and can never be decoded as a result.
+
+Every divergent row has exactly `identity,paths,status,reasons,finding`. Rows sort by full
+domain-separated identity digest; paths and closed reason codes are sorted unique values.
+Status is exactly `preserved|valid|none|invalid|ambiguous`. `finding` is null exactly for
+`preserved` and `valid`; otherwise it is amendment 16's exact stable identity-based
+`check,subject,message,fix` object. Full retained proof remains an internal immutable test
+value rather than an open CLI field. Unknown, missing, duplicate, legacy, or wrong-typed
+keys at any level refuse strict decoding. This explicitly replaces amendment 16's `policy`
+top-level field and row `evidence` digest: an unsealed advisory cannot authenticate its own
+executing policy, and tests bind the internal proof directly.
+
+`counters` contains every amendment-33 `CORE_COUNTER_LIMITS_V1` name exactly once in ASCII
+sort order as exact `{used,limit}` objects and no other name. The 67 names, limits, type
+rules, exact/limit controls, fast-forward zeros, and invalid-result behavior remain
+unchanged.
+
+### Serialization counters use one exact logical partition
+
+Let `L` be the length in bytes of the final canonical JSON line including LF. Its logical
+serialization partition is uniquely the consecutive half-open slices
+`[0,1048576)`, `[1048576,2097152)`, and so on, truncated at `L`; no caller-, write-, pipe-,
+or platform-sized partition is permitted. Because a result is nonempty,
+`result_peak_serialization_chunk_bytes.used = min(L,1048576)` and
+`result_serialization_bytes.used = L`.
+
+The pre-allocation size calculator solves the two self-referential integers jointly. Starting
+with `(length,peak)=(0,0)`, it counts the exact canonical bytes that would be encoded with
+those two provisional `used` values without allocating the result buffer, sets the next pair
+to `(count,min(count,1048576))`, and repeats. The first pair equal to its successor is the
+canonical pair selected by this algorithm; failure to converge within 16 counted passes is incomplete. The
+encoder then precharges `L`, allocates once, writes exactly the fixed-point line in the
+defined slices, and verifies both measured length and peak before delivery. Tests cover each
+decimal-width transition around both counters, `L=1048575`, `1048576`, and `1048577`, the
+32 MiB exact/plus-one boundary, a deliberately nonconverging calculator double, alternate
+4 KiB/caller chunking, short writes, and re-encoding under different hash seeds, locales,
+time zones, and pipe fragmentation.
+
+Amendment 33's `local CLI/reconciler parity` verification phrase is withdrawn. Verification
+instead requires standalone CLI/library byte parity, explicit proof that `reconcile.py` and
+current workflow bytes and behavior are unchanged, the two independent-result human matrix,
+and all other in-scope semantic, fault, budget, cleanup, targeted/full-suite, reconciler, and
+cold-clone evidence listed there.
+
+### Corrected implementation gate
+
+Production activation remains unopened. Dormant provider-neutral core implementation may
+begin only after one immutable revision containing amendment 34 receives three fresh base
+lens accepts, followed on that same revision by independent budget and core-admission
+accepts. Those reviews cover the separated CLI, standalone bytes, 67-name registry,
+Strategy A semantics, local transaction, and explicit provider-service boundary. No verdict
+on `c0bdc44ae10bfa65a25b961ab5e3970b5bfb6107`, no incomplete review, and no verdict on the
+rejected provider/launcher history transfers.

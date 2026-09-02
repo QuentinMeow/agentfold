@@ -586,3 +586,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   server-side-admission step and needs its own task and PR before activation.
 - Production remains unopened. The new immutable revision still needs three base accepts,
   then budget and core-admission accepts, before dormant core implementation begins.
+
+## 2026-09-01 — Separate-command and unique-byte correction (codex)
+
+- Two fresh exact-SHA reviews blocked amendment 33 because it contradicted the retained
+  two-command boundary, overloaded one result/exit across independent judgments, admitted
+  writer options through a purported read-only mode, and left logical result chunking
+  non-canonical. A third local fresh-context scope review suffered repeated response-stream
+  disconnections and produced no vote; its partial checks found no scope-split counterexample.
+- Amendment 34 restores `ref_update.py` as the only Strategy A CLI and leaves
+  `reconcile.py`, its ordinary output, its writers, current workflow calls, and legacy
+  continuity behavior unchanged in the dormant task. Humans and evidence-only wrappers keep
+  continuity and ordinary results separately named and cannot let one clear the other.
+- Closed the advisory schema without a self-authenticating policy field or open proof object,
+  retained stable identity-based Findings and the complete 67-name core registry, and made
+  logical serialization chunks the unique consecutive 1 MiB partition of final bytes.
+- Production remains unopened. Amendment 34 now needs three fresh base-lens accepts, then
+  budget and core-admission accepts on the same immutable revision before implementation.
