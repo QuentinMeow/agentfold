@@ -3480,3 +3480,68 @@ test writes; it retains its own quota-exhaustion test.
 
 Production remains unopened. The new immutable revision must again pass semantic, CLI, and
 provider review before the first budget/core-fit review of this complete contract.
+
+## 2026-09-01 correction amendment 24 — Git file-type pairs and single-charge categories
+
+Fresh review of `fef7d871e1b0364a447ae51b072c1d7caf4bd068` again accepted
+classifier semantics and rejected two executable details. Git represents regular-file ↔
+symlink changes as a delete/create section pair, not a one-section mode change; and amendment
+22's prose accidentally charged patch/manifest/output bytes again to metadata. This amendment
+supersedes amendment 23's form selection and amendment 22's category-membership sentence.
+
+### File type selects a fifth paired-section form
+
+Modes `100644` and `100755` share the regular-file type; `120000` is the symlink type.
+Amendment 23 forms 1 and 3 apply only to the regular-file executable-bit transition
+`100644 ↔ 100755`. A `120000 → 120000` content change uses form 2. Whenever exactly one
+side is `120000` and the other is regular, the parser selects a fifth **file-type change**
+form regardless of whether blob OIDs/sizes are equal or different.
+
+That fifth form binds one manifest row to exactly two consecutive same-path sections in
+this order:
+
+1. a complete deletion from authenticated before mode/OID/size to the all-zero absent
+   sentinel, with `deleted file mode`, full-to-zero index, and exact deletion body; then
+2. a complete creation from the all-zero absent sentinel to authenticated after
+   mode/OID/size, with `new file mode`, zero-to-full index, and exact creation body.
+
+Both sections repeat the same exact normalized `diff --git a/<path> b/<path>` header. No
+other path or section may intervene; the path consumes exactly one sorted manifest row and
+cannot appear again. Each body independently satisfies amendment 22's bounded text/binary
+grammar and the corresponding before→absent or absent→after size/OID relation. The parser
+permits no hunk/body only for a deletion/creation whose present blob has size zero and whose
+exact Git form therefore ends after the full-index header. It rejects every other bodyless,
+reversed, missing, extra, interleaved, rename/copy, abbreviated-OID, wrong-mode, or
+independently listed delete/create form. Same-OID/same-size regular↔symlink,
+zero-regular↔nonempty-symlink, and different-content transitions are required cold-clone
+cases. Literal generation, bounded parse, `git apply --index`, post-apply mode/OID/size, and
+final tree equality must all agree.
+
+Actual one-sided path creation/deletion still uses amendment 23 form 4 and exactly one
+section, with the same exact zero-size body omission. Therefore a manifest side being null
+and a present-side type change remain distinct, unambiguous cases.
+
+### Every scratch byte has one category
+
+Category membership is now mutually exclusive:
+
+- patch file bytes charge only the 16,777,216-byte patch category;
+- activation-manifest bytes charge only the 2,097,152-byte manifest category;
+- retained stdout/stderr/status bytes charge only the 2,097,152-byte output category;
+- path encodings, Git index bytes, journal/tombstone bytes, fanout-directory entries, and
+  filesystem metadata charge only the 4,194,304-byte metadata category;
+- working-copy payload charges only the working-copy formula; and
+- loose-object payload plus its reserved header/compression/block overhead charges only the
+  loose-object formula.
+
+The implementation tags each ledger debit with this closed enum and refuses an unknown or
+second tag. The patch, manifest, and output payloads are not metadata. This restores the
+independent 16 MiB patch boundary while leaving the reported derived sum `462,469,636`
+unchanged. Tests reach each category exact limit with all other categories in range, then
+change only that category by +1; cross-tag, double-tag, missing-tag, and sum arithmetic have
+separate tests.
+
+### Gate boundary
+
+Production remains unopened. One new immutable revision needs the three base lenses before
+budget and core-fit review.

@@ -413,3 +413,13 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Kept six independent disk categories and made their 462,469,636-byte sum reported-only;
   removed the impossible aggregate +1 claim while retaining the hard one-GiB quota.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Git file-type pair and single-charge correction (codex)
+
+- Semantic review accepted amendment 23; provider/CLI review proved regular↔symlink changes
+  generate a same-path delete/create pair and found patch bytes double-charged as metadata.
+- Restricted one-section pure/content-plus-mode forms to regular executable-bit changes and
+  added a fifth, consecutive delete/create file-type form bound to one manifest row.
+- Made scratch category tags mutually exclusive so patch, manifest, output, metadata,
+  worktree, and loose-object bytes are each charged exactly once.
+- Production remains unopened pending another full five-lens immutable-revision review.

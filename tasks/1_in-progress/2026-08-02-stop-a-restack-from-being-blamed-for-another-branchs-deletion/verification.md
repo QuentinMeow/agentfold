@@ -54,6 +54,20 @@ and no production implementation began from this revision.
 
 Budget and core-fit lenses were not run. Production remained unopened.
 
+## Superseded supervised-suite review
+
+**Reviewed revision:** `fef7d871e1b0364a447ae51b072c1d7caf4bd068`
+
+- semantic/DAG / a15-semantic-review: `approve` — the five activation execution forms and
+  supervisor remained outside classifier authority and fail closed.
+- workflow/provider / r19-semantic-design: `block` — Git emits regular↔symlink changes as a
+  same-path delete/create pair, which none of the four parser forms admitted.
+- CLI/resource / am22-cli-review: `block` — it reproduced the file-type pair and found that
+  patch bytes were accidentally double-charged into the 4 MiB metadata category, making the
+  16 MiB patch boundary unreachable. Its supervisor deadline arithmetic was coherent.
+
+Budget and core-fit lenses were not run. Production remained unopened.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text
