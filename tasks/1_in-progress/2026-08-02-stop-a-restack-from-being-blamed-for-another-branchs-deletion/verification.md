@@ -202,6 +202,47 @@ PY
 45 87382 87428
 ```
 
+## Superseded immutable-slot review
+
+**Reviewed revision:** `6e5978cdf17207b62365abf75e37488e6cef1481`
+
+- semantic/authority / a26-design-consistency: `block` — the retained O/N/evaluator policy
+  equality contradicted pre-Gate-2 migration; one mixed fd could not enforce T/candidate
+  roles; live workflow bytes were not protected by the active adapter policy; launcher
+  publication lacked fields required by its equality join; and receipt landing used the
+  rejected records-only trust class.
+- workflow/provider / r19-semantic-design: `block` — selector `adapter_policy` formed a
+  digest self-reference through its own activation patch, independently confirmed the
+  pre-Gate-2 policy contradiction, and restored receipt landing to a tested core-data PR.
+  Provider attempt/job/log/artifact APIs and additive slot ordering otherwise remained
+  feasible.
+- CLI/resource / am22-cli-review: `block` — the slot had no exact manifest locators or
+  complete source-extraction budget, the fd-5 role table was undefined, and the 87,428-byte
+  LF cap contradicted a required 87,429-byte maximum CRLF line. It reproduced all Git
+  command forms and the positive selector/tree/batch/token arithmetic.
+
+All three reviews were read-only and named the same immutable SHA. Budget and core-fit were
+not run. Production remained unopened.
+
+The amendment-31 T-only and deployment totals were recomputed directly:
+
+```text
+$ python3 - <<'PY'
+authority_framing=30+2+32*30+8192
+authority_payload=4194304
+deployment_payload=8192+1024+2097152+65536+65536+authority_payload+27262976+16777216
+print(authority_framing, authority_framing+authority_payload)
+print(deployment_payload, deployment_payload+54*(79+79+1))
+PY
+9184 4203488
+50471936 50480522
+```
+
+The complete tested-commit/split-FD launcher policy was independently encoded at 642 bytes
+including LF; substituted maximum-width arguments occupy 351 bytes including NULs.
+The pointer-only active-selector V2 canonical vector was independently encoded at 184 bytes
+including LF.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

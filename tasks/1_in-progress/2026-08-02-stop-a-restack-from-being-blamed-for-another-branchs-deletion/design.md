@@ -4433,3 +4433,315 @@ Production remains unopened. Amendment 30 changes control-plane selection, all d
 paths, selector/source invariants, canary/receipt V5, and launcher publication V2. One new
 immutable revision requires all three base-lens accepts before the budget and core-fit
 lenses; no earlier vote transfers.
+
+## 2026-09-01 correction amendment 31 — T-only authority and physically split object sources
+
+Fresh review of `6e5978cdf17207b62365abf75e37488e6cef1481` rejected eight
+cross-layer contradictions. The old O/N/evaluator policy-file rule made the advertised
+pre-Gate-2 migration impossible; a shared fd 5 could not enforce T-versus-candidate object
+roles; the selector's adapter digest hashed a patch containing that same digest; deployment
+manifests had no locators or aggregate extraction budget; an ordinary commit could change
+the live workflow without changing the active slot; launcher publication lacked fields its
+join required; receipt landing regressed to records-only; and maximum-token CRLF exceeded
+the stated line cap. This amendment supersedes those authority, selector, source-discovery,
+FD, V5/V2 evidence, live-projection, receipt-lane, and log-framing clauses. Strategy A's
+bounded O/N graph and classification rules remain unchanged for data admitted by the active
+policy.
+
+### The selector is not self-referential
+
+The active selector becomes the pointer-only `agentfold-ref-update-active/v2` with exactly
+`schema,slot_id,receipt_path`. All policy and receipt-derived digests are removed. Execution
+and adapter policies are read from and verified through the selector-named receipt, so the
+exact selector can be constructed at Gate 2 without solving a digest equation whose input
+contains itself. The fixed selector and receipt paths, opaque slot grammar, canonical
+encoder, 1,024-byte raw ceiling, and 1,024/1,025 raw damage pair otherwise remain amendment
+30's. Every valid V2 selector is exactly 184 bytes including LF; its independent golden
+vector and both raw containment cases are required. V1 selectors refuse.
+
+The canary artifact and receipt become
+`agentfold-ref-update-canary-artifact/v6` and
+`agentfold-ref-update-canary-receipt/v6`. Their exact top-level keys remain amendment 30's
+V5 keys. `deployment` now has exactly
+`slot_id,selector_sha256,receipt_path,slot_index`. The selector digest hashes the complete
+future V2 selector; receipt `execution` and `adapter_policy` supply all policy values omitted
+from it. Production hashes the selector, requires equality with
+`deployment.selector_sha256`, and requires its path/slot to equal the receipt. V4/V5
+artifacts or receipts and V1 selectors cannot activate or run V6.
+
+### One index and four fixed manifests close a slot
+
+For slot root automation/runtime/ref-update/slots/<slot_id>/, these paths are exact:
+
+```text
+slot-index.json
+launcher
+launcher-policy.json
+runtime-profile.json
+authority-manifest.json
+adapter-manifest.json
+```
+
+Each is prefixed by the exact slot root; no alternate name or second instance is admitted.
+`slot-index.json` is canonical JSON plus LF, schema
+`agentfold-ref-update-slot-index/v1`, raw cap 8,192 bytes, and exact keys
+`schema,slot_id,execution,adapter_policy,objects`. Execution is the complete result-v2
+object. `objects` has exactly
+`launcher,launcher_policy,runtime_profile,authority_manifest,adapter_manifest`; each value
+has exactly `path,mode,blob_oid,size,sha256`. Paths equal the fixed literals above. Launcher
+mode is `100755`; all four manifest modes are `100644`; OIDs/sizes/digests retain their
+closed types. The index does not contain its own locator, selector/receipt/T, or another
+derived pointer.
+
+`deployment.slot_index` is the exact locator for `slot-index.json`, with keys
+`path,mode,blob_oid,size,sha256`, mode `100644`, size `1..8,192`, and the same strict
+identity types. The locator is byte/object-equal across artifact, receipt, launcher
+publication, and Gate 3. `launcher_source` must equal `slot_index.objects.launcher`.
+
+`authority-manifest.json` has exactly
+`schema,slot_id,authority_policy,files`; `adapter-manifest.json` has exactly
+`schema,slot_id,authority_policy,adapter_policy,files`. Their schemas are respectively
+`agentfold-ref-update-authority-manifest/v1` and
+`agentfold-ref-update-adapter-manifest/v1`. Each file locator has exactly
+`role,path,mode,blob_oid,size,sha256`. Adapter rows additionally have exactly
+`category,live_path`; category is
+`activation-patch|activation-manifest|other`, and `live_path` is JSON null or one normalized
+repository path. Every adapter byte executable before sealed launch has one non-null unique
+live path; dormant templates/data remain null. Role is one unique member of the existing
+fixed registry. Authority paths are below the same slot's authority/ directory and adapter
+paths below its adapter/ directory; no path/OID can satisfy two roles or cross the two
+namespaces. Rows appear in the exact pre-existing fixed role-registry order used by the V2
+digest transcript; role names map one-to-one to those ordinals, and path bytes do not define
+a second ordering.
+
+Authority retains 1..32 rows, 4,096 bytes per path, 8,192 aggregate path bytes, and 4 MiB
+aggregate payload. Adapter retains 1..16 rows, 4,096 bytes per path, 4,096 aggregate path
+bytes, a separate 4,096 aggregate non-null live-path bytes, 27,262,976 aggregate payload
+bytes, and the existing mutually exclusive category limits. Both locator manifests have a
+65,536-byte raw cap including LF. Launcher policy
+retains its raw 1,024-byte cap and runtime profile its 2 MiB cap. Exact raw manifest caps may
+be malformed containment inputs; independent valid-schema exact/+1 tests stay on the source
+count/path/payload/category gates.
+
+Authority-policy/v2 is recomputed from the authority manifest's exact path/mode/payload
+rows. Adapter-policy/v2 is recomputed from its rows and embedded authority digest. Launcher
+and runtime objects decode to their closed manifests and match index/receipt execution.
+Slot index and locator manifests are deployment metadata, not members of their own policy
+row transcripts; their identities are instead bound by T plus index/receipt locators. This
+expressly supersedes any earlier claim that those metadata files self-enter adapter-policy
+membership. Unknown, missing, duplicate, aliased, unlisted, or policy-mismatched rows refuse;
+searching the slot directory is forbidden.
+
+### T is the only authority-policy source
+
+Amendments 3 and 25 required authority files and an equal policy digest independently at O,
+N, and the evaluator. That rule is withdrawn. Neither O nor N is an executable-policy
+source, and neither is required to contain a slot, manifest, authority file, or active
+selector. For every accepted edge the sole authority policy is recomputed from the V6
+receipt's source manifest and blobs at exact `T`, then compared to receipt execution and the
+sealed evaluator bytes made from those same T blobs.
+
+`policy-version-mismatch` now means only that T source, source-manifest recomputation,
+receipt execution, sealed evaluator, or active-selector execution disagree. A policy-looking
+file added, removed, or changed at O/N is inert data and cannot affect execution; the active
+slot guard separately prevents an ordinary default-branch change from becoming authority.
+The build/import audit still rejects any T authority dependency outside its closed manifest.
+
+One required authority role is the closed historical-data-contract registry. It contains
+ordered named predicates and parsers for queue/task/evidence bytes, not executable paths in
+O/N. The initial slot includes `pre-slot-v1`, whose fixtures are the exact current
+pre-Gate-2 repository schemas and path conventions. A historical object must match exactly
+one admitted contract before semantic parsing; zero or multiple matches yield
+`unsupported-policy-history`. Registry names/order/parser bytes are authority-policy rows,
+so adding, dropping, or reinterpreting a contract requires a new slot/canary/activation.
+Damage tests relabel data, satisfy two predicates, remove required version evidence, and
+change only O/N policy-looking files; none can silently select executable semantics.
+
+This replacement is mandatory for the initial migration. Canary scenarios include an O
+created before Gate 2 with no slot or policy source and an N after activation, across W0,
+P1, P2, and P3; outputs must equal the accepted POC's clean/blocked results. Presence/absence
+of policy-looking paths in any of O-only, N-only, both, or neither is varied and cannot
+change one result byte. Ordinary checks continue to inspect their own ranges independently.
+
+A future selector switch is the explicit policy-version boundary. Gate 3 validates that
+transition under the old active control plane, then later edges use only the new T. Because
+backward compatibility is not promised, historical queue data outside the new policy's
+closed input grammar returns stable `unsupported-policy-history` unavailable before graph
+work and fails continuity closed; it never falls back to an old or O/N evaluator. Stale
+provider reruns keep their original A/selector/T and therefore remain reproducible. Human
+instructions distinguish this actionable migration refusal from a deletion Finding and
+require a reviewed data migration or an explicitly pinned old-slot diagnostic; neither may
+clear the remote gate automatically.
+
+Removing two historical policy recomputations changes the derived authority work. One T
+manifest reaches framing `30 + 2 + 32*30 + 8,192 = 9,184`, payload `4,194,304`, and total
+digest input `4,203,488`. These supersede the three-source observations 27,552, 12,582,912,
+and 12,610,464. Independent source gates remain 32 rows, 8,192 path bytes, and 4 MiB payload;
+derived maxima use unchanged-maximum observed-minus-one controls, not independent `+1`.
+Adapter framing `4,649`, payload `27,262,976`, and total `27,267,625` remain unchanged.
+
+### Control and candidate objects are physically separate capabilities
+
+The complete launcher-policy argv becomes:
+
+```text
+["agentfold-ref-update-launcher","--authority-manifest-fd=3","--runtime-manifest-fd=4","--control-git-dir-fd=5","--candidate-git-dir-fd=6","--tested-commit=<full-oid>","--old=<full-oid>","--new=<full-oid>"]
+```
+
+The tested-commit placeholder is replaced exactly once by T. Old/new retain their existing
+full-OID rules. This full array's maximum canonical launcher-policy representation is 642
+bytes including LF, and maximum actual argument-string storage is 351 bytes including each
+element's NUL. The raw 1,024/1,025 envelope and all argument mutation tests remain. The old
+single `--git-dir-fd=5` spelling and 578/636-byte vectors refuse.
+
+Fd 5 names a sanitized read-only object database fetched only from the authenticated base
+repository and containing only the reduced T/authority control objects described below.
+Fd 6 names a physically separate sanitized
+read-only database fetched only from the event-named candidate repository and containing
+the exact O/N candidate closure. Neither database has alternates, replacements, refs,
+hardlinks, shared writable packs, environment/config inheritance, or a path/descriptor to
+the other. Missing candidate objects cannot be satisfied from control even when the same
+OID exists there.
+
+The static launcher uses only fd 5 and T while verifying the authority manifest and
+constructing its sealed policy directory. It then terminates/reaps that Git child, closes
+fd 5 and every control descriptor, detaches the control mount, and only afterward exposes
+fd 6 to the evaluator. Evaluator/classifier Git commands accept only fd 6 and O/N. No role
+table exists or is needed. Tests omit an O/N object that exists under T, swap fd 5/6, add an
+alternate/hardlink/shared pack, retain a control descriptor, and request T through the
+candidate child; every case refuses or remains missing exactly as the candidate-only oracle.
+
+The control loose-object reservation is at most 4,327,488 bytes for 32 rows/4 MiB and is
+charged separately from the 4,194,304-byte sealed authority copy. The split phase enforces
+`RLIMIT_NOFILE=32`, one live Git child, a 1 GiB cgroup with swap disabled and `pids.max=4`,
+and the existing per-process address-space/pipe/output limits. The descriptor registry adds
+fd 6 explicitly and requires every unspecified descriptor closed before child exec; a
+test-only observed-open-count minus one must fail the unchanged maximum phase. Every
+refusal kills/reaps the child group, closes both role capabilities and partial memfds,
+empties the control ODB/policy volume, unmounts them, and proves zero descendant/residue.
+
+### Deployment extraction is bounded as one closed inventory
+
+T extraction has three sequential stages: slot index, its five fixed objects, then the 48
+source rows. The closed set has 54 objects total. For each stage the verifier first fchdirs
+to the already-open control ODB and runs a no-replace, literal-path
+`ls-tree -z --full-tree T -- <sorted-exact-paths>` child. It requires one default-format
+record per requested path in the same order and no extra record. With 78 bytes of record
+overhead, 521 fixed-path bytes, and the 8,192/4,096 source-path aggregates, cumulative tree
+output is bounded by `54*78 + 521 + 8,192 + 4,096 = 17,021` bytes. The existing 4,174-byte
+per-record/4,175 refusal remains.
+
+Each stage then starts and fully reaps one no-replace
+`cat-file --batch-command --buffer` child. It sends every `info` command then one `flush`,
+validates and precharges the stage, and only then sends every `contents` command plus one
+`flush`. Across all stages, request bytes are
+`54*70 + 54*74 + 6*6 = 7,812`. Each info/contents response uses the conservative 79-byte
+header and each content has one delimiter.
+
+Independent body ceilings are 8,192 slot index; 1,024 launcher policy; 2,097,152 runtime
+profile; 65,536 each authority/adapter manifest; 4,194,304 authority sources; 27,262,976
+adapter sources; and 16,777,216 launcher. Their source-derived body sum is 50,471,936 bytes;
+including 54 pairs of response headers plus delimiters yields a transcript containment
+ceiling of 50,480,522 bytes. Byte 50,480,523 terminates the child. These sums are not new
+schema-valid `+1` promises: the independent source limits keep exact/+1 tests, while the
+unchanged maximum transcript runs with an observed-minus-one total.
+
+Tree and batch output are streamed; only decoded index/manifest metadata, one 64 KiB chunk,
+bounded diagnostics, and the already charged destination are retained. Adapter bytes are
+verified but not copied into the launcher's 16 MiB sealed policy volume. Authority payload,
+its locator manifest, and the closed policy copy fit that volume; launcher memfd and
+read-only runtime files use separately charged storage. An ancestry child, three tree
+children, and three batch children are seven sequential Git children: one-shot limits are
+30 seconds, each batch exchange 10 seconds, and the control-extraction aggregate is 210
+seconds including 30 seconds setup/cleanup. One 512 MiB child may overlap the 256 MiB
+verifier; no two children overlap. Counts 54/55, partial headers, early/late EOF, every
+per-file/source cap, both observed-minus-one totals, deadlines, termination/reaping,
+descriptor closure, partial memfd/policy cleanup, and scratch residue are golden cases.
+
+The 50 MiB-class traversal occurs in the outer authenticated base ODB and is charged to the
+existing 128 MiB extracted-provider/control-source allowance. After it verifies adapter and
+deployment bytes, the host constructs a fresh reduced control ODB containing T's required
+commit/tree objects plus only the authority rows named by fd 3; its loose-object
+reservation is the 4,327,488-byte value above. It verifies that reduced source independently,
+destroys/unmounts the outer base ODB, and only then seals/executes the launcher with reduced
+fd 5. Candidate fd 6 is constructed separately and is never an alternate or copy source for
+either base ODB.
+
+### A includes the exact active live adapter projection
+
+Repository/workflow position and `github.workflow_sha` are necessary but no longer
+sufficient to authenticate A. The adapter source manifest at T has unique required roles
+for activation manifest/patch, installed live workflow, event/O/N extraction, object
+transport, result acceptance, action metadata, and every live helper. The rows with
+non-null `live_path` are the exact active projection; the activation manifest's after rows
+must install the same source blob/mode at each one and may additionally carry non-executable
+contract/test/documentation transitions.
+
+Before any result can be accepted, the trusted adapter and independent verifier require
+every active-projection live path/mode/blob in A to equal its T source row and recompute the
+receipt adapter digest. A projection mismatch is adapter-unavailable before event bytes can
+authorize a result; artifacts/status emitted by mismatched workflow bytes are untrusted.
+The reconciler/core-scope/source guard applies the same comparison to every default-branch
+candidate: ordinary PRs may not edit selector, active slot, active receipt, live workflow,
+event extraction, result acceptance, launch behavior, or another projection row. Only an
+exact Gate-3 activation transition may change them.
+
+Future Gate 2 stores new templates under a dormant slot and leaves A's active projection
+unchanged. Gate 3 atomically switches selector and every changed live row to the new
+receipt's canaried after projection. A later ordinary default-branch commit with different
+live bytes is not an authenticated A even when repository/ref/workflow position matches.
+Tests change each live row independently, change only mode, add an unlisted live helper,
+emit forged artifacts from mismatched workflow bytes, and race A after event capture; none
+can produce an accepted continuity result.
+
+Projection validation uses one separate A-tree `ls-tree -z --full-tree` child after T
+manifest verification and before event acceptance. At most 16 rows plus 4,096 live-path
+bytes yield `16*78 + 4,096 = 5,344` bytes; byte 5,345, a missing/extra/reordered row, or any
+mode/OID mismatch refuses. No projection payload is reread: equality to the already hashed
+T source blob OID plus repository object-format verification is the byte identity. The child
+uses the same 30-second/512 MiB/cleanup envelope and never overlaps extraction or candidate
+children.
+
+### V6 evidence and launcher publication V3 are representable
+
+Launcher publication becomes `agentfold-launcher-publication/v3` with exactly these keys:
+
+```text
+schema,deployment,tested_commit,execution,adapter_policy,
+repository_id,repository_full_name,workflow_id,workflow_path,workflow_sha,head_sha,
+run_id,run_attempt,job_id,job_name,artifact_id,name,archive_sha256,
+architecture,executable_mode,executable_size,executable_sha256,launcher_source
+```
+
+Schema is the V3 literal. `deployment`, `execution`, `adapter_policy`, `tested_commit`, and
+`launcher_source` are now actually present and byte/object-equal to V6. Provider/job/artifact
+fields keep amendment 29's types and joins; conclusion/archive size remain independently
+validated from provider metadata after the job completes rather than fabricated in the
+post-upload marker. V1/V2 markers cannot satisfy V6.
+
+V6 withdraws amendment 28's claim that Gate 2 can land a future provider artifact locator.
+Gate 2 knows no run/job/artifact IDs. Its trusted canary build job runs at exact head T,
+reads the launcher source/index/manifests from T, uploads only the verified payload, then
+emits publication V3. Therefore publication `head_sha` and `tested_commit` both equal T;
+the aggregate artifact is the first object allowed to carry the resulting locator. The
+independent core-data verifier re-fetches and proves that locator before writing the V6
+receipt. This ordering has neither a future-ID placeholder nor a receipt bootstrap cycle.
+
+The outer prefix becomes `AGENTFOLD_REF_UPDATE_LAUNCHER_PUBLICATION_V3 `. Decoded raw/token
+caps remain 65,536/87,382 bytes. Prefix plus token is at most 87,427 bytes; accepted LF and
+CRLF observed lines are separately capped at 87,428 and 87,429 bytes. The scanner's stored
+token cap remains 87,382, so CRLF consumes no extra retained token memory. Exact maximum LF,
+maximum CRLF, byte 87,430, token `+1`, raw `+1`, duplicate/split markers, and the existing
+8 MiB log/72 MiB aggregate/deadline cases are independent fixtures.
+
+Receipt landing is a tested **core-data PR**, not records-only. It may add only the new V6
+receipt in its runtime projection, but it runs core-scope, schema, provider-reverification,
+cold-clone, selector, manifest/source, live-projection, and provenance tests before becoming
+Gate 3's immutable base.
+
+### Gate boundary
+
+Production remains unopened. Amendment 31 changes active selector V2, artifact/receipt V6,
+launcher publication V3, policy selection/budgets, launcher argv, object-source topology,
+deployment manifests, and active adapter admission. One new immutable revision requires all
+three base-lens accepts before budget and core-fit review; no earlier vote transfers.

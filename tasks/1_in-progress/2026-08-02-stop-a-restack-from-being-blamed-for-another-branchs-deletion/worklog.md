@@ -518,3 +518,25 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   exact/+1, duplicate, split, stall, and cleanup cases.
 - Production remains unopened pending another three-lens immutable-revision review, then
   budget and core-fit review on that exact revision.
+
+## 2026-09-01 — T-only authority and split-object correction (codex)
+
+- Three fresh reviews blocked amendment 30 on a retained three-tree policy rule, a shared
+  T/candidate ODB, a selector self-digest, missing slot locators/extraction totals, mutable
+  live adapter bytes, an under-specified publication schema, a records-only receipt lane,
+  and an LF/CRLF cap contradiction.
+- Made receipt-tested T the sole authority-policy source. O/N are only classifier data and
+  may predate Gate 2; future unsupported historical data fails closed without promising
+  backward compatibility or borrowing an old evaluator.
+- Split control and candidate Git capabilities into fd 5/fd 6, added explicit T/O/N argv,
+  removed the undefined role table, and closed each source before exposing the next.
+- Added a fixed slot index, five object locators, and closed authority/adapter source
+  manifests. Rebased authority work on one 4 MiB T source and bounded the 54-object stream
+  at source-derived 50,471,936 body / 50,480,522 response bytes.
+- Made active selector V2 a pointer only to break every policy/patch self-reference; advanced
+  canary/receipt to V6 and launcher publication to V3 with every joined field represented.
+- Required A's exact live adapter projection to equal the receipt and restored receipt
+  admission to a fully tested core-data PR. Split maximum LF/CRLF lines into 87,428/87,429
+  byte caps.
+- Production remains unopened pending a new three-lens exact-SHA review, then budget and
+  core-fit review.
