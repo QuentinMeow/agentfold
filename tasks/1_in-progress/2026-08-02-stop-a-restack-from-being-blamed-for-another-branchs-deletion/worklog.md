@@ -128,6 +128,18 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   HTTP, TLS, alternate-object, helper, and environment controls.
 - Production remains unopened pending a fresh full five-lens immutable-revision review.
 
+## 2026-09-01 — Read-only-transport correction (codex)
+
+- Fresh review accepted the observer-only O/N model but showed that “no remote helper” also
+  prohibited the trusted GitHub adapter's necessary anonymous exact-object fetch.
+- Kept the core library, local CLI, and ordinary transaction fully network-free; narrowed
+  the adapter exception to its already bounded read-only fetch/upload-pack lane. Push,
+  receive-pack, ref mutation, publication credentials, and candidate helpers remain
+  forbidden and owned outside this task.
+- One assigned workflow reviewer exhausted its execution quota without a verdict; no
+  missing vote was treated as approval.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Observer-core and external-publisher correction (codex)
 
 - Review proved that the attempted sealed publisher opened a separate system: reachable-

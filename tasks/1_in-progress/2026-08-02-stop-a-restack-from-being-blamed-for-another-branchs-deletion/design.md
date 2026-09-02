@@ -2221,3 +2221,35 @@ implementation.
 Production remains unopened. The next five-lens review judges the smaller observer-only
 scope, Linux historical-execution boundary, and unchanged accepted O/N semantics. The
 publisher backlog stays a separate task and future PR.
+
+## 2026-09-01 correction amendment 14 — read-only transport is not publication
+
+The review of `a79425b7de1234b390ed0c495b6ed774a6b32c51` accepted the O/N
+semantics and observer/publisher boundary, then found that the negative wording also banned
+the trusted adapter's required anonymous HTTPS fetch. This section supersedes only that
+over-broad remote-helper prohibition. It does not reopen publication.
+
+The provider-independent classifier library, integrated local CLI, and ordinary-history
+transaction are network-free. They consume an already available bounded object source and
+never run a remote helper.
+
+The trusted GitHub adapter may perform the previously specified bounded, read-only
+fetch/upload-pack transport into its isolated empty object directory. That transport may
+execute the trusted installation's HTTPS remote helper, but only for the event-named public
+GitHub repository and exact O/N object IDs, under the existing host/repository validation,
+redirect, credential, transfer, disk, process, memory, deadline, and no-candidate-code
+contracts. It never invokes push, receive-pack, a publication credential helper, or a
+candidate-provided remote helper. A missing private-fork credential remains unavailable;
+the adapter does not acquire one implicitly.
+
+Negative tests therefore assert:
+
+- no Strategy A component invokes `git push`, receive-pack, or any ref-mutation API;
+- the library and local entrypoints perform no network or remote-helper operation;
+- the trusted adapter accepts only its bounded fetch/upload-pack helper and rejects a
+  helper path, URL, redirect, repository identity, or credential source outside its closed
+  transport contract; and
+- replacing the allowed fetch helper with a push/receive-pack/publication path is observed
+  red.
+
+Production remains unopened pending the full five-lens review of a new immutable revision.

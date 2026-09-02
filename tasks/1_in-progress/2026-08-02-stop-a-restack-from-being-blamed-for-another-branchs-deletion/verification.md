@@ -28,6 +28,17 @@ The four-to-one panel rejected the revision. No production implementation began 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded observer-only design review
+
+**Reviewed revision:** `a79425b7de1234b390ed0c495b6ed774a6b32c51`
+
+- semantic/DAG/scope / r19-semantic-design: `approve` — publisher authority was fully withdrawn; Linux-gated historical paths, direct/synthetic candidates, handover incarnations, and ordinary roles remained POC-equivalent.
+- budgets/transaction/composition / r17-production-seam-audit: `block` — the blanket remote-helper prohibition contradicted the trusted adapter's required bounded anonymous HTTPS fetch/upload-pack transport.
+- workflow/adapter/human: `not run` — the assigned reviewer exhausted its execution quota before returning a verdict.
+
+The panel stopped after one concrete block. The two remaining lenses were not run, and no
+production implementation began from this revision.
+
 ## Superseded sealed-publisher design review
 
 **Reviewed revision:** `56b73d57cd1564c510d6a331793b6b9f5aa4beed`
