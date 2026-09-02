@@ -4745,3 +4745,360 @@ Production remains unopened. Amendment 31 changes active selector V2, artifact/r
 launcher publication V3, policy selection/budgets, launcher argv, object-source topology,
 deployment manifests, and active adapter admission. One new immutable revision requires all
 three base-lens accepts before budget and core-fit review; no earlier vote transfers.
+
+## 2026-09-01 correction amendment 32 — external acceptance and acyclic projections
+
+Fresh review of `33b52f95e166ed74067f5d9427e9a24c5bf65d27` rejected the
+deployment rather than Strategy A. A repository workflow could execute before proving its
+own A projection; the first canary could not match a production projection that Gate 3 had
+not installed; the reduced control ODB had no commit/tree budget; one 1 GiB scope could not
+contain the evaluator's admitted process topology; a projection lookup still interpreted
+pathspec magic; the manifest referred to registries that did not exist; result v2 retained
+three-source counters; and a breaking selector switch could strand old live edges. This
+amendment supersedes amendment 31's acceptance authority, single live projection, manifest
+registries, reduced control ODB, launcher argv/resource scopes, policy counters, projection
+lookup, unsupported-history timing, and breaking-upgrade wording. Selector V2, slot index
+V1, authority-policy V2, result V2, launcher publication V3, T-only authority, candidate fd
+6 isolation, and all accepted POC mappings remain unchanged.
+
+### A is evidence; an external verifier alone accepts production
+
+No byte executed from A may authenticate A or publish an accepted continuity result. Every
+provider claiming trusted production coverage requires a host-owned
+`production-verifier/v1` whose executable image, policy, credentials, and first instruction
+are outside the repository being classified. For GitHub this capability is a GitHub App or
+equivalent host service with a separately authenticated webhook secret and exact
+`metadata:read,contents:read,actions:read,checks:write` permissions. The repository workflow
+and its `GITHUB_TOKEN` can publish only evidence. Its stable job is
+`agentfold-ref-update/evidence-capture`; it can never satisfy the trusted continuity check.
+
+The host verifier independently authenticates the signed delivery and numeric repository
+identity; re-fetches the exact run, attempt, job, workflow, A, selector, receipt, T, and
+O/N sources; verifies T ancestry, every slot locator, the complete phase projection, and the
+split repository transports; invokes the sealed T evaluator itself; requires byte-identical
+agreement with any repository-produced result; and publishes through its own identity. The
+only accepted GitHub check is `agentfold-ref-update/verified` issued by the receipt-named App
+ID. A same-named check from Actions, another App, a candidate workflow, or a repository token
+has no authority. Absence of this external capability leaves remote production unavailable;
+there is no in-repository fallback.
+
+The external verifier emits canonical JSON-plus-LF
+`agentfold-ref-update-production-acceptance/v1` with exactly
+`schema,verifier,repository,control,event,run,result`. Nested objects have exactly:
+
+```text
+verifier = policy_sha256,issuer_kind,issuer_id,installation_id
+repository = repository_id,repository_full_name
+control = control_commit,selector_sha256,receipt_path,receipt_sha256,
+          tested_commit,active_projection_sha256,execution,adapter_policy
+event = delivery_id,event_name,action,raw_sha256,
+        source_repository_id,source_repository_full_name,old,new
+run = workflow_id,workflow_path,workflow_sha,
+      run_id,run_attempt,job_id,job_name,status,conclusion
+result = state,evaluator_exit,result_sha256
+```
+
+All existing scalar grammars apply. `issuer_kind` is the provider enum `github-app` for the
+GitHub adapter; IDs are positive provider integers. The canonical acceptance excludes the
+not-yet-created check-run ID. Its prefixed SHA-256 is the check run's `external_id`; the
+provider response independently supplies check ID, App issuer, conclusion, and repository.
+Unknown/missing/duplicate fields, absent signed delivery bytes, wrong issuer, projection or
+result mismatch, publication failure, or a response/external-ID mismatch creates no accepted
+result. The host retains the acceptance body as evidence, but provider success is authoritative
+only while joined to the exact issuer response.
+
+Canary artifact and receipt become `agentfold-ref-update-canary-artifact/v7` and
+`agentfold-ref-update-canary-receipt/v7`. Their exact top-level keys are respectively
+`schema,deployment,tested_commit,execution,adapter_policy,production_verifier,projections,launcher_source,launcher_artifact,fixture,workflow,rows,cleanup`
+and those keys plus final `artifact`. `production_verifier` has exactly
+`policy_sha256,issuer_kind,issuer_id,check_name,acceptance_schema`; the last two values are
+the literals above. V6 evidence cannot activate V7. The verifier image is a host capability,
+not an adapter-manifest row. Gate 3 requires a live V7 clean and blocked canary published by
+the named external identity before retiring legacy protection. After activation, verifier
+absence produces no verified check and therefore fails closed.
+
+The external-verifier canary matrix includes completed-clean, completed-blocked, pending
+approval, stale attempt, mismatched A projection, forged A evidence, forged check name,
+wrong-App issuer, and publication-response mismatch. Only the first completed-clean row may
+be green; the blocked row is a completed negative control, pending remains non-success, and
+every forgery produces no accepted check.
+
+### Adapter manifest V2 has separate control and target projections
+
+`agentfold-ref-update-adapter-manifest/v2` has exactly
+`schema,slot_id,authority_policy,adapter_policy,files,projections`. A source row has exactly
+`role,path,mode,blob_oid,size,sha256,category`; amendment 31's `live_path` member is removed.
+`projections` has exactly `control,target`, each an array of exact
+`role,live_path` rows. A projection role names exactly one source row. Rows use the fixed
+registry order, roles and live paths are unique within a projection, paths retain the
+literal normalized UTF-8 domain, and both projections independently cap aggregate live-path
+bytes at 4,096.
+
+The complete authority role registry and order is:
+
+```text
+evaluator-entrypoint
+evaluator-bootstrap
+classifier-core
+historical-data-contracts
+authority-support-00 ... authority-support-27
+```
+
+The first four occur exactly once. Present support roles are a gap-free prefix, giving
+4..32 authority rows. The complete adapter role registry and order is:
+
+```text
+activation-manifest
+activation-patch
+canary-driver
+installed-workflow
+event-extraction
+object-transport
+result-evidence
+action-metadata
+live-helper-00 ... live-helper-03
+dormant-template-00 ... dormant-template-03
+```
+
+The first eight occur exactly once. Each optional family is a gap-free prefix, giving
+8..16 adapter rows. `activation-manifest` and `activation-patch` use their same-named
+categories; every other role uses `other`. The control projection contains exactly
+`canary-driver,event-extraction,object-transport,result-evidence,action-metadata` and every
+present live-helper role. The target projection replaces only `canary-driver` with
+`installed-workflow` and otherwise has the same required set. Thus each projection has
+5..9 rows. Activation and dormant-template roles occur in neither executable projection.
+Unknown, duplicate, skipped-prefix, reordered, wrong-category, missing-projection, or extra-
+projection roles refuse.
+
+The control projection is a manually triggered build/canary driver. It cannot receive a
+production push/PR trigger, change the selector, land a receipt, publish a production check,
+or use a production credential. The target projection is the complete future repository
+adapter, but its workflow still emits evidence rather than accepting itself. For each phase,
+the dependency audit starts from that phase's fixed workflow role and requires every
+repository byte executable before sealed launch to be one of its projection rows. A local
+action, helper, interpreter input, dynamic path search, or checkout executable absent from
+the projection refuses. Inert activation/test/documentation data remains in the source
+inventory but is not executable.
+
+Authority-policy V2 retains its row transcript. Adapter-policy V2 retains its source-row
+transcript and embedded authority digest; projection metadata does not self-enter that
+digest. The complete adapter-manifest locator is independently bound by T, slot index, and
+V7, so admitted adapter identity is the pair `(adapter_policy, adapter_manifest locator)`.
+Both manifests retain their 65,536-byte raw caps, source-count/path/payload limits, and the
+54-object outer extraction inventory. V1 adapter manifests refuse.
+
+For either projection define its canonical digest as SHA-256 of:
+
+```text
+ASCII("agentfold-ref-update-projection/v1") || 00
+|| ASCII("control" or "target") || 00
+|| uint16be(row_count)
+|| for each registry-ordered row:
+     uint16be(len(UTF8(role))) || UTF8(role)
+     || uint64be(len(UTF8(live_path))) || UTF8(live_path)
+     || uint64be(6) || ASCII(source_git_mode)
+     || uint16be(len(source_blob_oid_ascii)) || source_blob_oid_ascii
+```
+
+The displayed value is the lowercase prefixed digest. With at most nine rows and 4,096
+live-path bytes, each exact tree query is capped at `9*78 + 4,096 = 4,798` bytes; byte 4,799
+refuses. The digest, tree rows, source rows, object format, and payload identities must all
+agree.
+
+### Canary and activation form an acyclic lifecycle
+
+Define K as the immutable host-owned fixture-repository commit containing the exact target
+projection. The lifecycle is:
+
+1. Gate 2 lands the slot and its manually triggered control projection at exact T while
+   leaving the active selector and current production target projection unchanged.
+2. Before launcher publication V3 is accepted, the external verifier requires every control
+   path at T to equal its named T source row. Publication still has `head_sha=tested_commit=T`.
+3. The host fixture controller constructs K with every target path/mode/blob equal to T's
+   target source row. It grants no candidate write or credential path. Provider canaries run
+   the installed target workflow and helpers from exact K.
+4. The external verifier authenticates K, validates the complete target projection, re-fetches
+   every attempt/artifact, re-executes the sealed evaluator, and creates V7 evidence.
+5. Gate 3 reads V7 from its immutable base and requires its candidate after-tree to contain
+   that exact target projection. It atomically switches selector and target paths; it does
+   not require the pre-Gate-3 A tree to equal the new target.
+6. Every later production acceptance requires A's target projection to equal the selected
+   receipt's T rows before interpreting A's evidence.
+
+V7 `projections` has exactly `control,target`; each value has exactly
+`repository_id,repository_full_name,commit,projection_sha256`. Control names the production
+base repository at T; target names the configured fixture repository at K. Both identities
+are independently authenticated and use T's object format. Control publication workflow
+identity must name a control row at T; every completed or pending canary row must name the
+same installed K target. Gate 3 candidate-after and later production A match the target
+digest and rows. A different K, phase substitution, mode-only drift, or one mismatched blob
+refuses.
+
+This phase rule replaces amendment 31's universal A comparison:
+
+```text
+canary/build: T.control and K.target match
+activation:   candidate-after.target matches
+production:   A.target matches
+```
+
+Initial legacy A and future old-slot A therefore do not need to equal a not-yet-installed
+target. Stale canaries retain their original K; stale production reruns retain original
+A/selector/receipt/T. Gate 3 may remove the old control projection after receipt creation;
+its source remains in retained T. Ordinary changes cannot alter an active target or a
+dormant slot/control projection. Tests change every row/mode/blob independently, add an
+unlisted helper, swap phases, forge evidence from mismatched workflow bytes, and race each
+commit after capture; none creates an accepted result.
+
+### A sealed authority transcript replaces the reduced control ODB
+
+The outer host verifier alone resolves T through its temporary authenticated base ODB. It
+verifies the slot index, four manifests, source paths/modes/OIDs/sizes/digests, and streams
+the authority rows into one non-executable sealable memfd containing exactly the complete
+authority-policy V2 digest transcript. Its maximum length is the already derived 4,203,488
+bytes. It independently verifies length, Git blob identities, and the authority digest,
+then applies and reads back
+`F_SEAL_WRITE|F_SEAL_GROW|F_SEAL_SHRINK|F_SEAL_SEAL`. No commit, tree, ref, pack, config,
+alternate, or other Git object enters this capability.
+
+The complete launcher argv becomes:
+
+```text
+["agentfold-ref-update-launcher","--authority-manifest-fd=3","--runtime-manifest-fd=4","--authority-bundle-fd=5","--candidate-git-dir-fd=6","--old=<full-oid>","--new=<full-oid>"]
+```
+
+Fd 3 is the sealed authority manifest, fd 4 the sealed runtime manifest, fd 5 the sealed
+authority transcript, and fd 6 the physically separate candidate O/N ODB. T is provenance
+owned by the outer verifier and receipt; a launcher with no control ODB receives no
+`--tested-commit`. The launcher requires exact seals/length, canonically parses fd 5 with no
+trailing byte, matches every role/order/path/mode/size/SHA-256/Git blob OID to fd 3,
+recomputes authority-policy V2, constructs the private read-only policy directory only from
+those payloads, and then closes fd 3/fd 5. The evaluator sees only that policy mount and fd 6.
+The outer verifier destroys its complete base ODB before releasing the launcher.
+
+The 4,327,488-byte control loose-object reservation and every reduced-ODB clause are
+withdrawn. The replacement storage counter is `authority_bundle_storage_bytes=4,203,488`;
+the separate sealed policy payload remains 4,194,304 bytes within the 16 MiB policy-volume
+quota. Retained non-source metadata is independently bounded by 8,192 slot-index + 1,024
+launcher-policy + 2,097,152 runtime-profile + two 65,536 manifests = 2,237,440 bytes.
+
+Cold-clone control acquisition has explicit independent containment:
+
+```text
+network/pack bytes                 134,217,728
+private outer base-ODB quota       268,435,456
+transport child address space      536,870,912
+transport deadline                        120s
+```
+
+The two byte/quota limits have exact/+1 damage controls. Address-space containment instead
+uses exact installation/readback plus page-granular allocation refusal, and the deadline has
+exact monotonic expiry/cleanup controls; neither makes a fictitious byte-level OOM promise.
+The outer extraction retains its 54 objects,
+17,021 tree bytes, 7,812 request bytes, 50,471,936 body bytes, and 50,480,522 transcript
+ceiling. Arbitrarily large unrelated T tree data never enters launcher storage; source
+transport beyond the explicit outer limits is unavailable rather than unaccounted.
+
+Launcher-policy canonical size is now at most 614 bytes including LF and actual argument
+storage at most 271 bytes including every NUL. The old control-Git/tested-commit spellings,
+642/351 vectors, missing/extra/reordered bundle rows, seal damage, trailing bytes, retained
+writable mappings, fd swaps, or a candidate lookup through fd 5 refuse. The raw 1,024/1,025
+launcher-policy containment remains.
+
+### Setup and evaluation use different enforced process scopes
+
+A host-owned supervisor remains alive outside the sealed evaluator. The whole transaction
+has an ancestor scope with `memory.max=2,684,354,560`, swap disabled, and `pids.max=8`. It
+creates three non-overlapping child scopes:
+
+```text
+control extraction  memory.max=1,073,741,824  pids.max=4  deadline=210s
+launcher setup      memory.max=1,073,741,824  pids.max=2  deadline=120s
+evaluator           memory.max=2,147,483,648  pids.max=4  deadline=120s
+```
+
+The control worker returns only sealed fds through one bounded `SCM_RIGHTS` socketpair and
+exits before launcher creation. After mount/pivot/readback, closure of fd 3/fd 5, and zero
+launcher descendants, the launcher emits one fixed ready record and blocks. The supervisor
+moves that exact PID from setup into the pre-created evaluator scope, reads back membership
+and every limit, destroys the empty setup scope, and sends one fixed continue byte. Only then
+may the launcher exec CPython. The evaluator scope contains the existing admitted peak of one
+512 MiB evaluator plus two simultaneous 512 MiB Git children. A third child refuses before
+spawn.
+
+The transaction deadline is 480 seconds: 210 extraction + 120 setup + 120 evaluation + 30
+transition/cleanup. A cap, move/readback, socket/ready, deadline, exec, or cleanup failure
+kill-alls current and ancestor scopes; closes fds 3..6 and partial memfds; unmounts policy,
+runtime, candidate, and temporary base views; reaps all children; and requires empty scopes
+and scratch before unavailable. Per-process RLIMIT, output, descriptor, and child-group
+limits remain additive defenses.
+
+### Result-v2 counters and literal projection lookup are exact
+
+All old three-source policy counter names and aliases are deleted. Every result-v2 object,
+including fast-forward, contains these authority registry entries exactly once:
+
+```text
+authority_sources             limit=1
+authority_rows                limit=32
+authority_path_bytes          limit=8,192
+authority_payload_bytes       limit=4,194,304
+authority_source_chunks       limit=95
+authority_framing_bytes       limit=9,184
+authority_total_hash_bytes    limit=4,203,488
+```
+
+Used values are respectively literal one; row count; aggregate UTF-8 path bytes; aggregate
+payload; the sum of `ceil(file_size/65,536)` for nonempty files; recomputed framing; and
+framing plus payload. Rows/path/payload retain independent exact/+1 gates. Chunk, framing,
+and total maxima are derived observations with unchanged-maximum observed-minus-one controls.
+O/N policy-looking files charge none of these counters. An old name, limit, or three-source
+golden vector refuses.
+
+Every T, K, A, and activation projection lookup uses the global literal option. The exact A
+form is:
+
+```text
+git --git-dir=. --no-replace-objects --literal-pathspecs \
+  ls-tree -z --full-tree A -- <registry-ordered exact live paths...>
+```
+
+Equivalent T/K/candidate-after commands substitute only the authenticated commit and exact
+projection. Sanitized environments remove pathspec variables. Literal fixtures include
+`:(literal)helper`, `:(glob)*`, `:/top`, `:!drop`, `:^drop`, and `:`; no valid path may be
+silently widened, excluded, or treated as magic.
+
+### Unsupported history is transactional; breaking switches require another task
+
+The claim that every unsupported contract is detected before graph work is withdrawn. After
+control authentication, the evaluator derives C, enumerates the bounded O/N graph, and
+requests snapshots in canonical graph/OID order. Before semantic parsing of each snapshot,
+its bytes must match exactly one T historical-data contract. Zero or multiple matches raise
+`unsupported-policy-history`, discard every retained row/proof, close all children, emit no
+complete result, and return exit 2. Endpoint detection may short-circuit as an optimization,
+but counters report work actually done. A restored endpoint with one unsupported intermediate
+commit must perform bounded graph/snapshot work and still refuse transactionally.
+
+This task does not authorize a breaking active selector switch. Gate 3 may switch S1 to S2
+only when S2's historical-data-contract registry is a semantic superset of S1's admitted
+registry. Identical names are insufficient: predicate/parser bytes and result semantics must
+be identical or covered by an independently reviewed compatibility proof. Otherwise Gate 3
+leaves S1 and legacy protection active and reports `breaking history migration required`.
+
+Dropping a contract requires a separate migration task with publication authority. That
+task must use a temporary dual-root verifier for retained T1 and proposed T2, a canonical
+per-action preservation/resolution mapping, an externally enforced ref freeze or exact-lease
+inventory, one externally verified receipt per protected base-repository ref, explicit open-
+fork treatment, and an honest refusal to claim coverage over closed/private/deleted or other
+unobservable forks. Only those receipts may authorize a breaking switch. The final T2 need
+not retain T1 compatibility; the temporary verifier can be removed after cutover while its
+evidence remains. Deleting/recreating refs, rebasing away the edge, or running an old-slot
+diagnostic cannot clear the production gate.
+
+### Gate boundary
+
+Production remains unopened. Amendment 32 makes a host-owned verifier and fixture repository
+mandatory for trusted provider activation and deliberately permits dormant core completion
+while those adapter capabilities remain unavailable. The next immutable revision needs all
+three base-lens accepts on this exact text, followed by independent budget and core-admission
+acceptance. No earlier verdict transfers and no production implementation may start first.

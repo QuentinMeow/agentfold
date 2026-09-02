@@ -540,3 +540,28 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   byte caps.
 - Production remains unopened pending a new three-lens exact-SHA review, then budget and
   core-fit review.
+
+## 2026-09-01 — External-acceptance and acyclic-projection correction (codex)
+
+- Three fresh exact-SHA reviews blocked amendment 31. A repository workflow still vouched
+  for its own first instruction; pre-Gate-3 A could not equal a future target projection;
+  T's commit/tree objects had no reduced-ODB budget; evaluator memory topology exceeded the
+  one-GiB setup scope; one projection lookup omitted literal pathspecs; fixed roles and
+  one-source result counters were not actually defined; and an incompatible selector switch
+  could strand old live edges.
+- Made every repository workflow evidence-only. Trusted production acceptance now requires
+  a host-owned verifier outside A; the GitHub shape is a separately identified App that
+  independently re-fetches and re-executes before publishing the only accepted check.
+- Split adapter manifest V2 into control and target projections. Gate 2 verifies T.control,
+  canaries install exact target bytes at immutable fixture K, Gate 3 checks its after-tree,
+  and only post-activation production checks A.target, removing the initial and upgrade
+  bootstrap cycles.
+- Replaced the reduced control ODB with a sealed 4,203,488-byte authority-policy transcript.
+  T commit/tree objects stop at the bounded outer verifier; the launcher receives only
+  sealed manifest/runtime/bundle capabilities plus the isolated candidate ODB.
+- Added exact authority/adapter role registries, one-source result-v2 counters, literal
+  projection commands, non-overlapping setup/evaluator cgroups, transactional unsupported-
+  history timing, and a hard refusal of breaking switches without a separate dual-root
+  migration protocol.
+- Production remains unopened. Amendment 32 must receive three fresh exact-SHA accepts,
+  then budget and core-admission accepts, before any dormant production implementation.

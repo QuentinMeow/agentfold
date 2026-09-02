@@ -243,6 +243,46 @@ including LF; substituted maximum-width arguments occupy 351 bytes including NUL
 The pointer-only active-selector V2 canonical vector was independently encoded at 184 bytes
 including LF.
 
+## Superseded T-only split-object review
+
+**Reviewed revision:** `33b52f95e166ed74067f5d9427e9a24c5bf65d27`
+
+- semantic/authority / a26-design-consistency: `block` — initial and upgrade canaries could
+  not satisfy a target projection that Gate 3 had not yet installed in A, and the reduced
+  control ODB charged authority blobs but not its mandatory T commit/tree objects.
+- workflow/provider / r19-semantic-design: `block` — code executing from A could skip its
+  own projection check and forge success because no production verifier existed outside A;
+  it independently found the uncharged T graph and a breaking switch that could strand an
+  old edge permanently. Unsupported historical data can also occur in an intermediate
+  commit, so universal pre-graph refusal was false.
+- CLI/resource / am22-cli-review: `block` — the reduced ODB omitted T graph storage; the one-
+  GiB scope could not contain the admitted evaluator plus two Git children; active projection
+  omitted `--literal-pathspecs`; role registries were not literal schemas; and result-v2
+  still carried the obsolete three-source policy limits.
+
+All three reviews were read-only and named the same immutable SHA. Budget and core-fit were
+not run, and production remained unopened.
+
+The amendment-32 sealed-bundle and launcher values were recomputed directly:
+
+```text
+$ python3 - <<'PY'
+import json
+argv=['--authority-manifest-fd=3','--runtime-manifest-fd=4',
+      '--authority-bundle-fd=5','--candidate-git-dir-fd=6',
+      '--old=<full-oid>','--new=<full-oid>']
+actual=sum(len(x)+1 for x in ['agentfold-ref-update-launcher',*argv])
+actual += 2*(64-len('<full-oid>'))
+print(30+2+32*30+8192+4194304, actual)
+PY
+4203488 271
+```
+
+Removing the 29-byte canonical tested-commit array member and replacing the control-Git
+spelling by the one-byte-longer bundle spelling changes the launcher-policy maximum from
+642 to 614 bytes including LF. The two phase projections contain at most nine rows, so their
+tree transcript cap is `9*78 + 4,096 = 4,798` bytes.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text
