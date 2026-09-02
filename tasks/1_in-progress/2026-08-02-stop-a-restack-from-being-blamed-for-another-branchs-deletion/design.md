@@ -4114,3 +4114,144 @@ load rather than a post-hoc mapping claim.
 
 Production remains unopened. All execution/evidence schemas and trust paths changed, so one
 new immutable SHA needs the three base lenses before budget and core-fit review.
+
+## 2026-09-01 correction amendment 29 — durable sealed execution and attempt binding
+
+Fresh read-only review of `c58b038c0e47e10ae0f2c495b1b2100ff3937fb3`
+rejected six executable gaps: ordinary release CPython has an empty ABI-flags string; the
+launcher manifest's valid representation could not reach its promised 64 KiB boundary;
+the exact argument vector omitted `argv[0]`; an open descriptor did not prevent same-inode
+mutation between hashing and execution; a rerun's artifact was not bound to its producing
+attempt; and activated production depended forever on a retention-bounded provider
+artifact even though activation removed the legacy fallback. This amendment supersedes the
+affected amendment-28 launcher/runtime, artifact/receipt, bootstrap, and local-execution
+clauses. The classifier semantics and result-v2 envelope do not change.
+
+### Launcher policy binds a complete invocation and reachable byte limits
+
+The `launcher-policy/v1` `argv_schema` is the complete `execve` argument array, including
+the fixed literal `argv[0]`:
+
+```text
+["agentfold-ref-update-launcher","--authority-manifest-fd=3","--runtime-manifest-fd=4","--git-dir-fd=5","--old=<full-oid>","--new=<full-oid>"]
+```
+
+No caller-supplied program name is admitted. The launcher refuses a different element,
+count, order, duplicate option, missing option, embedded NUL, or placeholder substitution
+outside the two endpoint elements. The exact sorted `kernel_capabilities` array becomes
+`close-range,execveat,memfd-sealing,mount-namespace,pivot-root,private-propagation,read-only-bind,sealed-tmpfs,user-namespace`.
+
+The raw launcher-policy read ceiling is 1,024 bytes including LF. Under the closed schema,
+fixed strings, fixed digest width, and executable size `1..16,777,216`, the largest valid
+canonical representation is exactly 578 bytes including LF. An independent encoder must
+produce that 578-byte vector. A 1,024-byte raw input is a bounded malformed-input case that
+must be read completely and then fail canonical/schema validation; a 1,025-byte input must
+refuse during bounded read before JSON decode. Neither is described as a schema-valid
+boundary. Valid minimum/maximum executable-size vectors, every single-field mutation, and
+the raw 1,024/1,025 damage pair replace amendment 28's unreachable 65,536-byte valid case.
+
+### Runtime ABI has one real CPython meaning
+
+`runtime-profile/v1.abi` is exactly the ASCII value of `sys.abiflags` observed under the
+fixed invocation. It is the sole authoritative extractor; `sysconfig` is not allowed to
+substitute another ABI label. Empty is valid and encoded as the JSON string `""`; nonempty
+values remain limited to 128 provider-independent ASCII bytes. `cache_tag`, `soabi`, and
+`platform` remain nonempty. The evaluator compares `abi` byte-for-byte with `sys.abiflags`.
+Golden profiles include an ordinary release build with empty ABI flags and a separately
+constructed supported build with a nonempty value; null, omission, non-ASCII, 129 bytes,
+or a disagreement with the running interpreter refuses.
+
+### Accepted execution always uses an immutable sealed copy
+
+No accepted provider, activation, production, or local path executes a regular-file
+descriptor merely because that descriptor was hashed. Its trusted verifier instead performs
+this exact single-threaded protocol before every launcher start:
+
+1. open the selected source with no-follow and verify its type, mode, exact length, and
+   digest while streaming under the launcher setup limits;
+2. create a fresh anonymous executable memfd with sealing enabled, without exporting,
+   duplicating, or mapping it; copy exactly the declared bytes while independently hashing
+   the copy, then require EOF on the source;
+3. require both source and copy hashes and lengths to equal the selected policy/source;
+   set the memfd executable mode, add `F_SEAL_WRITE|F_SEAL_GROW|F_SEAL_SHRINK|F_SEAL_SEAL`,
+   and read the seals back exactly;
+4. close the mutable source and execute only the sealed memfd with `execveat(..., "", argv,
+   empty_env, AT_EMPTY_PATH)` and the complete argument vector above.
+
+On kernels that distinguish executable memfds, the verifier requests the executable form
+at creation. Absence of memfd sealing, executable memfd, or `execveat` is unavailable, not a
+weaker fallback. It never executes through a pathname or the original descriptor. Creation,
+copy, hashing, sealing, mode, and exec-status descriptors are included in the existing
+descriptor, time, memory, diagnostic, and cleanup envelopes.
+
+Damage controls overwrite the source by rename and in place before and during copy, retain
+a pre-existing writable mapping, attempt write/truncate/grow after sealing, alter mode or
+length, exhaust each memfd/exec operation, and interrupt between every two stages. Mutation
+before or during copy refuses; post-seal mutation is rejected by the kernel; only the sealed
+digest-equal copy may start. Every refusal closes the memfd and leaves no child or mount.
+
+### The durable launcher source is repository data
+
+Gate 2 commits the exact launcher payload as a regular executable Git blob at the fixed path
+automation/runtime/launchers/x86_64-linux-gnu/agentfold-ref-update-launcher. It is dormant
+repository data, not authority by its location. `launcher_source` has exactly
+`path,mode,blob_oid,size,sha256`: the path is that literal, mode is `100755`, `blob_oid` is a
+lowercase full non-zero object-format OID, size is `1..16,777,216`, and SHA-256 is the
+launcher-policy executable digest. Git blob type, OID, bytes, mode, size, and digest are all
+verified from the immutable trusted base before the sealed-copy protocol.
+
+The canary artifact and receipt become
+`agentfold-ref-update-canary-artifact/v4` and
+`agentfold-ref-update-canary-receipt/v4`. Their exact top-level keys are respectively
+`schema,tested_commit,execution,adapter_policy,launcher_source,launcher_artifact,fixture,workflow,rows,cleanup`
+and those keys plus `artifact`. The new `launcher_source` object is byte/object-equal across
+the trusted base, every scenario result bundle, the aggregate artifact, the independent
+verification, the receipt, and Gate 3. V3 artifacts/receipts cannot activate V4 code.
+
+Before activation, the trusted canary reads the launcher blob from its immutable Gate-2
+base, verifies it against both manifests, copies it into a sealed memfd, and executes that
+copy. Receipt creation and Gate 3 additionally re-fetch and validate the provider artifact
+described below. Activation may retire the legacy path only when the base receipt and the
+base-tree `launcher_source` match and the activation patch does not change the source,
+receipt, manifests, or any digest-covered byte.
+
+After activation, every production update reads the source from its immutable old/base Git
+tree and verifies it against receipt V4 before sealed execution. It does not contact the
+provider artifact API and does not depend on artifact retention. A missing, non-blob,
+wrong-mode, wrong-OID, wrong-size, or wrong-digest source is a stable unavailable result that
+fails the continuity gate closed; it cannot silently use current-worktree bytes. Provider
+artifact expiry after activation is therefore irrelevant to W0/P1/P2/P3 protection. A
+launcher/runtime update repeats dormant Gate 2, canary, receipt, and Gate 3 with a new V4
+identity.
+
+### A launcher artifact is bound to the producing attempt
+
+Amendment 28's `launcher_artifact` object adds exact fields
+`job_id,job_name,publication_sha256`. `job_id` is a positive provider integer; `job_name` is
+the fixed trusted-workflow job name `build-launcher`; and `publication_sha256` is a lowercase
+prefixed digest. The independent verifier queries the provider's jobs-for-workflow-run-
+attempt endpoint for the exact `run_id,run_attempt`, requires exactly one completed
+successful job with that ID/name and the trusted head/workflow identity, and downloads that
+job's log.
+
+Only after the upload action returns its artifact ID and digest, the trusted job emits
+exactly one LF-terminated canonical marker `agentfold-launcher-publication/v1`. Its exact
+keys are
+`schema,repository_id,workflow_id,workflow_sha,head_sha,run_id,run_attempt,job_id,job_name,artifact_id,name,archive_sha256,architecture,executable_mode,executable_size,executable_sha256,launcher_source`.
+Every value is byte/object-equal to the locator, trusted job, manifest, and base source;
+`publication_sha256` hashes the complete canonical marker. The artifact API independently
+supplies and validates archive size, expiry, workflow-run ID, repository, head, name, ID,
+and digest. The log marker supplies the missing attempt-specific join; neither source alone
+is sufficient.
+
+A run-ID replay from attempt 1 into attempt 2, a marker before upload, two matching jobs or
+markers, wrong logical job name, artifact replacement, absent log, expired artifact during
+receipt/Gate 3, and any locator/marker/API disagreement refuse. Artifact expiry remains a
+pre-activation refusal only; it cannot invalidate an already activated durable V4 source.
+
+### Gate boundary
+
+Production remains unopened. Amendment 29 changes launcher bytes, kernel requirements,
+artifact/receipt schemas, and lifecycle behavior. One new immutable revision must receive
+all three base-lens accepts before budget and core-fit review; no verdict on an earlier SHA
+transfers.

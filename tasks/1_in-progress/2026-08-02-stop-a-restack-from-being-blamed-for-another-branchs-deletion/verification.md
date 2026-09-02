@@ -141,6 +141,37 @@ The sealed mount/pivot/descriptor sequence, literal Git pathspecs, v2 arithmetic
 adapter totals passed their assigned controls. Budget and core-fit lenses were not run.
 Production remained unopened.
 
+## Superseded closed-execution review
+
+**Reviewed revision:** `c58b038c0e47e10ae0f2c495b1b2100ff3937fb3`
+
+- semantic/authority / a26-design-consistency: `block` — activated production re-fetched a
+  retention-bounded launcher artifact forever while atomic activation removed the legacy
+  path it claimed would remain available after expiry.
+- workflow/provider / r19-semantic-design: `block` — the provider artifact object did not
+  prove which rerun attempt produced it, and independently confirmed the post-activation
+  expiry gap. Result v2, canary/receipt v3, publication v2, first-canary sequencing, and the
+  local/core trust distinction otherwise joined coherently.
+- CLI/resource / am22-cli-review: `block` — ordinary release CPython could not encode its
+  empty ABI flags; the valid launcher policy could not reach its promised 64 KiB boundary;
+  a same-fd verifier allowed in-place inode mutation before exec; and the exact argument
+  vector omitted `argv[0]`. It found no further contradiction in the four stored/two
+  derived counters, literal pathspecs, or sealed-root budget composition.
+
+All three reviews were read-only and named the same immutable SHA. Budget and core-fit
+lenses were not run, and production remained unopened.
+
+The empty ABI observation was reproduced under the fixed interpreter flags:
+
+```text
+$ python3 -I -S -B -X utf8 -c 'import sys,sysconfig; print(repr(sys.abiflags), repr(sysconfig.get_config_var("ABIFLAGS")))'
+'' ''
+```
+
+Independent canonical-JSON probes measured the amendment-28 maximum at 519 bytes including
+LF and the amendment-29 complete-argv/sealing-capability maximum at 578 bytes including LF.
+The revised 1,024-byte raw ceiling therefore is not represented as a valid-schema boundary.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

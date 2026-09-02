@@ -477,3 +477,24 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Replaced future native-mapping enumeration with an immutable root in which every loadable
   runtime file is already manifested and no original host/source namespace exists.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Durable sealed-launch and attempt-binding correction (codex)
+
+- Three fresh read-only reviews blocked amendment 28 on six independent executable gaps:
+  empty CPython ABI flags, an unreachable launcher-manifest boundary, omitted `argv[0]`,
+  same-inode verify/exec mutation, a launcher artifact not bound to its producing rerun
+  attempt, and eventual loss of protection after the provider artifact expired.
+- Replaced pathname/fd execution with an exact fresh-memfd copy, independent copy digest,
+  mandatory write/grow/shrink/seal locks, seal readback, and `execveat` of only the sealed
+  bytes. Hosts without those primitives remain honestly unavailable.
+- Made the launcher a receipt-bound durable Git blob in the immutable base. Provider
+  artifacts now prove dormant canary and Gate-3 behavior but are not a production-runtime
+  dependency, so retention expiry cannot remove Strategy A after legacy retirement.
+- Added an attempt-specific build-job lookup and post-upload canonical log marker binding
+  the artifact ID/digest to the exact run attempt. Advanced canary/receipt envelopes to V4
+  with an exact `launcher_source` object.
+- Bound the full argument vector including `argv[0]`, defined ABI as `sys.abiflags` with an
+  allowed empty string, and replaced the impossible 64 KiB valid fixture with a measured
+  578-byte valid maximum plus raw 1,024/1,025-byte damage controls.
+- Production remains unopened pending a fresh three-lens immutable-revision review, then
+  budget and core-fit review on that same revision.
