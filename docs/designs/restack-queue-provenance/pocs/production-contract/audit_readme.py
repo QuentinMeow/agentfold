@@ -13,11 +13,15 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v6"
+SCHEMA = "agentfold-production-contract-evidence/v7"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -54,6 +58,16 @@ SUPERSEDED_EVIDENCE = {
                 "false block; history is preserved and v5 is never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v5",
+        },
+        {
+            "commit": "9ab61c416be1911e44c6bce2b3d711b6f2abef15",
+            "disposition": (
+                "superseded and burned after fresh-replay, deterministic "
+                "merge-carrier, descriptor-lifecycle, and executable "
+                "event-adapter blockers; history is preserved and v6 is "
+                "never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v6",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -492,7 +506,16 @@ SCENARIO_IDS = tuple(sorted((
     "R18-U-parent-order-reversed",
     "R18-U-rename-timing-move",
     "R18-U-review-binding-restoration",
+    "R18-U-review-compatible-merge",
+    "R18-U-review-compatible-merge-reversed",
+    "R18-U-review-compatible-source-high",
+    "R18-U-review-compatible-source-high-reversed",
+    "R18-U-review-compatible-source-low",
+    "R18-U-review-compatible-source-low-reversed",
+    "R18-U-review-incompatible-carrier",
     "R18-U-review-publication-equivalence",
+    "R18-U-review-three-carrying-parents",
+    "R18-U-review-two-valid-sources",
     "R18-U-schema-invalid-birth",
     "R18-U-second-birth",
     "R18-U-transient-protected-mutation",
@@ -504,6 +527,17 @@ SCENARIO_IDS = tuple(sorted((
     "R18-origin-parent-edges-plus-one-refused",
     "R18-origin-witness-bytes-exact",
     "R18-origin-witness-bytes-plus-one-refused",
+    "R19-WF-local-blocking-attack",
+    "R19-WF-local-missing-old",
+    "R19-WF-local-normal-restack",
+    "R19-WF-pre-push-blocking-attack",
+    "R19-WF-pre-push-normal-restack",
+    "R19-WF-pull-request-synchronize-blocking-attack",
+    "R19-WF-pull-request-synchronize-head-mismatch",
+    "R19-WF-pull-request-synchronize-normal-restack",
+    "R19-WF-push-blocking-attack",
+    "R19-WF-push-normal-restack",
+    "R19-WF-push-zero-before",
     "W0-fast-forward-return",
     "W1-pre-PR-push-exact-endpoints",
     "W2-base-advance-retarget-invariant",
@@ -524,8 +558,10 @@ CONTROL_IDS = tuple(sorted((
     "ignore-persisted-outside-C-collision",
     "identity-multiplicity-collapsed-to-set",
     "endpoint-only-origin-equality",
+    "event-adapter-cli-entrypoint",
     "literal-review-pending-treated-concrete",
     "locale-git-error-stream-equality",
+    "leak-object-database-pipes",
     "missing-all-parent-direct-validation",
     "missing-post-event-continuity",
     "omit-old-tip-human-binding",
@@ -540,6 +576,7 @@ CONTROL_IDS = tuple(sorted((
     "skip-origin-birth-uniqueness",
     "skip-origin-endpoint-non-regression",
     "skip-origin-post-birth-absence",
+    "reject-all-origin-invalid-carriers",
     "skip-persisted-candidate-continuity",
     "skip-persisted-frozen-skeleton",
     "skip-preserved-state-validation",
@@ -647,7 +684,7 @@ FIXTURE_CLAIMS = (
 # c32f470977735a63feaf377ca9290353d1520e0e and
 # 850d02587f7f812b7dde9667a39da80b4ce48764. Every row kind has one exact
 # recursive shape digest, checked before any projection.
-RAW_SHAPE_CATALOG_V6 = """
+RAW_SHAPE_CATALOG_V7 = """
 scenario:P1-direct-linear-valid sha256:356e5e2f5b906e2609dce7643c46eb3802ab376b1994aaac48c90cdacd35b660
 scenario:P10-direct-invalid-parent sha256:243adfd610241a33198cd863fe6b3bf8838e0f1249417cd02d785958e9b00db2
 scenario:P11-direct-three-parent-valid sha256:08cbb263eae6a1b25dd5c0a43993f762cf5e5e609e224e060e033aff4c7a6d8e
@@ -813,7 +850,16 @@ scenario:R18-U-parent-order sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca1
 scenario:R18-U-parent-order-reversed sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca17ddafb32ce92d93ad6d
 scenario:R18-U-rename-timing-move sha256:93225d0766eeb06577b676234c702278f400f6f7268d082494a23007181145f5
 scenario:R18-U-review-binding-restoration sha256:c1009ffb93da27c30c1ca25fea26f30a7d376d437ffd79051696d18cac108e53
+scenario:R18-U-review-compatible-merge sha256:55b30a4c8e3ec2040c376bb96ce8e73e720ddb34c40be5980a4b93a309ed0a43
+scenario:R18-U-review-compatible-merge-reversed sha256:55b30a4c8e3ec2040c376bb96ce8e73e720ddb34c40be5980a4b93a309ed0a43
+scenario:R18-U-review-compatible-source-high sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
+scenario:R18-U-review-compatible-source-high-reversed sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
+scenario:R18-U-review-compatible-source-low sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
+scenario:R18-U-review-compatible-source-low-reversed sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
+scenario:R18-U-review-incompatible-carrier sha256:60bceec745d4de65bedfa4c0b40662f9957909306dda918d25cccaec9fa6ddb5
 scenario:R18-U-review-publication-equivalence sha256:7aaad893c08f170dd9d55cad5c947acb67bd580e2d8a4c5ae972e12473964521
+scenario:R18-U-review-three-carrying-parents sha256:4bdf267c1ccaf54cba0fe5666e6816ca34ffd86d64319bd464359135fd016596
+scenario:R18-U-review-two-valid-sources sha256:4ffe1e5c47457c202b072459ccff7e66257e08069c1f28b35b83c6433bd74a84
 scenario:R18-U-schema-invalid-birth sha256:b1b052933ab5797075ee5b3cab2607e04f975e3639aa19d64d53de6a0cebf437
 scenario:R18-U-second-birth sha256:5ab541a901c3d8973a650c18bbae8e5d54e17184a58f9dfdb23b375a27153fef
 scenario:R18-U-transient-protected-mutation sha256:6356d37c4ade35ad68f3d150bdc06a2f3983c9297ac6bc419be36cdaf362f835
@@ -825,6 +871,17 @@ scenario:R18-origin-parent-edges-exact sha256:f4da25de95ba1de681d3a368e4a915e835
 scenario:R18-origin-parent-edges-plus-one-refused sha256:92d157ab0770f813c2b89532785d76ded427184635790e65c929b7092e445720
 scenario:R18-origin-witness-bytes-exact sha256:f4da25de95ba1de681d3a368e4a915e8350a0d231be38e392fe20c225b4ba9ef
 scenario:R18-origin-witness-bytes-plus-one-refused sha256:92d157ab0770f813c2b89532785d76ded427184635790e65c929b7092e445720
+scenario:R19-WF-local-blocking-attack sha256:79bdf9c5603d6ca3958c2bbb155dbb1e2754e434306c1f866c86867bf832207c
+scenario:R19-WF-local-missing-old sha256:31ba4d77105bfe5d96c3fcaef61900f63b2e2eabd00c621afcd5b9d8304749a1
+scenario:R19-WF-local-normal-restack sha256:14c550cd676ef26a8fa4de611438940558fc3cf5c88d8a2ff93d1984d57c69b6
+scenario:R19-WF-pre-push-blocking-attack sha256:79bdf9c5603d6ca3958c2bbb155dbb1e2754e434306c1f866c86867bf832207c
+scenario:R19-WF-pre-push-normal-restack sha256:14c550cd676ef26a8fa4de611438940558fc3cf5c88d8a2ff93d1984d57c69b6
+scenario:R19-WF-pull-request-synchronize-blocking-attack sha256:54a82ce5f8ffa8da0e14bd2e57cad3d479c6a26042e82f413605f2105c998298
+scenario:R19-WF-pull-request-synchronize-head-mismatch sha256:f2704a2a7f0cf659ebafc88718390642ac2e6eaf0d51c46892f5ebc389650be4
+scenario:R19-WF-pull-request-synchronize-normal-restack sha256:0a1d3d156b21e2b30367d12e13ab8b2f9921dfd1bc7242e3bf4d9618670d1e8e
+scenario:R19-WF-push-blocking-attack sha256:405637042a2f39c7eecebfa05a004ada7f9082ede156a5a24642e5879be785ca
+scenario:R19-WF-push-normal-restack sha256:cc436a87da79735f31997d1ad9fde7f52d81ebc2aee2f56f6c7540de1777c7ec
+scenario:R19-WF-push-zero-before sha256:eaa401709582c5fdae848813e3d3a947c2a5537edae4bc5c8688d2281d57b870
 scenario:R3-01-two-invalid-causal-sources sha256:a53104abe8ddc00a54de65fd93fc6679f248668793703081f3e53e5f5145cbb6
 scenario:R3-02-invalid-valid-causal-competition sha256:278833b57aa902bcc3306c875adb1c0edf9cd6b09730b88f71e1f803b9e725e5
 scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks sha256:42f1a09cdbcc797aea03e212090f31b98c5094dfbfc4f154d005d0c52d7a9f6c
@@ -856,11 +913,12 @@ scenario:W4-stale-rerun-exact-inputs sha256:6461d566aa2f5203949f906ef30e3455ca77
 scenario:W5-missing-O-coverage-unavailable sha256:ee917ef118937c57c4508dcf43c05feb874d1d5c23560caa2a1d98ef30c18c34
 scenario:W6-created-deleted-zero-endpoints sha256:d30a2ba7092135979715101e2788f40a9c9774df00927c1f65d997f36d8d281b
 scenario:W7-PR-synchronize-top-level-endpoints sha256:036b6126668bc82fbbe148144c2202c1e302e991648cb9709d46e014942fe3ba
-parent-permutation sha256:96d2728c54be6458bedd52e4717ab16328e95a1f6874e1e56156dd931088d64d
+parent-permutation sha256:4eb67669a07e806e1078f6638453877ac49ad2a4ab0b4dd1594c9615e38cde6a
 aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:event-adapter-cli-entrypoint sha256:b839e870c310cfc584c697f1e48863b0b151f38a7255472316aac5bbda7c4b37
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -868,6 +926,7 @@ control:ignore-invalid-N-root sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfc
 control:ignore-outside-C-carrier sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:ignore-persisted-absent-C-arm sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:ignore-persisted-outside-C-collision sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:leak-object-database-pipes sha256:09d852a1d76466655eefd0cca040e2c512e74470e8a3bd34603f65d520741bd7
 control:literal-review-pending-treated-concrete sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:locale-git-error-stream-equality sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4
 control:missing-all-parent-direct-validation sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -876,6 +935,7 @@ control:omit-old-tip-human-binding sha256:4d55407e4a51e86c40626e007d59ef9c33330a
 control:omit-supplier-carrier-human-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
 control:omit-unanswered-published-review-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
 control:posthoc-budget-accounting sha256:34d3a59cb23be03b3687a5e44a27da906e1181389e054e98f6788474cb5e6e83
+control:reject-all-origin-invalid-carriers sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:reopen-outside-C-boundary-ancestry sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:reopen-pre-C-genealogy sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:restore-universal-ancestor-carry-scan sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -896,11 +956,11 @@ control:unmetered-dynamic-support sha256:247979e72c21e06ce04516c2b72a803d84b4642
 control:unmetered-object-payload sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:unmetered-support-construction sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:unmetered-tree-paths sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
-summary sha256:076e24673c34bc6dcb5896b23fcf5c2134316e04ed3546b3fec9d7e28d0ee840
+summary sha256:b957b61b2a27224040772a4629d78ad28a6877450d639808664ac078929a351e
 """
 RAW_SHAPE_SHA256 = dict(
     line.split(" ", 1)
-    for line in RAW_SHAPE_CATALOG_V6.splitlines()
+    for line in RAW_SHAPE_CATALOG_V7.splitlines()
     if " " in line
 )
 
@@ -1035,6 +1095,7 @@ def validate_permutation_record(value: Any, context: str):
             "r17_parent_permutation",
             "r17_persisted_parent_permutations",
             "r18_origin_parent_permutation",
+            "r19_review_merge_parent_permutations",
             "status",
         ),
         context,
@@ -1106,6 +1167,41 @@ def validate_permutation_record(value: Any, context: str):
             ),
             f"{context}.r18_origin_parent_permutation[{index}]",
         )
+    review = value["r19_review_merge_parent_permutations"]
+    expected_cases = (
+        "review-compatible-merge",
+        "review-compatible-source-high",
+        "review-compatible-source-low",
+    )
+    if not isinstance(review, dict) or tuple(sorted(review)) != expected_cases:
+        raise EvidenceError(f"{context} review merge permutation catalog differs")
+    for case in expected_cases:
+        pair = review[case]
+        if not isinstance(pair, list) or len(pair) != 2 or pair[0] != pair[1]:
+            raise EvidenceError(
+                f"{context} review merge permutation differs for {case}"
+            )
+        for index, signature in enumerate(pair):
+            require_keys(
+                signature,
+                (
+                    "classification", "compatible_carriers",
+                    "evidence_status", "invalid_edges", "reason_code",
+                    "role_multiset", "selected_source_is_canonical",
+                ),
+                f"{context}.r19_review_merge_parent_permutations."
+                f"{case}[{index}]",
+            )
+            if (
+                signature["classification"] != "no-finding"
+                or signature["evidence_status"] != "valid"
+                or signature["invalid_edges"] != 0
+                or signature["selected_source_is_canonical"] is not True
+                or signature["compatible_carriers"] < 1
+            ):
+                raise EvidenceError(
+                    f"{context} review merge signature is not clean for {case}"
+                )
 
 
 def normalized_record(value: dict) -> dict:
@@ -1137,11 +1233,21 @@ class Stream:
         return stream
 
     def _load(self):
+        if not self.raw:
+            raise EvidenceError("JSONL stream is empty")
+        if b"\r" in self.raw:
+            raise EvidenceError("JSONL stream contains CR bytes")
+        if not self.raw.endswith(b"\n"):
+            raise EvidenceError("JSONL stream has no final LF")
         self.objects = []
-        for number, line in enumerate(self.raw.splitlines(), start=1):
+        for number, line in enumerate(self.raw[:-1].split(b"\n"), start=1):
             if not line:
                 raise EvidenceError(f"blank JSONL line {number}")
             value = load_json(line)
+            if canonical_bytes(value) != line + b"\n":
+                raise EvidenceError(
+                    f"JSONL line {number} is not canonical sorted-key JSON+LF"
+                )
             if not isinstance(value, dict):
                 raise EvidenceError(f"JSONL line {number} is not an object")
             key = raw_record_key(value)
@@ -1204,22 +1310,198 @@ class Stream:
         names = [row.get("alias") for row in inventory or []]
         if tuple(sorted(names)) != ALIAS_IDS or len(set(names)) != 4:
             raise EvidenceError("alias catalog differs from closed inventory")
+        failure_scenarios = {
+            row.get("scenario")
+            for row in self.summary.get("failures", [])
+            if isinstance(row, dict) and "scenario" in row
+        }
+        failure_controls = {
+            row.get("control")
+            for row in self.summary.get("failures", [])
+            if isinstance(row, dict) and "control" in row
+        }
+        observed_controls = sum(
+            row.get("status") == "OBSERVED_RED"
+            for row in self.controls.values()
+        )
+        alias_rows = self.aliases["scenario_alias_inventory"]
+        observed_aliases = sum(
+            row.get("status") == "PASS" for row in alias_rows
+        )
+        recomputed_summary = (
+            "PASS"
+            if (
+                not self.summary.get("failures")
+                and observed_controls == len(CONTROL_IDS)
+                and observed_aliases == len(ALIAS_IDS)
+            )
+            else "FAIL"
+        )
         expected = {
-            "summary": "PASS", "passed": len(SCENARIO_IDS),
-            "total": len(SCENARIO_IDS), "controls_passed": len(CONTROL_IDS),
+            "summary": recomputed_summary,
+            "passed": len(SCENARIO_IDS) - len(failure_scenarios),
+            "total": len(SCENARIO_IDS),
+            "controls_passed": observed_controls,
             "controls_total": len(CONTROL_IDS),
-            "aliases_passed": len(ALIAS_IDS), "aliases_total": len(ALIAS_IDS),
+            "aliases_passed": observed_aliases,
+            "aliases_total": len(ALIAS_IDS),
             "r17_parent_permutation": "PASS",
             "r18_origin_parent_permutation": "PASS",
-            "failures": [],
+            "r19_review_merge_parent_permutation": "PASS",
         }
         for key, value in expected.items():
             if self.summary.get(key) != value:
                 raise EvidenceError(f"stream summary {key} is not {value!r}")
+        if failure_controls - set(self.controls):
+            raise EvidenceError("stream summary names an unknown failed control")
+        self._validate_aliases()
         validate_permutation_record(self.permutation, "stream permutation")
+
+    def _validate_aliases(self):
+        contracts = {
+            "S1": {
+                "scenario": "P1-direct-linear-valid",
+                "classification": "no-finding",
+                "evidence_status": "valid",
+                "event_mode": "direct",
+                "finding": False,
+                "authority_edges": 1,
+                "invalid_authority_edges": 0,
+                "propagation_edges": 0,
+            },
+            "S2": {
+                "scenario": "P2-direct-linear-invalid",
+                "classification": "blocking-finding",
+                "evidence_status": "invalid",
+                "event_mode": "direct",
+                "finding": True,
+                "authority_edges": 1,
+                "invalid_authority_edges": 1,
+                "propagation_edges": 0,
+            },
+            "S3": {
+                "scenario": "P3-genuine-old-loss",
+                "classification": "blocking-finding",
+                "evidence_status": "none",
+                "event_mode": "none",
+                "finding": True,
+                "authority_edges": 0,
+                "invalid_authority_edges": 0,
+                "propagation_edges": 0,
+            },
+            "S12": {
+                "scenario": "P12-merge-supplier-valid",
+                "classification": "no-finding",
+                "evidence_status": "valid",
+                "event_mode": "supplier",
+                "finding": False,
+                "authority_edges": 1,
+                "invalid_authority_edges": 0,
+                "propagation_edges": 1,
+            },
+        }
+        by_alias = {
+            row["alias"]: row
+            for row in self.aliases["scenario_alias_inventory"]
+        }
+        if set(by_alias) != set(contracts):
+            raise EvidenceError("alias inventory differs from static contracts")
+        for alias, expected in contracts.items():
+            source = self.scenarios[expected["scenario"]]
+            observed = {
+                "scenario": source["scenario"],
+                "classification": source["classification"],
+                "evidence_status": source["evidence_verdict"]["status"],
+                "event_mode": source["event_mode"],
+                "finding": any(x["finding"] for x in source["actions"]),
+                "authority_edges": len(source["authority_edges"]),
+                "invalid_authority_edges": sum(
+                    edge["problem"] is not None
+                    for edge in source["authority_edges"]
+                ),
+                "propagation_edges": len(source["propagation_edges"]),
+            }
+            row = by_alias[alias]
+            if row != {
+                "alias": alias,
+                "maps_to": expected["scenario"],
+                "expected": expected,
+                "observed": observed,
+                "status": "PASS" if observed == expected else "FAIL",
+            }:
+                raise EvidenceError(
+                    f"alias {alias} differs from recomputed scenario projection"
+                )
 
     def semantic_bytes(self):
         return b"".join(canonical_bytes(normalized_record(x)) for x in self.objects)
+
+
+def internal_replay_stream() -> Stream:
+    """Run the sibling prototype from scratch under a fixed environment."""
+    prototype = Path(__file__).resolve().with_name("prototype.py")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PYTHONHASHSEED": "0",
+            "TZ": "UTC",
+        }
+    )
+    with tempfile.TemporaryDirectory(prefix="production-contract-audit-replay-") as raw:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(prototype),
+                "--self-test",
+                "--fixtures-dir",
+                str(Path(raw) / "fixtures"),
+            ],
+            check=False,
+            env=environment,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            timeout=900,
+        )
+    if completed.returncode != 0:
+        diagnostic = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise EvidenceError(
+            "fresh internal prototype replay failed"
+            + (f": {diagnostic}" if diagnostic else "")
+        )
+    return Stream.from_bytes(completed.stdout, "<fresh-internal-replay>")
+
+
+def require_fresh_replay(
+    supplied: Stream,
+    fresh: Stream,
+    comparison: Stream | None = None,
+):
+    if supplied.raw != fresh.raw:
+        raise EvidenceError(
+            "generation input differs byte-for-byte from fresh internal replay"
+        )
+    if comparison is not None and comparison.raw != fresh.raw:
+        raise EvidenceError(
+            "generation comparison differs byte-for-byte from fresh internal replay"
+        )
+
+
+def publish_generated_artifacts(
+    supplied: Stream,
+    fresh: Stream,
+    evidence_path: Path,
+    readme_path: Path,
+    *,
+    comparison: Stream | None = None,
+) -> dict:
+    """Publish only after every caller stream equals a fresh replay exactly."""
+    require_fresh_replay(supplied, fresh, comparison)
+    expected = manifest_from_stream(fresh)
+    evidence_path.write_bytes(canonical_bytes(expected))
+    readme_path.write_bytes(render_readme(expected))
+    return expected
 
 
 def pointer(value, parts):
@@ -1396,6 +1678,16 @@ def control_projection(row):
                 "stable_full_results_equal"
             ],
             "stable_reasons": locale["stable_reasons"],
+        }
+    elif row["control"] == "leak-object-database-pipes":
+        observation = {
+            **row["object_database_observation"],
+            "kind": "object-database-descriptor-lifecycle",
+        }
+    elif row["control"] == "event-adapter-cli-entrypoint":
+        observation = {
+            **row["event_adapter_cli_observation"],
+            "kind": "immutable-event-adapter-cli",
         }
     return {
         "authority_edges": [edge_projection(x) for x in row["authority_edges"]],
@@ -1621,6 +1913,15 @@ def origin_strategy_projection(stream):
         "R18-U-human-response-restoration",
         "R18-U-review-binding-restoration",
         "R18-U-schema-invalid-birth",
+        "R18-U-review-compatible-merge",
+        "R18-U-review-compatible-merge-reversed",
+        "R18-U-review-compatible-source-low",
+        "R18-U-review-compatible-source-low-reversed",
+        "R18-U-review-compatible-source-high",
+        "R18-U-review-compatible-source-high-reversed",
+        "R18-U-review-three-carrying-parents",
+        "R18-U-review-two-valid-sources",
+        "R18-U-review-incompatible-carrier",
         "R18-U-claim-restoration",
         "R18-U-second-birth",
         "R18-U-multiplicity",
@@ -1646,6 +1947,7 @@ def origin_strategy_projection(stream):
         "skip-origin-birth-uniqueness",
         "skip-origin-post-birth-absence",
         "skip-origin-endpoint-non-regression",
+        "reject-all-origin-invalid-carriers",
     )
     return {
         "cases": cases,
@@ -1698,6 +2000,73 @@ def origin_strategy_projection(stream):
         "parent_permutation": stream.permutation[
             "r18_origin_parent_permutation"
         ],
+        "review_merge_parent_permutations": stream.permutation[
+            "r19_review_merge_parent_permutations"
+        ],
+    }
+
+
+def generation_contract_projection():
+    return {
+        "caller_rows_authoritative": False,
+        "comparison_requires_exact_bytes": True,
+        "fresh_internal_replay": True,
+        "pre_generation_damage_cases": [
+            "pre-generation-nonexistent-OID",
+            "pre-generation-contradictory-result",
+            "pre-generation-CRLF",
+            "pre-generation-missing-final-LF",
+            "pre-generation-duplicate-key",
+            "pre-generation-unsorted-json",
+        ],
+        "publication_order": (
+            "parse canonical raw JSONL, recompute aliases/permutations/summary, "
+            "and compare exact fresh bytes before the first output write"
+        ),
+        "publication_requires_exact_bytes": True,
+        "raw_jsonl": {
+            "compact_sorted_json": True,
+            "duplicate_keys_rejected": True,
+            "exactly_one_LF_per_record": True,
+            "final_LF_required": True,
+            "CR_rejected": True,
+        },
+        "same_file_stream_and_compare_is_not_a_bypass": True,
+        "sentinels_unchanged_on_rejection": True,
+    }
+
+
+def event_workflow_projection(stream):
+    ids = [name for name in SCENARIO_IDS if name.startswith("R19-WF-")]
+    cases = {}
+    for name in ids:
+        row = stream.scenarios[name]
+        details = row["details"]
+        action = next(
+            (item for item in row["actions"] if item["origin_proofs"]),
+            None,
+        )
+        cases[name] = {
+            "adapter": row["event_adapter"],
+            "audit_exit": row["audit_exit"],
+            "classification": row["classification"],
+            "finding": bool(action and action["finding"]),
+            "non_fast_forward": details["workflow_non_fast_forward"],
+            "reason_code": action["reason_code"] if action else None,
+            "record_sha256": record_digest(normalized_record(row)),
+            "transport": details["workflow_transport"],
+            "workflow_attack": details["workflow_attack"],
+            "workflow_failure": details["workflow_failure"],
+        }
+    return {
+        "cases": cases,
+        "claim": (
+            "immutable event endpoint extraction and typed Strategy U make no "
+            "claim about provider authority, user intent, or github.sha"
+        ),
+        "cli_control": control_projection(
+            stream.controls["event-adapter-cli-entrypoint"]
+        ),
     }
 
 
@@ -1760,7 +2129,9 @@ def core_claim_projection(stream):
             "frontier": "N",
             "schema": "restack-provenance-input/v2",
         },
+        "evidence_generation": generation_contract_projection(),
         "evidence_supersession": SUPERSEDED_EVIDENCE,
+        "immutable_event_workflows": event_workflow_projection(stream),
         "execution_bounds": execution_bounds_projection(stream),
         "measured_budget": {
             "exact": budget_case_projection(exact_budget),
@@ -1804,6 +2175,9 @@ def core_claim_projection(stream):
             },
         },
         "origin_strategies": origin_strategy_projection(stream),
+        "object_database_lifecycle": control_projection(
+            stream.controls["leak-object-database-pipes"]
+        ),
         "parent_permutation": stream.permutation,
         "persisted_carry": {
             "cases": [
@@ -1926,6 +2300,9 @@ def manifest_from_stream(stream):
             ],
             "r18_origin_parent_permutation": stream.summary[
                 "r18_origin_parent_permutation"
+            ],
+            "r19_review_merge_parent_permutation": stream.summary[
+                "r19_review_merge_parent_permutation"
             ],
             "scenario_passed": stream.summary["passed"],
             "scenario_total": stream.summary["total"],
@@ -2117,6 +2494,7 @@ def validate_manifest(manifest):
         "aliases_passed", "aliases_total", "canonical_stream_sha256",
         "controls_passed", "controls_total", "r17_parent_permutation",
         "r18_origin_parent_permutation",
+        "r19_review_merge_parent_permutation",
         "scenario_passed", "scenario_total", "status",
     ), "summary")
     summary = manifest["summary"]
@@ -2126,6 +2504,7 @@ def validate_manifest(manifest):
         "controls_passed": len(CONTROL_IDS), "controls_total": len(CONTROL_IDS),
         "r17_parent_permutation": "PASS",
         "r18_origin_parent_permutation": "PASS",
+        "r19_review_merge_parent_permutation": "PASS",
         "scenario_passed": len(SCENARIO_IDS), "scenario_total": len(SCENARIO_IDS),
         "status": "PASS",
     }
@@ -2135,6 +2514,7 @@ def validate_manifest(manifest):
         if key not in {
             "status", "r17_parent_permutation",
             "r18_origin_parent_permutation",
+            "r19_review_merge_parent_permutation",
         }:
             require_nonnegative_int(summary[key], f"summary.{key}")
 
@@ -2290,6 +2670,165 @@ def validate_manifest(manifest):
                     raise EvidenceError(
                         f"{context} stream cleanup observation changed"
                     )
+        elif row["id"] == "event-adapter-cli-entrypoint":
+            observation = row["observation"]
+            require_keys(
+                observation,
+                (
+                    "cases", "entrypoint", "execution_seam",
+                    "importable_api", "kind", "payload_grammar",
+                ),
+                f"{context}.observation",
+            )
+            if (
+                observation["kind"] != "immutable-event-adapter-cli"
+                or observation["entrypoint"]
+                != (
+                    "prototype.py --repo ROOT --event-kind KIND "
+                    "--event-payload EVENT.json"
+                )
+                or observation["payload_grammar"]
+                != {
+                    "local": ["old", "new"],
+                    "pre-push": ["old", "new"],
+                    "pull-request-synchronize": [
+                        "before", "after", "pull_request.head.sha"
+                    ],
+                    "push": ["before", "after"],
+                }
+            ):
+                raise EvidenceError(f"{context} event adapter grammar changed")
+            if observation["importable_api"] != {
+                "endpoint_derivation": (
+                    "event_endpoints(event_kind: str, payload: "
+                    "Mapping[str, Any]) -> EventEndpoints"
+                ),
+                "typed_U_audit": (
+                    "audit_event(root: Path, event_kind: str, payload: "
+                    "Mapping[str, Any], *, budget_limit: int | None = None, "
+                    "transaction: Callable[[], ContextManager[None]] | "
+                    "None = None) -> dict"
+                ),
+            }:
+                raise EvidenceError(f"{context} importable adapter API changed")
+            seam = observation["execution_seam"]
+            require_keys(
+                seam,
+                ("invalid", "result_owned_by_audit", "valid"),
+                f"{context}.execution_seam",
+            )
+            seam_keys = (
+                "audit_exit", "git_subprocesses", "result_git_processes",
+                "transaction_entries", "typed_origin_strategy",
+            )
+            for name in ("invalid", "valid"):
+                item = seam[name]
+                require_keys(item, seam_keys, f"{context}.execution_seam.{name}")
+            if (
+                seam["valid"]["audit_exit"] != 0
+                or seam["valid"]["transaction_entries"] != 1
+                or seam["valid"]["git_subprocesses"] <= 0
+                or seam["valid"]["git_subprocesses"]
+                != seam["valid"]["result_git_processes"]
+                or seam["valid"]["typed_origin_strategy"] != "U"
+                or seam["result_owned_by_audit"] is not True
+                or seam["invalid"] != {
+                    "audit_exit": 2,
+                    "git_subprocesses": 0,
+                    "result_git_processes": 0,
+                    "transaction_entries": 0,
+                    "typed_origin_strategy": "U",
+                }
+            ):
+                raise EvidenceError(f"{context} execution seam escaped accounting")
+            cases = observation["cases"]
+            if set(cases) != {"blocking", "clean", "unavailable"}:
+                raise EvidenceError(f"{context} event adapter cases changed")
+            expectations = {
+                "blocking": ("accepted", "blocking-finding", 1),
+                "clean": ("accepted", "no-finding", 0),
+                "unavailable": ("coverage-unavailable", "unreadable", 2),
+            }
+            for name, item in cases.items():
+                require_keys(
+                    item,
+                    (
+                        "adapter_status", "classification", "exit", "reason",
+                        "stdout_canonical", "typed_origin_strategy",
+                    ),
+                    f"{context}.observation.cases.{name}",
+                )
+                if (
+                    (
+                        item["adapter_status"],
+                        item["classification"],
+                        item["exit"],
+                    )
+                    != expectations[name]
+                    or item["stdout_canonical"] is not True
+                    or item["typed_origin_strategy"] != "U"
+                ):
+                    raise EvidenceError(
+                        f"{context} event adapter exit contract changed"
+                    )
+        elif row["id"] == "leak-object-database-pipes":
+            observation = row["observation"]
+            require_keys(
+                observation,
+                ("baseline", "damaged", "kind"),
+                f"{context}.observation",
+            )
+            if observation["kind"] != "object-database-descriptor-lifecycle":
+                raise EvidenceError(
+                    f"{context} descriptor lifecycle kind changed"
+                )
+            baseline = observation["baseline"]
+            if set(baseline) != {
+                "abort", "after-exit", "close-live", "stubborn-close"
+            }:
+                raise EvidenceError(
+                    f"{context} descriptor baseline modes changed"
+                )
+            lifecycle_keys = (
+                "killed", "mode", "process_reaps", "process_terminations",
+                "returncode_is_set",
+                "stdin_closed", "stdout_closed",
+            )
+            for mode, item in baseline.items():
+                require_keys(
+                    item, lifecycle_keys,
+                    f"{context}.observation.baseline.{mode}",
+                )
+                if (
+                    item["mode"] != mode
+                    or item["process_reaps"] != 1
+                    or item["returncode_is_set"] is not True
+                    or item["stdin_closed"] is not True
+                    or item["stdout_closed"] is not True
+                    or item["killed"] is not (mode == "stubborn-close")
+                    or item["process_terminations"]
+                    != int(mode in {"abort", "stubborn-close"})
+                ):
+                    raise EvidenceError(
+                        f"{context} baseline descriptor closure changed"
+                    )
+            damaged = observation["damaged"]
+            require_keys(
+                damaged, lifecycle_keys,
+                f"{context}.observation.damaged",
+            )
+            if (
+                damaged["mode"] != "after-exit"
+                or damaged["process_reaps"] != 1
+                or damaged["returncode_is_set"] is not True
+                or damaged["stdin_closed"] is not False
+                or damaged["stdout_closed"] is not False
+                or damaged["killed"] is not False
+                or damaged["process_terminations"] != 0
+            ):
+                raise EvidenceError(
+                    f"{context} leak mutant did not remain observed red"
+                )
         elif row["id"] == "posthoc-budget-accounting":
             observation = row["observation"]
             require_keys(
@@ -2399,8 +2938,10 @@ def validate_manifest(manifest):
     by_id = {x["id"]: x for x in scenarios}
     core = manifest["core_claims"]
     require_keys(core, (
-        "boundary_ancestry", "endpoint_contract", "evidence_supersession",
-        "execution_bounds", "measured_budget", "origin_strategies",
+        "boundary_ancestry", "endpoint_contract", "evidence_generation",
+        "evidence_supersession", "execution_bounds",
+        "immutable_event_workflows", "measured_budget", "origin_strategies",
+        "object_database_lifecycle",
         "parent_permutation",
         "persisted_carry",
         "raw_grammar",
@@ -2464,6 +3005,8 @@ def validate_manifest(manifest):
         "schema": "restack-provenance-input/v2",
     }:
         raise EvidenceError("core endpoint contract changed")
+    if core["evidence_generation"] != generation_contract_projection():
+        raise EvidenceError("fresh evidence generation contract changed")
     if core["evidence_supersession"] != SUPERSEDED_EVIDENCE:
         raise EvidenceError("evidence schema supersession changed")
     require_keys(
@@ -2483,6 +3026,96 @@ def validate_manifest(manifest):
             artifact["commit"],
             f"evidence_supersession.artifacts[{index}].commit",
         )
+    lifecycle_control = next(
+        row for row in controls if row["id"] == "leak-object-database-pipes"
+    )
+    if core["object_database_lifecycle"] != lifecycle_control:
+        raise EvidenceError("object database lifecycle projection changed")
+    event_workflows = core["immutable_event_workflows"]
+    require_keys(
+        event_workflows, ("cases", "claim", "cli_control"),
+        "immutable_event_workflows",
+    )
+    expected_event_ids = [
+        name for name in SCENARIO_IDS if name.startswith("R19-WF-")
+    ]
+    if list(event_workflows["cases"]) != expected_event_ids:
+        raise EvidenceError("immutable event workflow catalog changed")
+    cli_control = next(
+        row for row in controls if row["id"] == "event-adapter-cli-entrypoint"
+    )
+    if event_workflows["cli_control"] != cli_control:
+        raise EvidenceError("immutable event CLI projection changed")
+    expected_transports = {
+        "local", "pre-push", "pull-request-synchronize", "push"
+    }
+    observed_normal = set()
+    observed_blocking = set()
+    for name, case in event_workflows["cases"].items():
+        require_keys(
+            case,
+            (
+                "adapter", "audit_exit", "classification", "finding",
+                "non_fast_forward", "reason_code", "record_sha256",
+                "transport", "workflow_attack", "workflow_failure",
+            ),
+            f"immutable_event_workflows.cases.{name}",
+        )
+        require_digest(case["record_sha256"], f"{name}.record_sha256")
+        if case["record_sha256"] != by_id[name]["record_sha256"]:
+            raise EvidenceError(f"{name} record binding changed")
+        adapter = case["adapter"]
+        require_keys(
+            adapter,
+            (
+                "N", "O", "endpoint_sources", "event_kind",
+                "github_sha_used", "mutable_metadata_invariant",
+                "mutable_state_reads", "provider_api_calls", "reason",
+                "status", "typed_origin_strategy",
+            ),
+            f"immutable_event_workflows.cases.{name}.adapter",
+        )
+        if (
+            adapter["event_kind"] != case["transport"]
+            or adapter["github_sha_used"] is not False
+            or adapter["mutable_metadata_invariant"] is not True
+            or adapter["mutable_state_reads"] != 0
+            or adapter["provider_api_calls"] != 0
+            or adapter["typed_origin_strategy"] != "U"
+        ):
+            raise EvidenceError(f"{name} escaped immutable typed-U event input")
+        if case["workflow_failure"] is not None:
+            if (
+                case["audit_exit"] != 2
+                or case["classification"] != "unreadable"
+                or case["finding"] is not False
+                or adapter["status"] != "coverage-unavailable"
+                or adapter["O"] != "0" * 40
+                or adapter["N"] != "0" * 40
+            ):
+                raise EvidenceError(f"{name} event failure did not fail closed")
+        elif case["workflow_attack"]:
+            observed_blocking.add(case["transport"])
+            if (
+                case["audit_exit"] != 1
+                or case["classification"] != "blocking-finding"
+                or case["finding"] is not True
+                or case["non_fast_forward"] is not True
+                or adapter["status"] != "accepted"
+            ):
+                raise EvidenceError(f"{name} blocking workflow changed")
+        else:
+            observed_normal.add(case["transport"])
+            if (
+                case["audit_exit"] != 0
+                or case["classification"] != "no-finding"
+                or case["finding"] is not False
+                or case["non_fast_forward"] is not True
+                or adapter["status"] != "accepted"
+            ):
+                raise EvidenceError(f"{name} normal restack workflow changed")
+    if observed_normal != expected_transports or observed_blocking != expected_transports:
+        raise EvidenceError("event workflows do not cover every transport")
     bounds = core["execution_bounds"]
     require_keys(
         bounds,
@@ -2611,7 +3244,8 @@ def validate_manifest(manifest):
         origins,
         (
             "cases", "damage_controls", "decision", "decision_basis",
-            "parent_permutation", "selection_boundary",
+            "parent_permutation", "review_merge_parent_permutations",
+            "selection_boundary",
         ),
         "origin_strategies",
     )
@@ -2642,6 +3276,15 @@ def validate_manifest(manifest):
         "R18-U-human-response-restoration",
         "R18-U-review-binding-restoration",
         "R18-U-schema-invalid-birth",
+        "R18-U-review-compatible-merge",
+        "R18-U-review-compatible-merge-reversed",
+        "R18-U-review-compatible-source-low",
+        "R18-U-review-compatible-source-low-reversed",
+        "R18-U-review-compatible-source-high",
+        "R18-U-review-compatible-source-high-reversed",
+        "R18-U-review-three-carrying-parents",
+        "R18-U-review-two-valid-sources",
+        "R18-U-review-incompatible-carrier",
         "R18-U-claim-restoration",
         "R18-U-second-birth",
         "R18-U-multiplicity",
@@ -2684,10 +3327,73 @@ def validate_manifest(manifest):
         "R18-U-review-publication-equivalence": "no-finding",
         "R18-B-review-publication-equivalence": "blocking-finding",
         "R18-U-schema-invalid-birth": "blocking-finding",
+        "R18-U-review-compatible-merge": "no-finding",
+        "R18-U-review-compatible-merge-reversed": "no-finding",
+        "R18-U-review-compatible-source-low": "no-finding",
+        "R18-U-review-compatible-source-low-reversed": "no-finding",
+        "R18-U-review-compatible-source-high": "no-finding",
+        "R18-U-review-compatible-source-high-reversed": "no-finding",
+        "R18-U-review-three-carrying-parents": "no-finding",
+        "R18-U-review-two-valid-sources": "no-finding",
+        "R18-U-review-incompatible-carrier": "blocking-finding",
     }
     for scenario, expected in expected_classifications.items():
         if origins["cases"][scenario]["classification"] != expected:
             raise EvidenceError(f"origin strategy verdict changed for {scenario}")
+    clean_review_merges = {
+        name for name in required_origin_cases
+        if "review-compatible" in name
+        or name in {
+            "R18-U-review-three-carrying-parents",
+            "R18-U-review-two-valid-sources",
+        }
+    }
+    for scenario in clean_review_merges:
+        child_edges = {}
+        for proof in origins["cases"][scenario]["origin_proofs"]:
+            for edge in proof["edges"]:
+                child_edges.setdefault(edge["child"], []).append(edge)
+        merge_groups = [edges for edges in child_edges.values() if len(edges) > 1]
+        if len(merge_groups) != 1:
+            raise EvidenceError(f"{scenario} merge edge group changed")
+        merge_edges = merge_groups[0]
+        if (
+            sum(edge["role"] == "source" for edge in merge_edges) != 1
+            or sum(
+                edge["role"] == "compatible-carrier" for edge in merge_edges
+            ) != len(merge_edges) - 1
+            or any(
+                edge[key] is not None
+                for edge in merge_edges
+                for key in (
+                    "production_problem", "frozen_problem",
+                    "regression_problem", "problem",
+                )
+            )
+        ):
+            raise EvidenceError(
+                f"{scenario} production-valid source/carrier contract changed"
+            )
+    incompatible_review = origins["cases"][
+        "R18-U-review-incompatible-carrier"
+    ]
+    incompatible_edges = [
+        edge
+        for proof in incompatible_review["origin_proofs"]
+        for edge in proof["edges"]
+    ]
+    incompatible_groups = {}
+    for edge in incompatible_edges:
+        incompatible_groups.setdefault(edge["child"], []).append(edge)
+    incompatible_merge = [
+        edges for edges in incompatible_groups.values() if len(edges) > 1
+    ]
+    if (
+        len(incompatible_merge) != 1
+        or sum(edge["problem"] is not None for edge in incompatible_merge[0]) != 1
+        or incompatible_review["reason_code"] != "origin-incompatible-carrier"
+    ):
+        raise EvidenceError("incompatible review carrier false-greened")
     boundary = origins["selection_boundary"]
     require_keys(
         boundary,
@@ -2762,6 +3468,7 @@ def validate_manifest(manifest):
         "skip-origin-birth-uniqueness",
         "skip-origin-post-birth-absence",
         "skip-origin-endpoint-non-regression",
+        "reject-all-origin-invalid-carriers",
     }
     if set(origins["damage_controls"]) != origin_control_ids:
         raise EvidenceError("origin damage-control inventory changed")
@@ -2774,6 +3481,10 @@ def validate_manifest(manifest):
         "r18_origin_parent_permutation"
     ]:
         raise EvidenceError("origin parent permutation projection changed")
+    if origins["review_merge_parent_permutations"] != core[
+        "parent_permutation"
+    ]["r19_review_merge_parent_permutations"]:
+        raise EvidenceError("review merge parent permutation projection changed")
     permutation = core["parent_permutation"]
     validate_permutation_record(
         permutation, "core_claims.parent_permutation"
@@ -3239,7 +3950,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, and v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, and v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -3276,6 +3987,19 @@ def render_readme(manifest):
         "top-level `before`/`after`, requires `after == pull_request.head.sha`, and makes",
         "no API lookup. Created/deleted zero endpoints and an unavailable old `O` are",
         "explicit coverage-unavailable results; the latter exits 2 with no fallback.", "",
+        "The stable executable adapter entrypoint is",
+        "`prototype.py --repo ROOT --event-kind KIND --event-payload EVENT.json`.",
+        "Exits 0, 1, and 2 mean clean, blocking, and coverage-unavailable. Importers",
+        "use `event_endpoints(event_kind, payload)` and typed-U-only",
+        "`audit_event(root, event_kind, payload, *, budget_limit=None, transaction=None)`.",
+        "A valid event calls the optional transaction seam once around",
+        "the complete Git-backed audit, so an external evaluator charges every Git",
+        "child; invalid publication calls it zero times. The caller receives neither",
+        "the operation nor its result, so O/N, Strategy U, and classification remain",
+        "owned by the audit. Local, pre-push, push, and PR",
+        "synchronize each run a real non-fast-forward clean restack and genuine blocking",
+        "attack. Endpoint extraction never consults provider state, an API, a current",
+        "ref, or `github.sha`, and makes no claim about provider authority or intent.", "",
         "The ten former candidate-base endpoint/adapter scenarios are retired because",
         "that endpoint no longer exists in the classifier API. Fixture-internal commits",
         "remain landmarks only and cannot steer attribution.", "",
@@ -3294,6 +4018,12 @@ def render_readme(manifest):
         "delete/recreate, invalid or frozen mutation, binding regression, incompatible",
         "merge carrier, unreadable object, or endpoint non-regression failure blocks.",
         "Absent merge parents that do not descend from the birth are neutral.", "",
+        "At a carrying merge, U gathers every production-valid source edge, selects",
+        "the lexically smallest `(parent, child, path)` deterministically, and validates",
+        "every remaining edge as a compatible carrier. Real-Git controls vary source",
+        "OID order and parent order, cover three carrying parents and two explicit valid",
+        "sources, reject a truly incompatible carrier, and observe the old reject-all",
+        "mutant red. Every accepted edge is checked by production mutation semantics.", "",
         "Strategy B layers a canonical birth-state witness on U. Its witness contains",
         "only the production identity transcript, actor, leaf, production delivery",
         "class, frozen skeleton, and initial lifecycle/review-binding projection. It",
@@ -3313,6 +4043,20 @@ def render_readme(manifest):
         "came from the other. Endpoint-only equality exists only in the",
         "`endpoint-only-origin-equality` observed-red damaged mutant; it is not a normal",
         "strategy branch.", "",
+        "## Evidence publication and process cleanup", "",
+        "`audit_readme.py --generate` runs the prototype itself in a fresh temporary",
+        "fixture root. Caller-supplied JSONL and optional comparison input must match",
+        "that replay byte-for-byte before either output file is touched. Raw records are",
+        "compact sorted-key JSON, one LF per row, with a final LF and no CR; duplicate",
+        "keys, unsorted rows, CRLF, and missing final LF are rejected. The auditor",
+        "recomputes aliases, permutations, and summary invariants from scenario/control",
+        "rows. Nonexistent-OID and contradictory-result forgeries remain red even when",
+        "the same forged file is both `--stream` and `--compare`; all six pre-generation",
+        "damage probes preserve output sentinels.", "",
+        "The object database closes stdin and stdout on success, abort, an already-exited",
+        "child, and a stubborn child that requires timeout then kill. Repeated close or",
+        "abort is idempotent: one reap and no double-count. The observed-red leak mutant",
+        "leaves both descriptors open after the child has already exited.", "",
         "| Fixture | U | B | Witness match |", "|---|---|---|---|",
         f"| Normal base advance + replayed addition | `{origins['cases']['R18-U-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['birth_witness_match']}` |",
         f"| Independently identical birth | `{origins['cases']['R18-U-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['birth_witness_match']}` |",
@@ -3401,14 +4145,15 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r18-v6-seed1 > /tmp/production-contract-r18-v6-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r18-v6-seed777 > /tmp/production-contract-r18-v6-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r18-v6-seed1.jsonl --compare /tmp/production-contract-r18-v6-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r18-v6-seed1.jsonl --damage-test",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r19-v7-seed1 > /tmp/production-contract-r19-v7-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r19-v7-seed777 > /tmp/production-contract-r19-v7-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --compare /tmp/production-contract-r19-v7-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --damage-test",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --generate",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
-              "The auditor requires raw and semantic equality for comparison, rejects",
+              "The auditor requires a fresh internal replay and raw byte equality before generation, rejects",
               "duplicate keys/IDs, enforces a static recursive raw key/list/type grammar",
               "before projection, compares a fresh",
               "manifest byte-for-byte, and regenerates this README in full. Its damage",
@@ -3746,6 +4491,45 @@ def damage_matrix(expected, stream):
         "evidence schema supersession changed",
     )
     manifest_case(
+        "superseded-v6-commit-erased",
+        lambda d: d["core_claims"]["evidence_supersession"][
+            "artifacts"
+        ][4].update(commit="0" * 40),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
+        "fresh-generation-caller-authoritative",
+        lambda d: d["core_claims"]["evidence_generation"].update(
+            caller_rows_authoritative=True
+        ),
+        "fresh evidence generation contract changed",
+    )
+    manifest_case(
+        "event-workflow-provider-api",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cases"
+        ]["R19-WF-push-normal-restack"]["adapter"].update(
+            provider_api_calls=1
+        ),
+        "escaped immutable typed-U event input",
+    )
+    manifest_case(
+        "event-invalid-invokes-transaction",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["invalid"].update(
+            transaction_entries=1
+        ),
+        "execution seam escaped accounting",
+    )
+    manifest_case(
+        "descriptor-after-exit-leak",
+        lambda d: d["core_claims"]["object_database_lifecycle"][
+            "observation"
+        ]["baseline"]["after-exit"].update(stdout_closed=False),
+        "baseline descriptor closure changed",
+    )
+    manifest_case(
         "locale-stable-error-drift",
         lambda d: d["core_claims"]["stable_git_diagnostics"][
             "stable_reasons"
@@ -3998,6 +4782,127 @@ def damage_matrix(expected, stream):
             "status": "OBSERVED_RED" if matched else "FALSE_GREEN",
         }
     )
+    pre_generation = []
+
+    def generation_probe(
+        name,
+        damaged_raw,
+        expected_failure,
+        *,
+        same_file_compare=False,
+    ):
+        observed_failure = None
+        sentinel = b"DO-NOT-OVERWRITE\n"
+        with tempfile.TemporaryDirectory(
+            prefix="production-contract-generation-damage-"
+        ) as raw:
+            evidence_path = Path(raw) / "evidence.json"
+            readme_path = Path(raw) / "README.md"
+            evidence_path.write_bytes(sentinel)
+            readme_path.write_bytes(sentinel)
+            try:
+                damaged_stream = Stream.from_bytes(
+                    damaged_raw, f"<pre-generation-{name}>"
+                )
+                publish_generated_artifacts(
+                    damaged_stream,
+                    stream,
+                    evidence_path,
+                    readme_path,
+                    comparison=(
+                        damaged_stream if same_file_compare else None
+                    ),
+                )
+            except EvidenceError as error:
+                observed_failure = str(error)
+            sentinels_unchanged = (
+                evidence_path.read_bytes() == sentinel
+                and readme_path.read_bytes() == sentinel
+            )
+        pre_generation.append(
+            {
+                "damage": name,
+                "expected_failure": expected_failure,
+                "observed_failure": observed_failure,
+                "same_file_stream_and_compare": same_file_compare,
+                "sentinels_unchanged": sentinels_unchanged,
+                "status": (
+                    "OBSERVED_RED"
+                    if observed_failure is not None
+                    and expected_failure in observed_failure
+                    and sentinels_unchanged
+                    else "FALSE_GREEN"
+                ),
+            }
+        )
+
+    stale_rows = copy.deepcopy(stream.objects)
+    stale_row = next(
+        row
+        for row in stale_rows
+        if row.get("scenario") == "R18-U-normal-base-advance-replay"
+    )
+    stale_row["O"] = "f" * 40
+    generation_probe(
+        "pre-generation-nonexistent-OID",
+        b"".join(canonical_bytes(row) for row in stale_rows),
+        "differs byte-for-byte from fresh internal replay",
+        same_file_compare=True,
+    )
+
+    contradictory_rows = copy.deepcopy(stream.objects)
+    contradictory = next(
+        row
+        for row in contradictory_rows
+        if row.get("scenario") == "R18-U-normal-base-advance-replay"
+    )
+    contradictory["classification"] = "blocking-finding"
+    contradictory["expected_result"] = "blocking-finding"
+    generation_probe(
+        "pre-generation-contradictory-result",
+        b"".join(canonical_bytes(row) for row in contradictory_rows),
+        "differs byte-for-byte from fresh internal replay",
+        same_file_compare=True,
+    )
+    generation_probe(
+        "pre-generation-CRLF",
+        stream.raw.replace(b"\n", b"\r\n"),
+        "contains CR bytes",
+        same_file_compare=True,
+    )
+    generation_probe(
+        "pre-generation-missing-final-LF",
+        stream.raw[:-1],
+        "has no final LF",
+        same_file_compare=True,
+    )
+    strict_lines = stream.raw[:-1].split(b"\n")
+    duplicate_first = strict_lines[0].replace(
+        b'{"C":', b'{"C":"duplicate","C":', 1
+    )
+    generation_probe(
+        "pre-generation-duplicate-key",
+        b"\n".join([duplicate_first, *strict_lines[1:]]) + b"\n",
+        "duplicate JSON key",
+        same_file_compare=True,
+    )
+    first_value = load_json(strict_lines[0])
+    reversed_value = {
+        key: first_value[key] for key in reversed(tuple(first_value))
+    }
+    unsorted_first = json.dumps(
+        reversed_value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=False,
+    ).encode("utf-8")
+    generation_probe(
+        "pre-generation-unsorted-json",
+        b"\n".join([unsorted_first, *strict_lines[1:]]) + b"\n",
+        "not canonical sorted-key JSON+LF",
+        same_file_compare=True,
+    )
+    results.extend(pre_generation)
     return {"audit_damage": "PASS" if all(x["status"] == "OBSERVED_RED" for x in results) else "FAIL",
             "cases": results, "observed_red": sum(x["status"] == "OBSERVED_RED" for x in results), "total": len(results)}
 
@@ -4013,15 +4918,29 @@ def main(argv=None):
     parser.add_argument("--readme", type=Path, default=here / "README.md")
     args = parser.parse_args(argv)
     try:
-        first = Stream(args.stream)
+        supplied = Stream(args.stream)
+        second = Stream(args.compare) if args.compare else None
+        fresh = None
+        if args.generate or args.damage_test:
+            fresh = internal_replay_stream()
+            require_fresh_replay(
+                supplied,
+                fresh,
+                second if args.generate else None,
+            )
+        first = fresh or supplied
         expected = manifest_from_stream(first)
         if args.generate:
-            args.evidence.write_bytes(canonical_bytes(expected))
-            args.readme.write_bytes(render_readme(expected))
+            expected = publish_generated_artifacts(
+                supplied,
+                fresh,
+                args.evidence,
+                args.readme,
+                comparison=second,
+            )
         failures = audit_artifacts(args.evidence.read_bytes(), args.readme.read_bytes(), expected)
         comparison = None
-        if args.compare:
-            second = Stream(args.compare)
+        if second is not None:
             second_manifest = manifest_from_stream(second)
             comparison = stream_differences(first, second)
             comparison["manifest_equal"] = expected == second_manifest

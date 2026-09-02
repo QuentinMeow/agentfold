@@ -17,10 +17,11 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import subprocess
 import sys
 import tempfile
-from typing import Callable, Iterable
+from typing import Any, Callable, ContextManager, Iterable, Mapping
 
 
 HERE = Path(__file__).resolve()
@@ -28,6 +29,17 @@ REPOSITORY = HERE.parents[5]
 RECONCILE_PATH = REPOSITORY / "automation/reconcile/reconcile.py"
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
+
+
+def emit_json(value: Any):
+    """Write one canonical sorted-key UTF-8 JSONL record."""
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    sys.stdout.buffer.write(encoded + b"\n")
 
 
 def load_reconciler():
@@ -318,6 +330,8 @@ class Damage:
     skip_origin_birth_uniqueness: bool = False
     skip_origin_post_birth_absence: bool = False
     skip_origin_endpoint_non_regression: bool = False
+    reject_all_origin_invalid_carriers: bool = False
+    leak_object_database_pipes: bool = False
 
 
 @dataclasses.dataclass
@@ -335,6 +349,109 @@ class Event:
     reason_records: list[dict] = dataclasses.field(default_factory=list)
     support_checks: list[dict] = dataclasses.field(default_factory=list)
     carry_proofs: list[dict] = dataclasses.field(default_factory=list)
+
+
+class EventInputError(ValueError):
+    """An immutable event does not contain usable restack endpoints."""
+
+
+@dataclasses.dataclass(frozen=True)
+class EventEndpoints:
+    """Exact immutable old/new endpoints derived without mutable state."""
+
+    O: str
+    N: str
+    event_kind: str
+    endpoint_sources: tuple[str, str]
+
+    def evidence(self) -> dict:
+        return {
+            "N": self.N,
+            "O": self.O,
+            "endpoint_sources": list(self.endpoint_sources),
+            "event_kind": self.event_kind,
+            "github_sha_used": False,
+            "mutable_metadata_invariant": True,
+            "mutable_state_reads": 0,
+            "provider_api_calls": 0,
+            "reason": None,
+            "status": "accepted",
+            "typed_origin_strategy": "U",
+        }
+
+
+def event_endpoints(
+    event_kind: str,
+    payload: Mapping[str, Any],
+) -> EventEndpoints:
+    """Derive exact O/N from one explicit immutable transport payload.
+
+    Supported local and pre-push calls provide ``old``/``new`` directly.
+    Push uses immutable ``before``/``after``.  Pull-request synchronize uses
+    top-level ``before``/``after`` and requires ``after`` to equal the embedded
+    head SHA.  This pure function has no repository, provider API, current-ref,
+    environment, or ``github.sha`` input.
+    """
+
+    def field(container: Mapping[str, Any], name: str, label: str) -> str:
+        value = container.get(name)
+        if not isinstance(value, str) or not value:
+            raise EventInputError(
+                f"coverage-unavailable: {label} is missing"
+            )
+        return value
+
+    if event_kind in {"local", "pre-push"}:
+        O = field(payload, "old", f"{event_kind}.old")
+        N = field(payload, "new", f"{event_kind}.new")
+        sources = ("explicit old", "explicit new")
+    elif event_kind == "push":
+        O = field(payload, "before", "push.before")
+        N = field(payload, "after", "push.after")
+        sources = ("immutable push.before", "immutable push.after")
+    elif event_kind == "pull-request-synchronize":
+        O = field(payload, "before", "pull_request.synchronize.before")
+        N = field(payload, "after", "pull_request.synchronize.after")
+        pull_request = payload.get("pull_request")
+        if not isinstance(pull_request, Mapping):
+            raise EventInputError(
+                "coverage-unavailable: pull_request object is missing"
+            )
+        head = pull_request.get("head")
+        if not isinstance(head, Mapping):
+            raise EventInputError(
+                "coverage-unavailable: pull_request.head is missing"
+            )
+        head_sha = field(
+            head, "sha", "pull_request.synchronize.pull_request.head.sha"
+        )
+        if N != head_sha:
+            raise EventInputError(
+                "coverage-unavailable: pull_request.synchronize after "
+                "does not equal pull_request.head.sha"
+            )
+        sources = (
+            "immutable pull_request.synchronize.before",
+            "immutable pull_request.synchronize.after",
+        )
+    else:
+        raise EventInputError(
+            f"coverage-unavailable: unsupported event kind {event_kind!r}"
+        )
+
+    for label, oid in (("O", O), ("N", N)):
+        if not (
+            len(oid) in {40, 64}
+            and all(char in "0123456789abcdef" for char in oid)
+        ):
+            raise EventInputError(
+                f"coverage-unavailable: {label} is not a full lowercase Git OID"
+            )
+        if not oid.strip("0"):
+            raise EventInputError(
+                f"coverage-unavailable: {label} is the zero OID"
+            )
+    return EventEndpoints(O, N, event_kind, sources)
 
 
 def is_git_command(command) -> bool:
@@ -805,26 +922,57 @@ class ObjectDatabase:
         self.snapshots: dict[
             str | None, dict[tuple, tuple[ActionState, ...]]
         ] = {}
+        self._reaped = False
+        self.wait_timeout = 5.0
+
+    def _close_pipes(self):
+        """Close both owned pipe objects, even after the child has exited."""
+        if self.damage.leak_object_database_pipes:
+            return
+        for pipe in (self.process.stdin, self.process.stdout):
+            if pipe is not None and not pipe.closed:
+                with contextlib.suppress(BrokenPipeError, OSError):
+                    pipe.close()
+
+    def _record_reap(self):
+        if not self._reaped:
+            self.metrics.observe("object_process_reaps")
+            self._reaped = True
 
     def close(self):
+        # Closing stdin delivers EOF to cat-file.  Pipe closure is deliberately
+        # independent of process liveness: poll() may already report an exited
+        # child while Python still owns open descriptors.
+        if not self.damage.leak_object_database_pipes:
+            pipe = self.process.stdin
+            if pipe is not None and not pipe.closed:
+                with contextlib.suppress(BrokenPipeError, OSError):
+                    pipe.close()
         if self.process.poll() is None:
-            with contextlib.suppress(BrokenPipeError):
-                if self.process.stdin:
-                    self.process.stdin.close()
-            if self.process.stdout:
-                self.process.stdout.close()
-            self.process.wait(timeout=5)
+            try:
+                self.process.wait(timeout=self.wait_timeout)
+            except subprocess.TimeoutExpired:
+                self.process.terminate()
+                self.metrics.observe("object_process_terminations")
+                try:
+                    self.process.wait(timeout=self.wait_timeout)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=self.wait_timeout)
+        self._record_reap()
+        self._close_pipes()
 
     def abort(self):
         if self.process.poll() is None:
             self.process.terminate()
             self.metrics.observe("object_process_terminations")
         try:
-            self.process.wait(timeout=5)
+            self.process.wait(timeout=self.wait_timeout)
         except subprocess.TimeoutExpired:
             self.process.kill()
-            self.process.wait(timeout=5)
-        self.metrics.observe("object_process_reaps")
+            self.process.wait(timeout=self.wait_timeout)
+        self._record_reap()
+        self._close_pipes()
         if self.process.poll() is None:
             raise RuntimeError("cat-file child was not reaped")
 
@@ -3169,32 +3317,54 @@ class Classifier:
                     for parent, before in carrying
                 ]
                 edges.extend(candidate_edges)
-                invalid = [
-                    edge for edge in candidate_edges
-                    if edge["problem"] is not None
-                ]
-                if invalid:
-                    problem = (
-                        f"origin arm has invalid carrier mutation into {child}: "
-                        + "; ".join(edge["problem"] for edge in invalid)
-                    )
-                    reason_code = "origin-invalid-mutation"
-                    break
                 if candidate_edges:
-                    candidate_edges[0]["role"] = "source"
-                    for index, ((_, before), edge) in enumerate(
-                        zip(carrying, candidate_edges, strict=True)
+                    valid_sources = sorted(
+                        (
+                            edge
+                            for edge in candidate_edges
+                            if edge["problem"] is None
+                        ),
+                        key=lambda edge: (
+                            edge["parent"], edge["child"], edge["path"]
+                        ),
+                    )
+                    if not valid_sources:
+                        problem = (
+                            "origin arm has no production-valid source "
+                            f"mutation into {child}: "
+                            + "; ".join(
+                                edge["problem"] for edge in candidate_edges
+                            )
+                        )
+                        reason_code = "origin-invalid-mutation"
+                        break
+                    source = valid_sources[0]
+                    source["role"] = "source"
+                    for (parent, before), edge in zip(
+                        carrying, candidate_edges, strict=True
                     ):
-                        if index == 0:
+                        if edge is source:
                             continue
                         edge["role"] = "compatible-carrier"
-                        edge["problem"] = self.merge_compatible_problem(
-                            identity, edge, before, child_states[0]
-                        )
-                        if edge["problem"] is not None:
+                        if self.damage.reject_all_origin_invalid_carriers:
+                            # Historical reject-all logic treated every
+                            # non-selected carrying parent as an invalid
+                            # competing source, even when it was a compatible
+                            # carrier.  Keep that exact false-positive as the
+                            # damage mutant for the R19 proof obligation.
+                            carrier_problem = (
+                                "reject-all mutant rejects a compatible "
+                                "non-source carrying parent"
+                            )
+                        else:
+                            carrier_problem = self.merge_compatible_problem(
+                                identity, edge, before, child_states[0]
+                            )
+                        edge["problem"] = carrier_problem
+                        if carrier_problem is not None:
                             problem = (
                                 "origin arm has incompatible merge carrier "
-                                f"into {child}: {edge['problem']}"
+                                f"{parent} into {child}: {carrier_problem}"
                             )
                             reason_code = "origin-incompatible-carrier"
                             break
@@ -9547,6 +9717,136 @@ def r18_origin_fixture(
             }
         )
         N = candidate_birth
+    elif case in {
+        "review-compatible-merge",
+        "review-compatible-source-low",
+        "review-compatible-source-high",
+        "review-three-carrying-parents",
+        "review-two-valid-sources",
+        "review-incompatible-carrier",
+    }:
+        review_target = evidence_path("r19-review-merge-target")
+        review_payload = "# R19 review merge target\n"
+        revision = review_revision(review_payload)
+        incompatible = case == "review-incompatible-carrier"
+        carrier_count = 2 if case == "review-three-carrying-parents" else 1
+        explicit_source_count = (
+            2 if case == "review-two-valid-sources" else 1
+        )
+        lexical_relation = (
+            "source-low"
+            if case == "review-compatible-source-low"
+            else "source-high"
+            if case == "review-compatible-source-high"
+            else None
+        )
+
+        repo.branch("old", C)
+        repo.write(review_target, review_payload)
+        add_review(
+            repo,
+            label,
+            status="waiting",
+            target=review_target,
+            revision=revision,
+        )
+        O = repo.commit("birth published review on old arm")
+
+        repo.branch("candidate-birth", C)
+        candidate_path = add_review(
+            repo,
+            label,
+            status="awaiting-artifact",
+            target="pending",
+            revision="pending",
+        )
+        candidate_birth = repo.commit(
+            "birth pending review before compatible merge"
+        )
+        repo.branch("candidate-source", candidate_birth)
+        repo.write(review_target, review_payload)
+        source = publish_review(
+            repo, candidate_path, review_target, revision
+        )
+        source_text = repo.read(candidate_path)
+        source_tree = repo.oid(f"{source}^{{tree}}")
+        sources = [source]
+        if explicit_source_count == 2:
+            sources.append(
+                repo.commit_tree(
+                    source_tree,
+                    "independent second valid review publication source",
+                    candidate_birth,
+                )
+            )
+
+        birth_tree = repo.oid(f"{candidate_birth}^{{tree}}")
+        carriers = []
+        conflicting_target = evidence_path("r19-review-merge-conflict")
+        if incompatible:
+            conflicting_payload = "# Conflicting review target\n"
+            repo.branch("candidate-incompatible-carrier", candidate_birth)
+            repo.write(conflicting_target, conflicting_payload)
+            carriers.append(
+                publish_review(
+                    repo,
+                    candidate_path,
+                    conflicting_target,
+                    review_revision(conflicting_payload),
+                )
+            )
+        else:
+            # Each carrier is a distinct real commit with the unchanged pending
+            # review tree.  Canonical selection, rather than fixture position,
+            # decides which production-valid edge is the source.
+            for carrier_index in range(carrier_count):
+                selected = None
+                for nonce in range(4096):
+                    candidate = repo.commit_tree(
+                        birth_tree,
+                        "carry pending review without authoring publication "
+                        f"{carrier_index}:{nonce}",
+                        candidate_birth,
+                    )
+                    if lexical_relation is None or (
+                        lexical_relation == "source-low" and source < candidate
+                    ) or (
+                        lexical_relation == "source-high" and source > candidate
+                    ):
+                        selected = candidate
+                        break
+                if selected is None:
+                    raise AssertionError(
+                        "could not construct requested source/carrier OID order"
+                    )
+                carriers.append(selected)
+
+        parents = tuple(sources + carriers)
+        if reverse_parents:
+            parents = tuple(reversed(parents))
+        merge = repo.merge_commit(
+            parents,
+            "merge published source with compatible pending carrier",
+            writes={
+                candidate_path: source_text,
+                review_target: review_payload,
+            },
+            removes=((conflicting_target,) if incompatible else ()),
+        )
+        if repo.oid(f"{merge}^{{tree}}") != source_tree:
+            raise AssertionError("review compatible merge tree drifted")
+        N = merge
+        landmarks.update(
+            {
+                "candidate_birth": candidate_birth,
+                "source": source,
+                "sources": sources,
+                "carriers": carriers,
+                "merge": merge,
+                "lexical_relation": lexical_relation,
+                "incompatible": incompatible,
+            }
+        )
     elif case == "exact-cherry-pick":
         _old_path, old_birth = simple_arm("old")
         O = old_birth
@@ -9805,11 +10105,23 @@ def r18_origin_fixture(
         "generated-retry",
         "task-pickup",
         "parent-order",
+        "review-compatible-merge",
+        "review-compatible-source-low",
+        "review-compatible-source-high",
+        "review-three-carrying-parents",
+        "review-two-valid-sources",
     }
     if case in clean_cases:
         expected = "no-finding"
         expected_code = f"origin-strategy-{strategy}-equivalent-live-incarnation"
-        expected_witness = True
+        expected_witness = (
+            False if case.startswith("review-compatible-")
+            or case in {
+                "review-three-carrying-parents",
+                "review-two-valid-sources",
+            }
+            else True
+        )
     elif case == "review-publication-equivalence":
         expected = "no-finding" if strategy == "U" else "blocking-finding"
         expected_code = (
@@ -9847,6 +10159,7 @@ def r18_origin_fixture(
             "inherited-then-deleted-merge-arm": (
                 "origin-post-birth-absence"
             ),
+            "review-incompatible-carrier": "origin-incompatible-carrier",
         }[case]
         expected_witness = None
     scenario = (
@@ -9903,6 +10216,90 @@ def r18_origin_budget_fixture(
         "overflow_by_one": overflow,
         "strategy": strategy,
         "typed_budget_limit": measured - int(overflow),
+    }
+    return fixture
+
+
+def r19_event_workflow_fixture(
+    root: Path,
+    *,
+    transport: str,
+    attack: bool = False,
+    failure: str | None = None,
+) -> Fixture:
+    """Drive a real typed-U restack from one immutable event payload."""
+    if transport not in {
+        "local", "pre-push", "push", "pull-request-synchronize"
+    }:
+        raise ValueError(transport)
+    if failure is not None and attack:
+        raise ValueError("a workflow fixture cannot be attack and input failure")
+
+    if failure is None:
+        fixture = r18_origin_fixture(
+            root,
+            case="delete-recreate-N" if attack else "normal-base-advance-replay",
+            strategy="U",
+        )
+    else:
+        fixture = ordinary_linear_fixture(
+            root,
+            f"r19-event-{transport}-{failure}",
+            valid=True,
+        )
+        fixture.expected = "unreadable"
+
+    if transport in {"local", "pre-push"}:
+        payload: dict[str, Any] = {"old": fixture.O, "new": fixture.N}
+    elif transport == "push":
+        payload = {
+            "before": fixture.O,
+            "after": fixture.N,
+            # Deliberately contradictory mutable metadata.  The adapter has no
+            # code path that reads this field.
+            "github_sha": "1" * 40,
+        }
+    else:
+        payload = {
+            "before": fixture.O,
+            "after": fixture.N,
+            "pull_request": {"head": {"sha": fixture.N}},
+            "github_sha": "1" * 40,
+        }
+
+    if failure == "missing-old":
+        payload.pop("old", None)
+        expected_reason = "coverage-unavailable: local.old is missing"
+    elif failure == "zero-before":
+        payload["before"] = "0" * 40
+        expected_reason = "coverage-unavailable: O is the zero OID"
+    elif failure == "head-mismatch":
+        payload["pull_request"]["head"]["sha"] = fixture.O
+        expected_reason = (
+            "coverage-unavailable: pull_request.synchronize after does not "
+            "equal pull_request.head.sha"
+        )
+    elif failure is None:
+        expected_reason = None
+    else:
+        raise ValueError(failure)
+
+    disposition = failure or ("blocking-attack" if attack else "normal-restack")
+    fixture.scenario = f"R19-WF-{transport}-{disposition}"
+    fixture.details = {
+        "event_adapter_input": {
+            "event_kind": transport,
+            "payload": payload,
+        },
+        "expected_adapter_reason": expected_reason,
+        "expected_event_endpoints": {
+            "O": fixture.O,
+            "N": fixture.N,
+        },
+        "workflow_attack": attack,
+        "workflow_failure": failure,
+        "workflow_non_fast_forward": failure is None,
+        "workflow_transport": transport,
     }
     return fixture
 
@@ -10397,11 +10794,71 @@ def scenario_builders():
             for case in ("generated-retry", "task-pickup")
             for strategy in ("U", "B")
         ],
+        lambda root: r18_origin_fixture(
+            root, case="review-compatible-merge"
+        ),
+        lambda root: r18_origin_fixture(
+            root,
+            case="review-compatible-merge",
+            reverse_parents=True,
+        ),
+        *[
+            (
+                lambda root, case=case, reverse=reverse:
+                r18_origin_fixture(
+                    root,
+                    case=case,
+                    reverse_parents=reverse,
+                )
+            )
+            for case in (
+                "review-compatible-source-low",
+                "review-compatible-source-high",
+            )
+            for reverse in (False, True)
+        ],
+        lambda root: r18_origin_fixture(
+            root, case="review-three-carrying-parents"
+        ),
+        lambda root: r18_origin_fixture(
+            root, case="review-two-valid-sources"
+        ),
+        lambda root: r18_origin_fixture(
+            root, case="review-incompatible-carrier"
+        ),
         lambda root: r18_origin_fixture(root, case="parent-order"),
         lambda root: r18_origin_fixture(
             root, case="parent-order", reverse_parents=True
         ),
         lambda root: r18_origin_fixture(root, case="unreadable-object"),
+        *[
+            (
+                lambda root, transport=transport, attack=attack:
+                r19_event_workflow_fixture(
+                    root,
+                    transport=transport,
+                    attack=attack,
+                )
+            )
+            for transport in (
+                "local",
+                "pre-push",
+                "push",
+                "pull-request-synchronize",
+            )
+            for attack in (False, True)
+        ],
+        lambda root: r19_event_workflow_fixture(
+            root, transport="local", failure="missing-old"
+        ),
+        lambda root: r19_event_workflow_fixture(
+            root, transport="push", failure="zero-before"
+        ),
+        lambda root: r19_event_workflow_fixture(
+            root,
+            transport="pull-request-synchronize",
+            failure="head-mismatch",
+        ),
         *[
             (
                 lambda root, counter=counter, overflow=overflow:
@@ -10471,6 +10928,9 @@ CONTROL_NAMES = (
     "skip-origin-birth-uniqueness",
     "skip-origin-post-birth-absence",
     "skip-origin-endpoint-non-regression",
+    "reject-all-origin-invalid-carriers",
+    "leak-object-database-pipes",
+    "event-adapter-cli-entrypoint",
 )
 
 
@@ -10519,6 +10979,19 @@ SCENARIO_ALIASES = {
 
 
 def run_fixture(fixture: Fixture, damage: Damage | None = None):
+    adapter_input = fixture.details.get("event_adapter_input")
+    if adapter_input is not None:
+        if damage is not None:
+            raise ValueError("event workflow fixture does not accept damage mode")
+        result = audit_event(
+            fixture.repo.root,
+            adapter_input["event_kind"],
+            adapter_input["payload"],
+        )
+        result["scenario"] = fixture.scenario
+        result["expected_result"] = fixture.expected
+        result["details"] = fixture.details
+        return result
     if "restore_hidden" not in fixture.details:
         result = Classifier(fixture, damage).run()
         workflow = fixture.details.get("workflow_contract", {})
@@ -10845,6 +11318,53 @@ def validate_result(result: dict):
             != "coverage-unavailable"
         ):
             errors.append("W7 synchronize endpoints are not self-contained")
+    if scenario.startswith("R19-WF-"):
+        details = result["details"]
+        adapter = result.get("event_adapter", {})
+        common_adapter = bool(
+            adapter.get("event_kind") == details["workflow_transport"]
+            and adapter.get("github_sha_used") is False
+            and adapter.get("mutable_metadata_invariant") is True
+            and adapter.get("mutable_state_reads") == 0
+            and adapter.get("provider_api_calls") == 0
+            and adapter.get("typed_origin_strategy") == "U"
+            and result["input_contract"]["origin_strategy"] == "U"
+        )
+        if not common_adapter:
+            errors.append("R19 workflow escaped the immutable typed-U adapter")
+        if details["workflow_failure"] is not None:
+            if (
+                result["audit_exit"] != 2
+                or result["classification"] != "unreadable"
+                or adapter.get("status") != "coverage-unavailable"
+                or adapter.get("reason")
+                != details["expected_adapter_reason"]
+                or result["evidence_verdict"]["reason"]
+                != details["expected_adapter_reason"]
+                or actions
+            ):
+                errors.append("R19 event failure did not fail closed explicitly")
+        else:
+            expected_endpoints = details["expected_event_endpoints"]
+            origin_actions = [
+                action for action in actions if action["origin_proofs"]
+            ]
+            if (
+                result["O"] != expected_endpoints["O"]
+                or result["N"] != expected_endpoints["N"]
+                or result["C"] == result["O"]
+                or adapter.get("O") != result["O"]
+                or adapter.get("N") != result["N"]
+                or adapter.get("status") != "accepted"
+                or adapter.get("reason") is not None
+                or len(origin_actions) != 1
+                or origin_actions[0]["event_mode"] != "origin-U"
+                or bool(origin_actions[0]["finding"])
+                is not details["workflow_attack"]
+            ):
+                errors.append(
+                    "R19 immutable event did not drive the real non-fast-forward typed-U result"
+                )
     if scenario == "R17-unreadable-outside-C-boundary" and (
         status != "unreadable"
         or result["audit_exit"] != 2
@@ -12580,6 +13100,78 @@ def validate_result(result: dict):
                         errors.append(
                             "R18 illegal typed birth escaped the birth schema"
                         )
+                    if (
+                        details.get("case", "").startswith("review-")
+                        and "merge" in details["landmarks"]
+                    ):
+                        candidate = action["origin_proofs"][1]
+                        merge_landmarks = details["landmarks"]
+                        merge = merge_landmarks["merge"]
+                        merge_edges = [
+                            edge
+                            for edge in candidate["edges"]
+                            if edge["child"] == merge
+                        ]
+                        sources = merge_landmarks["sources"]
+                        carriers = merge_landmarks["carriers"]
+                        selected_sources = [
+                            edge["parent"]
+                            for edge in merge_edges
+                            if edge["role"] == "source"
+                        ]
+                        compatible = [
+                            edge
+                            for edge in merge_edges
+                            if edge["role"] == "compatible-carrier"
+                        ]
+                        incompatible = merge_landmarks["incompatible"]
+                        valid_source_candidates = [
+                            edge["parent"]
+                            for edge in merge_edges
+                            if edge["production_problem"] is None
+                            and edge["frozen_problem"] is None
+                            and edge["regression_problem"] is None
+                        ]
+                        lexical_relation = merge_landmarks[
+                            "lexical_relation"
+                        ]
+                        if (
+                            len(merge_edges) != len(sources) + len(carriers)
+                            or not valid_source_candidates
+                            or selected_sources != [min(valid_source_candidates)]
+                            or len(compatible) != len(merge_edges) - 1
+                            or (
+                                not incompatible
+                                and (
+                                    action["reason_code"]
+                                    != "origin-strategy-U-equivalent-live-incarnation"
+                                    or any(edge["problem"] for edge in merge_edges)
+                                )
+                            )
+                            or (
+                                incompatible
+                                and (
+                                    action["reason_code"]
+                                    != "origin-incompatible-carrier"
+                                    or sum(
+                                        edge["problem"] is not None
+                                        for edge in merge_edges
+                                    )
+                                    != 1
+                                )
+                            )
+                            or (
+                                lexical_relation == "source-low"
+                                and not all(sources[0] < oid for oid in carriers)
+                            )
+                            or (
+                                lexical_relation == "source-high"
+                                and not all(sources[0] > oid for oid in carriers)
+                            )
+                        ):
+                            errors.append(
+                                "R19 review merge lost deterministic source/carrier roles"
+                            )
             if (
                 details.get("case") == "neutral-pre-origin-merge"
                 and origin_actions
@@ -12850,10 +13442,323 @@ def control_builder(name: str, root: Path):
             Damage(skip_origin_endpoint_non_regression=True),
             "no-finding",
         )
+    if name == "reject-all-origin-invalid-carriers":
+        return (
+            r18_origin_fixture(root, case="review-compatible-merge"),
+            Damage(reject_all_origin_invalid_carriers=True),
+            "blocking-finding",
+        )
     raise ValueError(name)
 
 
 def run_control(name: str, root: Path):
+    if name == "event-adapter-cli-entrypoint":
+        fixtures = {
+            "clean": r19_event_workflow_fixture(
+                root / "clean", transport="push"
+            ),
+            "blocking": r19_event_workflow_fixture(
+                root / "blocking", transport="pre-push", attack=True
+            ),
+            "unavailable": r19_event_workflow_fixture(
+                root / "unavailable",
+                transport="pull-request-synchronize",
+                failure="head-mismatch",
+            ),
+        }
+        observations = {}
+        for label, fixture in fixtures.items():
+            adapter_input = fixture.details["event_adapter_input"]
+            payload_path = root / f"{label}-event.json"
+            payload_path.write_bytes(
+                json.dumps(
+                    adapter_input["payload"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+                + b"\n"
+            )
+            completed = REAL_RUN(
+                [
+                    sys.executable,
+                    str(HERE),
+                    "--repo",
+                    str(fixture.repo.root),
+                    "--event-kind",
+                    adapter_input["event_kind"],
+                    "--event-payload",
+                    str(payload_path),
+                ],
+                check=False,
+                env=stable_git_environment(),
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+            try:
+                result = json.loads(completed.stdout.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError):
+                result = {}
+            observations[label] = {
+                "adapter_status": result.get("event_adapter", {}).get(
+                    "status"
+                ),
+                "classification": result.get("classification"),
+                "exit": completed.returncode,
+                "reason": result.get("evidence_verdict", {}).get("reason"),
+                "stdout_canonical": (
+                    bool(result)
+                    and completed.stdout
+                    == json.dumps(
+                        result,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode("utf-8")
+                    + b"\n"
+                ),
+                "typed_origin_strategy": result.get(
+                    "input_contract", {}
+                ).get("origin_strategy"),
+            }
+
+        def seam_probe(event_kind: str, payload: Mapping[str, Any]):
+            transaction_entries = 0
+            git_subprocesses = 0
+
+            @contextlib.contextmanager
+            def transaction():
+                nonlocal transaction_entries, git_subprocesses
+                global REAL_POPEN
+                transaction_entries += 1
+                prior_popen = REAL_POPEN
+
+                def counted_popen(command, *args, **kwargs):
+                    nonlocal git_subprocesses
+                    if is_git_command(command):
+                        git_subprocesses += 1
+                    return prior_popen(command, *args, **kwargs)
+
+                REAL_POPEN = counted_popen
+                try:
+                    yield
+                finally:
+                    REAL_POPEN = prior_popen
+
+            result = audit_event(
+                fixtures["clean"].repo.root,
+                event_kind,
+                payload,
+                transaction=transaction,
+            )
+            return {
+                "audit_exit": result["audit_exit"],
+                "transaction_entries": transaction_entries,
+                "git_subprocesses": git_subprocesses,
+                "result_git_processes": result["metrics"]["git_processes"],
+                "typed_origin_strategy": result["input_contract"][
+                    "origin_strategy"
+                ],
+            }
+
+        clean_input = fixtures["clean"].details["event_adapter_input"]
+        execution_seam = {
+            "valid": seam_probe(
+                clean_input["event_kind"], clean_input["payload"]
+            ),
+            "invalid": seam_probe("local", {"new": "1" * 40}),
+        }
+        execution_seam["result_owned_by_audit"] = True
+        observed = bool(
+            observations["clean"]["exit"] == 0
+            and observations["clean"]["classification"] == "no-finding"
+            and observations["clean"]["adapter_status"] == "accepted"
+            and observations["blocking"]["exit"] == 1
+            and observations["blocking"]["classification"]
+            == "blocking-finding"
+            and observations["blocking"]["adapter_status"] == "accepted"
+            and observations["unavailable"]["exit"] == 2
+            and observations["unavailable"]["classification"] == "unreadable"
+            and observations["unavailable"]["adapter_status"]
+            == "coverage-unavailable"
+            and all(
+                item["stdout_canonical"]
+                and item["typed_origin_strategy"] == "U"
+                for item in observations.values()
+            )
+            and execution_seam["valid"]["transaction_entries"] == 1
+            and execution_seam["valid"]["git_subprocesses"] > 0
+            and execution_seam["valid"]["git_subprocesses"]
+            == execution_seam["valid"]["result_git_processes"]
+            and execution_seam["valid"]["typed_origin_strategy"] == "U"
+            and execution_seam["result_owned_by_audit"] is True
+            and execution_seam["invalid"] == {
+                "audit_exit": 2,
+                "git_subprocesses": 0,
+                "result_git_processes": 0,
+                "transaction_entries": 0,
+                "typed_origin_strategy": "U",
+            }
+        )
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": "0" * 40,
+            "O": "0" * 40,
+            "N": "0" * 40,
+            "baseline_classification": "three-exit-adapter-contract",
+            "damaged_classification": "metadata-only-workflow-fixture",
+            "expected_baseline": "three-exit-adapter-contract",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "event_adapter_cli_observation": {
+                "cases": observations,
+                "entrypoint": (
+                    "prototype.py --repo ROOT --event-kind KIND "
+                    "--event-payload EVENT.json"
+                ),
+                "execution_seam": execution_seam,
+                "importable_api": {
+                    "endpoint_derivation": (
+                        "event_endpoints(event_kind: str, payload: "
+                        "Mapping[str, Any]) -> EventEndpoints"
+                    ),
+                    "typed_U_audit": (
+                        "audit_event(root: Path, event_kind: str, payload: "
+                        "Mapping[str, Any], *, budget_limit: int | None = "
+                        "None, transaction: Callable[[], "
+                        "ContextManager[None]] | None = None) -> dict"
+                    ),
+                },
+                "payload_grammar": {
+                    "local": ["old", "new"],
+                    "pre-push": ["old", "new"],
+                    "pull-request-synchronize": [
+                        "before", "after", "pull_request.head.sha"
+                    ],
+                    "push": ["before", "after"],
+                },
+            },
+        }
+    if name == "leak-object-database-pipes":
+        repo = GitRepository(root)
+        initialize(repo)
+        repo.commit("initialize descriptor lifecycle fixture")
+
+        def observe(mode: str, damage: Damage | None = None):
+            metrics = Metrics()
+            if mode == "stubborn-close":
+                database = ObjectDatabase.__new__(ObjectDatabase)
+                database.root = root
+                database.metrics = metrics
+                database.damage = damage or Damage()
+                database.process = REAL_POPEN(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import os,signal,time;"
+                            "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+                            "os.write(1,b'R');"
+                            "time.sleep(60)"
+                        ),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+                database._reaped = False
+                database.wait_timeout = 0.1
+                if database.process.stdout.read(1) != b"R":
+                    raise RuntimeError("stubborn child did not become ready")
+                database.close()
+                database.close()
+            else:
+                database = ObjectDatabase(root, metrics, damage=damage)
+            if mode == "after-exit":
+                database.process.terminate()
+                database.process.wait(timeout=5)
+                database.close()
+                database.close()
+            elif mode == "abort":
+                database.abort()
+                database.abort()
+            elif mode == "close-live":
+                database.close()
+                database.close()
+            elif mode != "stubborn-close":
+                raise ValueError(mode)
+            result = {
+                "killed": (
+                    mode == "stubborn-close"
+                    and database.process.returncode == -signal.SIGKILL
+                ),
+                "mode": mode,
+                "process_reaps": metrics.object_process_reaps,
+                "process_terminations": metrics.object_process_terminations,
+                "returncode_is_set": database.process.poll() is not None,
+                "stdin_closed": bool(
+                    database.process.stdin is not None
+                    and database.process.stdin.closed
+                ),
+                "stdout_closed": bool(
+                    database.process.stdout is not None
+                    and database.process.stdout.closed
+                ),
+            }
+            # The damaged instance intentionally skips its closure path.  Close
+            # the observed descriptors directly after recording the leak so the
+            # control itself does not leak resources.
+            for pipe in (database.process.stdin, database.process.stdout):
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
+            return result
+
+        baseline = {
+            mode: observe(mode)
+            for mode in (
+                "close-live", "after-exit", "abort", "stubborn-close"
+            )
+        }
+        damaged = observe(
+            "after-exit", Damage(leak_object_database_pipes=True)
+        )
+        baseline_closed = all(
+            item["stdin_closed"]
+            and item["stdout_closed"]
+            and item["returncode_is_set"]
+            and item["process_reaps"] == 1
+            and (
+                item["killed"]
+                if mode == "stubborn-close"
+                else not item["killed"]
+            )
+            for item in baseline.values()
+            for mode in (item["mode"],)
+        )
+        damaged_leaked = bool(
+            not damaged["stdin_closed"]
+            and not damaged["stdout_closed"]
+            and damaged["returncode_is_set"]
+            and damaged["process_reaps"] == 1
+        )
+        observed = baseline_closed and damaged_leaked
+        return {
+            "control": name,
+            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+            "C": "0" * 40,
+            "O": "0" * 40,
+            "N": "0" * 40,
+            "baseline_classification": "closed-descriptors",
+            "damaged_classification": "leaked-descriptors",
+            "expected_baseline": "closed-descriptors",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "object_database_observation": {
+                "baseline": baseline,
+                "damaged": damaged,
+            },
+        }
     if name == "stream-malformed-truncated-final-line":
         root.mkdir(parents=True, exist_ok=True)
         observations = {}
@@ -13121,7 +14026,7 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
         results.append(result)
     results.sort(key=lambda item: item["scenario"])
     for result in results:
-        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        emit_json(result)
     by_scenario = {result["scenario"]: result for result in results}
     permutation_results = [
         by_scenario.get("R17-carry-compatible"),
@@ -13258,8 +14163,80 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
                 "errors": ["origin verdict or semantic roles changed"],
             }
         )
-    print(
-        json.dumps(
+    review_merge_permutations = {}
+    for case in (
+        "review-compatible-merge",
+        "review-compatible-source-low",
+        "review-compatible-source-high",
+    ):
+        signatures = []
+        for suffix in ("", "-reversed"):
+            result = by_scenario.get(f"R18-U-{case}{suffix}")
+            if result is None:
+                continue
+            action = next(
+                (item for item in result["actions"] if item["origin_proofs"]),
+                None,
+            )
+            landmarks = result["details"]["landmarks"]
+            merge_edges = [
+                edge
+                for proof in (
+                    action["origin_proofs"] if action is not None else []
+                )
+                for edge in proof["edges"]
+                if edge["child"] == landmarks["merge"]
+            ]
+            signatures.append(
+                {
+                    "classification": result["classification"],
+                    "compatible_carriers": sum(
+                        edge["role"] == "compatible-carrier"
+                        for edge in merge_edges
+                    ),
+                    "evidence_status": result["evidence_verdict"]["status"],
+                    "invalid_edges": sum(
+                        edge["problem"] is not None for edge in merge_edges
+                    ),
+                    "reason_code": (
+                        action["reason_code"] if action is not None else None
+                    ),
+                    "role_multiset": sorted(
+                        edge["role"] for edge in merge_edges
+                    ),
+                    "selected_source_is_canonical": (
+                        [
+                            edge["parent"]
+                            for edge in merge_edges
+                            if edge["role"] == "source"
+                        ]
+                        == [
+                            min(
+                                edge["parent"]
+                                for edge in merge_edges
+                                if edge["production_problem"] is None
+                                and edge["frozen_problem"] is None
+                                and edge["regression_problem"] is None
+                            )
+                        ]
+                    ),
+                }
+            )
+        review_merge_permutations[case] = signatures
+    review_merge_permutation_ok = all(
+        len(signatures) == 2 and signatures[0] == signatures[1]
+        for signatures in review_merge_permutations.values()
+    )
+    if not review_merge_permutation_ok:
+        failures.append(
+            {
+                "scenario": "R19-review-merge-parent-permutation-invariance",
+                "errors": [
+                    "review source/carrier semantics changed with parent order"
+                ],
+            }
+        )
+    emit_json(
             {
                 "r17_parent_permutation": permutation_signatures,
                 "r17_persisted_parent_permutations": (
@@ -13268,27 +14245,28 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
                 "r18_origin_parent_permutation": (
                     origin_permutation_signatures
                 ),
+                "r19_review_merge_parent_permutations": (
+                    review_merge_permutations
+                ),
                 "status": (
                     "PASS"
-                    if permutation_ok and origin_permutation_ok
+                    if (
+                        permutation_ok
+                        and origin_permutation_ok
+                        and review_merge_permutation_ok
+                    )
                     else "FAIL"
                 ),
-            },
-            sort_keys=True,
+            }
         )
-    )
     alias_inventory, alias_failures = validate_scenario_aliases(results)
     failures.extend(alias_failures)
-    print(
-        json.dumps(
+    emit_json(
             {
                 "scenario_alias_inventory": alias_inventory,
                 "status": "PASS" if not alias_failures else "FAIL",
-            },
-            sort_keys=True,
-            ensure_ascii=False,
+            }
         )
-    )
     controls = []
     control_names = list(CONTROL_NAMES)
     if reverse_construction:
@@ -13300,7 +14278,7 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
             failures.append({"control": name, "errors": [result["status"]]})
     controls.sort(key=lambda item: item["control"])
     for result in controls:
-        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        emit_json(result)
     summary = {
         "summary": "PASS" if not failures else "FAIL",
         "passed": len(results) - sum("scenario" in item for item in failures),
@@ -13317,6 +14295,9 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
         "r18_origin_parent_permutation": (
             "PASS" if origin_permutation_ok else "FAIL"
         ),
+        "r19_review_merge_parent_permutation": (
+            "PASS" if review_merge_permutation_ok else "FAIL"
+        ),
         "python": sys.version.split()[0],
         "git": REAL_RUN(
             ["git", "--version"],
@@ -13326,7 +14307,7 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
         ).stdout.strip(),
         "failures": failures,
     }
-    print(json.dumps(summary, sort_keys=True))
+    emit_json(summary)
     return 0 if not failures else 1
 
 
@@ -13389,6 +14370,77 @@ def ordinary_audit(
     return result
 
 
+def audit_event(
+    root: Path,
+    event_kind: str,
+    payload: Mapping[str, Any],
+    *,
+    budget_limit: int | None = None,
+    transaction: Callable[[], ContextManager[None]] | None = None,
+) -> dict:
+    """Run typed Strategy U from exact endpoints in an immutable event.
+
+    ``transaction`` is a narrow accounting seam.  For a valid event, this
+    function enters exactly one caller-supplied context and itself executes the
+    complete Git-backed audit inside it.  Invalid event publication never calls
+    the factory.  Because the caller never receives the operation or result, it
+    cannot select a different origin strategy, endpoints, or classification.
+    """
+    try:
+        endpoints = event_endpoints(event_kind, payload)
+    except EventInputError as error:
+        zero = "0" * 40
+        return {
+            "scenario": "ordinary-event-audit",
+            "C": None,
+            "O": zero,
+            "N": zero,
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
+                "origin_strategy": "U",
+            },
+            "audit_exit": 2,
+            "classification": "unreadable",
+            "evidence_verdict": {
+                "status": "unreadable",
+                "reason": str(error),
+            },
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+            "metrics": Metrics().as_dict(),
+            "event_adapter": {
+                "N": zero,
+                "O": zero,
+                "endpoint_sources": [],
+                "event_kind": event_kind,
+                "github_sha_used": False,
+                "mutable_metadata_invariant": True,
+                "mutable_state_reads": 0,
+                "provider_api_calls": 0,
+                "reason": str(error),
+                "status": "coverage-unavailable",
+                "typed_origin_strategy": "U",
+            },
+        }
+    scope = (
+        contextlib.nullcontext()
+        if transaction is None
+        else transaction()
+    )
+    with scope:
+        result = ordinary_audit(
+            root, endpoints.O, endpoints.N, budget_limit, "U"
+        )
+    result["event_adapter"] = endpoints.evidence()
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
@@ -13398,20 +14450,48 @@ def main(argv=None):
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--old", metavar="O")
     parser.add_argument("--new", metavar="N")
+    parser.add_argument(
+        "--event-kind",
+        choices=(
+            "local",
+            "pre-push",
+            "push",
+            "pull-request-synchronize",
+        ),
+    )
+    parser.add_argument("--event-payload", type=Path)
     parser.add_argument("--budget", type=int)
     parser.add_argument("--origin-strategy", choices=("U", "B"), default="U")
     arguments = parser.parse_args(argv)
+    event_mode = any(
+        value is not None
+        for value in (arguments.event_kind, arguments.event_payload)
+    )
     ordinary = any(
         value is not None
-        for value in (arguments.repo, arguments.old, arguments.new)
-    )
-    selected = int(arguments.self_test) + int(arguments.control is not None) + int(
-        ordinary
+        for value in (arguments.old, arguments.new)
+    ) or (arguments.repo is not None and not event_mode)
+    selected = (
+        int(arguments.self_test)
+        + int(arguments.control is not None)
+        + int(ordinary)
+        + int(event_mode)
     )
     if selected != 1:
-        parser.error("choose exactly one of --self-test, --control, or --repo/--old/--new")
+        parser.error(
+            "choose exactly one of --self-test, --control, "
+            "--repo/--old/--new, or --repo/--event-kind/--event-payload"
+        )
     if ordinary and None in (arguments.repo, arguments.old, arguments.new):
         parser.error("ordinary audit requires --repo, --old O, and --new N")
+    if event_mode and None in (
+        arguments.repo,
+        arguments.event_kind,
+        arguments.event_payload,
+    ):
+        parser.error(
+            "event audit requires --repo, --event-kind, and --event-payload"
+        )
     if arguments.reverse_construction and not arguments.self_test:
         parser.error("--reverse-construction requires --self-test")
     if ordinary:
@@ -13422,7 +14502,22 @@ def main(argv=None):
             arguments.budget,
             arguments.origin_strategy,
         )
-        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        emit_json(result)
+        return result["audit_exit"]
+    if event_mode:
+        try:
+            payload = json.loads(arguments.event_payload.read_text("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            parser.error(f"could not read event payload: {error}")
+        if not isinstance(payload, dict):
+            parser.error("event payload must be a JSON object")
+        result = audit_event(
+            arguments.repo.resolve(),
+            arguments.event_kind,
+            payload,
+            budget_limit=arguments.budget,
+        )
+        emit_json(result)
         return result["audit_exit"]
 
     if arguments.fixtures_dir is not None:
@@ -13440,7 +14535,7 @@ def main(argv=None):
                 reverse_construction=arguments.reverse_construction,
             )
         result = run_control(arguments.control, root / "control")
-        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        emit_json(result)
         return 0 if result["status"] == "OBSERVED_RED" else 1
 
 
