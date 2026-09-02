@@ -12,8 +12,10 @@ import contextlib
 import contextvars
 import dataclasses
 import errno
+import gc
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -23,6 +25,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from typing import Any, Callable, ContextManager, Iterable, Mapping, Protocol
 
 
@@ -51,6 +54,11 @@ GIT_SPAWN_OBSERVER: contextvars.ContextVar[GitSpawnObserver | None] = (
 GIT_SPAWN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "production_contract_git_spawn_active", default=False
 )
+PRODUCTION_HELPER_TOKEN: contextvars.ContextVar[object | None] = (
+    contextvars.ContextVar("production_contract_helper_token", default=None)
+)
+PRODUCTION_HELPER_LOCK = threading.RLock()
+AUDIT_SINGLE_FLIGHT = threading.Lock()
 
 
 def emit_json(value: Any):
@@ -556,6 +564,17 @@ def raise_deferred_cleanup(
         (error for error in failures if is_cancellation(error)), None
     )
     if cancellation is not None:
+        cleanup_failures = [
+            cleanup_failure_text(error)
+            for error in failures
+            if error is not cancellation
+        ]
+        if cleanup_failures:
+            cancellation.add_note(
+                prefix
+                + ": "
+                + "; ".join(dict.fromkeys(cleanup_failures))
+            )
         raise cancellation
     if failures:
         raise Unreadable(
@@ -567,61 +586,96 @@ def raise_deferred_cleanup(
         ) from failures[0]
 
 
-def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
-    """Close and verify an owned pipe, recovering from wrapper close errors."""
-    if pipe is None:
+@dataclasses.dataclass
+class OwnedPipe:
+    """One captured process pipe whose ownership is consumed exactly once."""
+
+    label: str
+    object_ref: Any | None
+    descriptor: int
+    state: str = "OPEN"
+
+
+class OwnedPipeView:
+    """A non-owning Python view whose close consumes one raw-fd token."""
+
+    def __init__(self, file_object: Any, ownership: OwnedPipe):
+        self._file_object = file_object
+        self._ownership = ownership
+
+    def __getattr__(self, name):
+        return getattr(self._file_object, name)
+
+    @property
+    def closed(self):
+        return self._file_object.closed
+
+    def fileno(self):
+        return self._file_object.fileno()
+
+    def _close_nonowning(self):
+        self._file_object.close()
+
+    def close(self):
+        close_owned_pipe(self._ownership, self, os.close)
+
+
+def close_owned_pipe(
+    ownership: OwnedPipe,
+    current_pipe,
+    raw_close: Callable[[int], None],
+):
+    """Consume captured ownership once without re-querying a wrapper fd."""
+    if ownership.state != "OPEN":
         return
-    try:
-        descriptor = pipe.fileno()
-    except BaseException as error:
-        if not is_cancellation(error) and getattr(pipe, "closed", False):
-            return
-        if is_cancellation(error):
-            raise
+    ownership.state = "RETIRING"
+    descriptor = ownership.descriptor
+    original = ownership.object_ref
+    if original is None:
+        ownership.state = "UNKNOWN"
         raise Unreadable(
-            f"cat-file {label} descriptor could not be captured"
-        ) from error
-    if descriptor_is_closed(descriptor):
-        return
-    close_error = None
-    try:
-        pipe.close()
-    except BaseException as error:
-        # A wrapper may raise before delegating.  The captured descriptor is
-        # still ours, so verify it and fall back to an OS close below.
-        close_error = error
-    needed_raw_fallback = not descriptor_is_closed(descriptor)
-    if needed_raw_fallback:
-        try:
-            raw_close(descriptor)
-        except BaseException as error:
-            if not (
-                isinstance(error, OSError) and error.errno == errno.EBADF
-            ):
-                if is_cancellation(error):
-                    raise
-                raise Unreadable(
-                    f"cat-file {label} descriptor fallback close failed"
-                ) from error
-    if not descriptor_is_closed(descriptor):
-        raise Unreadable(
-            f"cat-file {label} descriptor remained open after close"
+            f"Git child {ownership.label} has no captured pipe view"
         )
-    if close_error is not None:
-        if is_cancellation(close_error):
-            raise close_error
-        if needed_raw_fallback:
-            detail = (
-                "failed before descriptor release; raw descriptor recovered"
-            )
+    candidate = current_pipe if current_pipe is not None else original
+    failures: list[BaseException] = []
+    try:
+        if candidate is original:
+            original._close_nonowning()
         else:
-            detail = "raised after verified descriptor release"
+            candidate.close()
+    except BaseException as error:
+        failures.append(error)
+
+    if original is not candidate or not original.closed:
+        try:
+            original._close_nonowning()
+        except BaseException as error:
+            failures.append(error)
+
+    try:
+        raw_close(descriptor)
+    except BaseException as error:
+        failures.append(error)
+        ownership.state = "UNKNOWN"
+    else:
+        ownership.state = "CLOSED"
+
+    cancellation = next(
+        (error for error in failures if is_cancellation(error)), None
+    )
+    if cancellation is not None:
+        raise cancellation
+    if failures:
         raise Unreadable(
-            f"cat-file {label} object close {detail}"
-        ) from close_error
+            f"Git child {ownership.label} cleanup ended "
+            f"{ownership.state.lower()}"
+        ) from failures[0]
 
 
-def cleanup_unclaimed_process(process: subprocess.Popen) -> None:
+def cleanup_unclaimed_process(
+    process: subprocess.Popen,
+    owned_pipes: dict[str, OwnedPipe],
+) -> None:
     """Reap and close a spawned child that an observer refused to accept."""
     failures: list[BaseException] = []
     try:
@@ -643,11 +697,116 @@ def cleanup_unclaimed_process(process: subprocess.Popen) -> None:
         except BaseException as cleanup_error:
             failures.append(cleanup_error)
     for label in ("stdin", "stdout", "stderr"):
+        ownership = owned_pipes.get(label)
+        if ownership is None:
+            continue
         try:
-            close_owned_pipe(getattr(process, label, None), label, os.close)
+            close_owned_pipe(
+                ownership, getattr(process, label, None), os.close
+            )
         except BaseException as error:
             failures.append(error)
     raise_deferred_cleanup(failures, "Git spawn observer cleanup failed")
+
+
+def retire_process_pipes(process: subprocess.Popen) -> None:
+    """Consume every production pipe token once after normal child use."""
+    failures: list[BaseException] = []
+    owned_pipes = getattr(process, "_agentfold_owned_pipes", {})
+    for label in ("stdin", "stdout", "stderr"):
+        ownership = owned_pipes.get(label)
+        if ownership is None:
+            continue
+        try:
+            close_owned_pipe(
+                ownership, getattr(process, label, None), os.close
+            )
+        except BaseException as error:
+            failures.append(error)
+    raise_deferred_cleanup(failures, "Git child pipe cleanup failed")
+
+
+def prepare_explicit_parent_pipes(labels: tuple[str, ...]):
+    """Create parent-owned fds and child-side ints without Popen PIPE owners."""
+    resources = {}
+    opened = []
+    try:
+        for label in labels:
+            read_fd, write_fd = os.pipe()
+            opened.extend((read_fd, write_fd))
+            if label == "stdin":
+                resources[label] = {
+                    "child": read_fd, "parent": write_fd, "mode": "wb"
+                }
+            elif label in {"stdout", "stderr"}:
+                resources[label] = {
+                    "child": write_fd, "parent": read_fd, "mode": "rb"
+                }
+            else:
+                raise ValueError(f"unsupported explicit pipe {label}")
+        return resources
+    except BaseException:
+        for descriptor in opened:
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
+        raise
+
+
+def attach_explicit_parent_pipes(process, resources, process_options=None):
+    """Close child-side parent copies and expose non-owning raw views."""
+    owned = {}
+    process_options = process_options or {}
+    text_mode = bool(
+        process_options.get("text")
+        or process_options.get("universal_newlines")
+        or process_options.get("encoding") is not None
+        or process_options.get("errors") is not None
+    )
+    for label, resource in resources.items():
+        os.close(resource["child"])
+        resource["child"] = None
+        buffering = process_options.get("bufsize", -1)
+        if text_mode and buffering == 1:
+            buffering = -1
+        file_object = io.open(
+            resource["parent"],
+            resource["mode"],
+            buffering=buffering,
+            closefd=False,
+        )
+        if text_mode:
+            file_object = io.TextIOWrapper(
+                file_object,
+                encoding=(
+                    process_options.get("encoding")
+                    or getattr(process, "encoding", None)
+                ),
+                errors=(
+                    process_options.get("errors")
+                    or getattr(process, "errors", None)
+                ),
+                write_through=label == "stdin",
+                line_buffering=(
+                    label == "stdin"
+                    and process_options.get("bufsize") == 1
+                ),
+            )
+        ownership = OwnedPipe(label, None, resource["parent"])
+        view = OwnedPipeView(file_object, ownership)
+        ownership.object_ref = view
+        setattr(process, label, view)
+        owned[label] = ownership
+    return owned
+
+
+def close_explicit_pipe_resources(resources):
+    for resource in (resources or {}).values():
+        for name in ("child", "parent"):
+            descriptor = resource.get(name)
+            if descriptor is not None:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+                resource[name] = None
 
 
 def spawn_git_process(
@@ -664,6 +823,7 @@ def spawn_git_process(
     exact_command = tuple(str(argument) for argument in command)
     observer = GIT_SPAWN_OBSERVER.get()
     token = GIT_SPAWN_ACTIVE.set(True)
+    explicit_resources = None
     try:
         metrics.charge("git_process_attempts")
         if observer is not None:
@@ -681,12 +841,47 @@ def spawn_git_process(
                 raise Unreadable(
                     "Git spawn observer failed before process creation"
                 ) from error
+        explicit_parent_pipes = tuple(
+            label
+            for label in ("stdin", "stdout", "stderr")
+            if kwargs.get(label) is subprocess.PIPE
+        )
+        if explicit_parent_pipes:
+            try:
+                explicit_resources = prepare_explicit_parent_pipes(
+                    explicit_parent_pipes
+                )
+                for label, resource in explicit_resources.items():
+                    kwargs[label] = resource["child"]
+            except BaseException as error:
+                if is_cancellation(error):
+                    raise
+                raise Unreadable(
+                    "Git child pipe setup failed: " + type(error).__name__
+                ) from error
         try:
             process = REAL_POPEN(command, *args, **kwargs)
         except BaseException as error:
-            if is_cancellation(error) or isinstance(error, Exception):
+            close_explicit_pipe_resources(explicit_resources)
+            if is_cancellation(error):
                 raise
-            raise Unreadable("Git process factory raised BaseException") from error
+            raise Unreadable(
+                "Git process factory failed: " + type(error).__name__
+            ) from error
+        try:
+            owned_pipes = attach_explicit_parent_pipes(
+                process, explicit_resources or {}, kwargs
+            )
+        except BaseException:
+            # Trusted Popen returned a process but pipe ownership could not be
+            # captured.  Best-effort cleanup cannot use uncaptured numbers.
+            with contextlib.suppress(BaseException):
+                process.kill()
+            with contextlib.suppress(BaseException):
+                process.wait(timeout=5)
+            close_explicit_pipe_resources(explicit_resources)
+            raise
+        process._agentfold_owned_pipes = owned_pipes
         metrics.observe("git_processes")
         if observer is not None:
             try:
@@ -696,7 +891,7 @@ def spawn_git_process(
             except BaseException as error:
                 cleanup_error = None
                 try:
-                    cleanup_unclaimed_process(process)
+                    cleanup_unclaimed_process(process, owned_pipes)
                 except BaseException as observed_cleanup_error:
                     cleanup_error = observed_cleanup_error
                 if is_cancellation(error):
@@ -752,8 +947,13 @@ def count_production_git(
 ):
     """Count each Git child spawned by imported production helpers once."""
 
+    invocation_token = object()
+
     def counted_popen(command, *args, **kwargs):
-        if is_git_command(command):
+        owned_invocation = (
+            PRODUCTION_HELPER_TOKEN.get() is invocation_token
+        )
+        if owned_invocation and is_git_command(command):
             encoded = sum(
                 len(str(argument).encode("utf-8", errors="surrogateescape"))
                 for argument in command
@@ -770,7 +970,7 @@ def count_production_git(
                 metrics.charge("production_parent_queries")
             if stable_git_diagnostics:
                 kwargs["env"] = stable_git_environment(kwargs.get("env"))
-        if is_git_command(command):
+        if owned_invocation and is_git_command(command):
             return spawn_git_process(
                 command,
                 *args,
@@ -779,12 +979,15 @@ def count_production_git(
             )
         return original_popen(command, *args, **kwargs)
 
-    original_popen = subprocess.Popen
-    subprocess.Popen = counted_popen
-    try:
-        yield
-    finally:
-        subprocess.Popen = original_popen
+    with PRODUCTION_HELPER_LOCK:
+        original_popen = subprocess.Popen
+        subprocess.Popen = counted_popen
+        context_token = PRODUCTION_HELPER_TOKEN.set(invocation_token)
+        try:
+            yield
+        finally:
+            PRODUCTION_HELPER_TOKEN.reset(context_token)
+            subprocess.Popen = original_popen
 
 
 @contextlib.contextmanager
@@ -798,17 +1001,18 @@ def reconciler_repository(root: Path):
         "CHANGE_RANGE": None,
         "DISPLACED_TIP": None,
     }
-    saved = {name: getattr(RECONCILE, name) for name in names}
-    for name, value in names.items():
-        setattr(RECONCILE, name, value)
-    RECONCILE.scope_immutable_git_caches()
-    try:
-        yield
-    finally:
-        RECONCILE.close_git_cat_file()
-        for name, value in saved.items():
+    with PRODUCTION_HELPER_LOCK:
+        saved = {name: getattr(RECONCILE, name) for name in names}
+        for name, value in names.items():
             setattr(RECONCILE, name, value)
         RECONCILE.scope_immutable_git_caches()
+        try:
+            yield
+        finally:
+            RECONCILE.close_git_cat_file()
+            for name, value in saved.items():
+                setattr(RECONCILE, name, value)
+            RECONCILE.scope_immutable_git_caches()
 
 
 class GitRepository:
@@ -1004,18 +1208,27 @@ def _terminate_and_reap(
     counter_prefix: str,
 ):
     """Terminate a refused Git child and prove that it was reaped."""
-    if process.poll() is None:
-        process.terminate()
-        metrics.observe(f"{counter_prefix}_process_terminations")
+    failures: list[BaseException] = []
     try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
-    metrics.observe(f"{counter_prefix}_process_reaps")
-    metrics.observe("graph_process_cleanup_checks")
-    if process.poll() is None:
-        raise RuntimeError("bounded Git child was not reaped")
+        if process.poll() is None:
+            process.terminate()
+            metrics.observe(f"{counter_prefix}_process_terminations")
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        metrics.observe(f"{counter_prefix}_process_reaps")
+        metrics.observe("graph_process_cleanup_checks")
+        if process.poll() is None:
+            failures.append(RuntimeError("bounded Git child was not reaped"))
+    except BaseException as error:
+        failures.append(error)
+    try:
+        retire_process_pipes(process)
+    except BaseException as error:
+        failures.append(error)
+    raise_deferred_cleanup(failures, "bounded Git child cleanup failed")
 
 
 def bounded_git_lines(
@@ -1174,6 +1387,7 @@ def bounded_git_lines(
         raise
     finally:
         selector.close()
+        retire_process_pipes(process)
 
 
 class ObjectDatabase:
@@ -1194,9 +1408,9 @@ class ObjectDatabase:
         self.process = spawn_git_process(
             ["git", "--no-replace-objects", "cat-file", "--batch"],
             metrics=metrics,
-            cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            cwd=root,
             stderr=subprocess.DEVNULL,
             env=(
                 stable_git_environment()
@@ -1204,6 +1418,7 @@ class ObjectDatabase:
                 else None
             ),
         )
+        self._owned_pipes = self.process._agentfold_owned_pipes
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.trees: dict[str, dict[str, tuple[str, str]]] = {}
         self.flat_trees: dict[str, dict[str, tuple[str, str]]] = {}
@@ -1224,8 +1439,13 @@ class ObjectDatabase:
             ("stdin", self.process.stdin),
             ("stdout", self.process.stdout),
         ):
+            ownership = self._owned_pipes.get(label)
+            if ownership is None:
+                continue
             try:
-                close_owned_pipe(pipe, label, self._raw_close_owned_fd)
+                close_owned_pipe(
+                    ownership, pipe, self._raw_close_owned_fd
+                )
             except BaseException as error:
                 failures.append(error)
         raise_deferred_cleanup(
@@ -1259,6 +1479,14 @@ class ObjectDatabase:
 
     def _shutdown(self, *, graceful: bool):
         failures: list[BaseException] = []
+
+        def child_is_live() -> bool:
+            try:
+                return self.process.poll() is None
+            except BaseException as error:
+                failures.append(error)
+                return True
+
         try:
             # Closing stdin delivers EOF to cat-file.  Pipe closure is
             # independent of liveness: poll() may already report an exited
@@ -1266,58 +1494,60 @@ class ObjectDatabase:
             if graceful and not self.damage.leak_object_database_pipes:
                 try:
                     close_owned_pipe(
+                        self._owned_pipes["stdin"],
                         self.process.stdin,
-                        "stdin",
                         self._raw_close_owned_fd,
                     )
                 except BaseException as error:
                     failures.append(error)
             if not graceful:
-                self._terminate_once()
-            if self.process.poll() is None:
+                try:
+                    self._terminate_once()
+                except BaseException as error:
+                    failures.append(error)
+            if child_is_live():
                 try:
                     self.process.wait(timeout=self.wait_timeout)
                 except subprocess.TimeoutExpired:
+                    pass
+                except BaseException as error:
+                    failures.append(error)
+            # Each remaining cleanup transition is independent.  A throwable
+            # in terminate or wait cannot suppress kill, the final wait, or
+            # descriptor closure below.
+            if child_is_live() and not self._termination_requested:
+                try:
                     self._terminate_once()
-                    try:
-                        self.process.wait(timeout=self.wait_timeout)
-                    except subprocess.TimeoutExpired:
-                        self._kill_once()
-                        try:
-                            self.process.wait(timeout=self.wait_timeout)
-                        except subprocess.TimeoutExpired as error:
-                            failures.append(
-                                Unreadable(
-                                    "cat-file child did not exit after kill"
-                                )
-                            )
-            if (
-                not self._record_reap()
-                and not any(
-                    str(error) == "cat-file child did not exit after kill"
-                    for error in failures
-                )
-            ):
-                failures.append(Unreadable("cat-file child was not reaped"))
-        except BaseException as error:
-            failures.append(error)
-            # A cancellation or arbitrary throwable cannot strand the child.
-            # Complete a bounded terminate/kill/reap sequence before it is
-            # re-raised or converted to unreadable below.
+                except BaseException as error:
+                    failures.append(error)
+            if child_is_live():
+                try:
+                    self.process.wait(timeout=self.wait_timeout)
+                except subprocess.TimeoutExpired:
+                    pass
+                except BaseException as error:
+                    failures.append(error)
+            if child_is_live():
+                try:
+                    self._kill_once()
+                except BaseException as error:
+                    failures.append(error)
+            if child_is_live():
+                try:
+                    self.process.wait(timeout=self.wait_timeout)
+                except subprocess.TimeoutExpired:
+                    pass
+                except BaseException as error:
+                    failures.append(error)
             try:
-                self._terminate_once()
-                if self.process.poll() is None:
-                    try:
-                        self.process.wait(timeout=self.wait_timeout)
-                    except subprocess.TimeoutExpired:
-                        self._kill_once()
-                        self.process.wait(timeout=self.wait_timeout)
-                if not self._record_reap():
-                    failures.append(
-                        Unreadable("cat-file child was not reaped")
-                    )
-            except BaseException as cleanup_error:
-                failures.append(cleanup_error)
+                reaped = self._record_reap()
+            except BaseException as error:
+                failures.append(error)
+                reaped = False
+            if not reaped:
+                failures.append(
+                    Unreadable("cat-file child was not reaped after kill")
+                )
         finally:
             # Descriptor ownership ends even when wait still times out after
             # kill.  The leak mutant alone deliberately skips this guarantee.
@@ -5308,10 +5538,12 @@ class Classifier:
             if objects is not None:
                 try:
                     objects.close()
-                except Exception as error:
+                except BaseException as error:
                     cleanup_error = error
             if published_result is not None:
                 if cleanup_error is not None:
+                    if is_cancellation(cleanup_error):
+                        raise cleanup_error
                     published_result.clear()
                     published_result.update(
                         {
@@ -14006,6 +14238,7 @@ def run_control(name: str, root: Path):
             repository: Path | None = None,
             fail_after_spawn: bool = False,
             ambient_delegating_wrapper: bool = False,
+            factory_error_type=None,
         ):
             transaction_entries = 0
             before_spawns = []
@@ -14033,6 +14266,7 @@ def run_control(name: str, root: Path):
                 yield AccountingObserver()
 
             prior_popen = subprocess.Popen
+            prior_factory = REAL_POPEN
 
             def delegating_popen(command, *args, **kwargs):
                 nonlocal ambient_wrapper_calls
@@ -14043,6 +14277,13 @@ def run_control(name: str, root: Path):
 
             if ambient_delegating_wrapper:
                 subprocess.Popen = delegating_popen
+            if factory_error_type is not None:
+                def failing_factory(*_args, **_kwargs):
+                    raise factory_error_type(
+                        "injected Git process factory throwable"
+                    )
+
+                globals()["REAL_POPEN"] = failing_factory
             try:
                 result = audit_event(
                     repository or fixtures["clean"].repo.root,
@@ -14053,6 +14294,7 @@ def run_control(name: str, root: Path):
                 )
             finally:
                 subprocess.Popen = prior_popen
+                globals()["REAL_POPEN"] = prior_factory
             observed_pids = [pid for _command, pid in after_spawns]
 
             def process_is_gone(pid):
@@ -14180,6 +14422,259 @@ def run_control(name: str, root: Path):
             ),
         }
 
+        class FactoryBaseException(BaseException):
+            pass
+
+        execution_seam["factory_throwables"] = {
+            name: seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                factory_error_type=error_type,
+            )
+            for name, error_type in (
+                ("runtime-error", RuntimeError),
+                ("subprocess-error", subprocess.SubprocessError),
+                ("direct-base-exception", FactoryBaseException),
+            )
+        }
+
+        different_fixture = r19_event_workflow_fixture(
+            root / "threaded-different-repository", transport="push"
+        )
+
+        def threaded_serialization_probe(different_repositories: bool):
+            barrier = threading.Barrier(2)
+            loser_finished = threading.Event()
+            results = [None, None]
+            failures = [None, None]
+            observations = [([], []), ([], [])]
+            ambient_calls = 0
+            prior_popen = subprocess.Popen
+
+            def ambient_popen(*args, **kwargs):
+                nonlocal ambient_calls
+                ambient_calls += 1
+                return prior_popen(*args, **kwargs)
+
+            class ThreadObserver:
+                def __init__(self, index):
+                    self.index = index
+
+                def before_spawn(self, command):
+                    observations[self.index][0].append(command)
+
+                def after_spawn(self, command, pid):
+                    observations[self.index][1].append((command, pid))
+
+            def worker(index, fixture):
+                @contextlib.contextmanager
+                def transaction():
+                    loser_finished.wait(timeout=10)
+                    yield ThreadObserver(index)
+
+                try:
+                    adapter = fixture.details["event_adapter_input"]
+                    barrier.wait(timeout=10)
+                    results[index] = audit_event(
+                        fixture.repo.root,
+                        adapter["event_kind"],
+                        adapter["payload"],
+                        transaction=transaction,
+                    )
+                    if results[index]["event_adapter"]["status"] == "audit-busy":
+                        loser_finished.set()
+                except BaseException as error:
+                    failures[index] = f"{type(error).__name__}:{error}"
+                    loser_finished.set()
+
+            fixtures_for_threads = (
+                (fixtures["clean"], different_fixture)
+                if different_repositories
+                else (fixtures["clean"], fixtures["clean"])
+            )
+            subprocess.Popen = ambient_popen
+            try:
+                threads = [
+                    threading.Thread(
+                        target=worker,
+                        args=(index, fixture),
+                        name=f"production-contract-audit-{index}",
+                    )
+                    for index, fixture in enumerate(fixtures_for_threads)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=30)
+                threads_completed = all(not thread.is_alive() for thread in threads)
+                ambient_restored_inside = subprocess.Popen is ambient_popen
+            finally:
+                subprocess.Popen = prior_popen
+            calls = []
+            for index, result in enumerate(results):
+                before, after = observations[index]
+                calls.append(
+                    {
+                        "adapter_status": (
+                            result["event_adapter"]["status"]
+                            if result is not None else None
+                        ),
+                        "after_spawns": len(after),
+                        "attempts": (
+                            result["metrics"]["git_process_attempts"]
+                            if result is not None else None
+                        ),
+                        "audit_exit": (
+                            result["audit_exit"] if result is not None else None
+                        ),
+                        "before_spawns": len(before),
+                        "classification": (
+                            result["classification"]
+                            if result is not None else None
+                        ),
+                        "processes": (
+                            result["metrics"]["git_processes"]
+                            if result is not None else None
+                        ),
+                        "unique_pids": len({pid for _command, pid in after})
+                        == len(after),
+                    }
+                )
+            return {
+                "ambient_factory_restored_exactly": (
+                    ambient_restored_inside
+                    and subprocess.Popen is prior_popen
+                ),
+                "ambient_wrapper_calls": ambient_calls,
+                "calls": sorted(
+                    calls, key=lambda item: str(item["adapter_status"])
+                ),
+                "different_repositories": different_repositories,
+                "failures": failures,
+                "threads_completed": threads_completed,
+            }
+
+        execution_seam["threaded_serialization"] = {
+            "different-repository": threaded_serialization_probe(True),
+            "same-repository": threaded_serialization_probe(False),
+        }
+
+        nested_transaction_entries = 0
+        nested_before = []
+        nested_after = []
+        nested_result = None
+
+        class NestedObserver:
+            def before_spawn(self, command):
+                nested_before.append(command)
+
+            def after_spawn(self, command, pid):
+                nested_after.append((command, pid))
+
+        @contextlib.contextmanager
+        def forbidden_nested_transaction():
+            nonlocal nested_transaction_entries
+            nested_transaction_entries += 1
+            yield None
+
+        @contextlib.contextmanager
+        def outer_nested_transaction():
+            nonlocal nested_result
+            nested_result = audit_event(
+                fixtures["clean"].repo.root,
+                clean_input["event_kind"],
+                clean_input["payload"],
+                transaction=forbidden_nested_transaction,
+            )
+            yield NestedObserver()
+
+        nested_outer = audit_event(
+            fixtures["clean"].repo.root,
+            clean_input["event_kind"],
+            clean_input["payload"],
+            transaction=outer_nested_transaction,
+        )
+        execution_seam["nested_reentry"] = {
+            "nested_actual": nested_result["metrics"]["git_processes"],
+            "nested_attempts": nested_result["metrics"][
+                "git_process_attempts"
+            ],
+            "nested_status": nested_result["event_adapter"]["status"],
+            "nested_transaction_entries": nested_transaction_entries,
+            "outer_actual": nested_outer["metrics"]["git_processes"],
+            "outer_after": len(nested_after),
+            "outer_attempts": nested_outer["metrics"][
+                "git_process_attempts"
+            ],
+            "outer_before": len(nested_before),
+            "outer_exit": nested_outer["audit_exit"],
+        }
+
+        unrelated_metrics = Metrics()
+        unrelated_before = []
+        unrelated_after = []
+        unrelated_ambient_calls = 0
+        unrelated_failure = None
+        prior_popen = subprocess.Popen
+
+        class UnrelatedObserver:
+            def before_spawn(self, command):
+                unrelated_before.append(command)
+
+            def after_spawn(self, command, pid):
+                unrelated_after.append((command, pid))
+
+        def unrelated_ambient(command, *args, **kwargs):
+            nonlocal unrelated_ambient_calls
+            unrelated_ambient_calls += 1
+            return prior_popen(command, *args, **kwargs)
+
+        def unrelated_worker():
+            nonlocal unrelated_failure
+            try:
+                completed = subprocess.Popen(
+                    ["git", "--version"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                completed.communicate(timeout=5)
+            except BaseException as error:
+                unrelated_failure = f"{type(error).__name__}:{error}"
+
+        subprocess.Popen = unrelated_ambient
+        try:
+            with observe_git_spawns(
+                UnrelatedObserver()
+            ), count_production_git(unrelated_metrics):
+                unrelated_thread = threading.Thread(
+                    target=unrelated_worker,
+                    name="production-contract-unrelated-popen",
+                )
+                unrelated_thread.start()
+                owned_child = subprocess.Popen(
+                    ["git", "--version"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                owned_child.communicate(timeout=5)
+                unrelated_thread.join(timeout=10)
+            ambient_restored_inside = subprocess.Popen is unrelated_ambient
+        finally:
+            subprocess.Popen = prior_popen
+        execution_seam["unrelated_thread_isolation"] = {
+            "ambient_factory_restored_exactly": (
+                ambient_restored_inside
+                and subprocess.Popen is prior_popen
+            ),
+            "ambient_wrapper_calls": unrelated_ambient_calls,
+            "observer_after": len(unrelated_after),
+            "observer_before": len(unrelated_before),
+            "owned_actual": unrelated_metrics.git_processes,
+            "owned_attempts": unrelated_metrics.git_process_attempts,
+            "unrelated_failure": unrelated_failure,
+            "unrelated_thread_completed": not unrelated_thread.is_alive(),
+        }
+
         def cancellation_probe(error_type, inject_cleanup_report=False):
             transaction_entries = 0
             before_spawns = []
@@ -14201,8 +14696,8 @@ def run_control(name: str, root: Path):
 
             original_cleanup = cleanup_unclaimed_process
 
-            def cleanup_then_report(process):
-                original_cleanup(process)
+            def cleanup_then_report(process, owned_pipes):
+                original_cleanup(process, owned_pipes)
                 raise Unreadable("injected cleanup reporting failure")
 
             if inject_cleanup_report:
@@ -14253,6 +14748,109 @@ def run_control(name: str, root: Path):
             "system-exit-with-cleanup-report": cancellation_probe(
                 SystemExit, inject_cleanup_report=True
             ),
+        }
+
+        def piped_child_after_spawn_probe(error_type):
+            before_spawns = []
+            after_spawns = []
+            pipe_allocations = []
+            caught = None
+            result = None
+
+            class PipedChildObserver:
+                def before_spawn(self, command):
+                    before_spawns.append(command)
+
+                def after_spawn(self, command, pid):
+                    after_spawns.append((command, pid))
+                    if len(after_spawns) == 2:
+                        raise error_type(
+                            "injected piped-child after-spawn throwable"
+                        )
+
+            @contextlib.contextmanager
+            def transaction():
+                yield PipedChildObserver()
+
+            original_prepare = prepare_explicit_parent_pipes
+
+            def recording_prepare(labels):
+                resources = original_prepare(labels)
+                pipe_allocations.append(
+                    {
+                        label: resource["parent"]
+                        for label, resource in resources.items()
+                    }
+                )
+                return resources
+
+            globals()["prepare_explicit_parent_pipes"] = recording_prepare
+            try:
+                result = audit_event(
+                    fixtures["clean"].repo.root,
+                    clean_input["event_kind"],
+                    clean_input["payload"],
+                    transaction=transaction,
+                )
+            except BaseException as error:
+                caught = error
+            finally:
+                globals()["prepare_explicit_parent_pipes"] = original_prepare
+            target_descriptors = list(pipe_allocations[1].values())
+            closed_before_reuse = all(
+                descriptor_is_closed(descriptor)
+                for descriptor in target_descriptors
+            )
+            replacements = []
+            try:
+                for _index in range(32):
+                    descriptor = os.open(os.devnull, os.O_RDWR)
+                    replacements.append(descriptor)
+                    if set(target_descriptors).issubset(replacements):
+                        break
+                gc.collect()
+                reused_descriptors_survived = bool(
+                    set(target_descriptors).issubset(replacements)
+                    and all(
+                        not descriptor_is_closed(descriptor)
+                        for descriptor in replacements
+                    )
+                )
+            finally:
+                for descriptor in replacements:
+                    with contextlib.suppress(OSError):
+                        os.close(descriptor)
+            observed_pid = after_spawns[1][1]
+            try:
+                os.kill(observed_pid, 0)
+            except ProcessLookupError:
+                child_reaped = True
+            except PermissionError:
+                child_reaped = False
+            else:
+                child_reaped = False
+            return {
+                "after_spawns": len(after_spawns),
+                "audit_exit": (
+                    result["audit_exit"] if result is not None else None
+                ),
+                "before_spawns": len(before_spawns),
+                "child_reaped": child_reaped,
+                "piped_labels": sorted(pipe_allocations[1]),
+                "pipe_descriptors_closed": closed_before_reuse,
+                "result_git_processes": (
+                    result["metrics"]["git_processes"]
+                    if result is not None else None
+                ),
+                "reused_descriptors_survived_gc": (
+                    reused_descriptors_survived
+                ),
+                "throwable": type(caught).__name__ if caught else None,
+            }
+
+        execution_seam["piped_child_after_spawn"] = {
+            "runtime": piped_child_after_spawn_probe(RuntimeError),
+            "keyboard": piped_child_after_spawn_probe(KeyboardInterrupt),
         }
         execution_seam["result_owned_by_audit"] = True
         invalid_shape = {
@@ -14339,6 +14937,16 @@ def run_control(name: str, root: Path):
             and execution_seam["spawn_factory_failure"][
                 "result_git_processes"
             ] == 0
+            and all(
+                item["audit_exit"] == 2
+                and item["transaction_entries"] == 1
+                and item["before_spawns"] == 1
+                and item["after_spawns"] == 0
+                and item["result_git_process_attempts"] == 1
+                and item["result_git_processes"] == 0
+                and "Git process factory failed" in item["reason"]
+                for item in execution_seam["factory_throwables"].values()
+            )
             and execution_seam["after_spawn_base_exception"]["audit_exit"] == 2
             and execution_seam["after_spawn_base_exception"]["before_spawns"] == 1
             and execution_seam["after_spawn_base_exception"]["after_spawns"] == 1
@@ -14366,6 +14974,30 @@ def run_control(name: str, root: Path):
                     "throwable": "SystemExit",
                 },
             }
+            and execution_seam["piped_child_after_spawn"] == {
+                "runtime": {
+                    "after_spawns": 2,
+                    "audit_exit": 2,
+                    "before_spawns": 2,
+                    "child_reaped": True,
+                    "piped_labels": ["stderr", "stdout"],
+                    "pipe_descriptors_closed": True,
+                    "result_git_processes": 2,
+                    "reused_descriptors_survived_gc": True,
+                    "throwable": None,
+                },
+                "keyboard": {
+                    "after_spawns": 2,
+                    "audit_exit": None,
+                    "before_spawns": 2,
+                    "child_reaped": True,
+                    "piped_labels": ["stderr", "stdout"],
+                    "pipe_descriptors_closed": True,
+                    "result_git_processes": None,
+                    "reused_descriptors_survived_gc": True,
+                    "throwable": "KeyboardInterrupt",
+                },
+            }
             and execution_seam["ambient_delegating_wrapper"][
                 "ambient_wrapper_calls"
             ] == 0
@@ -14380,6 +15012,58 @@ def run_control(name: str, root: Path):
             and execution_seam["ambient_delegating_wrapper"][
                 "all_pids_unique"
             ] is True
+            and all(
+                threaded["threads_completed"]
+                and threaded["ambient_factory_restored_exactly"]
+                and threaded["ambient_wrapper_calls"] == 0
+                and threaded["failures"] == [None, None]
+                and threaded["calls"] == [
+                    {
+                        "adapter_status": "accepted",
+                        "after_spawns": 4,
+                        "attempts": 4,
+                        "audit_exit": 0,
+                        "before_spawns": 4,
+                        "classification": "no-finding",
+                        "processes": 4,
+                        "unique_pids": True,
+                    },
+                    {
+                        "adapter_status": "audit-busy",
+                        "after_spawns": 0,
+                        "attempts": 0,
+                        "audit_exit": 2,
+                        "before_spawns": 0,
+                        "classification": "unreadable",
+                        "processes": 0,
+                        "unique_pids": True,
+                    },
+                ]
+                for threaded in execution_seam[
+                    "threaded_serialization"
+                ].values()
+            )
+            and execution_seam["nested_reentry"] == {
+                "nested_actual": 0,
+                "nested_attempts": 0,
+                "nested_status": "audit-busy",
+                "nested_transaction_entries": 0,
+                "outer_actual": 4,
+                "outer_after": 4,
+                "outer_attempts": 4,
+                "outer_before": 4,
+                "outer_exit": 0,
+            }
+            and execution_seam["unrelated_thread_isolation"] == {
+                "ambient_factory_restored_exactly": True,
+                "ambient_wrapper_calls": 1,
+                "observer_after": 1,
+                "observer_before": 1,
+                "owned_actual": 1,
+                "owned_attempts": 1,
+                "unrelated_failure": None,
+                "unrelated_thread_completed": True,
+            }
         )
         return {
             "control": name,
@@ -14454,6 +15138,19 @@ def run_control(name: str, root: Path):
                     )
                 raise self.error_type("injected close-after-delegate")
 
+        class FilenoAndCloseRaiseBeforeDelegate(
+            CloseRaisesBeforeDelegate
+        ):
+            """Prove cleanup never re-queries an adversarial wrapper fd."""
+
+            def __init__(self, delegate, error_type=OSError):
+                super().__init__(delegate, error_type)
+                self.fileno_calls = 0
+
+            def fileno(self):
+                self.fileno_calls += 1
+                raise self.error_type("injected fileno failure")
+
         class PipeBaseException(BaseException):
             pass
 
@@ -14469,6 +15166,18 @@ def run_control(name: str, root: Path):
             "keyboard-after-close": (
                 "close", KeyboardInterrupt, "after"
             ),
+            "fileno-runtime-close": (
+                "close", RuntimeError, "fileno"
+            ),
+            "fileno-keyboard-close": (
+                "close", KeyboardInterrupt, "fileno"
+            ),
+            "fileno-system-exit-abort": (
+                "abort", SystemExit, "fileno"
+            ),
+            "fileno-base-close": (
+                "close", PipeBaseException, "fileno"
+            ),
         }
 
         def observe(mode: str, damage: Damage | None = None):
@@ -14480,6 +15189,9 @@ def run_control(name: str, root: Path):
                 database.root = root
                 database.metrics = metrics
                 database.damage = damage or Damage()
+                resources = prepare_explicit_parent_pipes(
+                    ("stdin", "stdout")
+                )
                 underlying_process = REAL_POPEN(
                     [
                         sys.executable,
@@ -14491,11 +15203,19 @@ def run_control(name: str, root: Path):
                             "time.sleep(60)"
                         ),
                     ],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
+                    stdin=resources["stdin"]["child"],
+                    stdout=resources["stdout"]["child"],
                     stderr=subprocess.DEVNULL,
                 )
+                underlying_process._agentfold_owned_pipes = (
+                    attach_explicit_parent_pipes(
+                        underlying_process, resources
+                    )
+                )
                 database.process = underlying_process
+                database._owned_pipes = (
+                    underlying_process._agentfold_owned_pipes
+                )
                 database._reaped = False
                 database._termination_requested = False
                 database._kill_requested = False
@@ -14536,21 +15256,19 @@ def run_control(name: str, root: Path):
                 database.process.terminate()
                 database.process.wait(timeout=5)
             if mode in raising_modes:
-                wrapper = (
-                    CloseRaisesAfterDelegate
-                    if raising_modes[mode][2] == "after"
-                    else CloseRaisesBeforeDelegate
+                wrapper = {
+                    "after": CloseRaisesAfterDelegate,
+                    "fileno": FilenoAndCloseRaiseBeforeDelegate,
+                }.get(
+                    raising_modes[mode][2],
+                    CloseRaisesBeforeDelegate,
                 )
                 database.process.stdin = wrapper(
                     database.process.stdin, raising_modes[mode][1]
                 )
             owned_descriptors = {
-                label: pipe.fileno()
-                for label, pipe in (
-                    ("stdin", database.process.stdin),
-                    ("stdout", database.process.stdout),
-                )
-                if pipe is not None
+                label: ownership.descriptor
+                for label, ownership in database._owned_pipes.items()
             }
             if mode == "after-exit":
                 database.close()
@@ -14613,13 +15331,24 @@ def run_control(name: str, root: Path):
                 "stdout_object_closed": bool(
                     database.process.stdout.closed
                 ),
+                "owned_states": {
+                    label: ownership.state
+                    for label, ownership in database._owned_pipes.items()
+                },
+                "wrapper_fileno_calls": getattr(
+                    database.process.stdin, "fileno_calls", 0
+                ),
             }
             # The damaged instance intentionally skips its closure path.  Close
             # the observed descriptors directly after recording the leak so the
             # control itself does not leak resources.
-            for descriptor in owned_descriptors.values():
-                if not descriptor_is_closed(descriptor):
-                    os.close(descriptor)
+            for label, ownership in database._owned_pipes.items():
+                with contextlib.suppress(BaseException):
+                    close_owned_pipe(
+                        ownership,
+                        getattr(database.process, label, None),
+                        os.close,
+                    )
             for pipe in (database.process.stdin, database.process.stdout):
                 if isinstance(pipe, CloseRaisesBeforeDelegate):
                     with contextlib.suppress(BaseException):
@@ -14646,6 +15375,10 @@ def run_control(name: str, root: Path):
                 "base-close",
                 "runtime-after-close",
                 "keyboard-after-close",
+                "fileno-runtime-close",
+                "fileno-keyboard-close",
+                "fileno-system-exit-abort",
+                "fileno-base-close",
                 "stubborn-close",
                 "stubborn-after-kill",
             )
@@ -14656,11 +15389,12 @@ def run_control(name: str, root: Path):
         baseline_closed = all(
             item["stdin_closed"]
             and item["stdout_closed"]
+            and set(item["owned_states"].values()) == {"CLOSED"}
             and (
                 len(item["cleanup_failures"]) == 2
                 and all(
                     failure.endswith(
-                        "cat-file child did not exit after kill"
+                        "cat-file child was not reaped after kill"
                     )
                     for failure in item["cleanup_failures"]
                 )
@@ -14674,27 +15408,15 @@ def run_control(name: str, root: Path):
                     and (
                         len(item["cleanup_failures"]) == 1
                         and (
-                            (
-                                item["cleanup_failures"][0].startswith(
-                                    "KeyboardInterrupt:"
-                                )
-                                if mode in {
-                                    "keyboard-close",
-                                    "keyboard-after-close",
-                                }
-                                else item["cleanup_failures"][0].startswith(
-                                    "SystemExit:"
-                                )
+                            item["cleanup_failures"][0].startswith(
+                                raising_modes[mode][1].__name__ + ":"
                             )
-                            if mode in {
-                                "keyboard-close", "keyboard-after-close",
-                                "system-exit-abort",
-                            }
+                            if raising_modes[mode][1]
+                            in {KeyboardInterrupt, SystemExit}
                             else (
-                                "verified descriptor release"
-                                if raising_modes[mode][2] == "after"
-                                else "raw descriptor recovered"
-                            ) in item["cleanup_failures"][0]
+                                "cleanup ended closed"
+                                in item["cleanup_failures"][0]
+                            )
                         )
                         if mode in raising_modes
                         else not item["cleanup_failures"]
@@ -14705,9 +15427,11 @@ def run_control(name: str, root: Path):
                         else not item["killed"]
                     )
                     and item["stdout_object_closed"]
-                    and item["stdin_object_closed"] is (
-                        mode not in raising_modes
-                        or raising_modes[mode][2] == "after"
+                    and item["stdin_object_closed"]
+                    and (
+                        item["wrapper_fileno_calls"] == 0
+                        if mode.startswith("fileno-")
+                        else True
                     )
                 )
             )
@@ -14734,7 +15458,7 @@ def run_control(name: str, root: Path):
         def init_with_raising_close(database, *args, **kwargs):
             original_init(database, *args, **kwargs)
             wrapped_classifier_descriptors.append(
-                database.process.stdin.fileno()
+                database._owned_pipes["stdin"].descriptor
             )
             wrapper = CloseRaisesBeforeDelegate(
                 database.process.stdin, RuntimeError
@@ -14762,7 +15486,7 @@ def run_control(name: str, root: Path):
             recovered_close_result["audit_exit"] == 2
             and recovered_close_result["classification"] == "unreadable"
             and not recovered_close_result["actions"]
-            and "raw descriptor recovered" in recovered_close_result[
+            and "cleanup ended closed" in recovered_close_result[
                 "evidence_verdict"
             ]["reason"]
             and wrapped_classifier_descriptors
@@ -14821,6 +15545,144 @@ def run_control(name: str, root: Path):
                 "evidence_verdict"
             ]["reason"]
         )
+
+        reuse_metrics = Metrics()
+        reuse_database = ObjectDatabase(root, reuse_metrics)
+        reuse_database.process.terminate()
+        reuse_database.process.wait(timeout=5)
+        reused_descriptor = reuse_database._owned_pipes["stdin"].descriptor
+        reuse_wrapper = CloseRaisesBeforeDelegate(
+            reuse_database.process.stdin, RuntimeError
+        )
+        reuse_database.process.stdin = reuse_wrapper
+        reuse_failure = None
+        try:
+            reuse_database.close()
+        except BaseException as error:
+            reuse_failure = f"{type(error).__name__}:{error}"
+        replacement_descriptors = []
+        try:
+            for _index in range(8):
+                descriptor = os.open(os.devnull, os.O_RDWR)
+                replacement_descriptors.append(descriptor)
+                if descriptor == reused_descriptor:
+                    break
+            repeated_failures = []
+            for operation in (reuse_database.close, reuse_database.abort):
+                try:
+                    operation()
+                except BaseException as error:
+                    repeated_failures.append(
+                        f"{type(error).__name__}:{error}"
+                    )
+            forced_fd_reuse_safe = bool(
+                reused_descriptor in replacement_descriptors
+                and reuse_failure is not None
+                and "cleanup ended closed" in reuse_failure
+                and not repeated_failures
+                and reuse_database._owned_pipes["stdin"].state == "CLOSED"
+                and all(
+                    not descriptor_is_closed(descriptor)
+                    for descriptor in replacement_descriptors
+                )
+            )
+        finally:
+            for descriptor in replacement_descriptors:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+
+        cancellation_resources = prepare_explicit_parent_pipes(
+            ("stdin", "stdout")
+        )
+        cancellation_child = REAL_POPEN(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os,signal,time;"
+                    "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+                    "os.write(1,b'R');time.sleep(60)"
+                ),
+            ],
+            stdin=cancellation_resources["stdin"]["child"],
+            stdout=cancellation_resources["stdout"]["child"],
+            stderr=subprocess.DEVNULL,
+        )
+        cancellation_child._agentfold_owned_pipes = (
+            attach_explicit_parent_pipes(
+                cancellation_child, cancellation_resources
+            )
+        )
+        if cancellation_child.stdout.read(1) != b"R":
+            raise RuntimeError("cancellation child did not become ready")
+
+        class ThrowableCleanupProcess:
+            def __init__(self, child):
+                self.child = child
+                self.stdin = child.stdin
+                self.stdout = child.stdout
+                self.wait_calls = 0
+                self.terminate_calls = 0
+                self.kill_calls = 0
+
+            @property
+            def returncode(self):
+                return self.child.returncode
+
+            def poll(self):
+                return self.child.poll()
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                if self.wait_calls == 1:
+                    raise KeyboardInterrupt(
+                        "injected cancellation during wait"
+                    )
+                return self.child.wait(timeout=timeout)
+
+            def terminate(self):
+                self.terminate_calls += 1
+                raise RuntimeError("injected terminate failure")
+
+            def kill(self):
+                self.kill_calls += 1
+                return self.child.kill()
+
+        cancellation_database = ObjectDatabase.__new__(ObjectDatabase)
+        cancellation_database.root = root
+        cancellation_database.metrics = Metrics()
+        cancellation_database.damage = Damage()
+        cancellation_database.process = ThrowableCleanupProcess(
+            cancellation_child
+        )
+        cancellation_database._owned_pipes = (
+            cancellation_child._agentfold_owned_pipes
+        )
+        cancellation_database._reaped = False
+        cancellation_database._termination_requested = False
+        cancellation_database._kill_requested = False
+        cancellation_database.wait_timeout = 0.1
+        cancellation_failure = None
+        cancellation_notes = []
+        try:
+            cancellation_database.abort()
+        except BaseException as error:
+            cancellation_failure = type(error).__name__
+            cancellation_notes = list(getattr(error, "__notes__", ()))
+        cancellation_cleanup_completed = bool(
+            cancellation_failure == "KeyboardInterrupt"
+            and cancellation_database.process.kill_calls == 1
+            and cancellation_child.poll() is not None
+            and cancellation_database.metrics.object_process_reaps == 1
+            and all(
+                ownership.state == "CLOSED"
+                for ownership in cancellation_database._owned_pipes.values()
+            )
+            and any(
+                "RuntimeError during resource cleanup" in note
+                for note in cancellation_notes
+            )
+        )
         original_close = ObjectDatabase.close
 
         def close_then_report_unproved_reap(database):
@@ -14853,6 +15715,8 @@ def run_control(name: str, root: Path):
             and metrics_published_after_close
             and classifier_fallback_closed
             and unclosed_descriptor_failed_closed
+            and forced_fd_reuse_safe
+            and cancellation_cleanup_completed
             and cleanup_failure_closed
         )
         return {
@@ -14876,6 +15740,26 @@ def run_control(name: str, root: Path):
                 "unclosed_descriptor_failed_closed": (
                     unclosed_descriptor_failed_closed
                 ),
+                "forced_fd_reuse_safe": forced_fd_reuse_safe,
+                "cancellation_cleanup_completed": (
+                    cancellation_cleanup_completed
+                ),
+                "cancellation_cleanup_notes": cancellation_notes,
+                "cancellation_cleanup_state": {
+                    "kill_calls": cancellation_database.process.kill_calls,
+                    "process_reaps": (
+                        cancellation_database.metrics.object_process_reaps
+                    ),
+                    "returncode_is_set": (
+                        cancellation_child.poll() is not None
+                    ),
+                    "owned_states": {
+                        label: ownership.state
+                        for label, ownership in (
+                            cancellation_database._owned_pipes.items()
+                        )
+                    },
+                },
                 "cleanup_failure_closed": cleanup_failure_closed,
             },
         }
@@ -15558,18 +16442,55 @@ def audit_event(
                 "typed_origin_strategy": "U",
             },
         }
-    scope = (
-        contextlib.nullcontext()
-        if transaction is None
-        else transaction()
-    )
-    with scope as observer:
-        with observe_git_spawns(observer):
-            result = ordinary_audit(
-                root, endpoints.O, endpoints.N, budget_limit, "U"
-            )
-    result["event_adapter"] = endpoints.evidence()
-    return result
+    if not AUDIT_SINGLE_FLIGHT.acquire(blocking=False):
+        busy_reason = (
+            "audit-busy: another production-helper audit owns the "
+            "process-local compatibility boundary"
+        )
+        event_adapter = endpoints.evidence()
+        event_adapter.update(
+            {"reason": busy_reason, "status": "audit-busy"}
+        )
+        return {
+            "scenario": "ordinary-event-audit",
+            "C": None,
+            "O": endpoints.O,
+            "N": endpoints.N,
+            "input_contract": {
+                "schema": "restack-provenance-input/v2",
+                "authoritative_endpoints": ["O", "N"],
+                "origin_strategy": "U",
+            },
+            "audit_exit": 2,
+            "classification": "unreadable",
+            "evidence_verdict": {
+                "status": "unreadable", "reason": busy_reason
+            },
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+            "metrics": Metrics().as_dict(),
+            "event_adapter": event_adapter,
+        }
+    try:
+        scope = (
+            contextlib.nullcontext()
+            if transaction is None
+            else transaction()
+        )
+        with scope as observer:
+            with observe_git_spawns(observer):
+                result = ordinary_audit(
+                    root, endpoints.O, endpoints.N, budget_limit, "U"
+                )
+        result["event_adapter"] = endpoints.evidence()
+        return result
+    finally:
+        AUDIT_SINGLE_FLIGHT.release()
 
 
 def main(argv=None):
