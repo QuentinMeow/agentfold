@@ -3936,3 +3936,181 @@ limit-plus-one damage controls remain.
 Production remains unopened. The external launcher and sealed-runtime requirements are part
 of core/adapter feasibility review; a new immutable SHA needs all three base lenses before
 the remaining budget and core-fit gates.
+
+## 2026-09-01 correction amendment 28 — closed execution evidence and rooted launch
+
+Fresh review of `cf2dd89520caec1bb855eb8f7c53516705affaf6` rejected three
+cross-layer contradictions: closed result/receipt schemas had nowhere to carry new execution
+identities; a worktree installer was not an independent local trust root; and a launcher
+cannot enumerate mappings loaded only after `execve`. It also found open JSON representations
+and a first-canary receipt cycle. This amendment supersedes all result/canary/publication
+schemas affected by execution identity, gives both policy manifests exact encodings, splits
+canary-time manifest trust from activation-time receipt trust, and narrows native-runtime
+attestation to the sealed root that can actually be proven.
+
+### Launcher policy has one canonical representation
+
+`launcher-policy/v1` uses the existing ASCII canonical-JSON-plus-LF encoder and duplicate-key
+refusal. Its top-level keys are exactly
+`schema,architecture,executable,argv_schema,environment,kernel_capabilities`.
+
+- `schema` is `agentfold-launcher-policy/v1` and `architecture` is the first-release literal
+  `x86_64-linux-gnu`.
+- `executable` has exactly `format,mode,size,sha256,static`: `format=elf64`,
+  `mode=100755`, size is decimal `1..16,777,216`, SHA-256 uses the lowercase prefixed form,
+  and `static` is JSON true. The ELF verifier independently requires no `PT_INTERP`, dynamic
+  section, executable stack, or trailing second executable.
+- `argv_schema` is exactly this JSON string array:
+  `["--authority-manifest-fd=3","--runtime-manifest-fd=4","--git-dir-fd=5","--old=<full-oid>","--new=<full-oid>"]`.
+  At invocation the two placeholders are replaced once by lowercase full non-zero
+  object-format OIDs; every other byte is literal.
+- `environment` is the exact empty object. The host closes the environment and launcher
+  synthesizes the evaluator environment from its runtime profile.
+- `kernel_capabilities` is the exact sorted string array
+  `close-range,mount-namespace,pivot-root,private-propagation,read-only-bind,sealed-tmpfs,user-namespace`.
+
+The manifest is at most 65,536 bytes including LF; scalar strings retain the 8 KiB bound.
+Decode/re-encode, exact ELF/manifest agreement, every field/enum/ordering mutation, cap/+1,
+and executable size/hash/mode drift are golden cases. `launcher_policy_sha256` always hashes
+these canonical bytes, not an informal capability list or the executable alone.
+
+### Runtime profile has exact JSON types
+
+`runtime-profile/v1` retains amendment 27's top-level key set and limits with these exact
+representations:
+
+- `schema` is `agentfold-runtime-profile/v1`; `implementation` is `cpython`.
+- `version` is an object with exactly `major,minor,micro,releaselevel,serial`. The first
+  three and serial are JSON integers `0..65,535`; release level is one of
+  `alpha|beta|candidate|final`.
+- `cache_tag`, `abi`, `soabi`, and `platform` are nonempty provider-independent ASCII strings
+  of at most 128 bytes. `magic_number` is exactly eight lowercase hex characters encoding
+  the four bytes in their observed order. `byteorder` is `little|big`; none is nullable.
+- `flags` has exactly the integer-valued keys
+  `bytes_warning,context_aware_warnings,debug,dev_mode,dont_write_bytecode,gil,hash_randomization,ignore_environment,inspect,int_max_str_digits,interactive,isolated,no_site,no_user_site,optimize,quiet,safe_path,thread_inherit_context,utf8_mode,verbose,warn_default_encoding`.
+  Boolean-like values are encoded as integer 0|1; `optimize`, `bytes_warning`, and `verbose`
+  are `0..2`; `int_max_str_digits` is `0..1,000,000`. The selected profile must report the
+  exact values produced by the fixed invocation, including isolated/no-site/no-bytecode/
+  safe-path/UTF-8 requirements.
+- `invocation` is exactly
+  `["/runtime/bin/python3","-I","-S","-B","-X","utf8","/policy/ref_update.py"]`.
+  `locale` is `C.UTF-8`; `timezone` is `UTC`.
+- `files` is sorted by strict UTF-8 path bytes. Each exact
+  `role,path,mode,size,sha256` object has role in
+  `interpreter|dynamic-loader|shared-library|stdlib-source|stdlib-extension|encoding|runtime-data`,
+  a normalized relative path in the amendment-25 unquoted byte domain, regular mode
+  `100644|100755`, decimal size, and lowercase prefixed SHA-256. No two rows share a path.
+
+The existing 2 MiB manifest, 1,024-row, per/aggregate path, 128 MiB per-file, and 512 MiB
+aggregate-file bounds remain. The profile verifier compares every scalar to the running
+interpreter after exec; file identity is enforced by the launcher's sealed-root construction.
+Independent encoders cover all release levels, flag extrema, null/wrong JSON types,
+magic-number byte order, enum/key/order damage, files exact/+1, and byte-identical profiles
+from two independently built roots.
+
+### V2 result names every execution identity
+
+The complete canonical classifier result becomes `agentfold-ref-update/v2` with exactly:
+
+```text
+schema,execution,old,new,common,state,rows,counters
+```
+
+This supersedes the v1 `policy` scalar. `execution` has exactly
+`launcher_policy,runtime_profile,authority_policy,execution_policy`; all four are lowercase
+`sha256:<64-hex>` strings, and `execution_policy` must recompute from the other three using
+amendment 27's fixed transcript. Endpoint/state/row/counter schemas and result-size/delivery
+bounds are otherwise unchanged. Minimal incomplete output remains a separate stable
+diagnostic with exit 2 and is never decoded as a complete result. Every local/provider
+acceptance parser requires v2 and the exact execution object; v1, a fifth digest, reordered
+meaning, authority-only identity, or recomputation mismatch refuses.
+
+The canary artifact becomes `agentfold-ref-update-canary-artifact/v3`; its exact top-level
+keys are
+`schema,tested_commit,execution,adapter_policy,launcher_artifact,fixture,workflow,rows,cleanup`.
+The receipt becomes `agentfold-ref-update-canary-receipt/v3` with those keys plus `artifact`.
+`execution` is byte/object-equal to result v2, and `adapter_policy` is one prefixed digest.
+Existing fixture/workflow/row/cleanup/artifact shapes remain unless superseded here.
+
+`launcher_artifact` has exactly
+`repository_id,repository_full_name,workflow_id,workflow_path,workflow_sha,head_sha,run_id,run_attempt,conclusion,artifact_id,name,archive_size,archive_sha256,architecture,executable_mode,executable_size,executable_sha256`.
+Repository/workflow/run identities use the existing attempt-specific provider grammar,
+match the trusted base repository, and are re-fetched by exact run attempt; workflow/head
+SHAs are full OIDs and conclusion is `success`. Name is
+`agentfold-ref-update-launcher-v1-x86_64`; architecture and executable mode are the launcher
+policy literals; archive/executable sizes and digests are independently bound. The archive
+contains exactly one regular non-link entry `launcher` with the recorded `100755` mode and
+payload; the existing safe archive grammar/caps apply. Provider metadata must bind the
+artifact to that exact trusted build run/attempt and show it unexpired.
+
+Every completed scenario result is v2 and its existing `result_sha256` hashes the full v2
+line. The attempt log marker publication becomes
+`agentfold-ref-update-publication/v2` and adds exactly one `execution` object to the prior
+closed keys; the two per-scenario artifact names use `...-event-v2-...` and
+`...-result-v2-...`. Artifact v3, receipt v3, publication v2, scenario row, downloaded result,
+and Gate 3 require byte/object-equal execution identities. No field is hidden in numeric
+counters or inferred from a job conclusion.
+
+### Canary bootstrap uses manifests; activation uses the receipt
+
+The first-run cycle is split explicitly:
+
+1. Gate 2 lands dormant authority/adapter code, canonical launcher-policy and runtime-profile
+   manifests, and the exact trusted-build `launcher_artifact` locator on the default branch.
+2. The trusted default-branch canary workflow authenticates launcher/runtime against those
+   base-commit manifests and locator. It does **not** require a receipt that this canary is
+   being run to create.
+3. The independent verifier re-fetches the build artifact and every canary attempt, validates
+   the manifests and execution identities, and lands receipt v3 in a separate core-data PR.
+4. Gate 3 and every activated production run require the immutable-base receipt v3, re-fetch
+   its launcher artifact/provider evidence, and compare launcher/runtime/authority/adapter/
+   execution values before evaluator exec. Expiry or provider failure leaves legacy
+   continuity active.
+
+A launcher/runtime update returns to step 1 with new manifests and a new canary; an old
+receipt cannot start activation or production for it. Manifest trust is permitted only for
+the dormant canary that creates the new receipt, never as a production substitute.
+
+### Local placement is not local attestation
+
+`automation/install.py` may copy a launcher and manifests into the Git common directory for
+convenience, but the copy and its provenance record establish no authority. Accepted local
+execution requires a **host-owned verifier** outside the repository/worktree/Git common
+directory. On every invocation that verifier opens the expected launcher with no-follow,
+compares it to an immutable host-configured launcher-policy digest, verifies the runtime
+profile, and executes the already opened binary by trusted fd semantics. The expected digest
+must come from a user-selected trusted default-branch receipt or host image, not from the
+current worktree or installer output.
+
+The host verifier may be an immutable-image/container service, fs-verity/IMA-backed runner,
+or equivalent implementation of the same protocol; it is an optional local adapter and is
+not installed or configured by core. Without it, local Strategy A authority is explicitly
+unavailable. A direct staged-launcher command may be documented only as untrusted diagnostic
+output and cannot satisfy parity, clear a remote unavailable edge, produce a receipt, or be
+accepted by activation. Tests replace the installer, staged binary, provenance record,
+expected digest, and binary between verification and exec; only the host-rooted fd execution
+can yield an accepted v2 result.
+
+### Sealed-root membership replaces future mapping enumeration
+
+The launcher no longer claims to observe mappings that `execve` has not created. Before
+pivot it verifies every runtime-profile file and constructs a private root containing no
+other regular file or symlink. Policy, Git-object, and scratch mounts are `nodev,nosuid,noexec`;
+runtime is immutable read-only `nodev,nosuid` and is the only executable/file-loader search
+root. Loader configuration, absolute dependency paths, invocation path, and sanitized
+environment resolve only inside `/runtime`. The original host root is detached before exec.
+
+Consequently CPython's dynamic loader and allowed extension imports can map only files that
+already have runtime-profile rows. The evaluator validates scalar `sys`/flag/profile values
+and the closed preloaded module names after startup, then removes late filesystem importers;
+it does not enumerate native mappings through absent `/proc`. Anonymous mappings, the kernel
+vDSO, and already authenticated executable pages are not runtime files and are not falsely
+represented as manifest rows. A path resolution outside runtime, late `dlopen`, new file in
+the sealed root, writable/remounted runtime, or loader-environment influence is unavailable.
+Tests add each unlisted library/config/search path and require failure at construction or
+load rather than a post-hoc mapping claim.
+
+### Gate boundary
+
+Production remains unopened. All execution/evidence schemas and trust paths changed, so one
+new immutable SHA needs the three base lenses before budget and core-fit review.

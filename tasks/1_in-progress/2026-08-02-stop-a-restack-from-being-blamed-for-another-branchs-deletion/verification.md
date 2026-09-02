@@ -123,6 +123,24 @@ Literal magic-path Git probes, revised v2 arithmetic, safe unquoted-path classes
 four-independent/two-derived scratch ledger passed. Budget and core-fit lenses were not run.
 Production remained unopened.
 
+## Superseded external-root review
+
+**Reviewed revision:** `cf2dd89520caec1bb855eb8f7c53516705affaf6`
+
+- semantic/DAG / a26-design-consistency: `block` — strict result/receipt schemas could not
+  carry launcher/runtime/execution identities, the local installer self-vouched, and the
+  launcher claimed to attest native mappings that existed only after exec.
+- workflow/provider / r19-semantic-design: `block` — the first canary required the receipt it
+  was meant to create, local launch lacked a host root, and exact artifact/receipt fields for
+  the new identities were absent.
+- CLI/resource / am22-cli-review: `block` — launcher/runtime policy JSON types were open,
+  result v1 contradicted new digest fields, and a staged local launcher could be replaced
+  before its first instruction.
+
+The sealed mount/pivot/descriptor sequence, literal Git pathspecs, v2 arithmetic, and derived
+adapter totals passed their assigned controls. Budget and core-fit lenses were not run.
+Production remained unopened.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

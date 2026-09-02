@@ -463,3 +463,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Reclassified authority/adapter framing, adapter payload aggregate, and total input as
   source-derived observations with observed-red damage controls.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Closed execution-evidence and rooted-local correction (codex)
+
+- Three fresh reviews blocked amendment 27 on closed-schema conflicts, a first-canary receipt
+  cycle, self-vouching local installation, open policy JSON types, and pre-exec mapping claims.
+- Defined canonical launcher/runtime manifests, result v2 execution identity, canary/receipt
+  v3, publication v2, and an exact provider launcher-artifact locator.
+- Split dormant canary manifest trust from receipt-required activation/production, so a new
+  launcher can produce but cannot bypass its independent receipt.
+- Made `install.py` placement non-authoritative; accepted local use now requires a host-owned
+  per-invocation verifier or remains explicitly unavailable.
+- Replaced future native-mapping enumeration with an immutable root in which every loadable
+  runtime file is already manifested and no original host/source namespace exists.
+- Production remains unopened pending another full five-lens immutable-revision review.
