@@ -34,9 +34,11 @@ schema, old, new, common, state, rows
 ```
 
 `old` and `new` bind the invocation's full `O` and `N` object IDs. `common` is exactly one
-full shared-boundary object ID; a run with zero or multiple merge bases fails closed before
-it can emit accepted result bytes. `state` is `clean` only when `rows` is empty and
-`blocked` only when at least one row exists. Each row has exactly
+trusted invocation-bound full shared-boundary object ID, not an array or a set. A run with
+zero or multiple merge bases fails closed before it can emit accepted result bytes, and
+provider projection rejects a forged `common` even when the receipt digest is recomputed.
+`state` is `clean` only when `rows` is empty and `blocked` only when at least one row exists.
+Each row has exactly
 `identity,paths,status,reasons,finding`, matching the accepted production row surface while
 remaining an illustrative POC projection rather than a claim that this evaluator implements
 all production row semantics. No counter, implementation name, runtime value, limit,
@@ -50,7 +52,7 @@ without depending on parsed object order, re-encodes, and compares every byte. I
 duplicate keys; unknown and legacy keys; wrong types (including JSON booleans where
 integers are required); alternate escapes; unsorted transport key order; whitespace and
 CRLF; prefix or suffix bytes; a missing LF; inconsistent rows, kinds, reasons, or state;
-and `old`/`new` values that differ from the invocation.
+and `old`/`new`/`common` values that differ from the invocation.
 
 ### Executable non-uniqueness counterexample
 
@@ -75,36 +77,63 @@ observations. This is the concrete counterexample to putting operational counter
 semantic digest: both implementations conform and reach the same authoritative answer, so
 neither counter pair may make one answer a different result.
 
+### Typed-U composition
+
+The semantic-boundary executable does not duplicate the production classifier. It imports
+the production-contract prototype behind a narrow adapter shaped around the planned
+`event_endpoints(event_kind, payload)` and
+`audit_event(root, event_kind, payload, *, budget_limit=None)` interfaces. This branch does
+not yet contain deterministic event payload builders, so the adapter temporarily falls
+back to the current production `r18_origin_fixture(..., strategy="U")` plus `Classifier`
+entry point.
+
+Two Strategy-U outputs are then passed through this module's canonical semantic result,
+separate receipt, and provider projection using the invocation's expected `common`: a real
+non-fast-forward normal restack that projects `clean`, and an illegal agent-action birth
+that projects `blocked` with one row in the exact
+`identity,paths,status,reasons,finding` shape. The typed-U row identity is the production
+identity payload, while this POC still does not claim to implement every production row
+semantic itself.
+
 ### Execution receipt and incomplete runs
 
 The run-scoped receipt is a separately canonical JSON transport with schema
 `restack-queue-execution-receipt/v1`. It records `result_sha256` or `null`, implementation,
-Python/Git/platform, budget profile, limits, used counters, exit, incomplete reason, and
-cleanup observations. A provider projection (the provider-facing clean/blocked/incomplete
-view) accepts a semantic result only when the strict result decoder succeeds and the
+Python/platform plus a non-spawned Git runtime marker, budget profile, limits, used
+counters, exit, incomplete reason, and cleanup observations. Receipt bytes use the same
+repository-canonical sorted-key JSON plus LF transport as semantic results and are rejected
+over their configured byte bound before parsing. A provider projection (the provider-facing
+clean/blocked/incomplete view) accepts a semantic result only when the strict result
+decoder succeeds against the invocation's expected `old`, `new`, and `common`, and the
 receipt digest matches. Receipt counters never alter the rows or state.
 
 An absent result plus a valid incomplete receipt projects to `incomplete`, never `clean`.
 There is no incomplete semantic result: budget refusal, provider failure, serialization
 refusal, injected fault, digest mismatch, or failed cleanup produces no accepted result
 bytes. A receipt claiming completion without a digest, or incompleteness with a digest, is
-itself invalid.
+itself invalid. A receipt is also invalid when a non-null operational limit is lower than
+the recorded used counter, such as `limits.spawns=0` with `used.spawns=1`.
 
 ### Deterministic budgets and cleanup
 
 The POC charges each bounded operation before its callback: snapshot request, read,
-allocation, child spawn, retained bytes, result write, and written bytes. A run with every
-limit set to its observed use succeeds. Seven observed-minus-one controls lower each
+allocation, child spawn, retained bytes, result write, and written bytes. Repository
+fingerprint Git calls and index-byte reads are charged too, while runtime Git version
+probing was removed from the receipt so it cannot be an unmetered subprocess. A run with
+every limit set to its observed use succeeds. Seven observed-minus-one controls lower each
 reachable maximum independently and prove that the run refuses before accepting a partial
 result. Seven direct `N+1` controls also prove that the rejected callback is never invoked.
+A synthetic `spawns=0` run completes only because no child process is required; a real-Git
+`spawns=0` run is wrapped with `subprocess.run` and `subprocess.Popen` forbidden and
+fails closed before either can be called.
 
 Result bytes remain staged until evaluation and cleanup succeed. On every complete or
 incomplete path, the transaction clears its cache, terminates and reaps live children,
 closes process streams and explicit descriptors, and compares repository refs, worktree
 status, and index bytes with their pre-run fingerprints. The fault controls interrupt after
-the first cached snapshot, after a real child spawn, after a real descriptor open, and
-immediately before result commit. Every interruption emits only an incomplete receipt and
-leaves the real-Git fixture unchanged.
+the first cached snapshot, after a real child spawn, after a real descriptor open, after
+result construction, after cleanup, and immediately before publication. Every interruption
+emits only an incomplete receipt and leaves the real-Git fixture unchanged.
 
 ### Cardinality decision
 
@@ -120,29 +149,32 @@ receipt-only telemetry.
 
 The new self-test preserves the existing 29-scenario test and independently covers strict
 round trips, the `6/5` versus `1/0` counterexample, fast-forward, divergent clean and
-blocked, provider projection, incomplete runs, exact and `N+1` budgets, observed-minus-one
-maxima, cleanup/fault injection, a 2,048-row result, serialization byte/row bounds, decode
-byte bounds, sorted-key transport, single-common enforcement, and two absolute fixture
-roots:
+blocked, typed-U clean and blocked composition, provider projection, incomplete runs, exact
+and `N+1` budgets, observed-minus-one maxima, cleanup/fault injection, a 2,048-row result,
+serialization byte/row bounds, result and receipt decode byte bounds, sorted-key transport,
+single-common enforcement, receipt counter-limit consistency, zero-spawn controls, and two
+absolute fixture roots:
 
 ```sh
 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --self-test
 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --self-test
 ```
 
-The second command emitted 57 named damage-control records followed by this exact summary
-on 2026-09-02 with Python 3.14.7 and Git 2.55.0:
+The second command emitted 78 named damage-control records followed by this exact summary
+on 2026-09-02 with Python 3.14.7:
 
 ```json
-{"checks_passed":89,"checks_total":89,"counterexample":"6/5-vs-1/0","damage_controls_passed":57,"damage_controls_total":57,"large_rows":2048,"real_git_cases":4,"summary":"PASS","synthetic_cases":4}
+{"checks_passed":118,"checks_total":118,"counterexample":"6/5-vs-1/0","damage_controls_passed":78,"damage_controls_total":78,"large_rows":2048,"real_git_cases":4,"summary":"PASS","synthetic_cases":4,"typed_u_cases":2}
 ```
 
-The 57 controls are 23 strict transport/schema rejections, including observed-red probes
-for array `common`, zero or multiple merge bases, unsorted result bytes, and decode byte limits;
-two serialization-bound refusals; seven observed-minus-one incomplete runs; seven `N+1`
-pre-charge refusals plus seven callback-not-run checks; nine fault/cleanup checks; and two
-provider incomplete/digest checks. The self-test prints each name and `PASS`, so no grouped
-total can hide a skipped control.
+The 78 controls include strict result and receipt transport/schema rejections; observed-red
+probes for array `common`, zero or multiple merge bases, invocation-common mismatch,
+forged-common plus recomputed receipt digest, unsorted result and receipt bytes, result and
+receipt decode byte limits, and every `used > non-null limit` counter; exact-limit and
+zero/zero receipt counter successes; serialization-bound refusals; observed-minus-one
+incomplete runs; `N+1` pre-charge refusals plus callback-not-run checks; zero-spawn
+subprocess monkeypatch checks; fault/cleanup checks; and provider incomplete/digest checks.
+The self-test prints each name and `PASS`, so no grouped total can hide a skipped control.
 
 Cross-implementation comparison:
 
@@ -153,8 +185,8 @@ cmp /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
 shasum -a 256 /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
 ```
 
-The comparison exited 0. Each file contained six results and 2,505 bytes with SHA-256
-`0fe3dca2eeb7d6cdf5db483b7862caa7f54ac858154996bf3a971fea6b84fe18`.
+The comparison exited 0. Each file contained eight results and 3,976 bytes with SHA-256
+`557637e11a2c1357c684e671c2af7ee55f5b917131f4c6300f946a5594e65de9`.
 
 Two-environment comparison, changing hash seed, locale, timezone, Python cache root,
 implementation, and absolute fixture root:
@@ -166,7 +198,7 @@ cmp /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
 shasum -a 256 /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
 ```
 
-That comparison also exited 0 with the same six lines, 2,505 bytes, and SHA-256 above.
+That comparison also exited 0 with the same eight lines, 3,976 bytes, and SHA-256 above.
 
 ## Result
 

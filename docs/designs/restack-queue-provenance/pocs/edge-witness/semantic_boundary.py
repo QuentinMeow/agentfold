@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -64,11 +65,20 @@ CLEANUP_KEYS = (
 )
 IMPLEMENTATIONS = ("identity-node-cache", "shared-object-batch")
 DEFAULT_MAX_BYTES = 8 * 1024 * 1024
+DEFAULT_MAX_RECEIPT_BYTES = DEFAULT_MAX_BYTES
 DEFAULT_MAX_ROWS = 4096
 OID_LENGTHS = (40, 64)
 FINDING_CHECK = "restack-queue-semantic-boundary-poc"
+TYPED_U_FINDING_CHECK = "restack-queue-production-contract-strategy-u"
 ROW_CHANGE_KINDS = ("unauthorized-deletion", "unauthorized-rewrite")
 ROW_STATUSES = ("preserved", "valid", "none", "invalid", "ambiguous")
+TYPED_U_IDENTITY_KEYS = (
+    "actor",
+    "kind",
+    "leaf",
+    "production_tuple",
+    "production_tuple_sha256",
+)
 ROW_REASON_CODES = {
     "unauthorized-deletion": "old-action-absent-without-matching-deletion-proof",
     "unauthorized-rewrite": "old-action-identity-changed-without-matching-proof",
@@ -106,6 +116,14 @@ class BudgetExceeded(RuntimeError):
 
 class InjectedFault(RuntimeError):
     """A deterministic test fault."""
+
+
+class CleanupFailed(RuntimeError):
+    """Cleanup could not prove its postconditions within the receipt budget."""
+
+    def __init__(self, reason: str, cleanup):
+        self.cleanup = cleanup
+        super().__init__(reason)
 
 
 class JsonObject(list):
@@ -183,6 +201,14 @@ class CodecLimits:
         _require_exact_int(self.max_rows, "max_rows", 0)
 
 
+@dataclasses.dataclass(frozen=True)
+class ReceiptLimits:
+    max_bytes: int = DEFAULT_MAX_RECEIPT_BYTES
+
+    def __post_init__(self):
+        _require_exact_int(self.max_bytes, "receipt max_bytes", 0)
+
+
 def _require_path(value, context: str):
     if type(value) is not str or not value or "\x00" in value:
         raise ContractError(f"{context} must be a nonempty NUL-free string")
@@ -198,6 +224,15 @@ def _validate_sorted_string_list(value, allowed, context: str):
     if value != sorted(set(value), key=lambda item: item.encode("utf-8")):
         raise ContractError(f"{context} must be sorted and duplicate-free")
     return value
+
+
+def _require_sha256(value, context: str):
+    if not (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    ):
+        raise ContractError(f"{context} must be one lowercase SHA-256 digest")
 
 
 def _canonical_json_bytes(value):
@@ -238,9 +273,17 @@ def _row_for_change(path: str, kind: str, old_blob: str, new_blob: str | None):
     }
 
 
-def _validate_row(value, position: int):
-    row = _schema_object(value, ROW_KEYS, f"row {position}")
-    identity = _schema_object(row["identity"], ROW_IDENTITY_KEYS, f"row {position} identity")
+def _validate_finding(value, position: int):
+    finding = _schema_object(value, ROW_FINDING_KEYS, f"row {position} finding")
+    if finding["check"] not in {FINDING_CHECK, TYPED_U_FINDING_CHECK}:
+        raise ContractError(f"row {position} finding check is inconsistent")
+    for key in ("subject", "message", "fix"):
+        if type(finding[key]) is not str or not finding[key] or "\x00" in finding[key]:
+            raise ContractError(f"row {position} finding.{key} must be nonempty text")
+    return finding
+
+
+def _validate_edge_row(row, identity, position: int):
     kind = identity["kind"]
     if kind not in ROW_CHANGE_KINDS:
         raise ContractError(f"row {position} has an unknown illustrative kind")
@@ -274,7 +317,7 @@ def _validate_row(value, position: int):
         if row["finding"] is not None:
             raise ContractError(f"row {position} preserved/valid rows require null finding")
     else:
-        finding = _schema_object(row["finding"], ROW_FINDING_KEYS, f"row {position} finding")
+        finding = _validate_finding(row["finding"], position)
         if finding["check"] != FINDING_CHECK:
             raise ContractError(f"row {position} finding check is inconsistent")
         if finding["subject"] != path:
@@ -284,6 +327,65 @@ def _validate_row(value, position: int):
         if finding["fix"] != ROW_FIXES[kind]:
             raise ContractError(f"row {position} finding fix is inconsistent")
     return row
+
+
+def _validate_typed_u_row(row, identity, position: int):
+    for key in ("actor", "kind", "leaf"):
+        _require_path(identity[key], f"row {position} identity.{key}")
+    production_tuple = identity["production_tuple"]
+    if type(production_tuple) is not list or not production_tuple:
+        raise ContractError(f"row {position} identity.production_tuple must be a nonempty array")
+    for index, item in enumerate(production_tuple):
+        if type(item) is not str or not item or "\x00" in item:
+            raise ContractError(
+                f"row {position} identity.production_tuple[{index}] must be nonempty text"
+            )
+    _require_sha256(
+        identity["production_tuple_sha256"],
+        f"row {position} identity.production_tuple_sha256",
+    )
+    paths = _validate_sorted_string_list(row["paths"], None, f"row {position} paths")
+    if not paths:
+        raise ContractError(f"row {position} typed-U finding must name at least one path")
+    status = row["status"]
+    if status not in ROW_STATUSES:
+        raise ContractError(f"row {position} has an unknown status")
+    reasons = _validate_sorted_string_list(row["reasons"], None, f"row {position} reasons")
+    if not reasons:
+        raise ContractError(f"row {position} typed-U finding must name at least one reason")
+    if status in {"preserved", "valid"}:
+        if row["finding"] is not None:
+            raise ContractError(f"row {position} preserved/valid rows require null finding")
+    else:
+        finding = _validate_finding(row["finding"], position)
+        if finding["check"] != TYPED_U_FINDING_CHECK:
+            raise ContractError(f"row {position} typed-U finding check is inconsistent")
+        if finding["subject"] != identity["production_tuple_sha256"]:
+            raise ContractError(f"row {position} typed-U finding subject is inconsistent")
+    return row
+
+
+def _validate_row(value, position: int):
+    row = _schema_object(value, ROW_KEYS, f"row {position}")
+    identity_pairs = _pairs(row["identity"], f"row {position} identity")
+    identity_keys = tuple(key for key, _item in identity_pairs)
+    if set(identity_keys) == set(ROW_IDENTITY_KEYS):
+        identity = _schema_object(
+            row["identity"],
+            ROW_IDENTITY_KEYS,
+            f"row {position} identity",
+        )
+        return _validate_edge_row(row, identity, position)
+    if set(identity_keys) == set(TYPED_U_IDENTITY_KEYS):
+        identity = _schema_object(
+            row["identity"],
+            TYPED_U_IDENTITY_KEYS,
+            f"row {position} identity",
+        )
+        return _validate_typed_u_row(row, identity, position)
+    raise ContractError(
+        f"row {position} identity is neither illustrative edge shape nor typed-U shape"
+    )
 
 
 def validate_result(value, limits=CodecLimits()):
@@ -350,12 +452,16 @@ def validate_receipt(value):
     budget = _schema_object(receipt["budget"], BUDGET_KEYS, "budget")
     if type(budget["profile"]) is not str or not budget["profile"]:
         raise ContractError("budget.profile must be a nonempty string")
-    _validate_counter_object(
+    limits = _validate_counter_object(
         budget["limits"], BUDGET_COUNTERS, "budget.limits", allow_null=True
     )
-    _validate_counter_object(
+    used = _validate_counter_object(
         budget["used"], OPERATIONAL_COUNTERS, "budget.used"
     )
+    for counter in BUDGET_COUNTERS:
+        limit = limits[counter]
+        if limit is not None and used[counter] > limit:
+            raise ContractError(f"budget.used.{counter} exceeds budget.limits.{counter}")
     _require_exact_int(receipt["exit"], "exit")
     if receipt["exit"] not in {0, 2}:
         raise ContractError("exit must be 0 (complete) or 2 (incomplete)")
@@ -439,9 +545,18 @@ def encode_result(value, limits=CodecLimits()):
     return encoded
 
 
-def encode_receipt(value):
+def encode_receipt(value, limits=ReceiptLimits()):
+    if type(limits) is not ReceiptLimits:
+        raise ContractError("receipt limits must be ReceiptLimits")
     validate_receipt(value)
-    return _dump(_native(value))
+    native = _native(value)
+    size = _json_size(native) + 1
+    if size > limits.max_bytes:
+        raise ContractError(f"execution receipt exceeds byte bound {limits.max_bytes}")
+    encoded = _dump(native)
+    if len(encoded) != size:
+        raise AssertionError("receipt size preflight drifted from encoder")
+    return encoded
 
 
 def _parse_exact(data, context: str):
@@ -469,7 +584,13 @@ def _parse_exact(data, context: str):
         raise ContractError(f"{context} is not one JSON value plus LF") from error
 
 
-def decode_result(data, invocation_old: str, invocation_new: str, limits=CodecLimits()):
+def decode_result(
+    data,
+    invocation_old: str,
+    invocation_new: str,
+    invocation_common: str,
+    limits=CodecLimits(),
+):
     if type(limits) is not CodecLimits:
         raise ContractError("limits must be CodecLimits")
     if type(data) is bytes and len(data) > limits.max_bytes:
@@ -479,12 +600,25 @@ def decode_result(data, invocation_old: str, invocation_new: str, limits=CodecLi
     native = _native(parsed)
     if _dump(native) != data:
         raise ContractError("semantic result is valid JSON but not exact canonical bytes")
-    if result["old"] != invocation_old or result["new"] != invocation_new:
-        raise ContractError("semantic result old/new do not match invocation O/N")
+    _require_oid(invocation_old, "invocation old")
+    _require_oid(invocation_new, "invocation new")
+    _require_oid(invocation_common, "invocation common")
+    if (
+        result["old"] != invocation_old
+        or result["new"] != invocation_new
+        or result["common"] != invocation_common
+    ):
+        raise ContractError(
+            "semantic result old/new/common do not match invocation O/N/C"
+        )
     return native
 
 
-def decode_receipt(data):
+def decode_receipt(data, limits=ReceiptLimits()):
+    if type(limits) is not ReceiptLimits:
+        raise ContractError("receipt limits must be ReceiptLimits")
+    if type(data) is bytes and len(data) > limits.max_bytes:
+        raise ContractError(f"execution receipt exceeds byte bound {limits.max_bytes}")
     parsed = _parse_exact(data, "execution receipt")
     validate_receipt(parsed)
     native = _native(parsed)
@@ -607,6 +741,30 @@ class GitSnapshotStore:
 
 
 @dataclasses.dataclass(frozen=True)
+class TypedUComposition:
+    """Narrow imported Strategy-U result source for the semantic boundary."""
+
+    scenario: str
+    classification: str
+    evidence_status: str
+    origin_strategy: str
+    common: str
+    state: str
+    rows: tuple[dict, ...]
+
+    def __post_init__(self):
+        for field in ("scenario", "classification", "evidence_status", "origin_strategy"):
+            value = getattr(self, field)
+            if type(value) is not str or not value:
+                raise ContractError(f"typed-U {field} must be a nonempty string")
+        if self.origin_strategy != "U":
+            raise ContractError("typed-U composition must be produced by Strategy U")
+        _require_oid(self.common, "typed-U common")
+        if self.state not in {"clean", "blocked"}:
+            raise ContractError("typed-U state must be clean or blocked")
+
+
+@dataclasses.dataclass(frozen=True)
 class ProofInput:
     label: str
     old: str
@@ -615,6 +773,7 @@ class ProofInput:
     revision_objects: tuple[tuple[str, str], ...]
     authorized_deletions: tuple[tuple[str, str], ...]
     store: object
+    typed_u: TypedUComposition | None = None
 
     def __post_init__(self):
         _require_oid(self.old, "proof old")
@@ -625,6 +784,19 @@ class ProofInput:
             raise ContractError("proof does not bind every old/new/common revision")
         if len(revisions) != len(self.revision_objects):
             raise ContractError("proof revision map contains duplicates")
+        if self.typed_u is not None:
+            if self.typed_u.common != self.common:
+                raise ContractError("typed-U composition common does not match proof")
+            validate_result(
+                {
+                    "schema": RESULT_SCHEMA,
+                    "old": self.old,
+                    "new": self.new,
+                    "common": self.common,
+                    "state": self.typed_u.state,
+                    "rows": list(self.typed_u.rows),
+                }
+            )
 
     def object_for(self, revision: str):
         return dict(self.revision_objects)[revision]
@@ -645,24 +817,22 @@ class RepositoryFingerprint:
     index_sha256: str
 
     @classmethod
-    def capture(cls, root: Path):
-        def git(*arguments):
-            result = subprocess.run(
-                ["git", *arguments],
-                cwd=root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            return result.stdout
-
-        refs = git("show-ref", "--head", "--dereference")
-        status = git("status", "--porcelain=v1", "-z", "--untracked-files=all")
-        index_path_text = git("rev-parse", "--git-path", "index").decode("utf-8").strip()
+    def capture(cls, root: Path, transaction):
+        refs = transaction.git_output(root, "show-ref", "--head", "--dereference")
+        status = transaction.git_output(
+            root,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        )
+        index_path_text = transaction.git_output(
+            root, "rev-parse", "--git-path", "index"
+        ).decode("utf-8").strip()
         index_path = Path(index_path_text)
         if not index_path.is_absolute():
             index_path = root / index_path
-        index_bytes = index_path.read_bytes() if index_path.exists() else b""
+        index_bytes = transaction.path_bytes(index_path) if index_path.exists() else b""
         return cls(refs, status, hashlib.sha256(index_bytes).hexdigest())
 
 
@@ -675,8 +845,19 @@ class EvaluationTransaction:
         self.children = []
         self.descriptors = []
         self.snapshot_calls = 0
-        root = proof.store.repository_root
-        self.before = RepositoryFingerprint.capture(root) if root is not None else None
+        self.before = None
+
+    def capture_before(self):
+        root = self.proof.store.repository_root
+        self.before = RepositoryFingerprint.capture(root, self) if root is not None else None
+
+    def path_bytes(self, path: Path):
+        def read():
+            return path.read_bytes()
+
+        data = self.budget.perform("reads", 1, read)
+        self.budget.charge("retained_bytes", len(data))
+        return data
 
     def _load_snapshot(self, object_oid: str):
         def load():
@@ -772,14 +953,22 @@ class EvaluationTransaction:
                 descriptors_closed = False
         self.cache.clear()
         root = self.proof.store.repository_root
-        after = RepositoryFingerprint.capture(root) if root is not None else None
-        if self.before is None:
+        cleanup_error = None
+        if root is None:
             repository_unchanged = worktree_unchanged = index_unchanged = True
+        elif self.before is None:
+            repository_unchanged = worktree_unchanged = index_unchanged = False
         else:
-            repository_unchanged = self.before.refs == after.refs
-            worktree_unchanged = self.before.status == after.status
-            index_unchanged = self.before.index_sha256 == after.index_sha256
-        return {
+            try:
+                after = RepositoryFingerprint.capture(root, self)
+            except (BudgetExceeded, ContractError) as error:
+                cleanup_error = str(error)
+                repository_unchanged = worktree_unchanged = index_unchanged = False
+            else:
+                repository_unchanged = self.before.refs == after.refs
+                worktree_unchanged = self.before.status == after.status
+                index_unchanged = self.before.index_sha256 == after.index_sha256
+        cleanup = {
             "caches_cleared": not self.cache,
             "children_terminated": children_terminated,
             "children_reaped": children_reaped,
@@ -788,12 +977,30 @@ class EvaluationTransaction:
             "worktree_unchanged": worktree_unchanged,
             "index_unchanged": index_unchanged,
         }
+        if cleanup_error is not None:
+            raise CleanupFailed(cleanup_error, cleanup)
+        return cleanup
 
 
 def _result_from_snapshots(proof: ProofInput, snapshots, budget: Budget):
     # One charged semantic-workspace allocation precedes all lookup tables and the
     # result-row container created by this evaluator phase.
     budget.charge("allocations", 1)
+    if proof.typed_u is not None:
+        rows = [dict(_native(row)) for row in proof.typed_u.rows]
+
+        def make_typed_result():
+            return {
+                "schema": RESULT_SCHEMA,
+                "old": proof.old,
+                "new": proof.new,
+                "common": proof.common,
+                "state": proof.typed_u.state,
+                "rows": rows,
+            }
+
+        return budget.perform("allocations", 1, make_typed_result)
+
     old_entries = dict(snapshots[proof.old].entries)
     new_entries = dict(snapshots[proof.new].entries)
     authorized = set(proof.authorized_deletions)
@@ -861,16 +1068,9 @@ class Execution:
 
 
 def _runtime():
-    git_version = subprocess.run(
-        ["git", "--version"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    ).stdout.strip()
     return {
         "python": sys.version.split()[0],
-        "git": git_version,
+        "git": "not-spawned-by-semantic-boundary-runtime",
         "platform": f"{platform.system().lower()}/{platform.machine().lower()}",
     }
 
@@ -889,8 +1089,18 @@ def execute(
     transaction = EvaluationTransaction(proof, budget, fault=fault)
     staged = None
     incomplete_reason = None
-    cleanup = None
+    cleanup_error = None
+    cleanup = {
+        "caches_cleared": False,
+        "children_terminated": False,
+        "children_reaped": False,
+        "descriptors_closed": False,
+        "repository_unchanged": False,
+        "worktree_unchanged": False,
+        "index_unchanged": False,
+    }
     try:
+        transaction.capture_before()
         if fault == "after-child-spawn":
             transaction.spawn_probe()
             raise InjectedFault("fault:after-child-spawn")
@@ -902,6 +1112,8 @@ def execute(
             "shared-object-batch": evaluate_shared_object_batch,
         }[implementation]
         result = evaluator(proof, transaction)
+        if fault == "after-result-construction":
+            raise InjectedFault("fault:after-result-construction")
         # The charge precedes validation's normalized object and the encoder's
         # canonical byte allocation. The retained-byte charge follows the allocation-
         # free size preflight and precedes materializing the transport bytes.
@@ -917,7 +1129,7 @@ def execute(
         staged = _dump(native)
         if len(staged) != predicted_size:
             raise AssertionError("result size preflight drifted")
-        decode_result(staged, proof.old, proof.new, codec_limits)
+        decode_result(staged, proof.old, proof.new, proof.common, codec_limits)
     except (BudgetExceeded, ContractError, InjectedFault) as error:
         incomplete_reason = str(error)
         staged = None
@@ -925,9 +1137,21 @@ def execute(
         incomplete_reason = f"unexpected:{type(error).__name__}:{error}"
         staged = None
     finally:
-        cleanup = transaction.cleanup()
+        try:
+            cleanup = transaction.cleanup()
+        except CleanupFailed as error:
+            cleanup = error.cleanup
+            cleanup_error = str(error)
+        except (BudgetExceeded, ContractError) as error:
+            cleanup_error = str(error)
+    if cleanup_error is not None:
+        incomplete_reason = cleanup_error
+        staged = None
     if staged is not None and not all(cleanup.values()):
         incomplete_reason = "cleanup:one-or-more-postconditions-failed"
+        staged = None
+    if staged is not None and fault == "after-cleanup":
+        incomplete_reason = "fault:after-cleanup"
         staged = None
     if staged is not None and fault == "before-result-commit":
         incomplete_reason = "fault:before-result-commit"
@@ -966,13 +1190,23 @@ def provider_projection(
     receipt_bytes: bytes,
     invocation_old: str,
     invocation_new: str,
+    invocation_common: str,
+    result_limits=CodecLimits(),
+    receipt_limits=ReceiptLimits(),
 ):
-    receipt = decode_receipt(receipt_bytes)
+    _require_oid(invocation_common, "invocation common")
+    receipt = decode_receipt(receipt_bytes, receipt_limits)
     if result_bytes is None:
         if receipt["exit"] == 0 or receipt["result_sha256"] is not None:
             raise ContractError("missing result conflicts with a complete receipt")
         return {"conclusion": "incomplete", "rows": []}
-    result = decode_result(result_bytes, invocation_old, invocation_new)
+    result = decode_result(
+        result_bytes,
+        invocation_old,
+        invocation_new,
+        invocation_common,
+        result_limits,
+    )
     digest = hashlib.sha256(result_bytes).hexdigest()
     if receipt["exit"] != 0 or receipt["result_sha256"] != digest:
         raise ContractError("execution receipt does not bind these semantic result bytes")
@@ -1067,6 +1301,172 @@ def real_git_proof(root: Path, factory):
     )
 
 
+_PRODUCTION_CONTRACT_MODULE = None
+PRODUCTION_EVENT_ADAPTER_SYMBOLS = ("event_endpoints", "audit_event")
+TYPED_U_CASES = {
+    "typed-u-normal-restack": {
+        "fallback_case": "normal-base-advance-replay",
+        "expected_state": "clean",
+    },
+    "typed-u-illegal-birth": {
+        "fallback_case": "agent-born-claimed",
+        "expected_state": "blocked",
+    },
+}
+
+
+def _production_contract_module():
+    global _PRODUCTION_CONTRACT_MODULE
+    if _PRODUCTION_CONTRACT_MODULE is not None:
+        return _PRODUCTION_CONTRACT_MODULE
+    module_name = "_agentfold_production_contract_prototype"
+    if module_name in sys.modules:
+        _PRODUCTION_CONTRACT_MODULE = sys.modules[module_name]
+        return _PRODUCTION_CONTRACT_MODULE
+    module_path = Path(__file__).resolve().parents[1] / "production-contract" / "prototype.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ContractError("production-contract prototype is not importable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    _PRODUCTION_CONTRACT_MODULE = module
+    return module
+
+
+def _has_production_event_adapter(module):
+    return all(callable(getattr(module, name, None)) for name in PRODUCTION_EVENT_ADAPTER_SYMBOLS)
+
+
+def _revision_objects_from_repo(repo, revisions: tuple[str, ...]):
+    return tuple(
+        (
+            revision,
+            repo.run(
+                "--no-replace-objects",
+                "rev-parse",
+                "--verify",
+                f"{revision}:message-queue",
+            ).stdout.strip(),
+        )
+        for revision in revisions
+    )
+
+
+def _typed_u_row_from_action(action, position: int):
+    if action.get("finding") is not True:
+        return None
+    identity = action.get("identity")
+    if type(identity) is not dict:
+        raise ContractError(f"typed-U action {position} missing production identity")
+    row_identity = {key: identity[key] for key in TYPED_U_IDENTITY_KEYS}
+    path_map = action.get("paths")
+    if type(path_map) is not dict:
+        raise ContractError(f"typed-U action {position} missing endpoint paths")
+    paths = []
+    for endpoint in ("C", "O", "N"):
+        values = path_map.get(endpoint, [])
+        if type(values) is not list:
+            raise ContractError(f"typed-U action {position} paths.{endpoint} must be an array")
+        paths.extend(values)
+    paths = sorted(set(paths), key=lambda item: item.encode("utf-8"))
+    reason_code = action.get("reason_code")
+    reason = action.get("reason")
+    if type(reason_code) is not str or not reason_code:
+        raise ContractError(f"typed-U action {position} missing reason code")
+    if type(reason) is not str or not reason:
+        raise ContractError(f"typed-U action {position} missing reason")
+    row = {
+        "identity": row_identity,
+        "paths": paths,
+        "status": action.get("status"),
+        "reasons": [reason_code],
+        "finding": {
+            "check": TYPED_U_FINDING_CHECK,
+            "subject": row_identity["production_tuple_sha256"],
+            "message": reason,
+            "fix": (
+                "preserve one typed legal live incarnation on each required arm "
+                "or leave the action blocked"
+            ),
+        },
+    }
+    return _validate_row(row, position)
+
+
+def _typed_u_composition_from_audit(audit: dict, expected_common: str):
+    _require_oid(expected_common, "typed-U expected common")
+    if audit.get("audit_exit") == 2:
+        raise ContractError("typed-U audit was unreadable")
+    if audit.get("C") != expected_common:
+        raise ContractError("typed-U audit common does not match merge-base proof")
+    input_contract = audit.get("input_contract")
+    if type(input_contract) is not dict or input_contract.get("origin_strategy") != "U":
+        raise ContractError("typed-U audit was not run with Strategy U")
+    classification = audit.get("classification")
+    if classification == "no-finding":
+        state = "clean"
+    elif classification == "blocking-finding":
+        state = "blocked"
+    else:
+        raise ContractError(f"typed-U audit is not a semantic clean/blocked result: {classification}")
+    rows = []
+    for position, action in enumerate(audit.get("actions", [])):
+        row = _typed_u_row_from_action(action, position)
+        if row is not None:
+            rows.append(row)
+    rows.sort(key=_row_identity_sort_key)
+    if (state == "clean") != (not rows):
+        raise ContractError("typed-U classification and finding rows disagree")
+    evidence = audit.get("evidence_verdict")
+    if type(evidence) is not dict or type(evidence.get("status")) is not str:
+        raise ContractError("typed-U audit missing evidence status")
+    return TypedUComposition(
+        scenario=audit["scenario"],
+        classification=classification,
+        evidence_status=evidence["status"],
+        origin_strategy="U",
+        common=expected_common,
+        state=state,
+        rows=tuple(rows),
+    )
+
+
+def production_typed_u_proof(root: Path, name: str):
+    if name not in TYPED_U_CASES:
+        raise ValueError(f"unknown typed-U case {name}")
+    module = _production_contract_module()
+    # The integration target is the production-contract event boundary:
+    # event_endpoints(event_kind, payload) + audit_event(root, event_kind, payload).
+    # This immutable branch does not yet expose deterministic event payload builders,
+    # so the compatibility path below asks the current production fixture builder and
+    # Classifier for a Strategy-U result without copying classifier logic here.
+    _has_production_event_adapter(module)
+    fixture_case = TYPED_U_CASES[name]["fallback_case"]
+    fixture = module.r18_origin_fixture(root, case=fixture_case, strategy="U")
+    audit = module.Classifier(fixture).run()
+    if audit["classification"] != fixture.expected:
+        raise ContractError("typed-U fixture did not produce its expected classification")
+    merge_bases = tuple(sorted(fixture.repo.run(
+        "--no-replace-objects", "merge-base", "--all", fixture.O, fixture.N
+    ).stdout.splitlines()))
+    common = _single_common(merge_bases)
+    composition = _typed_u_composition_from_audit(audit, common)
+    if composition.state != TYPED_U_CASES[name]["expected_state"]:
+        raise ContractError("typed-U fixture state did not match semantic case")
+    revisions = tuple(dict.fromkeys((fixture.O, fixture.N, common)))
+    return ProofInput(
+        label=name,
+        old=fixture.O,
+        new=fixture.N,
+        common=common,
+        revision_objects=_revision_objects_from_repo(fixture.repo, revisions),
+        authorized_deletions=(),
+        store=GitSnapshotStore(root),
+        typed_u=composition,
+    )
+
+
 class CheckBook:
     def __init__(self):
         self.checks = []
@@ -1094,19 +1494,45 @@ def _manual_result(result, **changes):
     return changed
 
 
+def _without_subprocess_spawns(callback: Callable):
+    original_run = subprocess.run
+    original_popen = subprocess.Popen
+    calls = []
+
+    def forbidden_run(*_args, **_kwargs):
+        calls.append("run")
+        raise AssertionError("subprocess.run was called in zero-spawn control")
+
+    def forbidden_popen(*_args, **_kwargs):
+        calls.append("Popen")
+        raise AssertionError("subprocess.Popen was called in zero-spawn control")
+
+    subprocess.run = forbidden_run
+    subprocess.Popen = forbidden_popen
+    try:
+        result = callback()
+    finally:
+        subprocess.run = original_run
+        subprocess.Popen = original_popen
+    if calls:
+        raise AssertionError(f"zero-spawn control observed subprocess calls: {calls}")
+    return result
+
+
 def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, receipt):
     old = clean_result["old"]
     new = clean_result["new"]
+    common = clean_result["common"]
     prefix = b'{"schema":"' + RESULT_SCHEMA.encode("ascii") + b'","schema":"x",'
     duplicate = prefix + clean_bytes.split(b",", 1)[1]
-    book.raises("reject-duplicate-keys", ContractError, lambda: decode_result(duplicate, old, new))
-    book.raises("reject-whitespace", ContractError, lambda: decode_result(clean_bytes.replace(b"{", b"{ ", 1), old, new))
-    book.raises("reject-crlf", ContractError, lambda: decode_result(clean_bytes[:-1] + b"\r\n", old, new))
-    book.raises("reject-prefix", ContractError, lambda: decode_result(b"x" + clean_bytes, old, new))
-    book.raises("reject-suffix", ContractError, lambda: decode_result(clean_bytes + b"x", old, new))
-    book.raises("reject-missing-lf", ContractError, lambda: decode_result(clean_bytes[:-1], old, new))
+    book.raises("reject-duplicate-keys", ContractError, lambda: decode_result(duplicate, old, new, common))
+    book.raises("reject-whitespace", ContractError, lambda: decode_result(clean_bytes.replace(b"{", b"{ ", 1), old, new, common))
+    book.raises("reject-crlf", ContractError, lambda: decode_result(clean_bytes[:-1] + b"\r\n", old, new, common))
+    book.raises("reject-prefix", ContractError, lambda: decode_result(b"x" + clean_bytes, old, new, common))
+    book.raises("reject-suffix", ContractError, lambda: decode_result(clean_bytes + b"x", old, new, common))
+    book.raises("reject-missing-lf", ContractError, lambda: decode_result(clean_bytes[:-1], old, new, common))
     escaped = clean_bytes.replace(b"restack", b"\\u0072estack", 1)
-    book.raises("reject-alternate-escape", ContractError, lambda: decode_result(escaped, old, new))
+    book.raises("reject-alternate-escape", ContractError, lambda: decode_result(escaped, old, new, common))
     reordered = {
         "old": old,
         "schema": RESULT_SCHEMA,
@@ -1119,9 +1545,24 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
     book.raises(
         "observed-red-unsorted-result-key-order-refuses",
         ContractError,
-        lambda: decode_result(_dump_insertion_order_for_test(reordered), old, new),
+        lambda: decode_result(_dump_insertion_order_for_test(reordered), old, new, common),
     )
     receipt_value = decode_receipt(receipt)
+    book.check(
+        "receipt-decode-exact-byte-bound-succeeds",
+        decode_receipt(receipt, ReceiptLimits(max_bytes=len(receipt))) == receipt_value,
+        damage=True,
+    )
+    book.raises(
+        "observed-red-receipt-byte-limit-plus-one-refuses",
+        ContractError,
+        lambda: decode_receipt(receipt, ReceiptLimits(max_bytes=len(receipt) - 1)),
+    )
+    book.raises(
+        "observed-red-receipt-zero-byte-budget-refuses",
+        ContractError,
+        lambda: decode_receipt(receipt, ReceiptLimits(max_bytes=0)),
+    )
     reordered_receipt = {key: receipt_value[key] for key in RECEIPT_KEYS}
     book.raises(
         "reject-unsorted-receipt-key-order",
@@ -1150,6 +1591,7 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
             clean_bytes,
             old,
             new,
+            common,
             CodecLimits(max_bytes=len(clean_bytes) - 1, max_rows=0),
         ),
     )
@@ -1191,17 +1633,73 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
     book.raises(
         "reject-invocation-old-new-mismatch",
         ContractError,
-        lambda: decode_result(clean_bytes, _oid("wrong-old"), new),
+        lambda: decode_result(clean_bytes, _oid("wrong-old"), new, common),
+    )
+    book.raises(
+        "observed-red-invocation-common-mismatch-refuses",
+        ContractError,
+        lambda: decode_result(clean_bytes, old, new, _oid("wrong-common")),
+    )
+    forged_result = _manual_result(clean_result, common=_oid("forged-common"))
+    forged_bytes = encode_result(forged_result)
+    forged_receipt = decode_receipt(receipt)
+    forged_receipt["result_sha256"] = hashlib.sha256(forged_bytes).hexdigest()
+    forged_receipt_bytes = encode_receipt(forged_receipt)
+    book.raises(
+        "observed-red-forged-common-recomputed-receipt-refuses",
+        ContractError,
+        lambda: provider_projection(
+            forged_bytes,
+            forged_receipt_bytes,
+            old,
+            new,
+            common,
+        ),
     )
     receipt_value["exit"] = True
     book.raises("reject-bool-as-int-exit", ContractError, lambda: encode_receipt(receipt_value))
     receipt_value = decode_receipt(receipt)
     receipt_value["budget"]["used"]["reads"] = False
     book.raises("reject-bool-as-int-counter", ContractError, lambda: encode_receipt(receipt_value))
+    exact_counter_receipt = decode_receipt(receipt)
+    for counter in BUDGET_COUNTERS:
+        exact_counter_receipt["budget"]["limits"][counter] = (
+            exact_counter_receipt["budget"]["used"][counter]
+        )
+    book.check(
+        "receipt-used-equals-non-null-limits-succeeds",
+        decode_receipt(encode_receipt(exact_counter_receipt))["budget"]["limits"]
+        == exact_counter_receipt["budget"]["limits"],
+        damage=True,
+    )
+    zero_counter_receipt = decode_receipt(receipt)
+    for counter in BUDGET_COUNTERS:
+        zero_counter_receipt["budget"]["limits"][counter] = 0
+        zero_counter_receipt["budget"]["used"][counter] = 0
+    book.check(
+        "receipt-zero-used-zero-limits-succeeds",
+        decode_receipt(encode_receipt(zero_counter_receipt))["budget"]["used"]["spawns"]
+        == 0,
+        damage=True,
+    )
+    for counter in BUDGET_COUNTERS:
+        exceeded = decode_receipt(receipt)
+        exceeded["budget"]["limits"][counter] = 0
+        exceeded["budget"]["used"][counter] = 1
+        book.raises(
+            f"observed-red-receipt-used-{counter}-exceeds-limit-refuses",
+            ContractError,
+            lambda exceeded=exceeded: encode_receipt(exceeded),
+        )
     book.raises(
         "reject-bool-as-int-codec-bound",
         ContractError,
         lambda: CodecLimits(max_bytes=True, max_rows=1),
+    )
+    book.raises(
+        "reject-bool-as-int-receipt-bound",
+        ContractError,
+        lambda: ReceiptLimits(max_bytes=True),
     )
 
 
@@ -1252,6 +1750,8 @@ def _fault_controls(book: CheckBook, proof: ProofInput):
         ("after-first-snapshot", "caches_cleared"),
         ("after-child-spawn", "children_reaped"),
         ("after-descriptor-open", "descriptors_closed"),
+        ("after-result-construction", "caches_cleared"),
+        ("after-cleanup", "repository_unchanged"),
         ("before-result-commit", "caches_cleared"),
     ):
         execution = execute(proof, "identity-node-cache", fault=fault)
@@ -1306,6 +1806,22 @@ def run_self_test():
     book.check("synthetic-cross-implementation-byte-parity", granular.result == batch.result)
     granular_receipt = granular.decoded_receipt
     batch_receipt = batch.decoded_receipt
+    zero_spawn_synthetic = _without_subprocess_spawns(
+        lambda: execute(
+            shared,
+            "identity-node-cache",
+            limits={"spawns": 0},
+            profile="zero-spawn-synthetic",
+        )
+    )
+    zero_spawn_synthetic_receipt = zero_spawn_synthetic.decoded_receipt
+    book.check(
+        "synthetic-zero-spawns-accepts-no-spawn",
+        zero_spawn_synthetic.result == granular.result
+        and zero_spawn_synthetic_receipt["exit"] == 0
+        and zero_spawn_synthetic_receipt["budget"]["used"]["spawns"] == 0,
+        damage=True,
+    )
     book.check(
         "synthetic-granular-counterexample-is-6-5",
         granular_receipt["budget"]["used"]["snapshot_requests"] == 6
@@ -1322,7 +1838,7 @@ def run_self_test():
         granular_receipt["result_sha256"] == batch_receipt["result_sha256"]
         == hashlib.sha256(granular.result).hexdigest(),
     )
-    clean_result = decode_result(granular.result, shared.old, shared.new)
+    clean_result = decode_result(granular.result, shared.old, shared.new, shared.common)
     book.check("strict-result-byte-round-trip", encode_result(clean_result) == granular.result)
     book.check("strict-receipt-byte-round-trip", encode_receipt(granular_receipt) == granular.receipt)
     _strict_damage_controls(book, granular.result, clean_result, granular.receipt)
@@ -1335,7 +1851,10 @@ def run_self_test():
     blocked_granular = execute(synthetic_blocked, "identity-node-cache")
     blocked_batch = execute(synthetic_blocked, "shared-object-batch")
     decoded_blocked = decode_result(
-        blocked_granular.result, synthetic_blocked.old, synthetic_blocked.new
+        blocked_granular.result,
+        synthetic_blocked.old,
+        synthetic_blocked.new,
+        synthetic_blocked.common,
     )
     book.check("synthetic-divergent-blocked-parity", blocked_granular.result == blocked_batch.result)
     book.check(
@@ -1352,14 +1871,17 @@ def run_self_test():
     book.check(
         "synthetic-fast-forward-clean",
         decode_result(
-            fast_forward.result, synthetic_fast_forward.old, synthetic_fast_forward.new
+            fast_forward.result,
+            synthetic_fast_forward.old,
+            synthetic_fast_forward.new,
+            synthetic_fast_forward.common,
         )["state"] == "clean",
     )
 
     large = _large_proof()
     large_granular = execute(large, "identity-node-cache")
     large_batch = execute(large, "shared-object-batch")
-    large_result = decode_result(large_granular.result, large.old, large.new)
+    large_result = decode_result(large_granular.result, large.old, large.new, large.common)
     book.check("large-2048-row-parity", large_granular.result == large_batch.result)
     book.check("large-2048-row-state", len(large_result["rows"]) == 2048 and large_result["state"] == "blocked")
     exact_codec = CodecLimits(max_bytes=len(large_granular.result), max_rows=2048)
@@ -1409,6 +1931,7 @@ def run_self_test():
                 executions["divergent-clean"].result,
                 real_proofs["divergent-clean"].old,
                 real_proofs["divergent-clean"].new,
+                real_proofs["divergent-clean"].common,
             )["state"] == "clean",
         )
         book.check(
@@ -1417,6 +1940,7 @@ def run_self_test():
                 executions["divergent-blocked"].result,
                 real_proofs["divergent-blocked"].old,
                 real_proofs["divergent-blocked"].new,
+                real_proofs["divergent-blocked"].common,
             )["state"] == "blocked",
         )
         book.check(
@@ -1425,6 +1949,7 @@ def run_self_test():
                 executions["fast-forward"].result,
                 real_proofs["fast-forward"].old,
                 real_proofs["fast-forward"].new,
+                real_proofs["fast-forward"].common,
             )["state"] == "clean",
         )
         real_left = executions["shared-subtree"].decoded_receipt
@@ -1442,18 +1967,78 @@ def run_self_test():
         )
         _budget_controls(book, real_proofs["divergent-blocked"], executions["divergent-blocked"])
         _fault_controls(book, real_proofs["divergent-blocked"])
+        zero_spawn_real = _without_subprocess_spawns(
+            lambda: execute(
+                real_proofs["divergent-blocked"],
+                "identity-node-cache",
+                limits={"spawns": 0},
+                profile="zero-spawn-real",
+            )
+        )
+        zero_spawn_real_receipt = zero_spawn_real.decoded_receipt
+        book.check(
+            "observed-red-real-zero-spawns-no-result",
+            zero_spawn_real.result is None
+            and zero_spawn_real_receipt["exit"] == 2
+            and zero_spawn_real_receipt["result_sha256"] is None
+            and zero_spawn_real_receipt["budget"]["used"]["spawns"] == 0
+            and zero_spawn_real_receipt["incomplete_reason"].startswith("budget:spawns:"),
+            damage=True,
+        )
+
+        typed_u_proofs = {
+            name: production_typed_u_proof(fixture_root / name, name)
+            for name in TYPED_U_CASES
+        }
+        for name, proof in typed_u_proofs.items():
+            left = execute(proof, "identity-node-cache")
+            right = execute(proof, "shared-object-batch")
+            projection = provider_projection(
+                left.result,
+                left.receipt,
+                proof.old,
+                proof.new,
+                proof.common,
+            )
+            decoded = decode_result(left.result, proof.old, proof.new, proof.common)
+            book.check(f"{name}-typed-u-byte-parity", left.result == right.result)
+            book.check(
+                f"{name}-typed-u-provider-projection",
+                projection["conclusion"] == proof.typed_u.state == decoded["state"],
+            )
+            book.check(
+                f"{name}-typed-u-separate-receipt",
+                left.decoded_receipt["implementation"] != right.decoded_receipt["implementation"]
+                and left.decoded_receipt["result_sha256"]
+                == right.decoded_receipt["result_sha256"]
+                == hashlib.sha256(left.result).hexdigest(),
+            )
+        book.check(
+            "typed-u-normal-restack-clean",
+            typed_u_proofs["typed-u-normal-restack"].typed_u.state == "clean",
+        )
+        illegal = typed_u_proofs["typed-u-illegal-birth"]
+        book.check(
+            "typed-u-illegal-birth-blocked-row-shape",
+            illegal.typed_u.state == "blocked"
+            and len(illegal.typed_u.rows) == 1
+            and set(illegal.typed_u.rows[0]) == set(ROW_KEYS)
+            and set(illegal.typed_u.rows[0]["identity"]) == set(TYPED_U_IDENTITY_KEYS),
+        )
 
         clean_projection = provider_projection(
             executions["divergent-clean"].result,
             executions["divergent-clean"].receipt,
             real_proofs["divergent-clean"].old,
             real_proofs["divergent-clean"].new,
+            real_proofs["divergent-clean"].common,
         )
         blocked_projection = provider_projection(
             executions["divergent-blocked"].result,
             executions["divergent-blocked"].receipt,
             real_proofs["divergent-blocked"].old,
             real_proofs["divergent-blocked"].new,
+            real_proofs["divergent-blocked"].common,
         )
         incomplete_execution = execute(
             real_proofs["divergent-blocked"],
@@ -1466,6 +2051,7 @@ def run_self_test():
             incomplete_execution.receipt,
             real_proofs["divergent-blocked"].old,
             real_proofs["divergent-blocked"].new,
+            real_proofs["divergent-blocked"].common,
         )
         book.check("provider-projects-clean", clean_projection["conclusion"] == "clean")
         book.check("provider-projects-blocked", blocked_projection["conclusion"] == "blocked")
@@ -1485,6 +2071,7 @@ def run_self_test():
                 forged_bytes,
                 real_proofs["divergent-clean"].old,
                 real_proofs["divergent-clean"].new,
+                real_proofs["divergent-clean"].common,
             ),
         )
 
@@ -1516,6 +2103,7 @@ def run_self_test():
         "damage_controls_total": len(book.damage_controls),
         "real_git_cases": 4,
         "synthetic_cases": 4,
+        "typed_u_cases": len(TYPED_U_CASES),
         "large_rows": 2048,
         "counterexample": "6/5-vs-1/0",
     }
@@ -1547,6 +2135,10 @@ def semantic_suite(implementation: str):
             real_git_proof(root / "s7", edge_witness.fixture_s7),
             real_git_proof(root / "s8", edge_witness.fixture_s8),
         ))
+        proofs.extend(
+            production_typed_u_proof(root / name, name)
+            for name in TYPED_U_CASES
+        )
         for proof in proofs:
             execution = execute(proof, implementation)
             if execution.result is None:
