@@ -39,6 +39,18 @@ and no production implementation began from this revision.
 The panel stopped after one concrete block. The two remaining lenses were not run, and no
 production implementation began from this revision.
 
+## Superseded final observer-only design review
+
+**Reviewed revision:** `b6966a34252184f6245d346ecf6904fa1cffcfc6`
+
+- semantic/DAG/executable / final-semantic-panel: `approve` — exact two-arm semantics, role-specific ordinary projections, Linux continuity gate, and bounded read-only adapter transport matched the accepted POC.
+- budgets/transaction/composition / final-budget-panel: `approve` — arithmetic, pre-exec containment, transaction ordering, arenas, cleanup, and zero partial output/writers were closed for the stated scope.
+- workflow/provider/human / final-workflow-panel: `approve` — common cycles and provider observation states remained honest; publication stayed external and the optional adapter remained separately gated.
+- core-fit / final-corefit-panel: `approve` — observer authority was agent/provider/repository substitutable, made no user-global writes, and kept the GitHub adapter optional and policy-free.
+- CLI/contracts/testability / final-cli-panel: `block` — Linux-gating ordinary range broke macOS integration, core/workflow retirement could not land independently, duplicate/output/exit contracts were open, and new authority modules escaped the Git-spawn guard.
+
+The four-to-one panel rejected the revision. No production implementation began from it.
+
 ## Superseded sealed-publisher design review
 
 **Reviewed revision:** `56b73d57cd1564c510d6a331793b6b9f5aa4beed`

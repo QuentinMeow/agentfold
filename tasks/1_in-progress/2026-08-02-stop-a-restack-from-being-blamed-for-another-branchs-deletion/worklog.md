@@ -128,6 +128,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   HTTP, TLS, alternate-object, helper, and environment controls.
 - Production remains unopened pending a fresh full five-lens immutable-revision review.
 
+## 2026-09-01 — Separate-CLI and atomic-activation correction (codex)
+
+- Four final lenses accepted the observer-only design. The CLI lens proved that applying
+  Linux gating to existing ordinary ranges would break the macOS landing-set builder, and
+  that parser/workflow retirement could not land as independent slices.
+- It also found last-value-wins duplicate options, undefined standalone bytes/exits and
+  Finding projection, and a source guard that would omit new authority modules.
+- Removed the combined `reconcile.py --ref-update` design. Kept existing ordinary range
+  behavior cross-platform; made standalone `ref_update.py` the only Linux continuity CLI;
+  defined canonical JSON bytes, exact exits, and one shared Finding projection; changed the
+  guard to recursively scan all reconciliation modules; and required dormant additive core,
+  proven adapter, then one atomic activation commit that removes `--displaced-tip`.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.
+
 ## 2026-09-01 — Read-only-transport correction (codex)
 
 - Fresh review accepted the observer-only O/N model but showed that “no remote helper” also

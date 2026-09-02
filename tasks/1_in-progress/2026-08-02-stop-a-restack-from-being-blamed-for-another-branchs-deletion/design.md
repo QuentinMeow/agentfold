@@ -2253,3 +2253,130 @@ Negative tests therefore assert:
   red.
 
 Production remains unopened pending the full five-lens review of a new immutable revision.
+
+## 2026-09-01 correction amendment 15 — separate CLI and atomic activation
+
+The five-lens review of `b6966a34252184f6245d346ecf6904fa1cffcfc6`
+accepted semantic, resource, workflow, and core-fit boundaries. The CLI lens then proved
+that Linux-gating every ordinary range would break the macOS landing-set builder, that
+parser and workflow migration could not land independently, that the standalone output was
+not byte-defined, and that new authority modules would sit outside the Git-spawn guard.
+This section supersedes every earlier integrated `reconcile.py --ref-update` interface,
+every claim that existing ordinary range checking is replaced or Linux-only in this task,
+and the affected parser/output/migration/test-ownership clauses. The Strategy A classifier
+semantics are unchanged.
+
+### Two separate commands, no combined mode
+
+automation/reconcile/ref_update.py is the only Strategy A continuity CLI. It is read-only,
+Linux-only, and accepts exactly one occurrence of each required option:
+
+```text
+--git-dir <absolute-path> --old <full-oid> --new <full-oid>
+```
+
+It rejects duplicate, missing, partial, zero, abbreviated, non-commit, or extra positional
+values before opening the object source. A custom single-occurrence parser rejects repeated
+`--git-dir`, `--old`, or `--new`; default last-value-wins `argparse` behavior is forbidden.
+It rejects writer, range, worktree, index, branch, task, provider, compatibility, and
+publication options. `--help` is the only option that may appear alone.
+
+`automation/reconcile/reconcile.py` remains the ordinary repository/index/worktree CLI.
+It does not gain `--ref-update`. Existing `--range B...N` and `root:N` behavior remains
+cross-platform and continues serving `automation/integrate.py`; this task does not claim to
+replace or resource-bound that legacy ordinary history implementation. The proposed
+`OrdinaryHistorySnapshot` and immutable ordinary-result rewrite from amendments 6–10 are
+withdrawn from this task and require a separate claimed task before implementation. Their
+research remains useful evidence, not accepted production scope.
+
+On Linux, a human or workflow runs continuity and ordinary checking as two processes with
+two separately named results. On native macOS, ordinary range checking remains available
+under its current contract, while `ref_update.py` emits Linux-unavailable exit 2 before
+history. An ordinary clean result never substitutes for missing continuity.
+
+### Canonical standalone bytes and exit mapping
+
+Every complete continuity result is exactly one UTF-8 JSON line on stdout, encoded with
+sorted keys, ASCII escaping, separators `,` and `:`, no insignificant whitespace, and one
+final LF. Stderr is empty. The top-level object has exactly these keys:
+
+```text
+schema, old, new, common, state, rows, counters
+```
+
+`schema` is `agentfold-ref-update/v1`; `state` is `clean` or `blocked`; endpoint/common
+values are lowercase full OIDs. Rows are canonically sorted by full identity digest and
+have exactly:
+
+```text
+identity, paths, status, reasons, finding, evidence
+```
+
+Paths and closed typed reason codes are sorted unique ASCII/UTF-8 strings. Status is one of
+`valid`, `none`, `invalid`, or `ambiguous`. `finding` is null only for a valid row; every
+`none`, `invalid`, or `ambiguous` row contains the exact integrated-compatible projection:
+
+```text
+check   = queue-resolution
+subject = lexicographically first representative path at O
+message = divergent ref update has no unique valid continuity proof for old action <full-identity>: <comma-joined-reason-codes>
+fix     = restore the old action or create one complete evidence-valid resolution in a new ref update; preserve every required commit, tree, and blob
+```
+
+`none` includes closed reason `no-resolution-root`, so the reason list is never empty for a
+finding. Evidence and counters use only the closed bounded fields already defined by the
+classifier; no raw action text, localized Git stderr, provider state, or moving ref enters
+the result. `state=clean` requires every row valid (or no affected rows) and exits 0.
+`state=blocked` requires at least one non-valid row and exits 1.
+
+Any syntax, platform, policy, object, graph, budget, deadline, child, or serialization
+incompleteness emits no stdout. It emits exactly one canonical ASCII JSON line to stderr
+with keys `schema`, `state`, and `reason`, where state is `incomplete` and reason is one
+closed code; then exits 2. Raw stderr is drained under budget but never copied. Help is
+fixed UTF-8 text on stdout and exit 0. Golden-byte tests cover every state, locale, time
+zone, hash seed, duplicate option, unknown option, and stdout/stderr/exit combination.
+
+### Additive implementation, then one atomic activation
+
+The migration has three gates:
+
+1. **Dormant additive core:** add the provider-independent library, standalone CLI, source
+   guard coverage, and tests. Do not change `reconcile.py`, the workflow, or current
+   `--displaced-tip` behavior. This commit is safe to review and test but is not production
+   activation.
+2. **Adapter proof:** complete the bounded read-only transport POC and live same-repository,
+   fork, conflicted, SHA-like, approval, stale, and retention canaries. Until this gate is
+   green, the current adapter and continuity mechanism remain active and no completion is
+   claimed.
+3. **Atomic activation commit:** in one commit, update every workflow call site to invoke
+   the new standalone continuity command plus the existing ordinary command; delete
+   `--displaced-tip` from parser/help/globals/current continuity implementation; update
+   workflow/source/CLI tests; and demonstrate the old option is rejected. No mergeable
+   revision may contain a new parser with the old workflow, or a new workflow without the
+   new proven classifier.
+
+If the adapter proof cannot run, the branch may retain the dormant additive core in a draft
+PR, but production behavior remains unchanged and the task stays incomplete. There is no
+temporary compatibility bridge in the final activated revision.
+
+### Recursive authority-module spawn guard
+
+The source guard no longer enumerates only `reconcile.py`. It recursively discovers every
+tracked Python file anywhere under `automation/reconcile/` and rejects any subprocess or OS
+spawn whose literal argument shape it cannot inspect. Every Git object read must carry
+`--no-replace-objects` in the hardened position; the closed bare-read allowlist remains
+per-file and empty by default. Network and publication commands remain forbidden except the
+separately scanned trusted adapter fetch lane.
+
+Guard tests inject a new reconciliation module with each known bypass spelling, including
+dynamic program names, tuples, concatenation, shell strings, import indirection, `Popen`,
+`os.exec*`, and a bare Git read. Each must fail without adding the filename to a manual
+registry. The real new library and CLI must be discovered, and at least the centralized Git
+execution module must expose recognized hardened reads so an accidentally empty scan cannot
+pass. Workflow shell commands retain their separate guard.
+
+### Gate boundary
+
+Production remains unopened. A fresh full five-lens review must accept this separated CLI,
+canonical byte contract, recursive guard, and atomic activation plan. Only then may the
+dormant additive core units start.
