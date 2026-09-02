@@ -129,6 +129,10 @@ class Metrics:
     per_action_history_walks: int = 0
     carry_proof_nodes: int = 0
     carry_proof_edges: int = 0
+    origin_arm_nodes: int = 0
+    origin_parent_edges: int = 0
+    origin_births: int = 0
+    origin_witness_bytes: int = 0
     production_helper_calls: int = 0
     production_helper_input_bytes: int = 0
     production_parent_queries: int = 0
@@ -181,6 +185,10 @@ class Metrics:
         "dynamic_support_paths_discovered": 1_000_000,
         "dynamic_support_path_bytes": 64 * 1024 * 1024,
         "production_helper_input_bytes": 64 * 1024 * 1024,
+        "origin_arm_nodes": 1_000_000,
+        "origin_parent_edges": 1_000_000,
+        "origin_births": 1_000_000,
+        "origin_witness_bytes": 64 * 1024 * 1024,
         "git_stderr_bytes": 1024 * 1024,
     }
 
@@ -266,6 +274,7 @@ class Fixture:
     details: dict = dataclasses.field(default_factory=dict)
     budget_limit: int | None = None
     budget_limits: dict[str, int] = dataclasses.field(default_factory=dict)
+    origin_strategy: str = "U"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -305,6 +314,10 @@ class Damage:
     unmetered_tree_paths: bool = False
     unmetered_dynamic_support: bool = False
     unmetered_support_construction: bool = False
+    endpoint_only_origin_equality: bool = False
+    skip_origin_birth_uniqueness: bool = False
+    skip_origin_post_birth_absence: bool = False
+    skip_origin_endpoint_non_regression: bool = False
 
 
 @dataclasses.dataclass
@@ -1302,6 +1315,11 @@ class Classifier:
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
         self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
+        if fixture.origin_strategy not in {"U", "B"}:
+            raise ValueError(
+                f"unsupported origin strategy {fixture.origin_strategy!r}"
+            )
+        self.origin_strategy = fixture.origin_strategy
 
     def budget_overflows(self) -> list[tuple[str, int]]:
         if self.damage.unmetered_cone_work:
@@ -2730,6 +2748,560 @@ class Classifier:
             f"{json.dumps(mismatches, sort_keys=True)}"
         )
 
+    def birth_state_witness(
+        self, identity: tuple, state: ActionState
+    ) -> dict:
+        """Bind canonical production-visible birth state, never Git provenance.
+
+        The witness deliberately excludes the queue path, commit identity,
+        timestamps, operational counters, and retry diagnostics that production
+        sanctions as mutable.  It can compare state, not prove that one commit
+        was replayed from another.
+        """
+        view = self.identity_view(identity)
+        fields = RECONCILE.text_fields(state.text)
+        lifecycle_projection = {
+            "status": fields.get("Status", "").strip(),
+        }
+        if view["actor"] == "needs-human":
+            response = RECONCILE.human_response_fields(state.text)
+            lifecycle_projection["human_response_review_binding"] = {
+                key: response[key]
+                for key in (
+                    "Your answer",
+                    "Your review",
+                    "Review target",
+                    "Review revision",
+                    "Reviewed revision",
+                    "Review outcome",
+                )
+            }
+        witness = {
+            "actor": view["actor"],
+            "delivery_class": RECONCILE.delivery_class(
+                Path(state.path).name
+            ),
+            "frozen_skeleton": RECONCILE.queue_frozen_skeleton(
+                state.path, state.text
+            ),
+            "initial_lifecycle_review_binding": lifecycle_projection,
+            "leaf": view["leaf"],
+            "production_identity_transcript": list(identity[3:]),
+            "schema": "queue-birth-state-witness/v1",
+        }
+        size = self.canonical_json_size(witness)
+        self.metrics.charge("origin_witness_bytes", size)
+        payload = json.dumps(
+            witness,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        if len(payload) != size:
+            raise AssertionError("birth witness canonical size drift")
+        digest = hashlib.sha256(
+            b"queue-birth-state-witness/v1\0" + payload
+        ).hexdigest()
+        return {
+            "digest": f"sha256:{digest}",
+            "state": witness,
+        }
+
+    def birth_schema_problem(
+        self,
+        identity: tuple,
+        commit: str,
+        state: ActionState,
+    ) -> str | None:
+        """Replay the context-free production queue schema at one birth.
+
+        ``check_queue_schema`` itself reads the candidate index and repository
+        worktree, so calling it for a historical commit would validate the wrong
+        bytes.  This projection instead composes the production parser,
+        constants, and pure predicates that are meaningful at an arbitrary Git
+        snapshot.  Context links are resolved from that snapshot.  Repository-
+        global reciprocity and current-template presentation remain independent
+        admission gates; this POC does not pretend to replay them historically.
+        """
+        assert self.objects is not None
+        parts = Path(state.path).parts
+        if not RECONCILE.valid_queue_item_path(state.path):
+            return "birth path is not a valid production queue-item path"
+        actor, leaf = parts[1], parts[2]
+        if len(identity) < 3 or (actor, leaf) != identity[1:3]:
+            return "birth path actor/leaf disagrees with production identity"
+        if RECONCILE.queue_action_identity(state.path, state.text) != identity:
+            return "birth does not round-trip to the production identity"
+
+        timing = RECONCILE.delivery_class(parts[3])
+        if timing not in RECONCILE.QUEUE_TIMING_FIELDS:
+            return "birth filename has no production delivery class"
+        fields = RECONCILE.text_fields(state.text)
+        duplicates = sorted(
+            key
+            for key, count in RECONCILE.field_counts(state.text).items()
+            if count != 1
+        )
+        if duplicates:
+            return "birth has duplicate structured fields: " + ", ".join(
+                duplicates
+            )
+
+        expected_timing = set(RECONCILE.QUEUE_TIMING_FIELDS[timing])
+        all_timing = {
+            key
+            for values in RECONCILE.QUEUE_TIMING_FIELDS.values()
+            for key in values
+        }
+        missing_timing = sorted(expected_timing - set(fields))
+        contradictory_timing = sorted(
+            (all_timing - expected_timing).intersection(fields)
+        )
+        empty_timing = sorted(
+            key
+            for key in expected_timing
+            if key in fields
+            and not RECONCILE.has_concrete_value(fields[key])
+        )
+        if missing_timing or contradictory_timing or empty_timing:
+            return (
+                "birth delivery header is not schema-valid: "
+                f"missing={missing_timing}, contradictory="
+                f"{contradictory_timing}, empty={empty_timing}"
+            )
+
+        required = list(
+            RECONCILE.QUEUE_SCHEMAS.get(
+                f"{actor}/{leaf}",
+                ["Status", "Filed", "Action", "Full context"],
+            )
+        )
+        missing = sorted(set(required) - set(fields))
+        if missing:
+            return "birth is missing required fields: " + ", ".join(missing)
+        status = fields.get("Status", "").strip()
+        is_generated_retry = identity[0] == "generated-retry"
+        is_pickup = (
+            actor == "needs-agent"
+            and leaf == "requests"
+            and fields.get("Request kind", "").strip() == "task-pickup"
+        )
+        if actor == "needs-agent":
+            if leaf not in {"requests", "retries"}:
+                return "birth is not a typed production agent action"
+            if status != "open":
+                return "agent action birth is not open"
+            if is_generated_retry and leaf != "retries":
+                return "generated retry birth is outside the retry leaf"
+            if is_pickup:
+                backlog = RECONCILE.pickup_task_path(state.text)
+                entry = (
+                    self.objects.path_entry(commit, backlog)
+                    if backlog is not None
+                    else {"state": "absent"}
+                )
+                if entry["state"] != "present" or entry["type"] != "blob":
+                    return "task-pickup birth has no live backlog origin"
+                _kind, backlog_bytes = self.objects.read(entry["oid"])
+                try:
+                    backlog_text = backlog_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    return "task-pickup birth backlog is not UTF-8"
+                backlog_fields = RECONCILE.text_fields(backlog_text)
+                if (
+                    backlog_fields.get("Claimed-by", "").strip()
+                    != "unclaimed"
+                    or state.path
+                    not in RECONCILE.task_queue_paths(
+                        backlog_fields.get("Queue actions", "")
+                    )
+                ):
+                    return "task-pickup birth has no unclaimed task backlink"
+        elif actor == "needs-human":
+            response = RECONCILE.human_response_fields(state.text)
+            if leaf in {"decisions", "clarifications"}:
+                if status != "waiting":
+                    return (
+                        "human decision/clarification birth is not waiting"
+                    )
+                if RECONCILE.first_concrete_response(response) is not None:
+                    return "human decision/clarification is answered at birth"
+            elif leaf == "reviews":
+                if status not in {"awaiting-artifact", "waiting"}:
+                    return "review birth is neither awaiting-artifact nor waiting"
+                if not RECONCILE.unanswered_review(response):
+                    return "review is answered or terminally bound at birth"
+                target = response["Review target"]
+                revision = response["Review revision"]
+                if status == "awaiting-artifact":
+                    if not (
+                        self.explicit_review_pending(target)
+                        and self.explicit_review_pending(revision)
+                    ):
+                        return (
+                            "awaiting-artifact review birth has a concrete binding"
+                        )
+                else:
+                    parsed_target = RECONCILE.review_target(target)
+                    if parsed_target is None:
+                        return "waiting review birth has no concrete target"
+                    if not RECONCILE.REVIEW_REVISION_RE.fullmatch(revision):
+                        return "waiting review birth has no immutable revision"
+                    target_kind, target_value = parsed_target
+                    if target_kind == "git" and revision != target_value:
+                        return "waiting review birth Git binding disagrees"
+                    if target_kind == "https" and not revision.startswith(
+                        "sha256:"
+                    ):
+                        return "waiting HTTPS review birth is not SHA-bound"
+                    if target_kind == "local":
+                        entry = self.objects.path_entry(commit, target_value)
+                        if (
+                            entry["state"] != "present"
+                            or entry["type"] != "blob"
+                        ):
+                            return "waiting review birth target is absent"
+                        _kind, target_bytes = self.objects.read(entry["oid"])
+                        expected = "sha256:" + hashlib.sha256(
+                            target_bytes
+                        ).hexdigest()
+                        if revision != expected:
+                            return "waiting review birth target digest disagrees"
+            else:
+                return "birth is not a typed production human action"
+        else:
+            return "birth actor is outside the production queue lifecycle"
+        if RECONCILE.parse_leading_date(fields.get("Filed", "")) is None:
+            return "birth has no valid Filed calendar date"
+        if not RECONCILE.has_concrete_value(fields.get("Action", "")):
+            return "birth has no concrete Action"
+
+        needs_resolution_evidence = actor == "needs-human" or (
+            actor == "needs-agent"
+            and not (is_pickup or is_generated_retry)
+        )
+        if needs_resolution_evidence and not RECONCILE.resolution_evidence_paths(
+            state.text
+        ):
+            return "birth has no production resolution-evidence declaration"
+
+        if "Full context" in fields:
+            candidates = RECONCILE.context_path_candidates(
+                fields["Full context"]
+            )
+            if not candidates or not any(
+                self.objects.path_entry(commit, candidate)["state"]
+                == "present"
+                for candidate in candidates
+            ):
+                return "birth Full context is absent from its Git snapshot"
+        if actor == "needs-human":
+            responses = (
+                ("Your review",)
+                if leaf == "reviews"
+                else ("Your answer",)
+                if leaf in {"decisions", "clarifications"}
+                else ("Your answer", "Your review")
+            )
+            if not any(response in fields for response in responses):
+                return "birth has no production human-response slot"
+        return None
+
+    def origin_arm_proof(self, identity: tuple, tip: str) -> dict:
+        """Prove exactly one legal C-local birth and continuous arm carriage."""
+        assert self.graph is not None
+        region = self.graph.between(self.graph.C, tip)
+        ordered = self.graph.ordered(region)
+        births: list[tuple[str, ActionState]] = []
+        edges: list[dict] = []
+        outside_neutral: set[str] = set()
+        outside_collisions: list[dict] = []
+        prebirth_neutral: set[str] = set()
+        multiplicities: list[dict] = []
+        child_parents: dict[str, list[tuple[str, ActionState]]] = {}
+        birth_schema_problems: list[dict] = []
+
+        for child in ordered:
+            self.metrics.charge("origin_arm_nodes")
+            child_states = self.states(child, identity)
+            if len(child_states) > 1:
+                multiplicities.append(
+                    {
+                        "commit": child,
+                        "multiplicity": len(child_states),
+                        "paths": [state.path for state in child_states],
+                    }
+                )
+            if child == self.graph.C:
+                continue
+            carrying: list[tuple[str, ActionState]] = []
+            absent: list[str] = []
+            for parent in sorted(self.graph.parents.get(child, ())):
+                self.metrics.charge("origin_parent_edges")
+                parent_states = self.states(parent, identity)
+                if len(parent_states) > 1:
+                    multiplicities.append(
+                        {
+                            "commit": parent,
+                            "multiplicity": len(parent_states),
+                            "paths": [state.path for state in parent_states],
+                        }
+                    )
+                if parent not in self.graph.c_descendants:
+                    if parent_states:
+                        outside_collisions.append(
+                            {
+                                "parent": parent,
+                                "multiplicity": len(parent_states),
+                                "paths": [
+                                    state.path for state in parent_states
+                                ],
+                                "scope": "outside-C",
+                            }
+                        )
+                    else:
+                        outside_neutral.add(parent)
+                    continue
+                if len(parent_states) == 1:
+                    carrying.append((parent, parent_states[0]))
+                elif not parent_states:
+                    absent.append(parent)
+            child_parents[child] = carrying
+            if len(child_states) != 1:
+                continue
+            if not carrying:
+                self.metrics.charge("origin_births")
+                births.append((child, child_states[0]))
+                prebirth_neutral.update(absent)
+                schema_problem = self.birth_schema_problem(
+                    identity, child, child_states[0]
+                )
+                if schema_problem is not None:
+                    birth_schema_problems.append(
+                        {"commit": child, "problem": schema_problem}
+                    )
+
+        unique_multiplicities = sorted(
+            {
+                json.dumps(item, sort_keys=True): item
+                for item in multiplicities
+            }.values(),
+            key=lambda item: item["commit"],
+        )
+        unique_collisions = sorted(
+            {
+                json.dumps(item, sort_keys=True): item
+                for item in outside_collisions
+            }.values(),
+            key=lambda item: (item["parent"], item["multiplicity"]),
+        )
+        post_birth_absent: set[str] = set()
+        if births and not self.damage.skip_origin_post_birth_absence:
+            birth_commits = {commit for commit, _state in births}
+            for commit in ordered:
+                if commit == self.graph.C or self.states(commit, identity):
+                    continue
+                ancestors = self.graph.ancestors(commit)
+                if birth_commits.intersection(ancestors):
+                    post_birth_absent.add(commit)
+
+        problem = None
+        reason_code = "origin-arm-valid"
+        if len(self.states(self.graph.C, identity)) != 0:
+            problem = "origin proof requires the identity to be absent at C"
+            reason_code = "origin-present-at-C"
+        elif len(self.states(tip, identity)) != 1:
+            problem = (
+                f"origin arm tip {tip} has multiplicity "
+                f"{len(self.states(tip, identity))}"
+            )
+            reason_code = "origin-endpoint-multiplicity"
+        elif unique_multiplicities:
+            problem = (
+                "origin arm contains identity multiplicity: "
+                f"{json.dumps(unique_multiplicities, sort_keys=True)}"
+            )
+            reason_code = "origin-arm-multiplicity"
+        elif unique_collisions:
+            problem = (
+                "origin arm has outside-C identity collision(s): "
+                f"{json.dumps(unique_collisions, sort_keys=True)}"
+            )
+            reason_code = "origin-outside-C-collision"
+        elif not births:
+            problem = "origin arm has no legal all-parents-absent birth"
+            reason_code = "origin-missing-birth"
+        elif birth_schema_problems:
+            problem = (
+                "origin arm has schema-invalid birth(s): "
+                f"{json.dumps(birth_schema_problems, sort_keys=True)}"
+            )
+            reason_code = "origin-birth-schema-invalid"
+        elif (
+            len(births) != 1
+            and not self.damage.skip_origin_birth_uniqueness
+        ):
+            problem = (
+                f"origin arm has {len(births)} legal births instead of one"
+            )
+            reason_code = "origin-birth-multiplicity"
+        elif post_birth_absent:
+            problem = (
+                "origin arm has post-birth absent descendant(s): "
+                f"{sorted(post_birth_absent)}"
+            )
+            reason_code = "origin-post-birth-absence"
+
+        if problem is None:
+            for child in ordered:
+                child_states = self.states(child, identity)
+                if len(child_states) != 1:
+                    continue
+                carrying = child_parents.get(child, [])
+                candidate_edges = [
+                    self.mutation_edge(
+                        identity,
+                        parent,
+                        child,
+                        before,
+                        child_states[0],
+                    )
+                    for parent, before in carrying
+                ]
+                edges.extend(candidate_edges)
+                invalid = [
+                    edge for edge in candidate_edges
+                    if edge["problem"] is not None
+                ]
+                if invalid:
+                    problem = (
+                        f"origin arm has invalid carrier mutation into {child}: "
+                        + "; ".join(edge["problem"] for edge in invalid)
+                    )
+                    reason_code = "origin-invalid-mutation"
+                    break
+                if candidate_edges:
+                    candidate_edges[0]["role"] = "source"
+                    for index, ((_, before), edge) in enumerate(
+                        zip(carrying, candidate_edges, strict=True)
+                    ):
+                        if index == 0:
+                            continue
+                        edge["role"] = "compatible-carrier"
+                        edge["problem"] = self.merge_compatible_problem(
+                            identity, edge, before, child_states[0]
+                        )
+                        if edge["problem"] is not None:
+                            problem = (
+                                "origin arm has incompatible merge carrier "
+                                f"into {child}: {edge['problem']}"
+                            )
+                            reason_code = "origin-incompatible-carrier"
+                            break
+                    if problem is not None:
+                        break
+
+        witness = (
+            self.birth_state_witness(identity, births[0][1])
+            if births
+            else None
+        )
+        return {
+            "birth_commits": [commit for commit, _state in births],
+            "birth_schema_problems": birth_schema_problems,
+            "birth_witness": witness,
+            "edges": self.stable_edges(edges),
+            "multiplicities": unique_multiplicities,
+            "outside_collisions": unique_collisions,
+            "outside_neutral": sorted(outside_neutral),
+            "post_birth_absent": sorted(post_birth_absent),
+            "prebirth_neutral": sorted(prebirth_neutral),
+            "reason": problem,
+            "reason_code": reason_code,
+            "status": "valid" if problem is None else "ambiguous",
+            "tip": tip,
+        }
+
+    def equivalent_origin_problem(
+        self,
+        identity: tuple,
+        old_state: ActionState,
+        new_state: ActionState,
+    ) -> tuple[str | None, str, list[dict], dict, bool | None]:
+        """Compare two valid live incarnations without claiming replay intent."""
+        if self.damage.endpoint_only_origin_equality:
+            return (
+                None,
+                "DAMAGED-endpoint-only-origin-equality",
+                [],
+                {"binding": None, "frozen": None, "regression": None},
+                None,
+            )
+        proofs = [
+            self.origin_arm_proof(identity, self.fixture.O),
+            self.origin_arm_proof(identity, self.fixture.N),
+        ]
+        failed = next(
+            (proof for proof in proofs if proof["reason"] is not None), None
+        )
+        if failed is not None:
+            return (
+                failed["reason"],
+                failed["reason_code"],
+                proofs,
+                {"binding": None, "frozen": None, "regression": None},
+                None,
+            )
+
+        regression = None
+        frozen = None
+        binding = None
+        if not self.damage.skip_origin_endpoint_non_regression:
+            regression = RECONCILE.queue_parent_state_regression_problem(
+                old_state.text, new_state.text
+            )
+            frozen, _exception = self.frozen_skeleton_problem(
+                old_state, new_state
+            )
+            binding = self.binding_subset_problem(
+                identity, old_state, new_state
+            )
+        endpoint_checks = {
+            "binding": binding,
+            "frozen": frozen,
+            "regression": regression,
+        }
+        endpoint_problem = regression or frozen or binding
+        if endpoint_problem is not None:
+            return (
+                endpoint_problem,
+                "origin-endpoint-regression",
+                proofs,
+                endpoint_checks,
+                None,
+            )
+
+        witnesses = [proof["birth_witness"] for proof in proofs]
+        witness_match = witnesses[0] == witnesses[1]
+        if (
+            self.origin_strategy == "B"
+            and not witness_match
+        ):
+            return (
+                "Strategy B birth-state witnesses differ",
+                "origin-birth-witness-mismatch",
+                proofs,
+                endpoint_checks,
+                False,
+            )
+        return (
+            None,
+            f"origin-strategy-{self.origin_strategy}-equivalent-live-incarnation",
+            proofs,
+            endpoint_checks,
+            witness_match,
+        )
+
     def mutation_edge(
         self,
         identity: tuple,
@@ -3667,6 +4239,14 @@ class Classifier:
             "absent_parents": [],
             "causal_roots": [],
             "reason_records": [],
+            "origin_strategy": self.origin_strategy,
+            "origin_proofs": [],
+            "birth_witness_match": None,
+            "endpoint_checks": {
+                "binding": None,
+                "frozen": None,
+                "regression": None,
+            },
             "event_mode": "none",
             "reason_code": "none",
         }
@@ -3691,6 +4271,74 @@ class Classifier:
                     "reason": (
                         "persisted production identity does not have one "
                         "unambiguous O-to-N occurrence"
+                    ),
+                }
+            if len(C_states) == 0:
+                (
+                    origin_problem,
+                    origin_code,
+                    origin_proofs,
+                    endpoint_checks,
+                    witness_match,
+                ) = self.equivalent_origin_problem(
+                    identity, old_states[0], N_states[0]
+                )
+                mutation_edges = self.stable_edges(
+                    edge
+                    for proof in origin_proofs
+                    for edge in proof["edges"]
+                )
+                if origin_problem is not None:
+                    ambiguous_codes = {
+                        "origin-arm-multiplicity",
+                        "origin-birth-multiplicity",
+                        "origin-endpoint-multiplicity",
+                        "origin-missing-birth",
+                        "origin-outside-C-collision",
+                        "origin-post-birth-absence",
+                        "origin-birth-witness-mismatch",
+                    }
+                    return {
+                        **base,
+                        "status": (
+                            "ambiguous"
+                            if origin_code in ambiguous_codes
+                            else "invalid"
+                        ),
+                        "finding": True,
+                        "authoring_lineage": (
+                            "non-equivalent-live-incarnation"
+                        ),
+                        "birth_witness_match": witness_match,
+                        "endpoint_checks": endpoint_checks,
+                        "event_mode": f"origin-{self.origin_strategy}",
+                        "mutation_edges": mutation_edges,
+                        "origin_proofs": origin_proofs,
+                        "reason_code": origin_code,
+                        "reason": (
+                            "the absent-at-C identity does not prove one "
+                            "equivalent valid live incarnation on each arm: "
+                            f"{origin_problem}"
+                        ),
+                    }
+                return {
+                    **base,
+                    "status": "valid",
+                    "finding": False,
+                    "authoring_lineage": (
+                        "equivalent-valid-live-incarnation"
+                    ),
+                    "birth_witness_match": witness_match,
+                    "endpoint_checks": endpoint_checks,
+                    "event_mode": f"origin-{self.origin_strategy}",
+                    "mutation_edges": mutation_edges,
+                    "origin_proofs": origin_proofs,
+                    "reason_code": origin_code,
+                    "reason": (
+                        f"Strategy {self.origin_strategy} proves one legal "
+                        "arm-local birth and uninterrupted valid carriage "
+                        "to each endpoint; this claims equivalent live "
+                        "incarnations, not intent or replay provenance"
                     ),
                 }
             if self.damage.skip_preserved_state_validation:
@@ -3922,6 +4570,7 @@ class Classifier:
             "input_contract": {
                 "schema": "restack-provenance-input/v2",
                 "authoritative_endpoints": ["O", "N"],
+                "origin_strategy": self.origin_strategy,
             },
         }
         objects = None
@@ -8740,6 +9389,524 @@ def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> Fixture:
     )
 
 
+def r18_origin_fixture(
+    root: Path,
+    *,
+    case: str,
+    strategy: str = "U",
+    reverse_parents: bool = False,
+    interpretation: str | None = None,
+) -> Fixture:
+    """Build one absent-at-C, live-incarnation Strategy U/B fixture."""
+    repo = GitRepository(root)
+    initialize(repo)
+    label = "r18-origin-action"
+    path = queue_path(label)
+    action_text = agent_text(label)
+    target = evidence_path(label)
+
+    if case == "generated-retry":
+        bad = "message-queue/needs-agent/requests/bad.md"
+        add_agent(repo, "r18-origin-bad", path=bad)
+    C = repo.commit("create origin-comparison C without target identity")
+
+    landmarks: dict[str, str] = {}
+
+    def add_plain_action(*, status: str = "open", at_path: str = path):
+        repo.write(target, f"# Evidence {label}: pending\n")
+        repo.write(at_path, agent_text(label, status=status))
+        return at_path
+
+    def add_kind(kind: str):
+        if kind == "agent":
+            return add_plain_action()
+        if kind == "human":
+            return add_human(repo, label)
+        if kind == "review":
+            review_target = evidence_path("r18-review-target")
+            review_payload = "# Review target\n"
+            repo.write(review_target, review_payload)
+            return add_review(
+                repo,
+                label,
+                status="waiting",
+                target=review_target,
+                revision=review_revision(review_payload),
+            )
+        if kind == "generated-retry":
+            return generated_retry(
+                repo, "message-queue/needs-agent/requests/bad.md"
+            )
+        if kind == "task-pickup":
+            pickup, _backlog, _active = add_pickup(repo, label)
+            return pickup
+        raise ValueError(f"unsupported origin fixture kind {kind}")
+
+    def simple_arm(branch: str, kind: str = "agent"):
+        repo.branch(branch, C)
+        action_path = add_kind(kind)
+        birth = repo.commit(f"birth target identity on {branch}")
+        landmarks[f"{branch}_birth"] = birth
+        landmarks[f"{branch}_path"] = action_path
+        return action_path, birth
+
+    def claimed_arm(branch: str, *, transient: str | None = None):
+        action_path, birth = simple_arm(branch)
+        claim_oid = claim(
+            repo, (action_path,), f"claim target identity on {branch}"
+        )
+        landmarks[f"{branch}_claim"] = claim_oid
+        if transient == "claim-removal":
+            claimed_text = repo.read(action_path)
+            repo.write(
+                action_path,
+                claimed_text.replace(
+                    "**Status:** in-repair", "**Status:** open", 1
+                ),
+            )
+            landmarks[f"{branch}_regression"] = repo.commit(
+                f"remove claim on {branch}"
+            )
+            repo.write(action_path, claimed_text)
+            landmarks[f"{branch}_restoration"] = repo.commit(
+                f"restore claim on {branch}"
+            )
+        return action_path, birth
+
+    if case == "O-only-post-C-loss":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        repo.branch("candidate", C)
+        N = feature(repo, "origin-candidate-without-old-only-action")
+    elif case == "agent-born-claimed":
+        claimed_arm("old")
+        O = repo.oid("HEAD")
+        repo.branch("candidate", C)
+        add_plain_action(status="in-repair")
+        candidate_birth = repo.commit(
+            "illegally birth claimed agent action"
+        )
+        landmarks["candidate_birth"] = candidate_birth
+        N = candidate_birth
+    elif case == "human-born-answered":
+        old_path, _birth = simple_arm("old", "human")
+        answer(repo, old_path, "approve")
+        O = repo.oid("HEAD")
+        repo.branch("candidate", C)
+        candidate_path = add_human(repo, label)
+        repo.write(
+            candidate_path,
+            repo.read(candidate_path).replace(
+                "**Your answer:** ______",
+                "**Your answer:** approve",
+                1,
+            ),
+        )
+        candidate_birth = repo.commit(
+            "illegally birth answered human action"
+        )
+        landmarks["candidate_birth"] = candidate_birth
+        N = candidate_birth
+    elif case == "review-publication-equivalence":
+        review_target = evidence_path("r18-review-target")
+        review_payload = "# Review target\n"
+        revision = review_revision(review_payload)
+        repo.branch("old", C)
+        old_path = add_review(
+            repo,
+            label,
+            status="awaiting-artifact",
+            target="pending",
+            revision="pending",
+        )
+        old_birth = repo.commit(
+            "birth review before its artifact is published"
+        )
+        repo.write(review_target, review_payload)
+        old_publication = publish_review(
+            repo, old_path, review_target, revision
+        )
+        O = old_publication
+        repo.branch("candidate", C)
+        repo.write(review_target, review_payload)
+        add_review(
+            repo,
+            label,
+            status="waiting",
+            target=review_target,
+            revision=revision,
+        )
+        candidate_birth = repo.commit(
+            "birth same unanswered review after artifact publication"
+        )
+        landmarks.update(
+            {
+                "old_birth": old_birth,
+                "old_publication": old_publication,
+                "candidate_birth": candidate_birth,
+            }
+        )
+        N = candidate_birth
+    elif case == "exact-cherry-pick":
+        _old_path, old_birth = simple_arm("old")
+        O = old_birth
+        repo.branch("candidate", C)
+        feature(repo, "origin-base-advance-before-cherry-pick")
+        result = repo.run(
+            "cherry-pick", old_birth, env=repo._commit_environment()
+        )
+        if result.returncode:
+            raise RuntimeError(result.stderr)
+        N = repo.oid("HEAD")
+        landmarks["candidate_birth"] = N
+    elif case in {"normal-base-advance-replay", "independent-birth"}:
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        repo.branch("candidate", C)
+        if case == "normal-base-advance-replay":
+            feature(repo, "origin-normal-base-advance")
+        add_plain_action()
+        candidate_birth = repo.commit(
+            "independently reproduce target addition"
+        )
+        landmarks["candidate_birth"] = candidate_birth
+        N = candidate_birth
+    elif case == "schema-invalid-birth":
+        endpoints = {}
+        for arm in ("old", "candidate"):
+            repo.branch(arm, C)
+            repo.write(target, f"# Evidence {label}: pending\n")
+            repo.write(
+                path,
+                action_text.replace(
+                    "**Filed:** 2026-08-31",
+                    "**Filed:** not-a-calendar-date",
+                    1,
+                ),
+            )
+            endpoints[arm] = repo.commit(
+                f"birth schema-invalid target on {arm}"
+            )
+            landmarks[f"{arm}_birth"] = endpoints[arm]
+        O, N = endpoints["old"], endpoints["candidate"]
+    elif case == "delete-recreate-O":
+        old_path, _birth = simple_arm("old")
+        saved = repo.read(old_path)
+        repo.remove(old_path)
+        landmarks["old_loss"] = repo.commit("delete old-arm incarnation")
+        repo.write(old_path, saved)
+        landmarks["old_rebirth"] = repo.commit(
+            "recreate old-arm incarnation"
+        )
+        O = repo.oid("HEAD")
+        simple_arm("candidate")
+        N = repo.oid("HEAD")
+    elif case == "delete-recreate-N":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        candidate_path, _birth = simple_arm("candidate")
+        saved = repo.read(candidate_path)
+        repo.remove(candidate_path)
+        landmarks["candidate_loss"] = repo.commit(
+            "delete candidate-arm incarnation"
+        )
+        repo.write(candidate_path, saved)
+        landmarks["candidate_rebirth"] = repo.commit(
+            "recreate candidate-arm incarnation"
+        )
+        N = repo.oid("HEAD")
+    elif case == "transient-protected-mutation":
+        old_path, _birth = simple_arm("old")
+        saved = repo.read(old_path)
+        repo.write(old_path, saved + "<!-- protected transient bytes -->\n")
+        landmarks["old_mutation"] = repo.commit(
+            "transiently mutate frozen bytes"
+        )
+        repo.write(old_path, saved)
+        landmarks["old_restoration"] = repo.commit(
+            "restore frozen bytes"
+        )
+        O = repo.oid("HEAD")
+        simple_arm("candidate")
+        N = repo.oid("HEAD")
+    elif case == "human-response-restoration":
+        old_path, _birth = simple_arm("old", "human")
+        answer(repo, old_path, "keep this exact response")
+        answered = repo.read(old_path)
+        repo.write(
+            old_path,
+            answered.replace(
+                "**Your answer:** keep this exact response",
+                "**Your answer:** ______",
+                1,
+            ),
+        )
+        landmarks["old_response_loss"] = repo.commit(
+            "remove concrete human response"
+        )
+        repo.write(old_path, answered)
+        landmarks["old_response_restoration"] = repo.commit(
+            "restore concrete human response"
+        )
+        O = repo.oid("HEAD")
+        candidate_path, _birth = simple_arm("candidate", "human")
+        answer(repo, candidate_path, "keep this exact response")
+        N = repo.oid("HEAD")
+    elif case == "review-binding-restoration":
+        old_path, _birth = simple_arm("old", "review")
+        answer_review(repo, old_path, "approve exact target")
+        claim_review(repo, old_path)
+        bound = repo.read(old_path)
+        repo.write(
+            old_path,
+            bound.replace(
+                f"**Review target:** `{evidence_path('r18-review-target')}`",
+                "**Review target:** `docs/different-target.md`",
+                1,
+            ),
+        )
+        landmarks["old_binding_loss"] = repo.commit(
+            "replace concrete review target"
+        )
+        repo.write(old_path, bound)
+        landmarks["old_binding_restoration"] = repo.commit(
+            "restore concrete review target"
+        )
+        O = repo.oid("HEAD")
+        candidate_path, _birth = simple_arm("candidate", "review")
+        answer_review(repo, candidate_path, "approve exact target")
+        claim_review(repo, candidate_path)
+        N = repo.oid("HEAD")
+    elif case == "claim-restoration":
+        claimed_arm("old", transient="claim-removal")
+        O = repo.oid("HEAD")
+        claimed_arm("candidate")
+        N = repo.oid("HEAD")
+    elif case == "endpoint-regression":
+        claimed_arm("old")
+        O = repo.oid("HEAD")
+        simple_arm("candidate")
+        N = repo.oid("HEAD")
+    elif case == "second-birth":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        repo.branch("candidate-left", C)
+        add_plain_action(at_path=path)
+        left = repo.commit("first candidate-arm birth")
+        repo.branch("candidate-right", C)
+        second_path = queue_path("r18-origin-action-copy")
+        repo.write(second_path, action_text)
+        repo.write(target, f"# Evidence {label}: pending\n")
+        right = repo.commit("second candidate-arm birth")
+        parents = (right, left) if reverse_parents else (left, right)
+        N = repo.merge_commit(parents, "merge two independently born carriers")
+        landmarks.update({"candidate_birth": left, "second_birth": right})
+    elif case == "multiplicity":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        candidate_path, _birth = simple_arm("candidate")
+        duplicate_path = queue_path("r18-origin-action-copy")
+        repo.write(duplicate_path, repo.read(candidate_path))
+        landmarks["candidate_multiplicity"] = repo.commit(
+            "temporarily duplicate production identity"
+        )
+        repo.remove(duplicate_path)
+        landmarks["candidate_singleton_restored"] = repo.commit(
+            "restore singleton production identity"
+        )
+        N = repo.oid("HEAD")
+    elif case == "outside-collision":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        simple_arm("candidate")
+        local = repo.oid("HEAD")
+        tree = repo.run("write-tree").stdout.strip()
+        outside = repo.commit_tree(
+            tree, "unrelated outside-C carrier with same identity"
+        )
+        N = repo.merge_commit(
+            (local, outside), "merge outside-C identity collision"
+        )
+        landmarks.update({"outside": outside, "candidate_birth": local})
+    elif case == "neutral-pre-origin-merge":
+        endpoints = {}
+        for arm in ("old", "candidate"):
+            repo.branch(f"{arm}-neutral-left", C)
+            left = feature(repo, f"{arm}-neutral-left")
+            repo.branch(f"{arm}-neutral-right", C)
+            right = feature(repo, f"{arm}-neutral-right")
+            parents = (right, left) if reverse_parents else (left, right)
+            merge = repo.merge_commit(
+                parents, f"merge {arm} pre-origin neutral parents"
+            )
+            add_plain_action()
+            birth = repo.commit(f"birth target after {arm} neutral merge")
+            endpoints[arm] = birth
+            landmarks[f"{arm}_prebirth_merge"] = merge
+            landmarks[f"{arm}_birth"] = birth
+        O, N = endpoints["old"], endpoints["candidate"]
+    elif case == "inherited-then-deleted-merge-arm":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        candidate_path, birth = simple_arm("candidate")
+        live = feature(repo, "origin-live-inherited-arm")
+        repo.branch("candidate-lost", birth)
+        repo.remove(candidate_path)
+        lost = repo.commit("delete inherited candidate-arm incarnation")
+        N = repo.merge_commit(
+            (live, lost), "merge live and inherited-then-deleted arms"
+        )
+        landmarks.update({"candidate_live": live, "candidate_loss": lost})
+    elif case == "rename-timing-move":
+        endpoints = {}
+        for arm in ("old", "candidate"):
+            action_path, _birth = simple_arm(arm)
+            moved = queue_path(label, timing="future-blocking")
+            repo.move(action_path, moved)
+            endpoints[arm] = repo.commit(
+                f"rename {arm} delivery timing path"
+            )
+            landmarks[f"{arm}_moved_path"] = moved
+        O, N = endpoints["old"], endpoints["candidate"]
+    elif case in {"generated-retry", "task-pickup"}:
+        kind = case
+        simple_arm("old", kind)
+        O = repo.oid("HEAD")
+        simple_arm("candidate", kind)
+        N = repo.oid("HEAD")
+    elif case == "parent-order":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        _candidate_path, birth = simple_arm("candidate")
+        repo.branch("candidate-left", birth)
+        left = feature(repo, "origin-parent-order-left")
+        repo.branch("candidate-right", birth)
+        right = feature(repo, "origin-parent-order-right")
+        parents = (right, left) if reverse_parents else (left, right)
+        N = repo.merge_commit(parents, "merge equivalent origin carriers")
+        landmarks.update({"candidate_left": left, "candidate_right": right})
+    elif case == "unreadable-object":
+        simple_arm("old")
+        O = repo.oid("HEAD")
+        candidate_path, _birth = simple_arm("candidate")
+        N = repo.oid("HEAD")
+        missing_oid = repo.tree_entry_oid(N, candidate_path)
+        repo.hide_loose_object(missing_oid)
+        landmarks["missing_oid"] = missing_oid
+    else:
+        raise ValueError(f"unsupported origin fixture case {case}")
+
+    clean_cases = {
+        "normal-base-advance-replay",
+        "independent-birth",
+        "exact-cherry-pick",
+        "neutral-pre-origin-merge",
+        "rename-timing-move",
+        "generated-retry",
+        "task-pickup",
+        "parent-order",
+    }
+    if case in clean_cases:
+        expected = "no-finding"
+        expected_code = f"origin-strategy-{strategy}-equivalent-live-incarnation"
+        expected_witness = True
+    elif case == "review-publication-equivalence":
+        expected = "no-finding" if strategy == "U" else "blocking-finding"
+        expected_code = (
+            "origin-strategy-U-equivalent-live-incarnation"
+            if strategy == "U"
+            else "origin-birth-witness-mismatch"
+        )
+        expected_witness = False
+    elif case in {"agent-born-claimed", "human-born-answered"}:
+        expected = "blocking-finding"
+        expected_code = "origin-birth-schema-invalid"
+        expected_witness = None
+    elif case == "unreadable-object":
+        expected = "unreadable"
+        expected_code = None
+        expected_witness = None
+    elif case == "O-only-post-C-loss":
+        expected = "blocking-finding"
+        expected_code = "not-present-at-C"
+        expected_witness = None
+    else:
+        expected = "blocking-finding"
+        expected_code = {
+            "delete-recreate-O": "origin-birth-multiplicity",
+            "delete-recreate-N": "origin-birth-multiplicity",
+            "transient-protected-mutation": "origin-invalid-mutation",
+            "human-response-restoration": "origin-invalid-mutation",
+            "review-binding-restoration": "origin-invalid-mutation",
+            "claim-restoration": "origin-invalid-mutation",
+            "endpoint-regression": "origin-endpoint-regression",
+            "second-birth": "origin-birth-multiplicity",
+            "multiplicity": "origin-arm-multiplicity",
+            "outside-collision": "origin-outside-C-collision",
+            "schema-invalid-birth": "origin-birth-schema-invalid",
+            "inherited-then-deleted-merge-arm": (
+                "origin-post-birth-absence"
+            ),
+        }[case]
+        expected_witness = None
+    scenario = (
+        f"R18-{strategy}-{case}"
+        + ("-reversed" if reverse_parents else "")
+    )
+    return Fixture(
+        scenario,
+        repo,
+        C,
+        O,
+        landmarks.get("candidate_birth", N),
+        N,
+        expected,
+        {
+            "case": case,
+            "expected_origin_code": expected_code,
+            "expected_witness_match": expected_witness,
+            "interpretation": interpretation,
+            "landmarks": landmarks,
+            "reverse_parents": reverse_parents,
+            "strategy": strategy,
+        },
+        origin_strategy=strategy,
+    )
+
+
+def r18_origin_budget_fixture(
+    root: Path,
+    *,
+    counter: str,
+    overflow: bool,
+) -> Fixture:
+    strategy = "B" if counter == "origin_witness_bytes" else "U"
+    fixture = r18_origin_fixture(
+        root,
+        case="normal-base-advance-replay",
+        strategy=strategy,
+    )
+    probe = Classifier(fixture).run()
+    measured = probe["metrics"][counter]
+    if measured <= 0:
+        raise AssertionError(f"origin budget counter {counter} was not exercised")
+    fixture.scenario = (
+        f"R18-{counter.replace('_', '-')}-"
+        + ("plus-one-refused" if overflow else "exact")
+    )
+    fixture.expected = "blocking-finding" if overflow else "no-finding"
+    fixture.budget_limits = {counter: measured - int(overflow)}
+    fixture.details = {
+        "case": "origin-execution-bound",
+        "counter": counter,
+        "measured": measured,
+        "overflow_by_one": overflow,
+        "strategy": strategy,
+        "typed_budget_limit": measured - int(overflow),
+    }
+    return fixture
+
+
 def scenario_builders():
     return [
         lambda root: ordinary_linear_fixture(
@@ -9128,6 +10295,129 @@ def scenario_builders():
         r17_unopened_outside_c_ancestor,
         *[
             (
+                lambda root, strategy=strategy:
+                r18_origin_fixture(
+                    root,
+                    case="normal-base-advance-replay",
+                    strategy=strategy,
+                )
+            )
+            for strategy in ("U", "B")
+        ],
+        *[
+            (
+                lambda root, strategy=strategy:
+                r18_origin_fixture(
+                    root,
+                    case="independent-birth",
+                    strategy=strategy,
+                )
+            )
+            for strategy in ("U", "B")
+        ],
+        lambda root: r18_origin_fixture(
+            root, case="O-only-post-C-loss"
+        ),
+        *[
+            (
+                lambda root, case=case:
+                r18_origin_fixture(root, case=case)
+            )
+            for case in (
+                "delete-recreate-O",
+                "delete-recreate-N",
+                "transient-protected-mutation",
+                "human-response-restoration",
+                "review-binding-restoration",
+                "claim-restoration",
+                "endpoint-regression",
+                "second-birth",
+                "multiplicity",
+                "outside-collision",
+                "schema-invalid-birth",
+                "neutral-pre-origin-merge",
+                "inherited-then-deleted-merge-arm",
+            )
+        ],
+        *[
+            (
+                lambda root, strategy=strategy:
+                r18_origin_fixture(
+                    root, case="exact-cherry-pick", strategy=strategy
+                )
+            )
+            for strategy in ("U", "B")
+        ],
+        *[
+            (
+                lambda root, case=case, strategy=strategy:
+                r18_origin_fixture(
+                    root,
+                    case=case,
+                    strategy=strategy,
+                    interpretation=(
+                        "illegal claimed state at an agent-action birth"
+                        if case == "agent-born-claimed"
+                        else "illegal concrete answer at a human-action birth"
+                    ),
+                )
+            )
+            for case in ("agent-born-claimed", "human-born-answered")
+            for strategy in ("U", "B")
+        ],
+        *[
+            (
+                lambda root, strategy=strategy:
+                r18_origin_fixture(
+                    root,
+                    case="review-publication-equivalence",
+                    strategy=strategy,
+                    interpretation=(
+                        "production-valid awaiting-artifact to waiting "
+                        "publication versus a waiting birth"
+                    ),
+                )
+            )
+            for strategy in ("U", "B")
+        ],
+        *[
+            (
+                lambda root, strategy=strategy:
+                r18_origin_fixture(
+                    root, case="rename-timing-move", strategy=strategy
+                )
+            )
+            for strategy in ("U", "B")
+        ],
+        *[
+            (
+                lambda root, case=case, strategy=strategy:
+                r18_origin_fixture(root, case=case, strategy=strategy)
+            )
+            for case in ("generated-retry", "task-pickup")
+            for strategy in ("U", "B")
+        ],
+        lambda root: r18_origin_fixture(root, case="parent-order"),
+        lambda root: r18_origin_fixture(
+            root, case="parent-order", reverse_parents=True
+        ),
+        lambda root: r18_origin_fixture(root, case="unreadable-object"),
+        *[
+            (
+                lambda root, counter=counter, overflow=overflow:
+                r18_origin_budget_fixture(
+                    root, counter=counter, overflow=overflow
+                )
+            )
+            for counter in (
+                "origin_arm_nodes",
+                "origin_parent_edges",
+                "origin_witness_bytes",
+            )
+            for overflow in (False, True)
+        ],
+        *[
+            (
                 lambda root, variant=variant:
                 r15_old_side_continuity(root, variant)
             )
@@ -9177,6 +10467,10 @@ CONTROL_NAMES = (
     "skip-persisted-candidate-continuity",
     "skip-old-side-continuity",
     "skip-supplier-support-certificate",
+    "endpoint-only-origin-equality",
+    "skip-origin-birth-uniqueness",
+    "skip-origin-post-birth-absence",
+    "skip-origin-endpoint-non-regression",
 )
 
 
@@ -11180,6 +12474,126 @@ def validate_result(result: dict):
     if scenario == "PCX-20a-budget-below-limit":
         if status != "valid" or not actions:
             errors.append("below-limit budget did not return normal verdict")
+    if scenario.startswith("R18-"):
+        details = result["details"]
+        if details.get("case") == "origin-execution-bound":
+            counter = details["counter"]
+            if details["overflow_by_one"]:
+                if (
+                    result["audit_exit"] != 2
+                    or result["classification"] != "blocking-finding"
+                    or result["metrics"][counter]
+                    != details["typed_budget_limit"] + 1
+                    or any(
+                        result[key]
+                        for key in (
+                            "actions",
+                            "authority_edges",
+                            "carry_proofs",
+                            "mutation_edges",
+                            "propagation_edges",
+                            "support_checks",
+                        )
+                    )
+                ):
+                    errors.append(
+                        "R18 origin +1 bound leaked partial semantic results"
+                    )
+            elif (
+                result["audit_exit"] != 0
+                or result["metrics"][counter] != details["measured"]
+            ):
+                errors.append("R18 exact origin bound did not pass")
+        elif details.get("case") == "unreadable-object":
+            if status != "unreadable" or actions:
+                errors.append("R18 unreadable birth object leaked a result")
+        else:
+            expected_code = details.get("expected_origin_code")
+            matching = [
+                action
+                for action in actions
+                if action["reason_code"] == expected_code
+            ]
+            if expected_code is not None and not matching:
+                errors.append(
+                    f"R18 did not expose expected reason {expected_code}"
+                )
+            origin_actions = [
+                action
+                for action in actions
+                if action["origin_proofs"]
+                or action["event_mode"].startswith("origin-")
+            ]
+            if details.get("case") != "O-only-post-C-loss":
+                if len(origin_actions) != 1:
+                    errors.append("R18 did not isolate one target origin action")
+                else:
+                    action = origin_actions[0]
+                    expected_witness = details.get(
+                        "expected_witness_match"
+                    )
+                    if (
+                        expected_witness is not None
+                        and action["birth_witness_match"]
+                        is not expected_witness
+                    ):
+                        errors.append("R18 birth witness comparison drifted")
+                    if len(action["origin_proofs"]) != 2:
+                        errors.append("R18 did not inspect both C..O/C..N arms")
+                    if details.get("case") == (
+                        "review-publication-equivalence"
+                    ):
+                        mutation_edges = [
+                            edge
+                            for proof in action["origin_proofs"]
+                            for edge in proof["edges"]
+                        ]
+                        if (
+                            any(
+                                proof["status"] != "valid"
+                                for proof in action["origin_proofs"]
+                            )
+                            or details["landmarks"]["old_publication"]
+                            not in {
+                                edge["child"] for edge in mutation_edges
+                            }
+                            or any(
+                                edge["production_problem"] is not None
+                                or edge["frozen_problem"] is not None
+                                or edge["regression_problem"] is not None
+                                or edge["problem"] is not None
+                                for edge in mutation_edges
+                            )
+                            or any(action["endpoint_checks"].values())
+                        ):
+                            errors.append(
+                                "R18 legal review publication edge was not "
+                                "accepted by every production mutation check"
+                            )
+                    if details.get("case") in {
+                        "agent-born-claimed",
+                        "human-born-answered",
+                    } and not any(
+                        proof["birth_schema_problems"]
+                        for proof in action["origin_proofs"]
+                    ):
+                        errors.append(
+                            "R18 illegal typed birth escaped the birth schema"
+                        )
+            if (
+                details.get("case") == "neutral-pre-origin-merge"
+                and origin_actions
+                and not all(
+                    proof["prebirth_neutral"]
+                    for proof in origin_actions[0]["origin_proofs"]
+                )
+            ):
+                errors.append("R18 rejected or hid neutral pre-birth parents")
+            if details.get("case") == "rename-timing-move" and (
+                not origin_actions
+                or origin_actions[0]["birth_witness_match"] is not True
+            ):
+                errors.append("R18 birth witness accidentally included path")
     return errors
 
 
@@ -11406,6 +12820,34 @@ def control_builder(name: str, root: Path):
         return (
             r16_supplier_support_fixture(root, "reverse-drop"),
             Damage(skip_supplier_support_certificate=True),
+            "no-finding",
+        )
+    if name == "endpoint-only-origin-equality":
+        return (
+            r18_origin_fixture(
+                root, case="transient-protected-mutation"
+            ),
+            Damage(endpoint_only_origin_equality=True),
+            "no-finding",
+        )
+    if name == "skip-origin-birth-uniqueness":
+        return (
+            r18_origin_fixture(root, case="second-birth"),
+            Damage(skip_origin_birth_uniqueness=True),
+            "no-finding",
+        )
+    if name == "skip-origin-post-birth-absence":
+        return (
+            r18_origin_fixture(
+                root, case="inherited-then-deleted-merge-arm"
+            ),
+            Damage(skip_origin_post_birth_absence=True),
+            "no-finding",
+        )
+    if name == "skip-origin-endpoint-non-regression":
+        return (
+            r18_origin_fixture(root, case="endpoint-regression"),
+            Damage(skip_origin_endpoint_non_regression=True),
             "no-finding",
         )
     raise ValueError(name)
@@ -11663,10 +13105,13 @@ def validate_scenario_aliases(results: list[dict]):
     return inventory, failures
 
 
-def run_suite(root: Path):
+def run_suite(root: Path, *, reverse_construction: bool = False):
     failures = []
     results = []
-    for index, builder in enumerate(scenario_builders(), start=1):
+    builders = list(scenario_builders())
+    if reverse_construction:
+        builders.reverse()
+    for index, builder in enumerate(builders, start=1):
         fixture_root = root / f"{index:02d}"
         fixture = builder(fixture_root)
         result = run_fixture(fixture)
@@ -11674,6 +13119,8 @@ def run_suite(root: Path):
         if errors:
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
+    results.sort(key=lambda item: item["scenario"])
+    for result in results:
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
     by_scenario = {result["scenario"]: result for result in results}
     permutation_results = [
@@ -11755,6 +13202,62 @@ def run_suite(root: Path):
                 "errors": ["verdict or carry role multiset changed"],
             }
         )
+    origin_permutation_signatures = []
+    for scenario in (
+        "R18-U-parent-order",
+        "R18-U-parent-order-reversed",
+    ):
+        result = by_scenario.get(scenario)
+        if result is None:
+            continue
+        action = next(
+            (
+                item for item in result["actions"]
+                if item["origin_proofs"]
+            ),
+            None,
+        )
+        origin_permutation_signatures.append(
+            {
+                "birth_counts": (
+                    [
+                        len(proof["birth_commits"])
+                        for proof in action["origin_proofs"]
+                    ]
+                    if action is not None
+                    else []
+                ),
+                "birth_witness_match": (
+                    action["birth_witness_match"]
+                    if action is not None
+                    else None
+                ),
+                "classification": result["classification"],
+                "edge_role_multiset": sorted(
+                    edge["role"]
+                    for proof in (
+                        action["origin_proofs"] if action is not None else []
+                    )
+                    for edge in proof["edges"]
+                ),
+                "evidence_status": result["evidence_verdict"]["status"],
+                "reason_code": (
+                    action["reason_code"] if action is not None else None
+                ),
+            }
+        )
+    origin_permutation_ok = (
+        len(origin_permutation_signatures) == 2
+        and origin_permutation_signatures[0]
+        == origin_permutation_signatures[1]
+    )
+    if not origin_permutation_ok:
+        failures.append(
+            {
+                "scenario": "R18-origin-parent-permutation-invariance",
+                "errors": ["origin verdict or semantic roles changed"],
+            }
+        )
     print(
         json.dumps(
             {
@@ -11762,7 +13265,14 @@ def run_suite(root: Path):
                 "r17_persisted_parent_permutations": (
                     persisted_permutations
                 ),
-                "status": "PASS" if permutation_ok else "FAIL",
+                "r18_origin_parent_permutation": (
+                    origin_permutation_signatures
+                ),
+                "status": (
+                    "PASS"
+                    if permutation_ok and origin_permutation_ok
+                    else "FAIL"
+                ),
             },
             sort_keys=True,
         )
@@ -11780,11 +13290,16 @@ def run_suite(root: Path):
         )
     )
     controls = []
-    for index, name in enumerate(CONTROL_NAMES, start=1):
+    control_names = list(CONTROL_NAMES)
+    if reverse_construction:
+        control_names.reverse()
+    for index, name in enumerate(control_names, start=1):
         result = run_control(name, root / f"control-{index:02d}")
         controls.append(result)
         if result["status"] != "OBSERVED_RED":
             failures.append({"control": name, "errors": [result["status"]]})
+    controls.sort(key=lambda item: item["control"])
+    for result in controls:
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
     summary = {
         "summary": "PASS" if not failures else "FAIL",
@@ -11799,6 +13314,9 @@ def run_suite(root: Path):
         ),
         "aliases_total": len(alias_inventory),
         "r17_parent_permutation": "PASS" if permutation_ok else "FAIL",
+        "r18_origin_parent_permutation": (
+            "PASS" if origin_permutation_ok else "FAIL"
+        ),
         "python": sys.version.split()[0],
         "git": REAL_RUN(
             ["git", "--version"],
@@ -11813,7 +13331,11 @@ def run_suite(root: Path):
 
 
 def ordinary_audit(
-    root: Path, O: str, N: str, budget_limit: int | None
+    root: Path,
+    O: str,
+    N: str,
+    budget_limit: int | None,
+    origin_strategy: str,
 ) -> dict:
     """Audit exactly two immutable O,N commit IDs in an existing repository."""
     valid_oid = lambda value: (
@@ -11836,6 +13358,7 @@ def ordinary_audit(
             "input_contract": {
                 "schema": "restack-provenance-input/v2",
                 "authoritative_endpoints": ["O", "N"],
+                "origin_strategy": origin_strategy,
             },
             "audit_exit": 2,
             "classification": "unreadable",
@@ -11858,6 +13381,7 @@ def ordinary_audit(
         N,
         "",
         budget_limit=budget_limit,
+        origin_strategy=origin_strategy,
     )
     result = Classifier(fixture).run()
     result.pop("expected_result", None)
@@ -11868,12 +13392,14 @@ def ordinary_audit(
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--reverse-construction", action="store_true")
     parser.add_argument("--control", choices=CONTROL_NAMES)
     parser.add_argument("--fixtures-dir", type=Path)
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--old", metavar="O")
     parser.add_argument("--new", metavar="N")
     parser.add_argument("--budget", type=int)
+    parser.add_argument("--origin-strategy", choices=("U", "B"), default="U")
     arguments = parser.parse_args(argv)
     ordinary = any(
         value is not None
@@ -11886,12 +13412,15 @@ def main(argv=None):
         parser.error("choose exactly one of --self-test, --control, or --repo/--old/--new")
     if ordinary and None in (arguments.repo, arguments.old, arguments.new):
         parser.error("ordinary audit requires --repo, --old O, and --new N")
+    if arguments.reverse_construction and not arguments.self_test:
+        parser.error("--reverse-construction requires --self-test")
     if ordinary:
         result = ordinary_audit(
             arguments.repo.resolve(),
             arguments.old,
             arguments.new,
             arguments.budget,
+            arguments.origin_strategy,
         )
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
         return result["audit_exit"]
@@ -11906,7 +13435,10 @@ def main(argv=None):
     with root_context as raw_root:
         root = Path(raw_root)
         if arguments.self_test:
-            return run_suite(root)
+            return run_suite(
+                root,
+                reverse_construction=arguments.reverse_construction,
+            )
         result = run_control(arguments.control, root / "control")
         print(json.dumps(result, sort_keys=True, ensure_ascii=False))
         return 0 if result["status"] == "OBSERVED_RED" else 1

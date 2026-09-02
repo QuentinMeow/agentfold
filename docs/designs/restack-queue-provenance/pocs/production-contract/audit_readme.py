@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v5"
+SCHEMA = "agentfold-production-contract-evidence/v6"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -46,6 +46,14 @@ SUPERSEDED_EVIDENCE = {
                 "never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v4",
+        },
+        {
+            "commit": "d12b799a2fa27b05a5ee2af1b422131856296b41",
+            "disposition": (
+                "superseded and burned after the absent-at-C normal-restack "
+                "false block; history is preserved and v5 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v5",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -79,7 +87,8 @@ METRIC_KEYS = (
     "support_serialized_bytes", "dynamic_support_paths_traversed",
     "dynamic_support_paths_discovered", "dynamic_support_path_bytes",
     "mutation_calls", "per_action_history_walks", "carry_proof_nodes",
-    "carry_proof_edges", "production_helper_calls",
+    "carry_proof_edges", "origin_arm_nodes", "origin_parent_edges",
+    "origin_births", "origin_witness_bytes", "production_helper_calls",
     "production_helper_input_bytes", "production_parent_queries",
     "git_stderr_bytes",
 )
@@ -124,6 +133,21 @@ EXECUTION_BOUND_CASES = (
         "R17-support-serialized-exact",
         "R17-support-serialized-plus-one-refused",
     ),
+    (
+        "origin_arm_nodes", "origin_arm_nodes", 5,
+        "R18-origin-arm-nodes-exact",
+        "R18-origin-arm-nodes-plus-one-refused",
+    ),
+    (
+        "origin_parent_edges", "origin_parent_edges", 3,
+        "R18-origin-parent-edges-exact",
+        "R18-origin-parent-edges-plus-one-refused",
+    ),
+    (
+        "origin_witness_bytes", "origin_witness_bytes", 1042,
+        "R18-origin-witness-bytes-exact",
+        "R18-origin-witness-bytes-plus-one-refused",
+    ),
 )
 PRECHARGE_P22_METRICS = {
     "authority_calls": 0,
@@ -162,6 +186,10 @@ PRECHARGE_P22_METRICS = {
     "merge_base_process_terminations": 0,
     "merge_base_tokens": 1,
     "mutation_calls": 1,
+    "origin_arm_nodes": 0,
+    "origin_births": 0,
+    "origin_parent_edges": 0,
+    "origin_witness_bytes": 0,
     "object_cache_hits": 25,
     "object_header_bytes": 6747,
     "object_payload_bytes": 29421,
@@ -235,6 +263,10 @@ POSTHOC_P22_METRICS = {
     "merge_base_process_terminations": 0,
     "merge_base_tokens": 1,
     "mutation_calls": 2080,
+    "origin_arm_nodes": 0,
+    "origin_births": 0,
+    "origin_parent_edges": 0,
+    "origin_witness_bytes": 0,
     "object_cache_hits": 24736,
     "object_header_bytes": 15262,
     "object_payload_bytes": 71081,
@@ -431,6 +463,47 @@ SCENARIO_IDS = tuple(sorted((
     "R17-wide-outside-C-boundary-budget",
     "R17-graph-parent-tokens-exact",
     "R17-graph-parent-tokens-plus-one-refused",
+    "R18-B-exact-cherry-pick",
+    "R18-B-agent-born-claimed",
+    "R18-B-generated-retry",
+    "R18-B-human-born-answered",
+    "R18-B-independent-birth",
+    "R18-B-normal-base-advance-replay",
+    "R18-B-rename-timing-move",
+    "R18-B-review-publication-equivalence",
+    "R18-B-task-pickup",
+    "R18-U-O-only-post-C-loss",
+    "R18-U-agent-born-claimed",
+    "R18-U-claim-restoration",
+    "R18-U-delete-recreate-N",
+    "R18-U-delete-recreate-O",
+    "R18-U-endpoint-regression",
+    "R18-U-exact-cherry-pick",
+    "R18-U-generated-retry",
+    "R18-U-human-response-restoration",
+    "R18-U-human-born-answered",
+    "R18-U-independent-birth",
+    "R18-U-inherited-then-deleted-merge-arm",
+    "R18-U-multiplicity",
+    "R18-U-neutral-pre-origin-merge",
+    "R18-U-normal-base-advance-replay",
+    "R18-U-outside-collision",
+    "R18-U-parent-order",
+    "R18-U-parent-order-reversed",
+    "R18-U-rename-timing-move",
+    "R18-U-review-binding-restoration",
+    "R18-U-review-publication-equivalence",
+    "R18-U-schema-invalid-birth",
+    "R18-U-second-birth",
+    "R18-U-transient-protected-mutation",
+    "R18-U-task-pickup",
+    "R18-U-unreadable-object",
+    "R18-origin-arm-nodes-exact",
+    "R18-origin-arm-nodes-plus-one-refused",
+    "R18-origin-parent-edges-exact",
+    "R18-origin-parent-edges-plus-one-refused",
+    "R18-origin-witness-bytes-exact",
+    "R18-origin-witness-bytes-plus-one-refused",
     "W0-fast-forward-return",
     "W1-pre-PR-push-exact-endpoints",
     "W2-base-advance-retarget-invariant",
@@ -450,6 +523,7 @@ CONTROL_IDS = tuple(sorted((
     "ignore-persisted-absent-C-arm",
     "ignore-persisted-outside-C-collision",
     "identity-multiplicity-collapsed-to-set",
+    "endpoint-only-origin-equality",
     "literal-review-pending-treated-concrete",
     "locale-git-error-stream-equality",
     "missing-all-parent-direct-validation",
@@ -463,6 +537,9 @@ CONTROL_IDS = tuple(sorted((
     "restore-universal-ancestor-carry-scan",
     "skip-carry-compatibility",
     "skip-old-side-continuity",
+    "skip-origin-birth-uniqueness",
+    "skip-origin-endpoint-non-regression",
+    "skip-origin-post-birth-absence",
     "skip-persisted-candidate-continuity",
     "skip-persisted-frozen-skeleton",
     "skip-preserved-state-validation",
@@ -566,14 +643,224 @@ FIXTURE_CLAIMS = (
 )
 
 
-# Generated once from both byte-identical fresh v5 streams after runtime commits
+# Generated from both byte-identical corrected v6 streams after runtime commits
 # c32f470977735a63feaf377ca9290353d1520e0e and
-# 850d02587f7f812b7dde9667a39da80b4ce48764.  Every row kind has one
-# exact recursive shape digest, checked before any projection.
-RAW_SHAPE_CATALOG_V5 = """
+# 850d02587f7f812b7dde9667a39da80b4ce48764. Every row kind has one exact
+# recursive shape digest, checked before any projection.
+RAW_SHAPE_CATALOG_V6 = """
+scenario:P1-direct-linear-valid sha256:356e5e2f5b906e2609dce7643c46eb3802ab376b1994aaac48c90cdacd35b660
+scenario:P10-direct-invalid-parent sha256:243adfd610241a33198cd863fe6b3bf8838e0f1249417cd02d785958e9b00db2
+scenario:P11-direct-three-parent-valid sha256:08cbb263eae6a1b25dd5c0a43993f762cf5e5e609e224e060e033aff4c7a6d8e
+scenario:P12-merge-supplier-valid sha256:62a0422e4abc3f2f30a8c92e80403730975d2a9a857ad68d5be835320416f79d
+scenario:P13-merge-supplier-invalid sha256:ff94228192a8d68de73542c2a091d31cb14c3a8486395c321345cc43ecb8d59d
+scenario:P14-supplier-reintroduced sha256:7454ea144eeb97e42fdec49a5c871b156e4eab36cf458fc9e323bc21d75d038d
+scenario:P15-competing-suppliers sha256:bfc196880866b433782f091ea315a59ff4da15a378395e84f9031019a03bae6b
+scenario:P16-PCX-08-invalid-supplier-claimed-carrier sha256:5e3b453421a76eb12e98e49e70e9676b7f3161982bd3ac2bfbbbfdd4c4f2266e
+scenario:P17-post-event-reintroduction sha256:1bf728538f3f9b2f8039ea328a14e9ac854f611096c8e6d7215f593ac9c94bd0
+scenario:P18a-missing-tip sha256:da6495cae1725367fa0e7f6396a28bec7aeaa81e0184c4e548af68cd513935a7
+scenario:P18b-noncommit-tip sha256:da6495cae1725367fa0e7f6396a28bec7aeaa81e0184c4e548af68cd513935a7
+scenario:P18c-unrelated-tip sha256:da6495cae1725367fa0e7f6396a28bec7aeaa81e0184c4e548af68cd513935a7
+scenario:P18d-shallow-required-region sha256:da6495cae1725367fa0e7f6396a28bec7aeaa81e0184c4e548af68cd513935a7
+scenario:P18e-missing-queue-blob sha256:7edae0c78d59593a52d89129162656692360731d908fdd3729fe88cf611fcada
+scenario:P18f-missing-queue-tree sha256:b1d54297d776a89060609e1bc66d4692ca003f5b80e55e59c155a4062224eb1f
+scenario:P18g-multiple-merge-bases sha256:c32fba6de342591595d0c401021cf433fd1c2cef2676c72ce200ce1b944bd09f
+scenario:P19-production-identities sha256:033f90ccb071f6497a6844de276b6ae6e2559959e0611bc935b941041a29f69c
+scenario:P2-direct-linear-invalid sha256:56e05ec0a91851229bdfc89505fb07b455c5db59bcc096a2afed3da4504329d9
+scenario:P20-lifecycle-types sha256:15226253f334121e1f257d75526897dcc78067b59fee96e184b54b47b1532b1f
+scenario:P21-PCX-17c-squash-erasure sha256:5993dcb6ca9c35cd6e45648b28820218e122476427ce873ae12fbb1b77a8109e
+scenario:P22-PCX-18-one-pass-many-actions sha256:90b3c3fc63a63438171db8ec1a7f2ae6a0f8b0fa2111cb7e69b9cad4599a8862
+scenario:P3-genuine-old-loss sha256:f4d7aa0fea3c8209656e6637fdfd573a6306a24b8674d952e46ca4e54733326c
+scenario:P4-pre-C-identical-origins sha256:e9f07454f5aa06ca57513a645d35048804ae714fd3d44fdae2448abded89abd2
+scenario:P5-duplicate-at-C sha256:b22089ba1ce2aa3f1c8cc2a33210522606ebb175bede2b00ee7a1ea031b1ded2
+scenario:P6a-old-delete-recreate sha256:60b5df621433e1b12b73476ce4ae391f3d9e9ec85f2b63d673ee4bd6870082f9
+scenario:P6b-candidate-delete-recreate sha256:6719d297697ea5c79dd16730a64abb4abf4908dcd4ff7d1f462cb438489db612
+scenario:P7-immutable-payload-change sha256:8d12cccc2e70200a62a42c5f14b315083dee5be4a74ccb687bf143ea926b679d
+scenario:P8-path-timing-move sha256:399f1049ee64053a8132821b61ca823265ee98aa8a605902c789ff923a65791a
+scenario:P9-direct-two-parent-valid sha256:0c16c29d76f9d816cdd9bc9d67e19b4219eaea44022ca7240c7fdd836f22d9bc
+scenario:PCX-01-neutral-parent sha256:d736acff2c56506f54240b5a594a50463d328ba29c8278d14548af1f4c7ee72a
+scenario:PCX-02-neutral-plus-invalid-carrier sha256:ecadc87ad361a6bbb5db07b28ae0e61a9eb37d2cb736090d6f064c338f26ec3a
+scenario:PCX-03-foreign-exact-identity sha256:3488004ff1af764e8b0a2edbba4be9ccefdbdb5a58e7a37776ac62a656e58390
+scenario:PCX-04-several-absent-one-supplier sha256:c96957004dcd2f030928e4070e46969bb99cf42e0e1444f82a95b675ddf41025
+scenario:PCX-05-competing-later-supplier sha256:28e09a02e1755faa58d92b0cd78b4fdcd3209f2da0cc32c68f3ba7ddba9b6b34
+scenario:PCX-06-nested-supplier-over-direct sha256:8ab1d9303f703dcdf363a1b145b592f641f2f23a64f0cb6f62da71bc34f59001
+scenario:PCX-07-overqualified-propagation sha256:b3ee1c7480548139bab197b7bed05bd75ac670dae35a28ec505bd1f040cc6675
+scenario:PCX-09-recreated-claimed-bytes sha256:83748512668326da86521cab5557fdf322a7eb3803554023eb537ef922e3cb9c
+scenario:PCX-10-transient-multiplicity sha256:524af5360b1d42f51d4c25d3146547fae4262b08c40d0f37b543bbe19f8eef09
+scenario:PCX-11-different-payload-same-path sha256:749f3f19e37bcc4010fdf1bf107b56be80ca4f559aeb14ec94884d02d88fff21
+scenario:PCX-12-timing-rename-supplier sha256:a4625e978c779f7042615f0d26b07f59fa3014a05a13c1a442f1e5e5f7d2f195
+scenario:PCX-13-conflicting-human-response sha256:35897b16a6c5e8ef91c1bf907b3c8970f28c71337080b03e1ad50f8a7bc14616
+scenario:PCX-14-valid-human-supplier sha256:2429b312c3b3243ef1a2d803a2b5a3d6e623c81e34268da37fd8bd6774feb425
+scenario:PCX-15-generated-retry-supplier sha256:c1f2b106dc21fb76201c699f8cc1f12e0ee25f5a3c0f782659683a223036c5bf
+scenario:PCX-16-task-pickup-supplier sha256:6182683fe92618dcecb781ec8ead254fb40017172d213acc855af473b3ffef47
+scenario:PCX-17-complete-cherry-pick sha256:2e1d93695d3d4ffa7756a1fdea89e83f761c2b58c8f10f3b255b5bb6dccd839d
+scenario:PCX-17-deletion-only-cherry-pick sha256:5993dcb6ca9c35cd6e45648b28820218e122476427ce873ae12fbb1b77a8109e
+scenario:PCX-19-missing-claim-blob-recovery sha256:d317b3dcc295468280621715e7cacad36a99b0036d1eb528d9e27c12311ed300
+scenario:PCX-20a-budget-below-limit sha256:8ecbbc1472471962bfd53a642d1d26291fdc770f413a00886dff2043e76d7cc7
+scenario:PCX-20b-budget-overflow sha256:e3aa1682a02c1ca646f8c83337b6cc79eabdae7a2a3c77d993bc9e6f2da6ee1a
+scenario:R10-direct-review-target-backtick-dotless-rejected sha256:d8be11e83431dfc36866311e3890655b9a5d9d7efdd67d809c6d09ae3630ff85
+scenario:R10-supplier-review-revision-generic-placeholder-rejected sha256:ecb56e3e83ae60f96c0a210c694a4cb69bc2d252b15bb177a58838d55581a4de
+scenario:R13-direct-review-binding-identical sha256:b5cab6e10850f3413195e2eef9dce3738a7f20fa93bc98ef250790a87d71b6b3
+scenario:R13-direct-review-binding-revision sha256:736bb81c9833b99212d07e9ddbcdd31e47f0df00991b508f14cbd4d7dc1bbe64
+scenario:R13-direct-review-binding-target sha256:820e749b156129f0be4a131f4e6281af0925596c8d9ff2a7f614aa534cc300b7
+scenario:R13-direct-review-binding-terminal sha256:7cd0bda0b5ad360ab8a1a7fc5c8ce0eeed5d8004c5e33838301dce745e6ef1ea
+scenario:R13-persisted-claim-loss sha256:f896875860ccce06186035a8b00a569c0b950825bb68ab0e6998535fbb5084f5
+scenario:R13-persisted-pending-fill sha256:5989193bdae5a33b1204ac55234c178ab309951b8ddb4694e74fcab207a42335
+scenario:R13-persisted-response-change sha256:80e4893742dc769ab7e2a52144981420689073904b0d387e5e89483ae854af73
+scenario:R13-persisted-response-removal sha256:cf177839f3205bc41739a5db21b6fb74e9a98282f00d91313e59e8126463cf50
+scenario:R13-persisted-review-outcome-change sha256:66d8e36f4944282e0ae94d460cfae38e8807464e363a4bab8a062e457bc257e5
+scenario:R13-persisted-review-revision-change sha256:66d8e36f4944282e0ae94d460cfae38e8807464e363a4bab8a062e457bc257e5
+scenario:R13-persisted-review-target-change sha256:66d8e36f4944282e0ae94d460cfae38e8807464e363a4bab8a062e457bc257e5
+scenario:R13-persisted-same-state sha256:4bf3284ce339183796fbed1f9b1b6ed7f369d2184196c66b00407e1abda8f113
+scenario:R13-persisted-terminal-fill sha256:b52150e8d4329770952bbfe8557a4a9d581181e140d6656f519f3dfa1c8ed3aa
+scenario:R13-supplier-review-binding-identical sha256:9c508b087b3556a4592aa81c0777a5de377c950d7253dfc494f67e3cd2045560
+scenario:R13-supplier-review-binding-revision sha256:f5e8cbc9e1e58d774a899b45689c45a2702537b548652ee30c81c77eecb7e7f9
+scenario:R13-supplier-review-binding-target sha256:f5e8cbc9e1e58d774a899b45689c45a2702537b548652ee30c81c77eecb7e7f9
+scenario:R13-supplier-review-binding-terminal sha256:da0cabf1112daa9863d2b8626a93d1965944aed0a46f455fb0ea59b5050b72c3
+scenario:R14-direct-old-unanswered-carrier-same sha256:84a12bb2a756db2024e15c6d7d3b862cf270878cc57adec4b7c3b619bb198c2a
+scenario:R14-direct-old-unanswered-carrier-target sha256:84a12bb2a756db2024e15c6d7d3b862cf270878cc57adec4b7c3b619bb198c2a
+scenario:R14-persisted-delete-recreate sha256:e339e21594b24b4faf15ed7579c661125a1b1845c637ecf51a89ffb3364ba203
+scenario:R14-persisted-hidden-bytes-low-similarity sha256:3702263506c6ce6b247d003a927951423761805d2bcf77fc00b5041b2c0b00f4
+scenario:R14-persisted-intermediate-claim-regression sha256:2e8cb2d7f3976814f53a2ffd84a5d97b719f003573bfb1b75b2cff83f6885a30
+scenario:R14-persisted-intermediate-review-regression sha256:cacd3fae26aeba3d22a53fac9a16834a27add144edac278b67253943fb0206c4
+scenario:R14-persisted-merge-carrier-conflict sha256:3e67eaa0201ad35b25f31bf2f16919533c4f0077ba4df0304960ad357fe4792b
+scenario:R14-persisted-merge-carrier-pending sha256:9490dda4ca97b62534d890175fe7ba368fccaad791ddfba54a294f363ef3e535
+scenario:R14-persisted-valid-first-response-low-similarity sha256:0f5eacfe4037ec067e90ef38552884008c55df64c3ce17c33947973b861b0ca5
+scenario:R14-persisted-valid-review-retraction sha256:3a0d22644fbd0da30337acf2f9eeb4cb5d5f1af12ac524b057342c5ccf572493
+scenario:R14-supplier-old-answered-carrier-pending sha256:69bdc800cd638c02a41d490e06aad60e8d02ffedb7d82499db815c8dc5f60f44
+scenario:R14-supplier-old-answered-carrier-revision sha256:69bdc800cd638c02a41d490e06aad60e8d02ffedb7d82499db815c8dc5f60f44
+scenario:R14-supplier-old-answered-carrier-same sha256:69bdc800cd638c02a41d490e06aad60e8d02ffedb7d82499db815c8dc5f60f44
+scenario:R14-supplier-old-answered-carrier-target sha256:69bdc800cd638c02a41d490e06aad60e8d02ffedb7d82499db815c8dc5f60f44
+scenario:R14-supplier-old-unanswered-carrier-same sha256:134fa675fe7f107b764577e90701cb24c30d979c6cb47ef3cc2df69427e833aa
+scenario:R14-supplier-old-unanswered-carrier-target sha256:134fa675fe7f107b764577e90701cb24c30d979c6cb47ef3cc2df69427e833aa
+scenario:R15-old-continuous-preserved sha256:d3397f00b9037680c51ef01c72d11b507c2f46f2c1a55cf9ba704919f7501529
+scenario:R15-old-hidden-bytes-restore sha256:11113e0859bcbfce1b8f81b6fd751fc63c04f3d39cfb485af61d50d213f0e22e
+scenario:R15-old-human-binding-restore sha256:80d4ea528981647d205a199317b03ef85f7b4b3ac04cb12945d01794634be919
+scenario:R15-old-invalid-delete-recreate sha256:582d6e28a4e2d0263ec68023449075ff1a618272385101deff81f0daf3897eae
+scenario:R15-old-valid-delete-recreate sha256:bc8a6cf13657304237b1f30c889a84d4e00bc9c6ea9a19e9b920e32e971f778b
+scenario:R16-earlier-landed-evidence-reversal sha256:fd7d4e334bc3cf6957bc6ccaaa73f0bb7b70bd546974479fe61128a2adf12521
+scenario:R16-pickup-evolution-0-backlog sha256:d55968e52c3b0e88e0a603e4393f7d7d77b131f5a1e20b6101668f859f5548dd
+scenario:R16-pickup-evolution-2-blocked sha256:b8e2af65bfee4e7d41e297698fd99041a01751e9ddcc43d157fc3f8e5089f5bb
+scenario:R16-pickup-evolution-3-in-review sha256:599eb8d9c50528def23b934622207299a0b49748891a57c17252a242061c35fb
+scenario:R16-pickup-evolution-3-in-review-drop-artifact sha256:c3577bc62d959f83cb035f10343323fa2902268adb298aa0363a309223f2ae31
+scenario:R16-pickup-evolution-4-done sha256:599eb8d9c50528def23b934622207299a0b49748891a57c17252a242061c35fb
+scenario:R16-support-adoption-drift sha256:5d945b0adeb0454895bdf174e6131e06083882cf503385d03386fa4e32b52482
+scenario:R16-support-forward sha256:9beac548b3e3e143501b112801d4dd43352f50fe3f3948f6a9fcf98e7805b761
+scenario:R16-support-invalid-source sha256:1de3f5e5813cba37191d136d4ff91a52a0fa0f6ec977fa3e3d81b6a739867e09
+scenario:R16-support-nested-drop sha256:3d1c63c6acfeed8a799f80891488a3e91b423e6d1c3e2dfac14a4ca2c6608616
+scenario:R16-support-permutation-diamond sha256:0fef45e9b55e1e016e3746caa19f81702a952aaaccdb8ba35d8b3e94c0b49d69
+scenario:R16-support-reverse-drop sha256:70ed37b05252a515f3d895ed3a31cccf5b767477dfae0f0dfd2953b62072917c
+scenario:R16-support-reverse-preserved sha256:9beac548b3e3e143501b112801d4dd43352f50fe3f3948f6a9fcf98e7805b761
+scenario:R16-support-source-evolution sha256:9beac548b3e3e143501b112801d4dd43352f50fe3f3948f6a9fcf98e7805b761
+scenario:R17-carry-absent-arm sha256:cb68aa216619389cc10a93a8e6177823a89df16cbe34f2e31a982ad8f371d8ee
+scenario:R17-carry-compatible sha256:1455b8d4c4466b49cc2cefd7db4ab220c0fea2644dba8d09c3abd70966ba7a95
+scenario:R17-carry-compatible-reversed sha256:1455b8d4c4466b49cc2cefd7db4ab220c0fea2644dba8d09c3abd70966ba7a95
+scenario:R17-carry-incompatible sha256:1919a765d1ce09ccfacd7b810a12c657a4ef8cd260c2ac8041583817626be056
+scenario:R17-carry-outside-duplicate sha256:3e52733c565eb82c5d6397a90dea0ee683b1402e0257d63438fff256e8c4e2fd
+scenario:R17-carry-outside-single sha256:60074052b84e6ccf791d9168decb4ef37b761ceda6ccab9e4691dc247a0f1076
+scenario:R17-dynamic-support-traversal-exact sha256:ef4619f11c28320e082e13e8ef683abcaa1421f5926b53ef0f0e9c1a7fbc580b
+scenario:R17-dynamic-support-traversal-plus-one-refused sha256:f441ced389c87e5dcb3b98be678d9081ff6c1a6ede2db4bacae1e52d7c3af746
+scenario:R17-flat-tree-peak-exact sha256:246f10366de76fec0c82571b605173c52dfb7dcb35aa7cdd5697786c25bd6853
+scenario:R17-flat-tree-peak-plus-one-refused sha256:4ca1afcf841f08c30563a04668a2ad7dd9ef65c2e706b4cea487adedeca47955
+scenario:R17-graph-line-peak-bytes-exact sha256:d7716f71b0e5aae92cfe3e824bd86f8a8bacaf1bb27fe3ad91dbd46b0d15a300
+scenario:R17-graph-line-peak-bytes-plus-one-refused sha256:76bfa429aee08d4b9c3d9e940d601a2c4114d5199c676e2d25b685195fbabf6d
+scenario:R17-graph-output-bytes-exact sha256:d7716f71b0e5aae92cfe3e824bd86f8a8bacaf1bb27fe3ad91dbd46b0d15a300
+scenario:R17-graph-output-bytes-plus-one-refused sha256:76bfa429aee08d4b9c3d9e940d601a2c4114d5199c676e2d25b685195fbabf6d
+scenario:R17-graph-parent-tokens-exact sha256:d7716f71b0e5aae92cfe3e824bd86f8a8bacaf1bb27fe3ad91dbd46b0d15a300
+scenario:R17-graph-parent-tokens-plus-one-refused sha256:76bfa429aee08d4b9c3d9e940d601a2c4114d5199c676e2d25b685195fbabf6d
+scenario:R17-object-payload-peak-exact sha256:d0ee37c4dac44680ff4d440e6ed3dcbcfad6b980ac89235d8613b83d8ff8d6bb
+scenario:R17-object-payload-peak-plus-one-refused sha256:6924687d230997ddceef1f585e682d08718b2aebce819fae598b490cf88bd8f3
+scenario:R17-outside-C-neutral-parent-valid-restack sha256:72fbc022fb34f2b12f49b8e88800fbacdd4707164cb78bae517f9bfc4bf8dd0d
+scenario:R17-persisted-outside-duplicate sha256:073ce80fa4c48086cff9343a917237b1abbc971e2eb02e90db2355392ba26636
+scenario:R17-persisted-outside-duplicate-reversed sha256:073ce80fa4c48086cff9343a917237b1abbc971e2eb02e90db2355392ba26636
+scenario:R17-persisted-outside-single sha256:f46d8e9c071fe75934e54886c21437dd261cb0f499e5f2fbd03f0cef9783078b
+scenario:R17-persisted-outside-single-reversed sha256:f46d8e9c071fe75934e54886c21437dd261cb0f499e5f2fbd03f0cef9783078b
+scenario:R17-persisted-unauthorized-absent-arm sha256:7fb46f08805fc14e39185bacf835d5a1f39b8dac4ec7f117f8f2d32ba1044e98
+scenario:R17-persisted-unauthorized-absent-arm-reversed sha256:7fb46f08805fc14e39185bacf835d5a1f39b8dac4ec7f117f8f2d32ba1044e98
+scenario:R17-persisted-valid-absent-arm sha256:42f29b9e931e2e3fd97be6366a1b2de95a330e87140a2ab8cc06e59a80a92575
+scenario:R17-persisted-valid-absent-arm-reversed sha256:42f29b9e931e2e3fd97be6366a1b2de95a330e87140a2ab8cc06e59a80a92575
+scenario:R17-precharge-P22-budget sha256:af867027af07d4d30502af5bd89064e13cc600c58fd57df6dde5a6c11df5bfaf
+scenario:R17-support-serialized-exact sha256:7f80e4bd5e84d20c3e1846dd52c82551659a4201c37f118c64c4ed2db06a29e9
+scenario:R17-support-serialized-plus-one-refused sha256:89d80ccc3f2e78f623401d3082eefa6652025a583078c11035fce1a0aab21349
+scenario:R17-unreadable-outside-C-ancestor-stays-unopened sha256:e9ed187cc5a55d6bbd0875aa4b9ce7ec045ad5e1b74bb944370d8412a0ad3ba3
+scenario:R17-unreadable-outside-C-boundary sha256:7cbe67ddaa1daadcb6e73ccaa1a4112b47b1777ea78f36fe9ee8d5bdf1a50f2d
+scenario:R17-wide-outside-C-boundary-budget sha256:72e514c5037ca9568a28cb598a830f21108a4d0808272547f49fa30dc0ca17ea
+scenario:R18-B-exact-cherry-pick sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-B-agent-born-claimed sha256:b9de2a3e33fdedf3ea442576859b3a0e7784e5257932cc431610ff6cd134de82
+scenario:R18-B-generated-retry sha256:70666ee5201a0b426320c3cd558fd58cc3bf2088a8d5bbdf5ef2a723182b8a3f
+scenario:R18-B-human-born-answered sha256:39a1f9769daafe958f211e6da9f0d8116fe21a2f88962cfa6b7265f02b813b3f
+scenario:R18-B-independent-birth sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-B-normal-base-advance-replay sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-B-rename-timing-move sha256:93225d0766eeb06577b676234c702278f400f6f7268d082494a23007181145f5
+scenario:R18-B-review-publication-equivalence sha256:7aaad893c08f170dd9d55cad5c947acb67bd580e2d8a4c5ae972e12473964521
+scenario:R18-B-task-pickup sha256:c5ea471772034b67f0e0c0dd5ad8ac6dd5ba75a8d12c9498acabb017669683b0
+scenario:R18-U-O-only-post-C-loss sha256:857c3f32e8a2aa13f8093d002551117df32a84b59292f44b4b2d9ed59d7bac85
+scenario:R18-U-agent-born-claimed sha256:b9de2a3e33fdedf3ea442576859b3a0e7784e5257932cc431610ff6cd134de82
+scenario:R18-U-claim-restoration sha256:56fafce867c7fb0d4ca5d465ba8751a97a3b11fc1dbee36c761ba3c6784087f2
+scenario:R18-U-delete-recreate-N sha256:cb5bdd57b38679f60cf68476109afc7bab8306c612dde2c2ad3b8c094e9d3899
+scenario:R18-U-delete-recreate-O sha256:b019324b6ce9d0b8918260ce93bdce8ed108260feb0e213d5b565784d39c15bd
+scenario:R18-U-endpoint-regression sha256:3b863bb38425d4471f8aae4a25cef3ec21980bc3e0de4dc4232fa9b43c83a646
+scenario:R18-U-exact-cherry-pick sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-U-generated-retry sha256:70666ee5201a0b426320c3cd558fd58cc3bf2088a8d5bbdf5ef2a723182b8a3f
+scenario:R18-U-human-born-answered sha256:39a1f9769daafe958f211e6da9f0d8116fe21a2f88962cfa6b7265f02b813b3f
+scenario:R18-U-human-response-restoration sha256:a0e8ca13dd6ca8864c046f29efb6466aa7d87f81af2a799b4c150fb7703f9056
+scenario:R18-U-independent-birth sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-U-inherited-then-deleted-merge-arm sha256:c7cbd4b92b36410a81045e284cc306179dbf1e7b1c3f7311d099bac715eb6744
+scenario:R18-U-multiplicity sha256:b1b95a8b94c7d8e2e2ded3586277fd225997312de4660f3437c4efc59ad012f1
+scenario:R18-U-neutral-pre-origin-merge sha256:519b895d5d4d03f153b0650f6362c5f8a0dd7329ecf8b6798c87eebc13016d92
+scenario:R18-U-normal-base-advance-replay sha256:7b268fd9caafbc07e49588422fcbb5f8cee83ba7dcafdbaf2f102a7dc5052be8
+scenario:R18-U-outside-collision sha256:bb180f3ff58253b57dd6776d634133d10c1fb669b2d850cb145e8b684d0bf7eb
+scenario:R18-U-parent-order sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca17ddafb32ce92d93ad6d
+scenario:R18-U-parent-order-reversed sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca17ddafb32ce92d93ad6d
+scenario:R18-U-rename-timing-move sha256:93225d0766eeb06577b676234c702278f400f6f7268d082494a23007181145f5
+scenario:R18-U-review-binding-restoration sha256:c1009ffb93da27c30c1ca25fea26f30a7d376d437ffd79051696d18cac108e53
+scenario:R18-U-review-publication-equivalence sha256:7aaad893c08f170dd9d55cad5c947acb67bd580e2d8a4c5ae972e12473964521
+scenario:R18-U-schema-invalid-birth sha256:b1b052933ab5797075ee5b3cab2607e04f975e3639aa19d64d53de6a0cebf437
+scenario:R18-U-second-birth sha256:5ab541a901c3d8973a650c18bbae8e5d54e17184a58f9dfdb23b375a27153fef
+scenario:R18-U-transient-protected-mutation sha256:6356d37c4ade35ad68f3d150bdc06a2f3983c9297ac6bc419be36cdaf362f835
+scenario:R18-U-task-pickup sha256:c5ea471772034b67f0e0c0dd5ad8ac6dd5ba75a8d12c9498acabb017669683b0
+scenario:R18-U-unreadable-object sha256:58225cfa35c7268d95a3515352c9a78363d9edffcdfb9fd55710c37eff82ce17
+scenario:R18-origin-arm-nodes-exact sha256:f4da25de95ba1de681d3a368e4a915e8350a0d231be38e392fe20c225b4ba9ef
+scenario:R18-origin-arm-nodes-plus-one-refused sha256:92d157ab0770f813c2b89532785d76ded427184635790e65c929b7092e445720
+scenario:R18-origin-parent-edges-exact sha256:f4da25de95ba1de681d3a368e4a915e8350a0d231be38e392fe20c225b4ba9ef
+scenario:R18-origin-parent-edges-plus-one-refused sha256:92d157ab0770f813c2b89532785d76ded427184635790e65c929b7092e445720
+scenario:R18-origin-witness-bytes-exact sha256:f4da25de95ba1de681d3a368e4a915e8350a0d231be38e392fe20c225b4ba9ef
+scenario:R18-origin-witness-bytes-plus-one-refused sha256:92d157ab0770f813c2b89532785d76ded427184635790e65c929b7092e445720
+scenario:R3-01-two-invalid-causal-sources sha256:a53104abe8ddc00a54de65fd93fc6679f248668793703081f3e53e5f5145cbb6
+scenario:R3-02-invalid-valid-causal-competition sha256:278833b57aa902bcc3306c875adb1c0edf9cd6b09730b88f71e1f803b9e725e5
+scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks sha256:42f1a09cdbcc797aea03e212090f31b98c5094dfbfc4f154d005d0c52d7a9f6c
+scenario:R4-01-same-root-valid-diamond sha256:f91457d4984bc5d87546cc20e5f28f852dc364edc5e8a0fde2a6d2843390622d
+scenario:R4-02-distinct-valid-root-diamond sha256:ce323651f427049b2389bbcf4ba55c227c120389704ae31e0061a1e0bf5b60ac
+scenario:R4-03-equal-root-plus-invalid-diamond sha256:52bc694ab0bfb67fcdcd15c3f3cba276e8c9cce8a6a1ab2068d98c78ce6fda4f
+scenario:R5-01-invalid-redelete-after-supplier-reintroduction sha256:e427d23cee74532869333f57a6a0df7226c8369782d44527b1a889014b46be89
+scenario:R5-02-valid-redelete-after-supplier-reintroduction sha256:61a96397af440f17761df075c0219c62a7821b924aa3c3d35e5ae3135ee297b1
+scenario:R6-01-valid-plus-invalid-all-absent sha256:9624e9467d01531c6d07bd7672a82353b3957065b9af3054c338fb24ed5653fb
+scenario:R6-02-valid-plus-ambiguous-all-absent sha256:0634e1ba483a795867e8e33288a7f06d0a9c80eb195ed8df01e84733622db148
+scenario:R6-03-two-invalid-all-absent sha256:4da64bb6eddda9ebca2bfa81bf6277c5778cbebf0ec15a2fc2eb9be26f68ff9c
+scenario:R6-04-same-valid-root-all-absent-wrappers sha256:6f30ffd79c9f4f6c43037e5e1f269b1bd6e774ee7cb051e61a6984182911ca67
+scenario:R8-direct-human-response-conflict sha256:cb4a507fa9f5ecf7d8bfd4eacb625484099aae8864a87d2c577741022843ccc5
+scenario:R8-direct-human-response-identical sha256:cb4a507fa9f5ecf7d8bfd4eacb625484099aae8864a87d2c577741022843ccc5
+scenario:R8-review-binding-divergent sha256:39465146932db98de812b38109cc96c4d42270872f51556f88e3e836c7ad201a
+scenario:R8-review-binding-identical sha256:501f950ea7aea69d613cbf07e042a920de53cc782fa07c74f91ed0d6b98540c5
+scenario:R8-review-binding-terminal-conflict sha256:64a91e5845f8534db3d1bb9362c0cfde8b9b59be8446c66510f95a2ae36f9e4c
+scenario:R8-supplier-human-response-conflict sha256:c746a52e7cac498ab3cfa5c017585bd809bf40b89e391166c1d55e2a5e1efad5
+scenario:R8-supplier-human-response-identical sha256:4818b25d2d279d0e5ad79cc155c14e30ced78af7e41a4cbd1a5079b3db6adb7b
+scenario:R9-direct-review-revision-pending-fill sha256:e5148f2dffe3d589b2bb0b06a9f09b27f20fad2c5ed196c8403a6f7be25e29fd
+scenario:R9-direct-review-target-pending-fill sha256:e5148f2dffe3d589b2bb0b06a9f09b27f20fad2c5ed196c8403a6f7be25e29fd
+scenario:R9-supplier-review-revision-pending-fill sha256:5a62eb234b309010057eb613a6be716b48a9222f9b65c91a84b3d03e34b3ed6d
+scenario:R9-supplier-review-target-pending-fill sha256:5a62eb234b309010057eb613a6be716b48a9222f9b65c91a84b3d03e34b3ed6d
+scenario:W0-fast-forward-return sha256:1dfcde10e7b57e1905d25276d464665bd422aa79d25005430e203e3643aa8985
+scenario:W1-pre-PR-push-exact-endpoints sha256:621ac415c58492828f2d9c40d9791fe782f5bb767be36a97af26279bb5ef250b
+scenario:W2-base-advance-retarget-invariant sha256:184c52aae71d6ee24532c319f43313bae60a391c06851349ecd161b1d6a200fe
+scenario:W3-multiple-PR-API-zero-calls sha256:0e70c77ed9716af5314322786706051fd971306263fd5b26232d049672dc6443
+scenario:W4-stale-rerun-exact-inputs sha256:6461d566aa2f5203949f906ef30e3455ca778af13f99e3244aae015cab8277aa
+scenario:W5-missing-O-coverage-unavailable sha256:ee917ef118937c57c4508dcf43c05feb874d1d5c23560caa2a1d98ef30c18c34
+scenario:W6-created-deleted-zero-endpoints sha256:d30a2ba7092135979715101e2788f40a9c9774df00927c1f65d997f36d8d281b
+scenario:W7-PR-synchronize-top-level-endpoints sha256:036b6126668bc82fbbe148144c2202c1e302e991648cb9709d46e014942fe3ba
+parent-permutation sha256:96d2728c54be6458bedd52e4717ab16328e95a1f6874e1e56156dd931088d64d
 aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
+control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -588,197 +875,32 @@ control:missing-post-event-continuity sha256:2bb8d20021633274e28d6f0f50b220f5cf5
 control:omit-old-tip-human-binding sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:omit-supplier-carrier-human-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
 control:omit-unanswered-published-review-binding sha256:465ccf7bbd7c9fc49c2576a9974d06ef1c8ec5cf27711192ed3bb05d1b009deb
-control:posthoc-budget-accounting sha256:7bcaf5e278473e8ac6ac3a3968001fd52cfccf97005b51dbbbae8ff2189d9a7d
+control:posthoc-budget-accounting sha256:34d3a59cb23be03b3687a5e44a27da906e1181389e054e98f6788474cb5e6e83
 control:reopen-outside-C-boundary-ancestry sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:reopen-pre-C-genealogy sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:restore-universal-ancestor-carry-scan sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:skip-carry-compatibility sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:skip-old-side-continuity sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-origin-birth-uniqueness sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-origin-endpoint-non-regression sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
+control:skip-origin-post-birth-absence sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:skip-persisted-candidate-continuity sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:skip-persisted-frozen-skeleton sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:skip-preserved-state-validation sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:skip-supplier-support-certificate sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfcc3ebf515a9c09dc66a8ab
 control:sole-valid-ignores-invalid-root sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
-control:stream-malformed-truncated-final-line sha256:cae48a249e054657a20bde2e2d8f3010169570bb307263fee4f1f7c7adfb4f48
+control:stream-malformed-truncated-final-line sha256:5f7ac68015df2e7b44146aa7b76438d931bd11e2682d67f3cbabc8a25b7e1c18
 control:supplier-authority-borrowing sha256:889c75da0848d6f89f4d98b22ac05d36d45c3a1d4888d64ae67d9316869049f4
 control:unmetered-cone-work sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:unmetered-dynamic-support sha256:247979e72c21e06ce04516c2b72a803d84b46428a0b274ce922a32c60821c96a
 control:unmetered-object-payload sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:unmetered-support-construction sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:unmetered-tree-paths sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
-parent-permutation sha256:ff2c5187a2f005aefb4e390ee296b9fb51f90077a07b7e52b90e26a54bcc27d6
-scenario:P1-direct-linear-valid sha256:4c33f5d3242af6e21b6cd10cfa38c814d852afe62e88105aafa861afc65c428d
-scenario:P10-direct-invalid-parent sha256:4ab8178a32e9442bea7d45567d2faeefbe4581806154507e260919856479da02
-scenario:P11-direct-three-parent-valid sha256:f238ab9c5fa4767b6188b113a38f92946121ae1e97a06b82ba5b3281d36f69ab
-scenario:P12-merge-supplier-valid sha256:74e5dece1ca1ed4aa928f4738ab5e1e891eb1527e4919c2b2459e27cfc5f6d0a
-scenario:P13-merge-supplier-invalid sha256:f3d3af68be6b7f29828923e3a798d3c195ab88a6791c749a7014370a95a63788
-scenario:P14-supplier-reintroduced sha256:74fef2526e0336c1988560a682eb7cde85bce9c26e75e9b6525914569127e15f
-scenario:P15-competing-suppliers sha256:82c564265fb903f01cc80169313095c30f0fcbcebb95bf7e076a5cd123910447
-scenario:P16-PCX-08-invalid-supplier-claimed-carrier sha256:78fa5408e6681c1c4974eaf955df19485d3413fdc2091efe7a954f5644fd0571
-scenario:P17-post-event-reintroduction sha256:06e7e2cac59217fdeac748abd5c400db289b156323ad2b28de6341618d595bcc
-scenario:P18a-missing-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
-scenario:P18b-noncommit-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
-scenario:P18c-unrelated-tip sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
-scenario:P18d-shallow-required-region sha256:83e94c26e047764cb8aefd3e39242b306e770c00d394224291dc93877f7404ae
-scenario:P18e-missing-queue-blob sha256:0cea7e00f363eaa29b0e139cf4d04f1c504437bf3cefe99c3d0405ad21e660a5
-scenario:P18f-missing-queue-tree sha256:f97e8d42c44b3002eceed0b6f4ba2c5087944d7d7901e5904ceaaa0b08ee0edd
-scenario:P18g-multiple-merge-bases sha256:596fff1132b2e97914e385a58524499674c8b10965d7514f2a33398418ec7077
-scenario:P19-production-identities sha256:c1a954ab7b5da32c5242bd452728eae046056844a76002a60e658cd6e1ebf1d4
-scenario:P2-direct-linear-invalid sha256:f0c8e5bd95470227d429658eb7c4d9317f31817d129e4d1a0511a878ec8c0d9e
-scenario:P20-lifecycle-types sha256:076ced0c964e2ca3e5eccb947b29c8a481ccfa64c9eeecd92fd27f1c0c7679b9
-scenario:P21-PCX-17c-squash-erasure sha256:f59ab60e938b4ed01343762e33d3e48c28d74c4a80c61ed4be4d386066a93ad8
-scenario:P22-PCX-18-one-pass-many-actions sha256:eb57ffad401fb37889906e4a6996f69aa46c50e2ed0f1b3e600ca920fa5f7cb2
-scenario:P3-genuine-old-loss sha256:08884a7b66dd4858183d0fdb2b0ebb34daed57ad33fde7606963d723a581686b
-scenario:P4-pre-C-identical-origins sha256:dc6d830026cfca449cb2b5784f5399d6d9c3259c5ebde45749d2bd9ef5a84535
-scenario:P5-duplicate-at-C sha256:739abf63e89be455172a5a2ed1b56419d395d0f98aaf652af34c540ce6674611
-scenario:P6a-old-delete-recreate sha256:3b889f79641d54ac9af069637bf8d9083d57bb42b54e7bcae475f87a640956ef
-scenario:P6b-candidate-delete-recreate sha256:407c21fc3f2aa76a11abe28625744d01ef132ce2d6af8a5ecc8235e15189e1e6
-scenario:P7-immutable-payload-change sha256:0d488725608626ae386c46d5c6bd1713e725428108f1413062250e295c5d78b4
-scenario:P8-path-timing-move sha256:845ec8bcb99bb323553fb11b9bf3c6fd981e5402b8e9edb25c17128a63ab9b04
-scenario:P9-direct-two-parent-valid sha256:f696566cef9dd09dd7e9e9d6de45e76f4fe674dbaf75765ea934acbc10fa2084
-scenario:PCX-01-neutral-parent sha256:a9751c3fca804974dd37c2f1fb12b8870604a6ba2711644261813b9f15cc26a8
-scenario:PCX-02-neutral-plus-invalid-carrier sha256:6b45a26c3cb2d193e7ddab5c86e0dd5c8667772a72790d512616fca14328dbd0
-scenario:PCX-03-foreign-exact-identity sha256:6e3cfe16dc586784b359e1ab9722863868d210bae3490283e2519a05acfc00f2
-scenario:PCX-04-several-absent-one-supplier sha256:8d9c6aea83d71615334d8a4fc7024fad1b4a1a4b0b19b7fe8572456655744770
-scenario:PCX-05-competing-later-supplier sha256:ed216702648fffe54b60b9a73757c448cc49c147840a70c8e29a2e63bf2e470b
-scenario:PCX-06-nested-supplier-over-direct sha256:bdb83b6a691e43d8e4b3b5e03ba24633a58a5b235905403741e2da2beb2a688b
-scenario:PCX-07-overqualified-propagation sha256:bed885b0e1f7bd2489daa7e59a072768d7c768e47cab770a63a44c521af350c5
-scenario:PCX-09-recreated-claimed-bytes sha256:942fc71c9f16fd9cc008925da67cc65f5f1971e31f3d7a1fdfab643e36ff4409
-scenario:PCX-10-transient-multiplicity sha256:3c52e2e05077bc7b017c26b3b981bed9891afd40bb137f7cf3e731d5f2117edf
-scenario:PCX-11-different-payload-same-path sha256:3b1b51660586e86a581c1a223bf254cc7f9dad51142477eff06b91ff67920fee
-scenario:PCX-12-timing-rename-supplier sha256:aa1c877dc0f7b8b71b7f0a1e623a954a89cfeb43fd4f87816259e5958ca9435e
-scenario:PCX-13-conflicting-human-response sha256:737a0d3ce9018db9765d69d9590f94fe5b6081548a95c15face8d8fc2bcea802
-scenario:PCX-14-valid-human-supplier sha256:33c72a7b22a5e80d641bb8489e04f76edbb5887fa740e4bb9da1f30692e2bab5
-scenario:PCX-15-generated-retry-supplier sha256:56dc30bf018b588b278f82b2222dd030476392aff7db869d677fdb83178a8894
-scenario:PCX-16-task-pickup-supplier sha256:143388e2a630084b96a4e0b4eb85d208fa18228b9ca1c9c33823fdbe3012de96
-scenario:PCX-17-complete-cherry-pick sha256:4cec14353ade0a710de581f0f9628f30a7720624a6a65fe86d2dad44ed780c10
-scenario:PCX-17-deletion-only-cherry-pick sha256:f59ab60e938b4ed01343762e33d3e48c28d74c4a80c61ed4be4d386066a93ad8
-scenario:PCX-19-missing-claim-blob-recovery sha256:129f309e070e0a81b0e6c37a1ae81be7f1a0cc9c1b18262d7e010b0fae75162c
-scenario:PCX-20a-budget-below-limit sha256:0f815b51de9227cb6408d56587e8e6ce2575fcfa0b973fd665d649f127651eae
-scenario:PCX-20b-budget-overflow sha256:3c01d9a534f635d15afe37744b92ca48c71173955617e600377d7ed5ca12ea17
-scenario:R10-direct-review-target-backtick-dotless-rejected sha256:37febd376cf79f90f88e993e5ce0981251ec8b2e5378fc12fb8e9175dbda3404
-scenario:R10-supplier-review-revision-generic-placeholder-rejected sha256:a004f6504fe4ef6114853bae0a9b4a368549ac561c1e2b0a9b99140e17e051a2
-scenario:R13-direct-review-binding-identical sha256:e592f189a7b8f6722079c9692db21a34a61cd7f97f94dd773544c4500f198290
-scenario:R13-direct-review-binding-revision sha256:6f677e3e1ff447c599f7da38213e1c1a45173c963c2918ad0a820c366cf355cc
-scenario:R13-direct-review-binding-target sha256:733f41dbf6377a865835eb55ce6c022ccd88c96e8e0997b85dad7ec7e4ddb399
-scenario:R13-direct-review-binding-terminal sha256:dc6d5a95db791d45a43f26363bee4fb7c6d56940025d6aa7c926bcbeda9cb5cb
-scenario:R13-persisted-claim-loss sha256:ca8eac25f0dce5c04e34e2bdd00207a01a24b19ba89ef0804727bf991cc37289
-scenario:R13-persisted-pending-fill sha256:a343c1b24e34bb5ee580ea5a03269d514dfe243be67c2d490089171aae73e939
-scenario:R13-persisted-response-change sha256:6067c932dcf3ce4649223242a45c3425c7678469d802dbe59d8135ddf8d3e05c
-scenario:R13-persisted-response-removal sha256:76268ef573b5ad4f6ce6a70abacf6626dd9b24d7d2b82a50b7484ad0fd406c66
-scenario:R13-persisted-review-outcome-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
-scenario:R13-persisted-review-revision-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
-scenario:R13-persisted-review-target-change sha256:063f8b7872bbc916413b7541710ab91f94dcb4c5f9c8fc39023ce382ff82f4c7
-scenario:R13-persisted-same-state sha256:4260557612f68c1156b79e43d919a085591095a812ea5e95e2030eb27dd3b27c
-scenario:R13-persisted-terminal-fill sha256:0c152df7faa58c3490b237cc0efcd0a9a24238ab8a127903eae546527bdb5b16
-scenario:R13-supplier-review-binding-identical sha256:07c9a4fb8872de5ba41e205b9ebfbfea0d4217ddfe5a09d9e95b687a240b0b11
-scenario:R13-supplier-review-binding-revision sha256:2485e7948a29253a801283695695e2d8e83a61e7f6463539dac3b578959ac813
-scenario:R13-supplier-review-binding-target sha256:2485e7948a29253a801283695695e2d8e83a61e7f6463539dac3b578959ac813
-scenario:R13-supplier-review-binding-terminal sha256:a8e999360a87fc76d41bbc7206ef1820c2f1086adb976ffe26ff28cd260662de
-scenario:R14-direct-old-unanswered-carrier-same sha256:f1971ec63a2a4aabb3183e603b85a6a195cfa8c2eaa6f0dcce2e6604189ff981
-scenario:R14-direct-old-unanswered-carrier-target sha256:f1971ec63a2a4aabb3183e603b85a6a195cfa8c2eaa6f0dcce2e6604189ff981
-scenario:R14-persisted-delete-recreate sha256:0899d2c7965d477568400ff1da18fb539079c5094f25da5abd721ec48574219c
-scenario:R14-persisted-hidden-bytes-low-similarity sha256:b6dfa410dc5a1a66185f18c0b6cdf19f257d4ab0bb50abeb0c6a39c678491ac4
-scenario:R14-persisted-intermediate-claim-regression sha256:6c171d221307821466717a04ae8740e88447bae9d67f96bc8486fd3823a6369f
-scenario:R14-persisted-intermediate-review-regression sha256:b0c2ba5c97ff8ea4a2ffc5e7003b5fa85f73ce96cb2bb4d16fb09275c887c10b
-scenario:R14-persisted-merge-carrier-conflict sha256:969f70695d906112281fdcb05e606d5a9da4f8bb932ff3b3b10fcd3ceffc8a18
-scenario:R14-persisted-merge-carrier-pending sha256:3bf28372712ef266906503f5a853456f235273fd3c6e73e7949a24b827f9a8e6
-scenario:R14-persisted-valid-first-response-low-similarity sha256:c023efb63e51b35a0fb1ce39a56ff2ab920ad232e9c24603bfacf69de9eb503e
-scenario:R14-persisted-valid-review-retraction sha256:8958c100d5c2fd0727757caca1cf027d64fe44fd5d7dd815191ac9bb169df244
-scenario:R14-supplier-old-answered-carrier-pending sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
-scenario:R14-supplier-old-answered-carrier-revision sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
-scenario:R14-supplier-old-answered-carrier-same sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
-scenario:R14-supplier-old-answered-carrier-target sha256:411b093178458cde7454ea7f71db1e5e589566b94122a52243f87e8ac83d672e
-scenario:R14-supplier-old-unanswered-carrier-same sha256:b246f62954d78df745c437ea77b01ab55f82022f05f9172a05977e1da1b5d0d0
-scenario:R14-supplier-old-unanswered-carrier-target sha256:b246f62954d78df745c437ea77b01ab55f82022f05f9172a05977e1da1b5d0d0
-scenario:R15-old-continuous-preserved sha256:433bc809971dfd4f8bcc2c555a9c6c00d37999bc981aec537a785f6ca58d2c36
-scenario:R15-old-hidden-bytes-restore sha256:efda2c716f2482bf4618b1568eea0c8e6b8c23db5d31c6fcf920f035e1afc872
-scenario:R15-old-human-binding-restore sha256:650b562bc81176c26e941b8fb08cadd162643c99a5c0a6cd78072e4821a60775
-scenario:R15-old-invalid-delete-recreate sha256:19a975770df1601deeffc96bf47523931ac96f147f6730f277b806a0877bb3b6
-scenario:R15-old-valid-delete-recreate sha256:c740b89979f12ae3cd20210ff5865c1679987e0966d7a53b9ea897aee7e339ff
-scenario:R16-earlier-landed-evidence-reversal sha256:7ff53b4e5f5d5261b15274561d416cfb0ef07dfc33716508ae0318da15dfcd04
-scenario:R16-pickup-evolution-0-backlog sha256:9c862c2f23aaf4032f137011a18b7dc041f488da788084c00ddcd4ded2a52fff
-scenario:R16-pickup-evolution-2-blocked sha256:35f4c94b1dc0dad12a0355f61f53a45420e38fe187ce924ab257748665cc24b5
-scenario:R16-pickup-evolution-3-in-review sha256:27bdc420e35c9db3ac75605a153d36fa17a147fb916c9c123b93301579d6e28f
-scenario:R16-pickup-evolution-3-in-review-drop-artifact sha256:b2ae60a59bdbced287811d37d0710e529eda1c744d00ba35a37c77380c9a523a
-scenario:R16-pickup-evolution-4-done sha256:27bdc420e35c9db3ac75605a153d36fa17a147fb916c9c123b93301579d6e28f
-scenario:R16-support-adoption-drift sha256:e85053853088bb6bda4b969192e5b147f77d68392c7caae9cee1c89ac5ac1a81
-scenario:R16-support-forward sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
-scenario:R16-support-invalid-source sha256:c50cc32b3f0491fb7a8ae00fc2729fcc95ddad2910a318dafb2d4d301a1988d5
-scenario:R16-support-nested-drop sha256:0d958da37cfbaa783eed433cbaae32d1b1961a7bfbc6c9ea6a1553f81f5103e2
-scenario:R16-support-permutation-diamond sha256:5032fa4d0b6a1dd0dcbd3dfeb338051bea2eae17ee4b21e9f41aa27d474042e3
-scenario:R16-support-reverse-drop sha256:4f920588787aea0a3376e11421f5d29c580f02b593ce5c890c5476ddcffe5802
-scenario:R16-support-reverse-preserved sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
-scenario:R16-support-source-evolution sha256:850522388cde6e4ad3a1d60c5add1c4cbc239910f63a266da1604fc4c237442d
-scenario:R17-carry-absent-arm sha256:7b9425750527dd92a3cd6271546564bf8573fd50d0997bd7a18617c18cf06f0c
-scenario:R17-carry-compatible sha256:b33fc74978aa0236bdfd0c8ce59ea27f869cc8467570e40821b95102127a0067
-scenario:R17-carry-compatible-reversed sha256:b33fc74978aa0236bdfd0c8ce59ea27f869cc8467570e40821b95102127a0067
-scenario:R17-carry-incompatible sha256:022ccb9a30113ef442826e2c1ed5652b10b72d1db778e653a8a4261f8a2b7dee
-scenario:R17-carry-outside-duplicate sha256:ae0bcb614239f0f3719a47aa7fd1778748fa8efb2abdffa14a164135d5a65e27
-scenario:R17-carry-outside-single sha256:837732f6b827d46706313b13660ef039cc79e13a79dadc97e444e9d5c44c3b5a
-scenario:R17-dynamic-support-traversal-exact sha256:0de4dfcd8beef66200231630600becfb70d73518dd527aff0221060c58536f20
-scenario:R17-dynamic-support-traversal-plus-one-refused sha256:d49fb869a26e3c3867d24a79b0a34ed4f67c9fff14b0662e578124a4099fd87a
-scenario:R17-flat-tree-peak-exact sha256:e606dc84af59b478121374efe63263cd164468dc75a14905bdae5850662a2976
-scenario:R17-flat-tree-peak-plus-one-refused sha256:d4a95635554890fe846a1265c1c7fc65b1e2cf42bb830b9bab785018e6cf27d7
-scenario:R17-graph-line-peak-bytes-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
-scenario:R17-graph-line-peak-bytes-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
-scenario:R17-graph-output-bytes-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
-scenario:R17-graph-output-bytes-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
-scenario:R17-graph-parent-tokens-exact sha256:474d5e22c7e03f502f8ee785d3552a8e602aba3b64625f33b6943276c75b24b0
-scenario:R17-graph-parent-tokens-plus-one-refused sha256:c29a0c7214bb9e1cd3ac50497199e13eabb4f385c894bf04d96c137d0f12783b
-scenario:R17-object-payload-peak-exact sha256:028988f232b02e34ebcd93c4883da2cb83ca4703c8e562035c6f27aa0cdd2acd
-scenario:R17-object-payload-peak-plus-one-refused sha256:9402e6f329401b56739a773a7142c9411629f6411854f636f9cf9d332a0c4611
-scenario:R17-outside-C-neutral-parent-valid-restack sha256:7efe001e3c7b246ab395d4897d4e3b978cb5ef2cd2e880e77f075782fddef0ce
-scenario:R17-persisted-outside-duplicate sha256:4a2d2d7e23e4798340a752e4708e85992bd6713a01cfe6979895345953fa9e37
-scenario:R17-persisted-outside-duplicate-reversed sha256:4a2d2d7e23e4798340a752e4708e85992bd6713a01cfe6979895345953fa9e37
-scenario:R17-persisted-outside-single sha256:641588d58a38957047cd98d2463bc9877700196ea38288972ff67d9ea37152fe
-scenario:R17-persisted-outside-single-reversed sha256:641588d58a38957047cd98d2463bc9877700196ea38288972ff67d9ea37152fe
-scenario:R17-persisted-unauthorized-absent-arm sha256:81dc63fe3b7e52b66bec9dbb5d6074cd20c605599fa9f0538e67e6704a1684c4
-scenario:R17-persisted-unauthorized-absent-arm-reversed sha256:81dc63fe3b7e52b66bec9dbb5d6074cd20c605599fa9f0538e67e6704a1684c4
-scenario:R17-persisted-valid-absent-arm sha256:fc2ebf334280a31bf395aa1df0720709f64e5d5703680b0f403b8a9222a0368b
-scenario:R17-persisted-valid-absent-arm-reversed sha256:fc2ebf334280a31bf395aa1df0720709f64e5d5703680b0f403b8a9222a0368b
-scenario:R17-precharge-P22-budget sha256:3cd8d7c46e548416920999e7fcf21fc47f23636b5c71481fc4f24cb20f7b8135
-scenario:R17-support-serialized-exact sha256:181ba0d0170b0f61cab3034cb97a826122be1063643eea93b85155dade68de39
-scenario:R17-support-serialized-plus-one-refused sha256:58d48a0d4c80fbb019c7607e3363e9b1e2869ef2b1195530e696f124afbf5f38
-scenario:R17-unreadable-outside-C-ancestor-stays-unopened sha256:9485768cd536a68596fd0b9b01237a116d88401a50e19733412f81821e1d003f
-scenario:R17-unreadable-outside-C-boundary sha256:599eced072e2f19d2078d01241fc5a599d87898a3b57f4ca9ad733cda5e1ce11
-scenario:R17-wide-outside-C-boundary-budget sha256:19bea2720bce2722accc7ce1ccccd34ff10c277db487fd3cb136a775b1f80bef
-scenario:R3-01-two-invalid-causal-sources sha256:1b4b5774a1bd551021a8891633f5d974d1330ad36101c8b9edf972605704f79f
-scenario:R3-02-invalid-valid-causal-competition sha256:3a56adced0b47c217679b3e66fe118c8e9fb6a40e52807b0314d5af00ec5bcc4
-scenario:R3-03-valid-supplier-plus-invalid-parent-at-N-blocks sha256:4c88a11cc1bd3f265fc2e0f811a8048eb95578cc62beba5c247b1fff40995caf
-scenario:R4-01-same-root-valid-diamond sha256:4f377fb34ff2ccd977457fa828c076828597d6ba30d8127eca749065413fc3ea
-scenario:R4-02-distinct-valid-root-diamond sha256:7e2ba91e253d23b760a15fca45e83f15b9413a3461db475880aa23a4eaeba8d6
-scenario:R4-03-equal-root-plus-invalid-diamond sha256:7cd9bedf89776ea5ac98e8dff87f9407421f4e016d1cd55189b2cc6d37d47104
-scenario:R5-01-invalid-redelete-after-supplier-reintroduction sha256:487a1c84014e36892c19027dc3575952921bf06b1bc29c394dde3dbe627d34cf
-scenario:R5-02-valid-redelete-after-supplier-reintroduction sha256:d5c3936f0f32e0446677432e333a33a3699e251c840d689bc49f1822cd778d71
-scenario:R6-01-valid-plus-invalid-all-absent sha256:d88f0f503a72fe038a645088fb47f49fb2621de0358f5054271fa596282318cf
-scenario:R6-02-valid-plus-ambiguous-all-absent sha256:eeaccb31b66ef1bdb92916c7eedf12906f71e66d0630a3399a613521e879c08c
-scenario:R6-03-two-invalid-all-absent sha256:9a3fce5b58c75d37838f42d98c26dd93ad2db81fcda1f1b52628ca2df36defdd
-scenario:R6-04-same-valid-root-all-absent-wrappers sha256:9660ae1d8ccf79a99e8407a7123c9bdbc1e5612a38d0139827a1055d5e8d1b94
-scenario:R8-direct-human-response-conflict sha256:ede74125c9adb379268febd01ebc1ca16d6f54c587aeb881297592564b4e9dfc
-scenario:R8-direct-human-response-identical sha256:ede74125c9adb379268febd01ebc1ca16d6f54c587aeb881297592564b4e9dfc
-scenario:R8-review-binding-divergent sha256:a7e76821fdd1e0642071d45b6d239d1e99cd07e6f641aa577c80c9278269cae3
-scenario:R8-review-binding-identical sha256:b36d4c923d1041edb2141b069c0656db0d605cb8e226a36d91e0685f06df898b
-scenario:R8-review-binding-terminal-conflict sha256:d327426e2a12ba2c08d12fc01bad2f86d4eca0d12a5c42830cbbc935d140bafd
-scenario:R8-supplier-human-response-conflict sha256:a7a88e387c8ae0beea99c98d679fa137463c0136886a462cedfb9980e93cea43
-scenario:R8-supplier-human-response-identical sha256:7c1db6f2084fc6ab17bb59b796ade8f1721e9f4d87bbd07f637d6011a37b2477
-scenario:R9-direct-review-revision-pending-fill sha256:76eeb95f024390200d2b30a16581975f6b56396436d255d89e71de24d451e3bb
-scenario:R9-direct-review-target-pending-fill sha256:76eeb95f024390200d2b30a16581975f6b56396436d255d89e71de24d451e3bb
-scenario:R9-supplier-review-revision-pending-fill sha256:eed70bb61607d49a48e42a018cdd926e62c7231ea74d9a29884f6a3713929d38
-scenario:R9-supplier-review-target-pending-fill sha256:eed70bb61607d49a48e42a018cdd926e62c7231ea74d9a29884f6a3713929d38
-scenario:W0-fast-forward-return sha256:f842e5ef0b147b9005d1834b5a67d3b742f6fc45e584094cc839d3da9520c761
-scenario:W1-pre-PR-push-exact-endpoints sha256:715801d19e7b22038c2c09b805c3c13d856c58b12261225f80614fe50f319a22
-scenario:W2-base-advance-retarget-invariant sha256:34d6200aa75b7e483cd9f223876451beedc3c4cfddd85d2b4a92ee9bcfec8211
-scenario:W3-multiple-PR-API-zero-calls sha256:335aaaf5250846599ba647a056a906d84733b19c8a8f3706c0252da17705c02e
-scenario:W4-stale-rerun-exact-inputs sha256:b81af0987f98c9e5c6e6107d634b2371050f39651449988430bf43c002137c2f
-scenario:W5-missing-O-coverage-unavailable sha256:0cc6cd8a6445c686471ba197dbb1c2c6b9f09b36812460ac9028bc1060d48406
-scenario:W6-created-deleted-zero-endpoints sha256:110c4f48a71cf41b70cdeda64e057224092a4e443a9a1d98be6afae72c1bf94c
-scenario:W7-PR-synchronize-top-level-endpoints sha256:a6c4c9dffcc53b1b997f90cdac676c7af4facd9d089a8e5db119c003816ce2a3
-summary sha256:74a7f9e3ab72663556d8c067e825e9ac744fd232524bfcbd337a2e8fd7fce00b
+summary sha256:076e24673c34bc6dcb5896b23fcf5c2134316e04ed3546b3fec9d7e28d0ee840
 """
 RAW_SHAPE_SHA256 = dict(
     line.split(" ", 1)
-    for line in RAW_SHAPE_CATALOG_V5.splitlines()
+    for line in RAW_SHAPE_CATALOG_V6.splitlines()
     if " " in line
 )
 
@@ -912,6 +1034,7 @@ def validate_permutation_record(value: Any, context: str):
         (
             "r17_parent_permutation",
             "r17_persisted_parent_permutations",
+            "r18_origin_parent_permutation",
             "status",
         ),
         context,
@@ -963,6 +1086,26 @@ def validate_permutation_record(value: Any, context: str):
                 f"{context}.r17_persisted_parent_permutations."
                 f"{variant}[{index}]",
             )
+    origin = value["r18_origin_parent_permutation"]
+    if (
+        not isinstance(origin, list)
+        or len(origin) != 2
+        or origin[0] != origin[1]
+    ):
+        raise EvidenceError(f"{context} origin parent pair differs")
+    for index, signature in enumerate(origin):
+        require_keys(
+            signature,
+            (
+                "birth_counts",
+                "birth_witness_match",
+                "classification",
+                "edge_role_multiset",
+                "evidence_status",
+                "reason_code",
+            ),
+            f"{context}.r18_origin_parent_permutation[{index}]",
+        )
 
 
 def normalized_record(value: dict) -> dict:
@@ -1067,6 +1210,7 @@ class Stream:
             "controls_total": len(CONTROL_IDS),
             "aliases_passed": len(ALIAS_IDS), "aliases_total": len(ALIAS_IDS),
             "r17_parent_permutation": "PASS",
+            "r18_origin_parent_permutation": "PASS",
             "failures": [],
         }
         for key, value in expected.items():
@@ -1133,6 +1277,50 @@ def carry_projection(proof):
     }
 
 
+def origin_proof_projection(proof):
+    return {
+        "birth_commits": proof["birth_commits"],
+        "birth_schema_problems": proof["birth_schema_problems"],
+        "birth_witness": proof["birth_witness"],
+        "edges": [
+            {
+                "binding_problem": edge["binding_problem"],
+                "child": edge["child"],
+                "frozen_problem": edge["frozen_problem"],
+                "parent": edge["parent"],
+                "problem": edge["problem"],
+                "production_problem": edge["production_problem"],
+                "regression_problem": edge["regression_problem"],
+                "role": edge["role"],
+            }
+            for edge in proof["edges"]
+        ],
+        "multiplicities": proof["multiplicities"],
+        "outside_collisions": proof["outside_collisions"],
+        "outside_neutral": proof["outside_neutral"],
+        "post_birth_absent": proof["post_birth_absent"],
+        "prebirth_neutral": proof["prebirth_neutral"],
+        "reason": proof["reason"],
+        "reason_code": proof["reason_code"],
+        "status": proof["status"],
+        "tip": proof["tip"],
+    }
+
+
+def origin_action_projection(action):
+    return {
+        "authoring_lineage": action["authoring_lineage"],
+        "birth_witness_match": action["birth_witness_match"],
+        "endpoint_checks": action["endpoint_checks"],
+        "origin_proofs": [
+            origin_proof_projection(proof)
+            for proof in action["origin_proofs"]
+        ],
+        "reason_code": action["reason_code"],
+        "strategy": action["origin_strategy"],
+    }
+
+
 def endpoints(row):
     return {
         "C": {"oid": row["C"], "role": "derived-unique-merge-base"},
@@ -1156,6 +1344,12 @@ def scenario_projection(row, failed):
         "input_contract": row["input_contract"],
         "metrics": {key: row["metrics"][key] for key in METRIC_KEYS},
         "mutation_edge_count": len(row["mutation_edges"]),
+        "origin_actions": [
+            origin_action_projection(action)
+            for action in row["actions"]
+            if action["origin_proofs"]
+            or action["event_mode"].startswith("origin-")
+        ],
         "propagation_edges": [propagation_projection(x) for x in row["propagation_edges"]],
         "reason_codes": [x.get("reason_code") for x in row["actions"]],
         "record_sha256": record_digest(normalized_record(row)),
@@ -1368,6 +1562,145 @@ def execution_bounds_projection(stream):
     }
 
 
+def origin_case_projection(row):
+    origin_actions = [
+        action
+        for action in row["actions"]
+        if action["origin_proofs"]
+        or action["event_mode"].startswith("origin-")
+    ]
+    action = origin_actions[0] if len(origin_actions) == 1 else None
+    return {
+        "audit_exit": row["audit_exit"],
+        "birth_witness_match": (
+            action["birth_witness_match"] if action is not None else None
+        ),
+        "classification": row["classification"],
+        "endpoint_checks": (
+            action["endpoint_checks"] if action is not None else {
+                "binding": None,
+                "frozen": None,
+                "regression": None,
+            }
+        ),
+        "evidence_status": row["evidence_verdict"]["status"],
+        "origin_proofs": (
+            [origin_proof_projection(x) for x in action["origin_proofs"]]
+            if action is not None
+            else []
+        ),
+        "reason_code": action["reason_code"] if action is not None else None,
+        "record_sha256": record_digest(normalized_record(row)),
+        "strategy": row["input_contract"]["origin_strategy"],
+    }
+
+
+def origin_strategy_projection(stream):
+    case_ids = (
+        "R18-U-normal-base-advance-replay",
+        "R18-B-normal-base-advance-replay",
+        "R18-U-independent-birth",
+        "R18-B-independent-birth",
+        "R18-U-exact-cherry-pick",
+        "R18-B-exact-cherry-pick",
+        "R18-U-generated-retry",
+        "R18-B-generated-retry",
+        "R18-U-task-pickup",
+        "R18-B-task-pickup",
+        "R18-U-agent-born-claimed",
+        "R18-B-agent-born-claimed",
+        "R18-U-human-born-answered",
+        "R18-B-human-born-answered",
+        "R18-U-review-publication-equivalence",
+        "R18-B-review-publication-equivalence",
+        "R18-U-rename-timing-move",
+        "R18-B-rename-timing-move",
+        "R18-U-delete-recreate-O",
+        "R18-U-delete-recreate-N",
+        "R18-U-transient-protected-mutation",
+        "R18-U-human-response-restoration",
+        "R18-U-review-binding-restoration",
+        "R18-U-schema-invalid-birth",
+        "R18-U-claim-restoration",
+        "R18-U-second-birth",
+        "R18-U-multiplicity",
+        "R18-U-outside-collision",
+        "R18-U-neutral-pre-origin-merge",
+        "R18-U-inherited-then-deleted-merge-arm",
+        "R18-U-unreadable-object",
+    )
+    cases = {
+        scenario: origin_case_projection(stream.scenarios[scenario])
+        for scenario in case_ids
+    }
+    legal_publication = cases[
+        "R18-B-review-publication-equivalence"
+    ]
+    legal_publication_edges = [
+        edge
+        for proof in legal_publication["origin_proofs"]
+        for edge in proof["edges"]
+    ]
+    bound_controls = (
+        "endpoint-only-origin-equality",
+        "skip-origin-birth-uniqueness",
+        "skip-origin-post-birth-absence",
+        "skip-origin-endpoint-non-regression",
+    )
+    return {
+        "cases": cases,
+        "damage_controls": {
+            name: control_projection(stream.controls[name])
+            for name in bound_controls
+        },
+        "decision": "U",
+        "decision_basis": (
+            "U already rejects claimed and answered births; B adds no safety "
+            "for those illegal origins and falsely blocks two production-legal "
+            "histories that converge on the same unanswered review"
+        ),
+        "selection_boundary": {
+            "B_false_blocks_legal_review_publication": (
+                legal_publication["classification"] == "blocking-finding"
+                and legal_publication["reason_code"]
+                == "origin-birth-witness-mismatch"
+            ),
+            "legal_publication_edges_all_production_valid": bool(
+                legal_publication_edges
+            ) and all(
+                edge["production_problem"] is None
+                and edge["frozen_problem"] is None
+                and edge["regression_problem"] is None
+                and edge["problem"] is None
+                for edge in legal_publication_edges
+            ),
+            "legal_publication_endpoints_equal": all(
+                problem is None
+                for problem in legal_publication["endpoint_checks"].values()
+            ),
+            "U_rejects_agent_born_claimed": (
+                cases["R18-U-agent-born-claimed"]["classification"]
+                == "blocking-finding"
+                and cases["R18-U-agent-born-claimed"]["reason_code"]
+                == "origin-birth-schema-invalid"
+            ),
+            "U_rejects_human_born_answered": (
+                cases["R18-U-human-born-answered"]["classification"]
+                == "blocking-finding"
+                and cases["R18-U-human-born-answered"]["reason_code"]
+                == "origin-birth-schema-invalid"
+            ),
+            "claim": (
+                "neither U nor B proves intent, replay provenance, or a "
+                "relationship between independently identical legal births"
+            ),
+        },
+        "parent_permutation": stream.permutation[
+            "r18_origin_parent_permutation"
+        ],
+    }
+
+
 def core_claim_projection(stream):
     boundary = stream.scenarios[
         "R17-unreadable-outside-C-ancestor-stays-unopened"
@@ -1470,6 +1803,7 @@ def core_claim_projection(stream):
                 ),
             },
         },
+        "origin_strategies": origin_strategy_projection(stream),
         "parent_permutation": stream.permutation,
         "persisted_carry": {
             "cases": [
@@ -1590,6 +1924,9 @@ def manifest_from_stream(stream):
             "r17_parent_permutation": stream.summary[
                 "r17_parent_permutation"
             ],
+            "r18_origin_parent_permutation": stream.summary[
+                "r18_origin_parent_permutation"
+            ],
             "scenario_passed": stream.summary["passed"],
             "scenario_total": stream.summary["total"],
             "status": stream.summary["summary"],
@@ -1679,6 +2016,96 @@ def validate_carry(value, context):
         )
 
 
+def validate_origin_proof(value, context):
+    require_keys(value, (
+        "birth_commits", "birth_schema_problems", "birth_witness", "edges",
+        "multiplicities", "outside_collisions", "outside_neutral",
+        "post_birth_absent", "prebirth_neutral", "reason", "reason_code",
+        "status", "tip",
+    ), context)
+    require_oid(value["tip"], f"{context}.tip")
+    if value["status"] not in {"valid", "ambiguous"}:
+        raise EvidenceError(f"{context}.status is not structured")
+    for key in (
+        "birth_commits", "outside_neutral", "post_birth_absent",
+        "prebirth_neutral",
+    ):
+        for index, oid in enumerate(value[key]):
+            require_oid(oid, f"{context}.{key}[{index}]")
+    for index, edge in enumerate(value["edges"]):
+        edge_context = f"{context}.edges[{index}]"
+        require_keys(
+            edge,
+            (
+                "binding_problem", "child", "frozen_problem", "parent",
+                "problem", "production_problem", "regression_problem",
+                "role",
+            ),
+            edge_context,
+        )
+        require_oid(edge["child"], f"{edge_context}.child")
+        require_oid(edge["parent"], f"{edge_context}.parent")
+        if edge["role"] not in {"source", "compatible-carrier", "unselected"}:
+            raise EvidenceError(f"{edge_context}.role is invalid")
+    for index, item in enumerate(value["birth_schema_problems"]):
+        item_context = f"{context}.birth_schema_problems[{index}]"
+        require_keys(item, ("commit", "problem"), item_context)
+        require_oid(item["commit"], f"{item_context}.commit")
+        if not isinstance(item["problem"], str) or not item["problem"]:
+            raise EvidenceError(f"{item_context}.problem is not concrete")
+    for index, item in enumerate(value["multiplicities"]):
+        item_context = f"{context}.multiplicities[{index}]"
+        require_keys(item, ("commit", "multiplicity", "paths"), item_context)
+        require_oid(item["commit"], f"{item_context}.commit")
+        require_nonnegative_int(item["multiplicity"], f"{item_context}.multiplicity")
+    for index, collision in enumerate(value["outside_collisions"]):
+        item_context = f"{context}.outside_collisions[{index}]"
+        require_keys(
+            collision, ("multiplicity", "parent", "paths", "scope"),
+            item_context,
+        )
+        require_oid(collision["parent"], f"{item_context}.parent")
+        require_nonnegative_int(
+            collision["multiplicity"], f"{item_context}.multiplicity"
+        )
+        if collision["scope"] != "outside-C":
+            raise EvidenceError(f"{item_context}.scope changed")
+    witness = value["birth_witness"]
+    if witness is not None:
+        require_keys(witness, ("digest", "state"), f"{context}.birth_witness")
+        require_digest(witness["digest"], f"{context}.birth_witness.digest")
+        state = witness["state"]
+        require_keys(state, (
+            "actor", "delivery_class", "frozen_skeleton",
+            "initial_lifecycle_review_binding", "leaf",
+            "production_identity_transcript", "schema",
+        ), f"{context}.birth_witness.state")
+        if state["schema"] != "queue-birth-state-witness/v1":
+            raise EvidenceError(f"{context} birth witness schema changed")
+        if "path" in state or "metrics" in state or "diagnostics" in state:
+            raise EvidenceError(f"{context} birth witness admitted excluded data")
+        lifecycle = state["initial_lifecycle_review_binding"]
+        if "status" not in lifecycle:
+            raise EvidenceError(f"{context} birth witness lost lifecycle status")
+
+
+def validate_origin_action(value, context):
+    require_keys(value, (
+        "authoring_lineage", "birth_witness_match", "endpoint_checks",
+        "origin_proofs", "reason_code", "strategy",
+    ), context)
+    if value["strategy"] not in {"U", "B"}:
+        raise EvidenceError(f"{context}.strategy is invalid")
+    if value["birth_witness_match"] not in {True, False, None}:
+        raise EvidenceError(f"{context}.birth_witness_match is invalid")
+    require_keys(
+        value["endpoint_checks"], ("binding", "frozen", "regression"),
+        f"{context}.endpoint_checks",
+    )
+    for index, proof in enumerate(value["origin_proofs"]):
+        validate_origin_proof(proof, f"{context}.origin_proofs[{index}]")
+
+
 def validate_manifest(manifest):
     require_keys(manifest, (
         "aliases", "controls", "core_claims", "fixture_sha_claims", "inputs",
@@ -1689,6 +2116,7 @@ def validate_manifest(manifest):
     require_keys(manifest["summary"], (
         "aliases_passed", "aliases_total", "canonical_stream_sha256",
         "controls_passed", "controls_total", "r17_parent_permutation",
+        "r18_origin_parent_permutation",
         "scenario_passed", "scenario_total", "status",
     ), "summary")
     summary = manifest["summary"]
@@ -1697,13 +2125,17 @@ def validate_manifest(manifest):
         "aliases_passed": len(ALIAS_IDS), "aliases_total": len(ALIAS_IDS),
         "controls_passed": len(CONTROL_IDS), "controls_total": len(CONTROL_IDS),
         "r17_parent_permutation": "PASS",
+        "r18_origin_parent_permutation": "PASS",
         "scenario_passed": len(SCENARIO_IDS), "scenario_total": len(SCENARIO_IDS),
         "status": "PASS",
     }
     for key, expected in counts.items():
         if summary[key] != expected:
             raise EvidenceError(f"summary {key} is not {expected!r}")
-        if key not in {"status", "r17_parent_permutation"}:
+        if key not in {
+            "status", "r17_parent_permutation",
+            "r18_origin_parent_permutation",
+        }:
             require_nonnegative_int(summary[key], f"summary.{key}")
 
     scenarios = manifest["scenarios"]
@@ -1714,7 +2146,7 @@ def validate_manifest(manifest):
         "endpoints", "event_mode",
         "evidence_status", "expected_result", "finding_count", "id",
         "input_contract", "metrics", "mutation_edge_count", "propagation_edges",
-        "reason_codes", "record_sha256",
+        "origin_actions", "reason_codes", "record_sha256",
         "support_checks", "validation_status",
     )
     for index, row in enumerate(scenarios):
@@ -1730,7 +2162,8 @@ def validate_manifest(manifest):
         if row["evidence_status"] not in {"valid", "invalid", "none", "ambiguous", "unreadable"}:
             raise EvidenceError(f"{context} evidence status is invalid")
         if row["event_mode"] not in {
-            "direct", "supplier", "none", "ambiguous", "mixed"
+            "direct", "supplier", "none", "ambiguous", "mixed",
+            "origin-U", "origin-B",
         }:
             raise EvidenceError(f"{context} event mode is invalid")
         if row["validation_status"] != "PASS":
@@ -1739,14 +2172,17 @@ def validate_manifest(manifest):
             raise EvidenceError(f"{context}.audit_exit is invalid")
         require_keys(
             row["input_contract"],
-            ("authoritative_endpoints", "schema"),
+            ("authoritative_endpoints", "origin_strategy", "schema"),
             f"{context}.input_contract",
         )
         if row["input_contract"] != {
             "authoritative_endpoints": ["O", "N"],
+            "origin_strategy": row["input_contract"]["origin_strategy"],
             "schema": "restack-provenance-input/v2",
         }:
             raise EvidenceError(f"{context} input contract changed")
+        if row["input_contract"]["origin_strategy"] not in {"U", "B"}:
+            raise EvidenceError(f"{context} origin strategy changed")
         require_keys(row["metrics"], METRIC_KEYS, f"{context}.metrics")
         for key, value in row["metrics"].items():
             require_nonnegative_int(value, f"{context}.metrics.{key}")
@@ -1763,6 +2199,8 @@ def validate_manifest(manifest):
             validate_support(check, f"{context}.support_checks[{i}]")
         for i, proof in enumerate(row["carry_proofs"]):
             validate_carry(proof, f"{context}.carry_proofs[{i}]")
+        for i, action in enumerate(row["origin_actions"]):
+            validate_origin_action(action, f"{context}.origin_actions[{i}]")
 
     controls = manifest["controls"]
     if [x.get("id") for x in controls] != list(CONTROL_IDS):
@@ -1962,7 +2400,8 @@ def validate_manifest(manifest):
     core = manifest["core_claims"]
     require_keys(core, (
         "boundary_ancestry", "endpoint_contract", "evidence_supersession",
-        "execution_bounds", "measured_budget", "parent_permutation",
+        "execution_bounds", "measured_budget", "origin_strategies",
+        "parent_permutation",
         "persisted_carry",
         "raw_grammar",
         "r3_full_frontier", "r6_outside_boundary_disposition",
@@ -2167,6 +2606,174 @@ def validate_manifest(manifest):
             or overflow["metrics"]["object_process_reaps"] != 1
         ):
             raise EvidenceError(f"{context} object cleanup bound changed")
+    origins = core["origin_strategies"]
+    require_keys(
+        origins,
+        (
+            "cases", "damage_controls", "decision", "decision_basis",
+            "parent_permutation", "selection_boundary",
+        ),
+        "origin_strategies",
+    )
+    if origins["decision"] != "U":
+        raise EvidenceError("origin strategy decision changed")
+    required_origin_cases = {
+        "R18-U-normal-base-advance-replay",
+        "R18-B-normal-base-advance-replay",
+        "R18-U-independent-birth",
+        "R18-B-independent-birth",
+        "R18-U-exact-cherry-pick",
+        "R18-B-exact-cherry-pick",
+        "R18-U-generated-retry",
+        "R18-B-generated-retry",
+        "R18-U-task-pickup",
+        "R18-B-task-pickup",
+        "R18-U-agent-born-claimed",
+        "R18-B-agent-born-claimed",
+        "R18-U-human-born-answered",
+        "R18-B-human-born-answered",
+        "R18-U-review-publication-equivalence",
+        "R18-B-review-publication-equivalence",
+        "R18-U-rename-timing-move",
+        "R18-B-rename-timing-move",
+        "R18-U-delete-recreate-O",
+        "R18-U-delete-recreate-N",
+        "R18-U-transient-protected-mutation",
+        "R18-U-human-response-restoration",
+        "R18-U-review-binding-restoration",
+        "R18-U-schema-invalid-birth",
+        "R18-U-claim-restoration",
+        "R18-U-second-birth",
+        "R18-U-multiplicity",
+        "R18-U-outside-collision",
+        "R18-U-neutral-pre-origin-merge",
+        "R18-U-inherited-then-deleted-merge-arm",
+        "R18-U-unreadable-object",
+    }
+    if set(origins["cases"]) != required_origin_cases:
+        raise EvidenceError("origin strategy case inventory changed")
+    origin_case_keys = (
+        "audit_exit", "birth_witness_match", "classification",
+        "endpoint_checks", "evidence_status", "origin_proofs", "reason_code",
+        "record_sha256", "strategy",
+    )
+    for scenario, case in origins["cases"].items():
+        context = f"origin_strategies.cases.{scenario}"
+        require_keys(case, origin_case_keys, context)
+        require_keys(
+            case["endpoint_checks"],
+            ("binding", "frozen", "regression"),
+            f"{context}.endpoint_checks",
+        )
+        if case["record_sha256"] != by_id[scenario]["record_sha256"]:
+            raise EvidenceError(f"{context} record binding changed")
+        require_digest(case["record_sha256"], f"{context}.record_sha256")
+        for index, proof in enumerate(case["origin_proofs"]):
+            validate_origin_proof(proof, f"{context}.origin_proofs[{index}]")
+    expected_classifications = {
+        "R18-U-normal-base-advance-replay": "no-finding",
+        "R18-B-normal-base-advance-replay": "no-finding",
+        "R18-U-generated-retry": "no-finding",
+        "R18-B-generated-retry": "no-finding",
+        "R18-U-task-pickup": "no-finding",
+        "R18-B-task-pickup": "no-finding",
+        "R18-U-agent-born-claimed": "blocking-finding",
+        "R18-B-agent-born-claimed": "blocking-finding",
+        "R18-U-human-born-answered": "blocking-finding",
+        "R18-B-human-born-answered": "blocking-finding",
+        "R18-U-review-publication-equivalence": "no-finding",
+        "R18-B-review-publication-equivalence": "blocking-finding",
+        "R18-U-schema-invalid-birth": "blocking-finding",
+    }
+    for scenario, expected in expected_classifications.items():
+        if origins["cases"][scenario]["classification"] != expected:
+            raise EvidenceError(f"origin strategy verdict changed for {scenario}")
+    boundary = origins["selection_boundary"]
+    require_keys(
+        boundary,
+        (
+            "B_false_blocks_legal_review_publication",
+            "U_rejects_agent_born_claimed",
+            "U_rejects_human_born_answered", "claim",
+            "legal_publication_edges_all_production_valid",
+            "legal_publication_endpoints_equal",
+        ),
+        "origin_strategies.selection_boundary",
+    )
+    if any(
+        boundary[key] is not True
+        for key in (
+            "B_false_blocks_legal_review_publication",
+            "U_rejects_agent_born_claimed",
+            "U_rejects_human_born_answered",
+            "legal_publication_edges_all_production_valid",
+            "legal_publication_endpoints_equal",
+        )
+    ):
+        raise EvidenceError("origin strategy selection boundary changed")
+    legal_case = origins["cases"][
+        "R18-B-review-publication-equivalence"
+    ]
+    legal_edges = [
+        edge
+        for proof in legal_case["origin_proofs"]
+        for edge in proof["edges"]
+    ]
+    if (
+        boundary["B_false_blocks_legal_review_publication"]
+        is not (
+            legal_case["classification"] == "blocking-finding"
+            and legal_case["reason_code"]
+            == "origin-birth-witness-mismatch"
+        )
+        or boundary["legal_publication_edges_all_production_valid"]
+        is not (
+            bool(legal_edges)
+            and all(
+                edge[key] is None
+                for edge in legal_edges
+                for key in (
+                    "production_problem", "frozen_problem",
+                    "regression_problem", "problem",
+                )
+            )
+        )
+        or boundary["legal_publication_endpoints_equal"]
+        is not all(
+            problem is None
+            for problem in legal_case["endpoint_checks"].values()
+        )
+        or boundary["U_rejects_agent_born_claimed"]
+        is not (
+            origins["cases"]["R18-U-agent-born-claimed"][
+                "reason_code"
+            ] == "origin-birth-schema-invalid"
+        )
+        or boundary["U_rejects_human_born_answered"]
+        is not (
+            origins["cases"]["R18-U-human-born-answered"][
+                "reason_code"
+            ] == "origin-birth-schema-invalid"
+        )
+    ):
+        raise EvidenceError("origin strategy selection evidence disagrees")
+    origin_control_ids = {
+        "endpoint-only-origin-equality",
+        "skip-origin-birth-uniqueness",
+        "skip-origin-post-birth-absence",
+        "skip-origin-endpoint-non-regression",
+    }
+    if set(origins["damage_controls"]) != origin_control_ids:
+        raise EvidenceError("origin damage-control inventory changed")
+    if any(
+        row["status"] != "OBSERVED_RED"
+        for row in origins["damage_controls"].values()
+    ):
+        raise EvidenceError("origin damage control false-greened")
+    if origins["parent_permutation"] != core["parent_permutation"][
+        "r18_origin_parent_permutation"
+    ]:
+        raise EvidenceError("origin parent permutation projection changed")
     permutation = core["parent_permutation"]
     validate_permutation_record(
         permutation, "core_claims.parent_permutation"
@@ -2617,6 +3224,7 @@ def render_readme(manifest):
     summary = manifest["summary"]
     core = manifest["core_claims"]
     bounds = core["execution_bounds"]
+    origins = core["origin_strategies"]
     by_id = {x["id"]: x for x in manifest["scenarios"]}
     p22, p19 = by_id["P22-PCX-18-one-pass-many-actions"], by_id["PCX-19-missing-claim-blob-recovery"]
     lines = [
@@ -2626,11 +3234,12 @@ def render_readme(manifest):
         "## Result", "",
         f"The real-Git self-test passed {summary['scenario_passed']}/{summary['scenario_total']} scenarios, {summary['aliases_passed']}/{summary['aliases_total']} executable aliases, and {summary['controls_passed']}/{summary['controls_total']} damaged-mode controls.",
         "It imports and calls the worktree's actual `queue_action_identity` and",
-        "`queue_deletion_problem`; it never invents an Action-ID or lifecycle verdict.", "",
+        "`queue_deletion_problem`, and `queue_mutation_problem`; it never invents",
+        "an Action-ID or lifecycle verdict.", "",
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, and v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, and v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -2670,6 +3279,46 @@ def render_readme(manifest):
         "The ten former candidate-base endpoint/adapter scenarios are retired because",
         "that endpoint no longer exists in the classifier API. Fixture-internal commits",
         "remain landmarks only and cannot steer attribution.", "",
+        "## Absent-at-C strategy comparison", "",
+        "Strategy U is selected for this POC. When an identity is absent at C but live",
+        "once at O and N, it independently proves exactly one all-parents-absent legal",
+        "birth on each arm, followed by uninterrupted production-valid carriage. An",
+        "all-parents-absent candidate is legal only when its historical queue header",
+        "passes the production path/actor/leaf, delivery, field, lifecycle, context,",
+        "and exact identity-round-trip projection; repository-global reciprocity and",
+        "current-template presentation remain separate admission gates. Agent actions,",
+        "including generated retries and task pickups, must be born `open`; human",
+        "decisions and clarifications must be born `waiting` and unanswered; reviews",
+        "must be born unanswered in `awaiting-artifact` or `waiting`, never `folding`.",
+        "An outside-C carrier collides; a second birth, multiplicity, post-birth absence,",
+        "delete/recreate, invalid or frozen mutation, binding regression, incompatible",
+        "merge carrier, unreadable object, or endpoint non-regression failure blocks.",
+        "Absent merge parents that do not descend from the birth are neutral.", "",
+        "Strategy B layers a canonical birth-state witness on U. Its witness contains",
+        "only the production identity transcript, actor, leaf, production delivery",
+        "class, frozen skeleton, and initial lifecycle/review-binding projection. It",
+        "contains no queue path, commit, timestamp, mutable retry diagnosis, or operational",
+        "counter. Both strategies clean exact cherry-pick, independently identical birth,",
+        "generated retry, task pickup, and rename/timing-move fixtures.", "",
+        "U's typed birth gate rejects an agent action born `in-repair` and a human",
+        "decision born with a concrete answer under both strategies. B therefore adds",
+        "no protection for those former claim-at-birth examples. B does, however, block",
+        "a fully legal pair: one review is born `awaiting-artifact` and reaches `waiting`",
+        "through the exact production publication transition, while the other is born",
+        "`waiting` with the same binding and endpoint state. Every production mutation",
+        f"check accepts that edge: `{origins['selection_boundary']['legal_publication_edges_all_production_valid']}`; every endpoint non-regression check is also clean: `{origins['selection_boundary']['legal_publication_endpoints_equal']}`. U stays clean and B blocks only on `origin-birth-witness-mismatch`, so B is redundant for illegal births and false-blocking for a legal restack; U is selected.",
+        "Both strategies claim only equivalent valid live incarnations. Neither claims",
+        "human intent, replay/cherry-pick provenance, or a relationship between independently",
+        "identical legal births. Equal B witnesses would still not prove that one birth",
+        "came from the other. Endpoint-only equality exists only in the",
+        "`endpoint-only-origin-equality` observed-red damaged mutant; it is not a normal",
+        "strategy branch.", "",
+        "| Fixture | U | B | Witness match |", "|---|---|---|---|",
+        f"| Normal base advance + replayed addition | `{origins['cases']['R18-U-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['birth_witness_match']}` |",
+        f"| Independently identical birth | `{origins['cases']['R18-U-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['birth_witness_match']}` |",
+        f"| Agent action born claimed (illegal) | `{origins['cases']['R18-U-agent-born-claimed']['classification']}` | `{origins['cases']['R18-B-agent-born-claimed']['classification']}` | `{origins['cases']['R18-B-agent-born-claimed']['birth_witness_match']}` |",
+        f"| Human decision born answered (illegal) | `{origins['cases']['R18-U-human-born-answered']['classification']}` | `{origins['cases']['R18-B-human-born-answered']['classification']}` | `{origins['cases']['R18-B-human-born-answered']['birth_witness_match']}` |",
+        f"| Legal review publication equivalence | `{origins['cases']['R18-U-review-publication-equivalence']['classification']}` | `{origins['cases']['R18-B-review-publication-equivalence']['classification']}` | `{origins['cases']['R18-B-review-publication-equivalence']['birth_witness_match']}` |", "",
         "## Bound r17 review outcomes", "",
         f"The exact reviewer DAG is clean and record-bound by `{core['reviewer_dag']['record_sha256']}`; its outside-C parent is neutral, its task patch replays exactly, and production deletion authority returns no problem.",
         f"R3-03 is blocking at the fixed N frontier with one invalid authority edge and is record-bound by `{core['r3_full_frontier']['record_sha256']}`.",
@@ -2678,11 +3327,11 @@ def render_readme(manifest):
         "All eight persisted-state attacker cases block in both parent orders: outside-C exact carriers retain multiplicity 1 or 2 as collisions, while valid and unauthorized absent C-descendant arms both remain deletion/reintroduction competitors.",
         f"The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `{core['measured_budget']['wide_boundary']['record_sha256']}`; no action, edge, support, or carry-proof result leaks past the exceeded parent-token budget.",
         f"The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at {core['measured_budget']['precharge_P22']['precharge_expected_metrics']['git_processes']}, freezes later counters, and is record-bound by `{core['measured_budget']['precharge_P22']['record_sha256']}`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.",
-        f"Seven runtime exact/+1 pairs bind streaming graph bytes/lines/tokens, object payloads, flattened trees, dynamic support traversal, and certificate serialization. Every +1 refusal exits 2 with zero partial results; graph reads peak at {bounds['streaming_graph_contract']['bounded_chunk_bytes']} bytes per chunk and publish nothing on refusal. P22 separately observes exactly {bounds['composition_observation']['production_parent_queries']} imported production parent queries and {bounds['composition_observation']['git_processes']} Git processes.",
+        f"Ten runtime exact/+1 pairs bind streaming graph bytes/lines/tokens, object payloads, flattened trees, dynamic support traversal, certificate serialization, origin-arm nodes/parent edges, and canonical birth-witness bytes. Every +1 refusal exits 2 with zero partial results; graph reads peak at {bounds['streaming_graph_contract']['bounded_chunk_bytes']} bytes per chunk and publish nothing on refusal. P22 separately observes exactly {bounds['composition_observation']['production_parent_queries']} imported production parent queries and {bounds['composition_observation']['git_processes']} Git processes.",
         f"Unreadable Git objects use the stable typed reason `{core['stable_git_diagnostics']['stable_reasons']['C']}`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.",
         f"Before any projection or digest, all {core['raw_grammar']['record_kinds']} raw rows must match the static recursive key/list/type grammar catalog `{core['raw_grammar']['catalog_sha256']}`; an unknown top-level or nested field exits {core['raw_grammar']['unknown_field_exit']}.",
         "The parent-order pair has identical verdicts and the same role multiset:",
-        f"`{core['parent_permutation']['r17_parent_permutation'][0]['merge_role_multiset']}`. The four persisted parent-order pairs are also byte-equal by semantic signature.", "",
+        f"`{core['parent_permutation']['r17_parent_permutation'][0]['merge_role_multiset']}`. The four persisted parent-order pairs and the origin-birth parent-order pair are also equal by semantic signature.", "",
         "Reviewer-supplied reference OIDs (bound as review input, not regenerated fixture IDs):", "",
         "| Role | OID |", "|---|---|",
     ]
@@ -2748,15 +3397,15 @@ def render_readme(manifest):
               f"PCX-20a passes at its exact measured maximum {exact_budget['measured_max_work']} with limit {exact_budget['limit']}; PCX-20b exits 2 with zero partial results when measured maximum {overflow_budget['measured_max_work']} exceeds limit {overflow_budget['limit']} by one.",
               f"R17-precharge-P22-budget charges before work and aborts on `{precharge_budget['evidence_reason']}` with exact bounded counters; the post-hoc reference vector is retained only as a damaged control.",
               f"The 64-parent boundary case stops at parent token {wide_budget['metrics']['graph_parent_tokens']} against limit {wide_budget['budget_contract']['limit']} after {wide_budget['metrics']['graph_output_bytes']} of {wide_budget['budget_contract']['raw_graph_bytes']} raw bytes; the graph child is reaped and no graph is published.",
-              "The closed runtime matrix additionally admits/refuses exact/+1 values for total graph bytes, peak graph-line bytes, a 1,000,000-byte object, 1,004 flattened paths, 12 dynamic support paths, and 2,920 serialized certificate bytes.", "",
+              "The closed runtime matrix additionally admits/refuses exact/+1 values for total graph bytes, peak graph-line bytes, a 1,000,000-byte object, 1,004 flattened paths, 12 dynamic support paths, 2,920 serialized certificate bytes, five origin-arm nodes, three origin parent edges, and 1,042 canonical birth-witness bytes.", "",
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v5-seed1 > /tmp/production-contract-r17-v5-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r17-v5-seed777 > /tmp/production-contract-r17-v5-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v5-seed1.jsonl --compare /tmp/production-contract-r17-v5-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r17-v5-seed1.jsonl --damage-test",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r18-v6-seed1 > /tmp/production-contract-r18-v6-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r18-v6-seed777 > /tmp/production-contract-r18-v6-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r18-v6-seed1.jsonl --compare /tmp/production-contract-r18-v6-seed777.jsonl",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r18-v6-seed1.jsonl --damage-test",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
               "The auditor requires raw and semantic equality for comparison, rejects",
@@ -2768,9 +3417,10 @@ def render_readme(manifest):
               "unknown raw fields/cost rows, locale error drift, post-hoc or unmetered runtime work,",
               "noncanonical ordering, BOM, CRLF, and missing newline.", "",
               "## Nonclaims and integration gates", "",
-              "- This POC changes no production reconciler, restack adapter, workflow input, schema, task, or run record.",
+              "- This executable comparison is not production-ready and does not authorize production integration.",
+              "- This POC changes no production reconciler, restack adapter, workflow input, schema, task, queue, memory, or history record.",
               "- A post-push check can only be advisory; prevention requires a pre-push or server-side production gate.",
-              "- Squash/deletion-only provenance is unsupported and blocks; only complete cherry-pick preserves authority.",
+              "- Strategy U accepts only typed legal live-incarnation births and does not prove squash, replay, or cherry-pick provenance; a squash that creates claimed or answered state at birth is illegal, and deletion-only resolution provenance remains unsupported and blocks.",
               "- No candidate-base or provider base field participates in attribution.",
               "- Fork/pre-PR transport without a trusted old O is coverage-unavailable; no reflog guess is permitted.",
               "- Local pre-push uses remote old/local new; an offline wrapper must capture O before rewriting.",
@@ -3089,6 +3739,13 @@ def damage_matrix(expected, stream):
         "evidence schema supersession changed",
     )
     manifest_case(
+        "superseded-v5-commit-erased",
+        lambda d: d["core_claims"]["evidence_supersession"][
+            "artifacts"
+        ][3].update(commit="0" * 40),
+        "evidence schema supersession changed",
+    )
+    manifest_case(
         "locale-stable-error-drift",
         lambda d: d["core_claims"]["stable_git_diagnostics"][
             "stable_reasons"
@@ -3127,6 +3784,88 @@ def damage_matrix(expected, stream):
             "r17_parent_permutation"
         ][1].update(merge_role_multiset=["source"]),
         "carry-parent pair differs",
+    )
+    manifest_case(
+        "origin-normal-restack-false-block",
+        lambda d: d["core_claims"]["origin_strategies"]["cases"][
+            "R18-U-normal-base-advance-replay"
+        ].update(classification="blocking-finding"),
+        "origin strategy verdict changed",
+    )
+    manifest_case(
+        "origin-illegal-agent-birth-false-clean",
+        lambda d: d["core_claims"]["origin_strategies"]["cases"][
+            "R18-U-agent-born-claimed"
+        ].update(classification="no-finding"),
+        "origin strategy verdict changed",
+    )
+    manifest_case(
+        "origin-illegal-human-birth-false-clean",
+        lambda d: d["core_claims"]["origin_strategies"]["cases"][
+            "R18-U-human-born-answered"
+        ].update(classification="no-finding"),
+        "origin strategy verdict changed",
+    )
+    manifest_case(
+        "origin-decision-flipped-to-B",
+        lambda d: d["core_claims"]["origin_strategies"].update(
+            decision="B"
+        ),
+        "origin strategy decision changed",
+    )
+    manifest_case(
+        "origin-legal-publication-false-block-erased",
+        lambda d: d["core_claims"]["origin_strategies"][
+            "selection_boundary"
+        ].update(B_false_blocks_legal_review_publication=False),
+        "origin strategy selection boundary changed",
+    )
+    manifest_case(
+        "origin-legal-publication-production-edge-corrupted",
+        lambda d: d["core_claims"]["origin_strategies"]["cases"][
+            "R18-B-review-publication-equivalence"
+        ]["origin_proofs"][0]["edges"][0].update(
+            production_problem="injected production rejection"
+        ),
+        "origin strategy selection evidence disagrees",
+    )
+    manifest_case(
+        "origin-parent-permutation-first-parent",
+        lambda d: d["core_claims"]["parent_permutation"][
+            "r18_origin_parent_permutation"
+        ][1].update(edge_role_multiset=["source"]),
+        "origin parent pair differs",
+    )
+    manifest_case(
+        "origin-damage-control-false-green",
+        lambda d: d["core_claims"]["origin_strategies"][
+            "damage_controls"
+        ]["skip-origin-birth-uniqueness"].update(status="FALSE_GREEN"),
+        "origin damage control false-greened",
+    )
+    manifest_case(
+        "origin-witness-path-injected",
+        lambda d: d["scenarios"][
+            next(
+                index for index, row in enumerate(d["scenarios"])
+                if row["id"] == "R18-B-normal-base-advance-replay"
+            )
+        ]["origin_actions"][0]["origin_proofs"][0]["birth_witness"][
+            "state"
+        ].update(path="message-queue/injected.md"),
+        "keys differ",
+    )
+    manifest_case(
+        "origin-witness-counter-injected",
+        lambda d: d["scenarios"][
+            next(
+                index for index, row in enumerate(d["scenarios"])
+                if row["id"] == "R18-B-normal-base-advance-replay"
+            )
+        ]["origin_actions"][0]["origin_proofs"][0]["birth_witness"][
+            "state"
+        ].update(metrics={"origin_arm_nodes": 1}),
+        "keys differ",
     )
     manifest_case(
         "push-github-sha-authoritative",
