@@ -3396,3 +3396,87 @@ candidate before `git diff`; application rejects an authenticated-fixture damage
 
 Production remains unopened. The new immutable revision must again pass all five lenses
 before dormant implementation begins.
+
+## 2026-09-01 correction amendment 23 — Git-real mode metadata and supervised suite
+
+Fresh review of `a8f52f86e356c8f35aff9d62eebd268b6342c6a0` accepted classifier
+semantics and rejected three activation details: Git omits `index` for a pure mode change,
+the current repository runner has no inherited deadline/output cap, and an aggregate +1 is
+not independent when the aggregate equals the sum of category maxima. This amendment
+supersedes amendment 22's extended-header grammar, post-overlay runner claim, and aggregate
+ledger refusal/test. All size categories, hard scratch quota, and pre-apply bounds remain.
+
+### Exact extended-header union includes pure mode changes
+
+The parser admits one and only one form selected from the authenticated row:
+
+1. **Pure mode:** `before_blob == after_blob`, `before_size == after_size`, and modes differ.
+   The section is exactly `diff --git`, `old mode <before_mode>`, `new mode <after_mode>`.
+   It has no `index`, hunk, binary body, similarity, rename/copy, or create/delete header.
+   Omitting `index` is mandatory in this form, matching Git's generated patch.
+2. **Content, unchanged mode:** both blobs exist, differ, and modes are equal. The full-index
+   line contains exact before/after OIDs and that one mode; any old/new mode header refuses.
+3. **Content plus mode:** both blobs exist and differ and modes differ. Exact old/new mode
+   headers precede a full-index before/after OID line with no redundant mode token.
+4. **Create/delete:** exactly one side is absent. The exact new/deleted-file mode and
+   zero-to-full/full-to-zero index OIDs agree with the manifest; the present payload then has
+   the corresponding text or binary body.
+
+Only forms 2–4 may contain hunks or a binary body, and every content-changing form requires
+both logical full OID endpoints including the all-zero absent sentinel. The parser rejects a
+pure-mode section whose blob/size differs, an `index` line in form 1, an omitted index in
+forms 2–4, swapped/abbreviated OIDs, misplaced mode token, duplicate extended header, or a
+body inconsistent with the selected form. Cold-clone coverage generates, parses, applies,
+and tree-compares regular executable-bit and regular/symlink pure-mode rows plus content-only,
+content+mode, create, and delete rows from the literal Git command.
+
+### The activation suite has a real supervisor
+
+Activation never relies on the current runner to police itself. The host scratch capability
+also provides one ephemeral cgroup-v2-equivalent execution scope with hard aggregate
+`memory.max=2,147,483,648`, swap disabled, `pids.max=32`, and a working kill-all operation.
+Capability setup/teardown and limit readback are startup-probed; a host without equivalent
+group-wide memory, process, kill, and scratch-quota enforcement is unavailable. The scope is
+repository-local/ephemeral and grants no core authority or user-global state.
+
+Trusted base code runs exactly `python3 automation/run_tests.py --jobs 1` as one direct
+process group inside that scope. Serial mode prevents the runner's concurrent buffered-output
+path. The supervisor streams stdout and stderr separately with 32 MiB accepted caps plus one
+detection byte each, enforces a 900-second monotonic deadline, and inherits the 512 MiB
+per-process address-space and 34 MiB file-size limits. Exit 0, both EOFs, no live descendant,
+and cgroup/process-group emptiness are all required. Cap +1, timeout, signal, nonzero exit,
+fork/process limit, aggregate/per-process memory limit, or descendant escape invokes both
+process-group termination and scope kill, then waits/reaps before returning unavailable.
+
+The reconciler runs next as exact
+`python3 automation/reconcile/reconcile.py --check` in a fresh scope with a 120-second
+deadline and 8 MiB stdout/stderr caps. Source/workflow/live-reference guards run as separately
+named exact commands registered by the dormant implementation, each in a fresh scope with a
+120-second deadline and 8 MiB caps; there are at most four guard commands and the manifest
+hashes their complete source and literal argv registry. All post-overlay commands are serial,
+share a 1,560-second aggregate monotonic deadline (60 seconds beyond the command ceilings
+for bounded startup/cleanup), use the same quota-bound scratch root and
+sealed environment, and must exit 0. No candidate test can weaken the trusted supervisor,
+argv registry, cgroup adapter, or caps because those bytes are base-authenticated.
+
+The supervisor sets `TMPDIR`, cache roots, Git config, and repository view inside scratch and
+allows no write capability outside it. It streams output rather than asking
+`subprocess.run(..., PIPE)` to retain it. Tests cover a nonterminating test, 32 MiB and +1
+output, a grandchild that changes process group/session, 32-process and +1 forks, aggregate
+and per-process memory limits, `EFBIG`/`ENOSPC`, nonzero/signal exits, cleanup interruption,
+and an otherwise green serial suite. A scope kill must leave zero descendants and an empty
+scratch root before activation can continue.
+
+### Aggregate scratch usage is derived, not a second gate
+
+The six amendment-22 category counters remain independently precharged and refuse at their
+own exact limits. `462,469,636` is only their reported derived maximum sum; there is no
+seventh aggregate limit or aggregate +1 branch. Therefore tests cover every category's exact
+limit and +1 plus the arithmetic sum, but do not claim an independently reachable aggregate
++1. The separate one-GiB enforced volume is the containment boundary for unexpected Git or
+test writes; it retains its own quota-exhaustion test.
+
+### Gate boundary
+
+Production remains unopened. The new immutable revision must again pass semantic, CLI, and
+provider review before the first budget/core-fit review of this complete contract.

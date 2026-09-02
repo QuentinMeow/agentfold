@@ -401,3 +401,15 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   closed.
 - Added compression-bomb, zlib/delta/text, scratch, resource, and cleanup exact/+1 tests.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Git-real metadata and supervised-suite correction (codex)
+
+- Semantic review accepted amendment 22; provider/CLI review found the pure-mode Git patch
+  grammar contradicted the parser, the current test runner had no inherited limits, and the
+  aggregate-ledger +1 was not an independent boundary.
+- Added an exact four-form extended-header union, including Git's index-free pure mode form.
+- Wrapped the serial full suite, reconciler, and guards in base-authenticated cgroup/process-
+  group supervisors with numeric memory, process, output, deadline, and kill/cleanup limits.
+- Kept six independent disk categories and made their 462,469,636-byte sum reported-only;
+  removed the impossible aggregate +1 claim while retaining the hard one-GiB quota.
+- Production remains unopened pending another full five-lens immutable-revision review.

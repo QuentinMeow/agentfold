@@ -62,6 +62,21 @@ $ python3 -c 'raw=134217728; rows=256; n=raw+14*rows; loose=n+(n>>12)+(n>>14)+(n
 462469636
 ```
 
+## Superseded bounded-materialization review
+
+**Reviewed revision:** `a8f52f86e356c8f35aff9d62eebd268b6342c6a0`
+
+- semantic/DAG / a15-semantic-review: `approve` — size/parser/quota failures remained
+  infrastructure-unavailable and could not alter Strategy A or hide candidate tree bytes.
+- workflow/provider / r19-semantic-design: `block` — the exact Git command emits no `index`
+  line for a pure mode change, while the parser required one despite admitting that row.
+- CLI/resource / am22-cli-review: `block` — it independently reproduced the pure-mode
+  contradiction, proved the current test runner has no promised timeout/output cap, and
+  showed aggregate +1 is unreachable independently when the aggregate is the sum of category
+  limits.
+
+Budget and core-fit lenses were not run. Production remained unopened.
+
 ## Superseded preserved-status design review
 
 **Reviewed revision:** `92a5f3e61fd3e03009813bf6e49a842e422bf25f`
