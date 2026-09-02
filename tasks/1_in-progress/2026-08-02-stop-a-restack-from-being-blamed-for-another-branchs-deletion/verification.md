@@ -128,6 +128,33 @@ and no production implementation began from this revision.
 The panel stopped after two independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded attempt/activation-contract review
+
+**Reviewed revision:** `7e41dc7a1a1a916060770fde03bbe821ada2ce64`
+
+- semantic/DAG / a15-semantic-review: `approve` — the two-arm graph, old-side continuity,
+  new-side authority, unique N frontier, fast-forward empty rows, identity digest, and
+  accepted-POC equivalence remained coherent.
+- workflow/provider / r19-semantic-design: `block` — completed rows did not bind each
+  scenario's run attempt, job, raw event, and result artifacts; the public-fork hold excluded
+  GitHub's native `action_required` forms.
+- CLI/resource / final-cli-panel: `block` — the exec-status pipe had neither a cumulative
+  frame grammar nor +1 behavior, and the 16 MiB patch bound could not fit the mandatory
+  4 MiB aggregate adapter transcript.
+
+The panel stopped after two independent blocks. Budget and core-fit lenses were not run,
+and no production implementation began from this revision. Official GitHub REST material
+was then re-read: workflow runs expose separate status/conclusion and `run_attempt`, the API
+has an attempt-specific run endpoint and public-fork approve endpoint, and provider status
+filters include `action_required`/`waiting`/`pending`/`requested`.
+
+The amendment-21 arithmetic was executed directly:
+
+```text
+$ python3 -c 'import base64; n=65536; print(26*1024*1024, 26*1024*1024+4329, len(base64.urlsafe_b64encode(b"x"*n).rstrip(b"=")))'
+27262976 27267305 87382
+```
+
 ## Superseded candidate-complete ordinary design review
 
 **Reviewed revision:** `aa872dfb6b27b864b2e9b12f9a542c834c86efb7`

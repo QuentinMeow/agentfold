@@ -3052,3 +3052,190 @@ it cannot ride inside the authenticated activation.
 
 Production remains unopened. A new immutable revision needs all five fresh review lenses
 before dormant core implementation.
+
+## 2026-09-01 correction amendment 21 — attempt-bound evidence and closed launcher bytes
+
+Fresh review of `7e41dc7a1a1a916060770fde03bbe821ada2ce64` again accepted
+classifier semantics and rejected provider/CLI closure. The aggregate canary run could not
+prove which attempt produced each scenario result; the public-fork hold excluded GitHub's
+native `action_required` shapes; the exec-status pipe had capacity but no cumulative frame
+contract; and a schema-valid activation patch could exceed the complete adapter transcript.
+This amendment supersedes amendments 19–20's row variants, attempt verification, status-pipe
+bytes, adapter payload bound, and affected golden cases. Canonical JSON, fixture topology,
+literal scenarios, process topology, activation reconstruction, and runtime projection remain.
+
+### Scenario input is not provider evidence
+
+Every row now shares exactly
+`kind,scenario,source_repository_id,source_repository_full_name,old,new,scenario_input_sha256`.
+The last field hashes the exact canonical scenario row in the pre-mutation fixture manifest;
+it is an input commitment, not a claim that GitHub emitted an event. For `completed`, the
+trusted raw event must independently yield the same source/O/N tuple. For `pending`,
+`no-observation`, and `not-applicable`, O/N remain expected fixture endpoints and can never
+authorize an evaluator result. This replaces those variants' misleading `event_sha256`.
+
+The variants add only these exact fields:
+
+- `completed`: `state,evaluator_exit,result_sha256,run`;
+- `pending`: `observation,reason,run`;
+- `no-observation`:
+  `observation,reason,polls,runs_examined,matching_tuples,window_complete`;
+- `not-applicable`: `observation,reason`.
+
+The existing state/exit mapping, observation/reason pairs, count limits, zero-endpoint rules,
+and 13-name kind registry remain. `no-observation` has no run and proves a complete bounded
+zero-match provider search. `not-applicable` has no run. Neither variant may carry result,
+job, artifact, or provider-event fields.
+
+### One attempt-bound run envelope
+
+Every `completed` or `pending` row has one `run` object with exactly:
+
+```text
+repository_id,repository_full_name,workflow_id,workflow_path,workflow_sha,
+run_id,run_attempt,event,head_sha,status,conclusion,job,evidence
+```
+
+Repository identity equals the base fixture. Provider/workflow/run IDs are positive bounded
+integers; `run_attempt` is `1..1,000`; path/event/status and non-null conclusion use the
+global string charge; SHAs are full repository-object-format OIDs. `workflow_id`, path, run
+ID, attempt, event, head SHA, status, and conclusion must equal the response from
+`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}`. The workflow SHA
+is the immutable commit OID named by the expected `github.workflow_sha`; its workflow-path
+blob is verified before scenario mutation. A completed publication proves that commit from
+trusted job bytes; a held run cannot execute and therefore binds it only as the expected
+installed commit/path blob, never as executed code.
+
+`job` is JSON null or exactly `job_id,name,status,conclusion`. A non-null job must appear by
+the same positive ID in
+`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100&page=1`.
+The response must report exactly one job and no second page; the undocumented `filter`
+parameter, latest-attempt endpoint, and run-wide job collection are forbidden. Its literal
+name is `agentfold-ref-update-canary`. Unknown, duplicate, stale-attempt, paginated-extra, or
+run-wide-only matches refuse.
+
+For `completed`, run and job status are `completed`, both conclusions are the row's existing
+`success|failure` mapping, job is non-null, and `evidence` has exactly
+`raw_event_artifact,result_artifact,publication_sha256`. Each artifact object has exactly
+`artifact_id,name,size,sha256`; IDs/sizes use existing bounds and digests hash exact downloaded
+archive bytes. Names are exactly
+`agentfold-ref-update-event-v1-<scenario>-<run_id>-<run_attempt>` and
+`agentfold-ref-update-result-v1-<scenario>-<run_id>-<run_attempt>`. Provider metadata must
+bind each artifact to the same run ID and report it unexpired.
+
+The pinned workflow writes one ASCII job-log line after both pinned uploads:
+
+```text
+AGENTFOLD_REF_UPDATE_PUBLICATION_V1 <unpadded-base64url(canonical-publication-JSON)>\n
+```
+
+The unpadded token decodes to the canonical publication JSON including its one LF and is at
+most 87,382 ASCII bytes, derived from a 65,536-byte canonical-publication cap. The decoded
+publication has exactly
+`schema,scenario,repository_id,workflow_id,workflow_sha,run_id,run_attempt,job_name,event_sha256,result_sha256,raw_event_artifact,result_artifact`;
+its schema is `agentfold-ref-update-publication/v1`, all values equal the row/run/evidence,
+and `publication_sha256` hashes its canonical JSON bytes including LF. The verifier downloads
+at most 8 MiB of that attempt-specific job log and 64 MiB across all scenario logs, scans
+without retaining unrelated log bytes, and requires exactly one marker occurrence delimited
+by LF or CRLF; provider timestamp/presentation bytes may precede the literal marker, but no
+byte may split or enter the marker/token. It refuses an overlong token before base64 decode,
+decodes/re-encodes it canonically, and matches every byte.
+
+It then safely downloads and extracts the two exact artifacts under the existing archive
+caps. The raw-event archive has exactly one regular non-link entry `event.json`, at most
+1 MiB, whose bytes are the exact `$GITHUB_EVENT_PATH`; the result archive has exactly one
+regular non-link entry `result.json`, at most 32 MiB, whose bytes are the accepted canonical
+evaluator result. Absolute/dot/dot-dot/backslash/NUL paths, duplicate entries, directories,
+links, devices, encryption, unsupported compression, trailing archive data, or another entry
+refuse before extraction. Their payload digests equal the publication, the event derives
+source/O/N, and the result derives state/exit/result digest. Artifact metadata alone, an
+aggregate-artifact claim, a job from another attempt, or a controller value cannot satisfy
+any of these joins.
+
+The aggregate canary artifact remains the transport containing the 13 rows, but the receipt
+verifier and Gate 3 independently re-fetch every completed run attempt, attempt-specific job
+and log marker, artifact metadata, archive, raw event, and result. Stale rerun explicitly
+records the original run attempt and refuses a later attempt even when run ID, scenario, or
+artifact basename is shared. Expired per-scenario logs/artifacts make activation unavailable.
+
+### Provider-real public-fork hold union
+
+For `pending`, `evidence` is JSON null and job is optional because no workflow byte may have
+executed. Exactly one provider-observed run pair is accepted:
+
+```text
+status=waiting          conclusion=null
+status=action_required  conclusion=null
+status=completed        conclusion=action_required
+```
+
+This is an exact union, not two independent enums. It follows the provider's public-fork
+hold shapes while excluding ordinary queueing, execution, cancellation, and terminal
+failure. For the first two pairs, a non-null job has status
+`queued|waiting|pending|requested` and null conclusion. For the third pair, a non-null job
+has status `completed` and conclusion `action_required`. Every non-null job must satisfy the
+attempt-specific lookup above; otherwise job is null. The row reason remains
+`fork-approval-required`. Because the held run cannot publish raw event bytes, this
+variant proves only provider-visible policy state and expected scenario input, never event
+payload or classifier success. If none of the three pairs appears inside the fixed discovery
+window, the adapter gate is unavailable.
+
+Golden provider fixtures cover all three run pairs, each with null job and each permitted
+job status where the API materializes one, plus crossed status/conclusion pairs, completed
+success/failure, action-required under a different run/attempt, latest-attempt aliasing, and
+job/artifact/log swaps. Live canaries must observe one permitted pair; they do not require
+the provider to manufacture every historical shape.
+
+### Exec-status is a 16-byte protocol, not a streaming channel
+
+The close-on-exec status pipe accepts exactly one of two transcripts. Successful `execve`
+is zero bytes followed by EOF. A pre-exec failure is one atomic 16-byte record followed by
+EOF:
+
+```text
+bytes 0..3   ASCII "AFEX"
+byte 4       version 1
+byte 5       stage: 1=setpgid, 2=address-limit, 3=descriptor-map,
+                      4=descriptor-close, 5=execve
+bytes 6..7   zero
+bytes 8..11  uint32be errno, range 1..2^31-1
+bytes 12..15 zero
+```
+
+The child makes one `write` no larger than `PIPE_BUF` and then `_exit`s; a short/interrupted
+write is not retried into a second record. The parent has a cumulative accepted cap of 16
+bytes and a 17-byte detection allowance: it reads at most 17 total, retains at most 17,
+and on the seventeenth byte immediately marks infrastructure unavailable and terminates the
+registered group without draining unbounded logical data. Kernel-resident unread bytes stay
+inside the separately charged 65,536-byte pipe capacity. EOF at 1–15 bytes, invalid magic,
+version/stage/errno/reserved bytes, a second/extra byte, or a deadline before EOF all refuse;
+none is a domain `blocked` result. Parent-side failures before fork use the parent error path
+and never fabricate a status record.
+
+Tests cover zero-byte EOF, every valid stage, errno bounds, exact 16, bytes 1–15, byte 17,
+two concatenated records, invalid/reserved fields, short write, writer stall, reader stall,
+success/failure races, and descriptor/group cleanup. The six-pipe 393,216-byte kernel peak
+and at-most-two-child process registry are unchanged.
+
+### Adapter transcript has composable category budgets
+
+The adapter-policy manifest keeps its exact framing and 1–16 path limit, but its aggregate
+payload cap is now 26 MiB (27,262,976 bytes), divided into simultaneously enforceable
+categories: the exact activation patch is at most 16,777,216 bytes; its exact activation
+manifest is at most 2,097,152 bytes including LF; every other digest-covered adapter/core/
+workflow/template/guard/test blob is at most 8,388,608 bytes in aggregate. The two activation
+paths are literal registry entries and cannot be reclassified. Every path belongs to exactly
+one category; all three counters are precharged before hashing.
+
+With the unchanged maximum framing of 4,329 bytes, the exact maximum digest input is
+27,267,305 bytes. Hashing streams each immutable Git blob in at most 65,536-byte chunks and
+does not retain the aggregate transcript. Golden vectors reach all three category maxima at
+once, the 26 MiB aggregate maximum, and each category/aggregate +1; a 16 MiB patch plus 2 MiB
+manifest always leaves the promised 8 MiB for every other required blob. Gate 2 is unavailable
+if the exact required non-activation files exceed that reserved category rather than silently
+reducing the patch limit.
+
+### Gate boundary
+
+Production remains unopened. Budget and core-fit review do not inherit the semantic ACCEPT;
+all five lenses must review one new immutable revision before dormant implementation.

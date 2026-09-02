@@ -371,3 +371,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   append/checkbox-only record overlay, then reconstructed and tested the complete candidate
   tree after overlay.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Attempt-bound evidence and launcher-frame correction (codex)
+
+- Semantic review accepted amendment 20; provider/CLI review found per-scenario attempt
+  evidence missing, native public-fork hold shapes excluded, an unframed status pipe, and an
+  activation patch larger than the complete adapter budget.
+- Replaced negative-row event claims with an authenticated scenario-input commitment and
+  required every completed result to join an attempt-specific run, job log marker, raw event
+  artifact, and result artifact. The aggregate canary artifact is transport, not authority.
+- Defined the exact three-pair provider union for a held public-fork run, including
+  `action_required`, while keeping its evidence null because no workflow code has executed.
+- Closed the exec-status channel to zero-byte success or one 16-byte failure frame, with a
+  17-byte overrun detector and exact malformed/stall/cleanup tests.
+- Raised and partitioned the adapter transcript to a composable 26 MiB total: 16 MiB patch,
+  2 MiB manifest, and 8 MiB reserved for all other mandatory bytes.
+- Production remains unopened pending another full five-lens immutable-revision review.
