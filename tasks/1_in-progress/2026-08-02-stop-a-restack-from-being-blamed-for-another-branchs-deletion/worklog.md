@@ -302,3 +302,20 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   exit/state/endpoints before publishing anything. A failed delivery may leave transport
   debris but can never become an accepted result.
 - Production remains unopened pending a fresh full five-lens immutable-revision review.
+
+## 2026-09-01 — Executable-preflight and canary-binding correction (codex)
+
+- The five-lens panel accepted budget and core fit but found three independent contract
+  classes: fast-forward row contradiction, impossible pre-open object typing plus unframed
+  hashes, and canary/local-caller workflow gaps.
+- Restored the accepted POC's empty-row fast-forward transaction and scoped per-identity
+  rows to divergence. Split syntax-only rejection from bounded post-open object-type checks.
+- Removed the open-ended public evidence digest and fixed the identity digest to one domain-
+  separated, count/length-framed strict-UTF-8 transcript with independent golden cases.
+- Specified ref_update_capture.py as the single human/provider acceptance entrypoint, with
+  closed grammar, two-process memory/deadline composition, bounded capture, strict result
+  validation, cleanup, and exact exit/output behavior.
+- Added a separately framed adapter-policy digest and required live canary receipts to match
+  every activated adapter/capture/invocation byte. The activation commit cannot change any
+  tested byte; a difference invalidates the receipt and returns to the adapter proof gate.
+- Production remains unopened pending another full five-lens immutable-revision review.

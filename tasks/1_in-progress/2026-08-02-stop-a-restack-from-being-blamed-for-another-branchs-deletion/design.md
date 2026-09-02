@@ -2488,3 +2488,143 @@ endpoint. Each attack must produce no accepted result and no repository mutation
 Production remains unopened. A new immutable revision must receive the full five-lens
 review; the prior two blocks are rejection evidence, not approvals transferable to this
 amendment.
+
+## 2026-09-01 correction amendment 17 — executable preflight and canary-bound callers
+
+The five-lens review of `92a5f3e61fd3e03009813bf6e49a842e422bf25f`
+accepted resource and core-fit boundaries but rejected semantic, CLI, and workflow
+composition. It proved that fast-forward row requirements contradicted the accepted POC,
+object type cannot be known before opening an object source, identity/evidence hash inputs
+were not framed, live canaries were not bound to the adapter later activated, and the
+authority-bearing local capture wrapper did not exist in the implementation contract. This
+section supersedes the affected endpoint-preflight, fast-forward row, row schema/digest,
+caller, adapter-proof, and activation clauses. Divergent Strategy A semantics and the
+accepted-delivery rule remain unchanged.
+
+### Syntax first, object type after a bounded open
+
+The custom parser performs only facts knowable without an object read. It rejects duplicate,
+missing, or unknown options; a non-absolute Git-directory path; O/N tokens that are not
+lowercase ASCII hexadecimal of length 40 or 64; all-zero tokens; unequal token lengths; and
+identical O/N. These failures occur before an object source is opened.
+
+The next minimal read-only source stage discovers repository object format and requires the
+token length to match it. One bounded hardened batch-check exchange then requires each exact
+OID to exist and have object type `commit`; a blob, tree, tag, missing object, malformed
+header, alternate/replacement view, or source error is incomplete exit 2. This stage
+necessarily opens the isolated object database, but it completes before policy payload,
+merge-base, graph, queue snapshot, or action provenance reads. Tests pair same-width commit,
+blob, tree, and annotated-tag OIDs and prove that syntax alone does not guess their type.
+
+### Fast-forward is the POC's empty-row transaction
+
+The row/status/Finding rules in amendment 16 apply only when `O` is not an ancestor of `N`.
+After endpoint and three-source policy verification, a same-policy fast-forward returns the
+canonical complete clean result with `common=O`, `rows=[]`, and only preflight/policy
+counters. It performs zero queue identity derivations, queue snapshots, graph enumeration,
+or action provenance, matching POC scenario `W0-fast-forward-return`. A policy-changing
+fast-forward remains incomplete exit 2. The separate ordinary O-to-N range owns every
+fast-forward deletion or mutation and still runs independently in provider composition.
+
+For divergent endpoints, every identity at O receives exactly one row and the `preserved`,
+`valid`, `none`, `invalid`, and `ambiguous` rules remain as specified. Golden tests assert
+both halves: W0 has empty rows and zero action work, while P8 maps the POC's clean persisted
+`none` to production `preserved`.
+
+### One exact identity transcript; no public proof-digest claim
+
+The CLI row schema is now exactly `identity,paths,status,reasons,finding`; amendment 16's
+`evidence` member is withdrawn. The CLI is a bounded conclusion projection, not a durable
+independent copy of the complete internal proof. The in-process classifier still retains
+and tests the full structured proof transaction before projection, but this task does not
+claim that an opaque hash of an unspecified proof schema is externally auditable.
+
+The stable identity digest has one exact transcript. Let `parts` be the complete string
+tuple returned by `queue_action_identity`: four elements for an ordinary action or five for
+a generated retry, including its existing kind discriminator. Every part must be a valid
+Unicode scalar string obtained by the repository's strict UTF-8 parser; no Unicode
+normalization, case folding, trimming, or path inclusion is added by the digest encoder.
+Encode:
+
+```text
+ASCII("agentfold-queue-action-identity/v1") || 0x00
+|| uint64be(len(parts))
+|| for each part in tuple order:
+     uint64be(len(UTF8(part))) || UTF8(part)
+```
+
+The displayed value is lowercase `sha256:` plus the 64-hex SHA-256 of exactly those bytes.
+An independently implemented golden encoder covers empty fields, embedded NUL, non-ASCII,
+combining characters, long text, the four- versus five-field variants, and every one-byte
+length boundary. A digest collision between unequal full tuples is incomplete exit 2. Raw
+identity text never enters CLI output, the Finding message, or the subject.
+
+### Named authority-bearing capture entrypoint
+
+automation/reconcile/ref_update.py remains the only classifier CLI. The human/provider
+acceptance entrypoint is automation/reconcile/ref_update_capture.py with the same exact
+single-occurrence grammar:
+
+```text
+--git-dir <absolute-path> --old <full-oid> --new <full-oid>
+```
+
+It invokes the sibling classifier by an immutable literal path and sanitized interpreter
+environment, concurrently drains stdout/stderr under the specified caps, waits and reaps
+under an outer deadline, applies every amendment-16 acceptance check, and only then re-emits
+the exact accepted canonical bytes with the same 0/1 state exit. Child failure or invalid
+bytes becomes wrapper exit 2 and no accepted result; wrapper output delivery follows the
+same prefix-is-not-authority rule. It never runs Git, ordinary reconciliation, provider
+logic, a writer, or a publication command.
+
+The wrapper installs the same probed Linux address-space ceiling before capture. Classifier
+and wrapper each have a 512 MiB per-process ceiling; their simultaneous closed maximum is
+1 GiB, plus only kernel pipe capacity. The wrapper's outer deadline is 130 seconds: at most
+120 seconds for the classifier transaction and at most 10 seconds for validation/final
+delivery. It kills the fixed child process group on cap, deadline, or parse refusal, drains
+bounded residual bytes, and reaps before exit. Exact/+1 tests cover both per-process memory
+boundaries, the composed maximum, stdout/stderr caps, child cleanup, and final delivery.
+
+This capture entrypoint is part of the authority-policy manifest and the dormant-core gate.
+Both local Linux diagnosis and every provider adapter invoke it; no human must invent a
+parser or shell pipeline. Documentation presents the capture command followed by the
+existing separate ordinary range command. Native macOS receives the same explicit Linux-
+unavailable exit 2 before child launch.
+
+### Canary bytes must equal activated adapter bytes
+
+The GitHub transport has a separate `adapter-policy/v1` digest; it is not classifier
+authority. Its closed ordered manifest contains the production event/O/N extraction script,
+the read-only object-transport script, the repository-local action metadata that invokes
+ref_update_capture.py, and a canonical workflow invocation projection covering event names,
+permissions, trust source, exact arguments, result mapping, and unavailable behavior. The
+digest uses the authority-policy transcript's domain separation, UTF-8 path ordering, and
+uint64 big-endian length framing. It also embeds the exact authority-policy digest expected
+by the capture entrypoint.
+
+The adapter proof runs the full live same-repository, fork, conflicted, SHA-like, approval,
+stale, and retention matrix through those exact manifest blobs. Its immutable receipt names
+the tested commit, adapter digest, authority-policy digest, fixture identity, workflow run
+and attempt, every captured endpoint/result, and cleanup result. Gate 2 may land these bytes
+dormant, but it may not activate or retire current continuity.
+
+Before gate 3 is mergeable, a mechanical activation check requires:
+
+1. every authority-policy and adapter-policy blob in the candidate tree is byte-identical
+   to the canary receipt digests;
+2. the actual workflow projection is byte-identical to the canaried canonical projection;
+3. the adapter and capture entrypoint are unchanged from the tested commit; and
+4. the receipt covers every required live row with no unavailable or stale substitution.
+
+The atomic activation commit may change only the checked workflow call sites, retire the
+legacy `--displaced-tip` parser/implementation, and update activation tests/records. It may
+not change digest-covered classifier, capture, adapter, or invocation-contract bytes. Any
+such change invalidates the receipt and returns to gate 2; a passed canary for adapter A can
+never authorize adapter B. Static damage tests mutate each workflow permission, event,
+argument, result mapping, digest-covered byte, and capture path and require activation
+refusal before legacy protection is removed.
+
+### Gate boundary
+
+Production remains unopened. The full five-lens review must accept a new immutable revision
+before dormant implementation units begin; approvals on the rejected revision do not carry.

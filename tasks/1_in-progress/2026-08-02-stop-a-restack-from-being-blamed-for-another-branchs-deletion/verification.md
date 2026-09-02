@@ -38,6 +38,18 @@ from it.
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded preserved-status design review
+
+**Reviewed revision:** `92a5f3e61fd3e03009813bf6e49a842e422bf25f`
+
+- semantic/DAG/executable / a15-semantic-review: `block` — every-O row coverage contradicted the accepted empty-row fast-forward transaction and ordinary ownership.
+- budgets/transaction/composition / a15-budget-review: `approve` — retained memory, graph/policy arithmetic, child cleanup, accepted-delivery handling, and separate ordinary composition were closed for the stated boundary.
+- workflow/provider/human / r19-semantic-design: `block` — canaries were not bound to activated adapter bytes, and the required local authority-bearing capture wrapper had no executable contract or implementation gate.
+- core-fit / final-corefit-panel: `approve` — the observer remained provider/agent/repository neutral, repository-local, optional-adapter, and free of user-global or third-party core coupling.
+- CLI/contracts/testability / final-cli-panel: `block` — object type was unknowable before an object read, fast-forward rows conflicted, and identity/evidence hash inputs were not byte-framed.
+
+The three-to-two panel rejected the revision. No production implementation began from it.
+
 ## Superseded observer-only design review
 
 **Reviewed revision:** `a79425b7de1234b390ed0c495b6ed774a6b32c51`
