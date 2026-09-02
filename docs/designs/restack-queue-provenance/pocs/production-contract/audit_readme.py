@@ -10,18 +10,20 @@ compares bytes, never prose fragments or an OID pool.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v7"
+SCHEMA = "agentfold-production-contract-evidence/v8"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -68,6 +70,16 @@ SUPERSEDED_EVIDENCE = {
                 "never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v6",
+        },
+        {
+            "commit": "820ae1a788f5b24493a4277fb4d79981e0be202f",
+            "disposition": (
+                "superseded and burned after endpoint/budget pre-validation, "
+                "duplicate-parent, startup-authority, artifact-pair, and "
+                "post-cleanup resource-accounting blockers; history is "
+                "preserved and v7 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v7",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -208,7 +220,7 @@ PRECHARGE_P22_METRICS = {
     "object_header_bytes": 6747,
     "object_payload_bytes": 29421,
     "object_payload_peak_bytes": 816,
-    "object_process_reaps": 0,
+    "object_process_reaps": 1,
     "object_process_terminations": 0,
     "object_reads": 134,
     "per_action_history_walks": 0,
@@ -285,7 +297,7 @@ POSTHOC_P22_METRICS = {
     "object_header_bytes": 15262,
     "object_payload_bytes": 71081,
     "object_payload_peak_bytes": 4480,
-    "object_process_reaps": 0,
+    "object_process_reaps": 1,
     "object_process_terminations": 0,
     "object_reads": 300,
     "per_action_history_walks": 0,
@@ -512,6 +524,7 @@ SCENARIO_IDS = tuple(sorted((
     "R18-U-review-compatible-source-high-reversed",
     "R18-U-review-compatible-source-low",
     "R18-U-review-compatible-source-low-reversed",
+    "R18-U-review-duplicate-parent-header",
     "R18-U-review-incompatible-carrier",
     "R18-U-review-publication-equivalence",
     "R18-U-review-three-carrying-parents",
@@ -684,7 +697,7 @@ FIXTURE_CLAIMS = (
 # c32f470977735a63feaf377ca9290353d1520e0e and
 # 850d02587f7f812b7dde9667a39da80b4ce48764. Every row kind has one exact
 # recursive shape digest, checked before any projection.
-RAW_SHAPE_CATALOG_V7 = """
+RAW_SHAPE_CATALOG_V8 = """
 scenario:P1-direct-linear-valid sha256:356e5e2f5b906e2609dce7643c46eb3802ab376b1994aaac48c90cdacd35b660
 scenario:P10-direct-invalid-parent sha256:243adfd610241a33198cd863fe6b3bf8838e0f1249417cd02d785958e9b00db2
 scenario:P11-direct-three-parent-valid sha256:08cbb263eae6a1b25dd5c0a43993f762cf5e5e609e224e060e033aff4c7a6d8e
@@ -850,16 +863,17 @@ scenario:R18-U-parent-order sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca1
 scenario:R18-U-parent-order-reversed sha256:9094e5c9990b922d9231796fa45e2944a5b455f71eca17ddafb32ce92d93ad6d
 scenario:R18-U-rename-timing-move sha256:93225d0766eeb06577b676234c702278f400f6f7268d082494a23007181145f5
 scenario:R18-U-review-binding-restoration sha256:c1009ffb93da27c30c1ca25fea26f30a7d376d437ffd79051696d18cac108e53
-scenario:R18-U-review-compatible-merge sha256:55b30a4c8e3ec2040c376bb96ce8e73e720ddb34c40be5980a4b93a309ed0a43
-scenario:R18-U-review-compatible-merge-reversed sha256:55b30a4c8e3ec2040c376bb96ce8e73e720ddb34c40be5980a4b93a309ed0a43
-scenario:R18-U-review-compatible-source-high sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
-scenario:R18-U-review-compatible-source-high-reversed sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
-scenario:R18-U-review-compatible-source-low sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
-scenario:R18-U-review-compatible-source-low-reversed sha256:e70f83c8dab5e739215eb11f5108faa4211f3c675419191fea9deacbd23363f8
-scenario:R18-U-review-incompatible-carrier sha256:60bceec745d4de65bedfa4c0b40662f9957909306dda918d25cccaec9fa6ddb5
+scenario:R18-U-review-compatible-merge sha256:03591c89514797a52439e4f55814a32b7ff9518926924bb5befb0898e6df7aec
+scenario:R18-U-review-compatible-merge-reversed sha256:03591c89514797a52439e4f55814a32b7ff9518926924bb5befb0898e6df7aec
+scenario:R18-U-review-compatible-source-high sha256:81bdd39c28ebdf6324362ac93eb32cf2e098a37b1eba0200d1e46c2d1e25fc1a
+scenario:R18-U-review-compatible-source-high-reversed sha256:81bdd39c28ebdf6324362ac93eb32cf2e098a37b1eba0200d1e46c2d1e25fc1a
+scenario:R18-U-review-compatible-source-low sha256:81bdd39c28ebdf6324362ac93eb32cf2e098a37b1eba0200d1e46c2d1e25fc1a
+scenario:R18-U-review-compatible-source-low-reversed sha256:81bdd39c28ebdf6324362ac93eb32cf2e098a37b1eba0200d1e46c2d1e25fc1a
+scenario:R18-U-review-duplicate-parent-header sha256:6c15537186d3a326f88bc495f631b7613996c8d91397024845c89bf680fed2bb
+scenario:R18-U-review-incompatible-carrier sha256:6a4c011b204c32a0f05916b03bfda7b6746e5efe74c4d839a40012f3acf31a95
 scenario:R18-U-review-publication-equivalence sha256:7aaad893c08f170dd9d55cad5c947acb67bd580e2d8a4c5ae972e12473964521
-scenario:R18-U-review-three-carrying-parents sha256:4bdf267c1ccaf54cba0fe5666e6816ca34ffd86d64319bd464359135fd016596
-scenario:R18-U-review-two-valid-sources sha256:4ffe1e5c47457c202b072459ccff7e66257e08069c1f28b35b83c6433bd74a84
+scenario:R18-U-review-three-carrying-parents sha256:1eca8aaafefce717fe397cc54d8b1659310fc81d1e3f46712fb57c6bde8dac29
+scenario:R18-U-review-two-valid-sources sha256:8f148ea4cdb3d9b1b03832d38e2a00e1a425bfb291e7e469653a7b1add36361c
 scenario:R18-U-schema-invalid-birth sha256:b1b052933ab5797075ee5b3cab2607e04f975e3639aa19d64d53de6a0cebf437
 scenario:R18-U-second-birth sha256:5ab541a901c3d8973a650c18bbae8e5d54e17184a58f9dfdb23b375a27153fef
 scenario:R18-U-transient-protected-mutation sha256:6356d37c4ade35ad68f3d150bdc06a2f3983c9297ac6bc419be36cdaf362f835
@@ -918,7 +932,7 @@ aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:event-adapter-cli-entrypoint sha256:b839e870c310cfc584c697f1e48863b0b151f38a7255472316aac5bbda7c4b37
+control:event-adapter-cli-entrypoint sha256:e67a7a02e0fecbfc9046de3d7848e2cb6723653d895a60e00fc2eddebe3d433b
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -926,7 +940,7 @@ control:ignore-invalid-N-root sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfc
 control:ignore-outside-C-carrier sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:ignore-persisted-absent-C-arm sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:ignore-persisted-outside-C-collision sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:leak-object-database-pipes sha256:09d852a1d76466655eefd0cca040e2c512e74470e8a3bd34603f65d520741bd7
+control:leak-object-database-pipes sha256:b9a9cf27587ce52eb12900de2f3a58e410e196e69264bda0ec335aac3c8837b0
 control:literal-review-pending-treated-concrete sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:locale-git-error-stream-equality sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4
 control:missing-all-parent-direct-validation sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -960,7 +974,7 @@ summary sha256:b957b61b2a27224040772a4629d78ad28a6877450d639808664ac078929a351e
 """
 RAW_SHAPE_SHA256 = dict(
     line.split(" ", 1)
-    for line in RAW_SHAPE_CATALOG_V7.splitlines()
+    for line in RAW_SHAPE_CATALOG_V8.splitlines()
     if " " in line
 )
 
@@ -1437,26 +1451,69 @@ class Stream:
         return b"".join(canonical_bytes(normalized_record(x)) for x in self.objects)
 
 
+def trusted_git_executable() -> Path:
+    """Select Git from fixed system prefixes, never from caller PATH."""
+    candidates = (
+        Path("/opt/homebrew/bin/git"),
+        Path("/usr/local/bin/git"),
+        Path("/usr/bin/git"),
+    )
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.resolve()
+    raise EvidenceError(
+        "isolated replay found no Git executable in the fixed trusted paths"
+    )
+
+
 def internal_replay_stream() -> Stream:
-    """Run the sibling prototype from scratch under a fixed environment."""
+    """Run the sibling prototype without caller Python or Git startup state."""
     prototype = Path(__file__).resolve().with_name("prototype.py")
-    environment = os.environ.copy()
-    environment.update(
-        {
+    git_executable = trusted_git_executable()
+    git_directory = str(git_executable.parent)
+    with tempfile.TemporaryDirectory(prefix="production-contract-audit-replay-") as raw:
+        scratch = Path(raw)
+        isolated_home = scratch / "home"
+        isolated_home.mkdir()
+        environment = {
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "HOME": str(isolated_home),
             "LANG": "C",
             "LC_ALL": "C",
-            "PYTHONHASHSEED": "0",
+            "PATH": os.pathsep.join((git_directory, os.defpath)),
             "TZ": "UTC",
+            "XDG_CONFIG_HOME": str(isolated_home / "xdg"),
         }
-    )
-    with tempfile.TemporaryDirectory(prefix="production-contract-audit-replay-") as raw:
+        git_smoke = subprocess.run(
+            ["git", "--version"],
+            check=False,
+            env=environment,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            timeout=10,
+        )
+        if git_smoke.returncode != 0:
+            diagnostic = git_smoke.stderr.decode(
+                "utf-8", errors="replace"
+            ).strip()
+            raise EvidenceError(
+                "isolated replay Git smoke test failed"
+                + (f": {diagnostic}" if diagnostic else "")
+            )
         completed = subprocess.run(
             [
                 sys.executable,
+                "-I",
+                "-S",
+                "-X",
+                "utf8",
                 str(prototype),
                 "--self-test",
                 "--fixtures-dir",
-                str(Path(raw) / "fixtures"),
+                str(scratch / "fixtures"),
             ],
             check=False,
             env=environment,
@@ -1488,6 +1545,34 @@ def require_fresh_replay(
         )
 
 
+def stage_artifact_bytes(target: Path, payload: bytes, label: str) -> Path:
+    """Write and fsync one same-directory staging file without publication."""
+    mode = (
+        stat.S_IMODE(target.stat().st_mode)
+        if target.exists()
+        else 0o644
+    )
+    descriptor, raw_path = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=f".{target.name}.{label}.",
+        suffix=".tmp",
+    )
+    staged = Path(raw_path)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+        with contextlib.suppress(OSError):
+            staged.unlink()
+        raise
+    return staged
+
+
 def publish_generated_artifacts(
     supplied: Stream,
     fresh: Stream,
@@ -1496,11 +1581,73 @@ def publish_generated_artifacts(
     *,
     comparison: Stream | None = None,
 ) -> dict:
-    """Publish only after every caller stream equals a fresh replay exactly."""
+    """Validate/stage both outputs, then publish them as a rollback pair.
+
+    Each individual ``os.replace`` is atomic.  A process or machine crash
+    between the two replacements is the unavoidable filesystem boundary:
+    ordinary reported I/O failures restore the complete old pair, but two
+    unrelated paths cannot be atomically exchanged as one portable operation.
+    """
     require_fresh_replay(supplied, fresh, comparison)
     expected = manifest_from_stream(fresh)
-    evidence_path.write_bytes(canonical_bytes(expected))
-    readme_path.write_bytes(render_readme(expected))
+    targets = (
+        (evidence_path, canonical_bytes(expected)),
+        (readme_path, render_readme(expected)),
+    )
+    staged = []
+    backups = []
+    try:
+        for target, payload in targets:
+            staged.append(stage_artifact_bytes(target, payload, "new"))
+        for target, _payload in targets:
+            backups.append(
+                (
+                    target.exists(),
+                    stage_artifact_bytes(target, target.read_bytes(), "old")
+                    if target.exists()
+                    else None,
+                )
+            )
+    except OSError as error:
+        for path in [*staged, *(item[1] for item in backups)]:
+            if path is not None:
+                with contextlib.suppress(OSError):
+                    path.unlink()
+        raise EvidenceError(
+            f"artifact pair staging failed before publication: {error}"
+        ) from error
+
+    try:
+        for staged_path, (target, _payload) in zip(
+            staged, targets, strict=True
+        ):
+            os.replace(staged_path, target)
+    except OSError as error:
+        rollback_errors = []
+        for (target, _payload), (existed, backup) in reversed(
+            list(zip(targets, backups, strict=True))
+        ):
+            try:
+                if existed:
+                    assert backup is not None
+                    os.replace(backup, target)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{target}: {rollback_error}")
+        detail = (
+            "; rollback incomplete: " + "; ".join(rollback_errors)
+            if rollback_errors
+            else "; old pair restored"
+        )
+        raise EvidenceError(
+            f"artifact pair publication failed: {error}{detail}"
+        ) from error
+    finally:
+        for path in [*staged, *(item[1] for item in backups)]:
+            if path is not None:
+                with contextlib.suppress(OSError):
+                    path.unlink()
     return expected
 
 
@@ -1919,6 +2066,7 @@ def origin_strategy_projection(stream):
         "R18-U-review-compatible-source-low-reversed",
         "R18-U-review-compatible-source-high",
         "R18-U-review-compatible-source-high-reversed",
+        "R18-U-review-duplicate-parent-header",
         "R18-U-review-three-carrying-parents",
         "R18-U-review-two-valid-sources",
         "R18-U-review-incompatible-carrier",
@@ -1942,6 +2090,19 @@ def origin_strategy_projection(stream):
         for proof in legal_publication["origin_proofs"]
         for edge in proof["edges"]
     ]
+    duplicate_row = stream.scenarios[
+        "R18-U-review-duplicate-parent-header"
+    ]
+    duplicate_landmarks = duplicate_row["details"]["landmarks"]
+    duplicate_merge = duplicate_landmarks["merge"]
+    duplicate_edges = [
+        edge
+        for proof in cases[
+            "R18-U-review-duplicate-parent-header"
+        ]["origin_proofs"]
+        for edge in proof["edges"]
+        if edge["child"] == duplicate_merge
+    ]
     bound_controls = (
         "endpoint-only-origin-equality",
         "skip-origin-birth-uniqueness",
@@ -1961,6 +2122,22 @@ def origin_strategy_projection(stream):
             "for those illegal origins and falsely blocks two production-legal "
             "histories that converge on the same unanswered review"
         ),
+        "duplicate_parent_header": {
+            "compatible_carrier_count": sum(
+                edge["role"] == "compatible-carrier"
+                for edge in duplicate_edges
+            ),
+            "fsck_returncode": duplicate_landmarks["fsck_returncode"],
+            "logical_parent_count": len(
+                duplicate_landmarks["logical_parent_oids"]
+            ),
+            "raw_parent_header_count": len(
+                duplicate_landmarks["raw_parent_headers"]
+            ),
+            "source_count": sum(
+                edge["role"] == "source" for edge in duplicate_edges
+            ),
+        },
         "selection_boundary": {
             "B_false_blocks_legal_review_publication": (
                 legal_publication["classification"] == "blocking-finding"
@@ -2007,10 +2184,19 @@ def origin_strategy_projection(stream):
 
 
 def generation_contract_projection():
+    git_executable = trusted_git_executable()
     return {
         "caller_rows_authoritative": False,
         "comparison_requires_exact_bytes": True,
         "fresh_internal_replay": True,
+        "fresh_replay_environment": (
+            "isolated -I/-S Python with an explicit Git/Python environment "
+            "allowlist"
+        ),
+        "trusted_git": {
+            "path": str(git_executable),
+            "sha256": digest_bytes(git_executable.read_bytes()),
+        },
         "pre_generation_damage_cases": [
             "pre-generation-nonexistent-OID",
             "pre-generation-contradictory-result",
@@ -2021,7 +2207,14 @@ def generation_contract_projection():
         ],
         "publication_order": (
             "parse canonical raw JSONL, recompute aliases/permutations/summary, "
-            "and compare exact fresh bytes before the first output write"
+            "compare exact fresh bytes, and stage/fsync both files before "
+            "namespace publication"
+        ),
+        "publication_pair_rollback": True,
+        "publication_crash_boundary": (
+            "portable filesystems cannot atomically exchange two paths; an "
+            "unreported process or machine crash between replacements can "
+            "still expose a mixed pair"
         ),
         "publication_requires_exact_bytes": True,
         "raw_jsonl": {
@@ -2714,12 +2907,19 @@ def validate_manifest(manifest):
             seam = observation["execution_seam"]
             require_keys(
                 seam,
-                ("invalid", "result_owned_by_audit", "valid"),
+                (
+                    "identical_endpoint_rejections",
+                    "invalid",
+                    "invalid_budget_rejections",
+                    "result_owned_by_audit",
+                    "valid",
+                ),
                 f"{context}.execution_seam",
             )
             seam_keys = (
-                "audit_exit", "git_subprocesses", "result_git_processes",
-                "transaction_entries", "typed_origin_strategy",
+                "adapter_status", "audit_exit", "git_subprocesses",
+                "reason", "result_git_processes", "transaction_entries",
+                "typed_origin_strategy",
             )
             for name in ("invalid", "valid"):
                 item = seam[name]
@@ -2731,16 +2931,57 @@ def validate_manifest(manifest):
                 or seam["valid"]["git_subprocesses"]
                 != seam["valid"]["result_git_processes"]
                 or seam["valid"]["typed_origin_strategy"] != "U"
+                or seam["valid"]["adapter_status"] != "accepted"
                 or seam["result_owned_by_audit"] is not True
                 or seam["invalid"] != {
+                    "adapter_status": "coverage-unavailable",
                     "audit_exit": 2,
                     "git_subprocesses": 0,
+                    "reason": "coverage-unavailable: local.old is missing",
                     "result_git_processes": 0,
                     "transaction_entries": 0,
                     "typed_origin_strategy": "U",
                 }
             ):
                 raise EvidenceError(f"{context} execution seam escaped accounting")
+            rejection_groups = (
+                (
+                    seam["identical_endpoint_rejections"],
+                    {"local", "pre-push", "push", "pull-request-synchronize"},
+                    "O and N must be distinct Git OIDs",
+                ),
+                (
+                    seam["invalid_budget_rejections"],
+                    {
+                        "zero", "negative", "bool-false", "bool-true",
+                        "float", "string",
+                    },
+                    "budget must be an exact positive integer",
+                ),
+            )
+            for group, expected_names, reason in rejection_groups:
+                if set(group) != expected_names:
+                    raise EvidenceError(
+                        f"{context} pre-execution rejection catalog changed"
+                    )
+                for name, item in group.items():
+                    require_keys(
+                        item,
+                        seam_keys,
+                        f"{context}.execution_seam.rejections.{name}",
+                    )
+                    if (
+                        item["adapter_status"] != "coverage-unavailable"
+                        or item["audit_exit"] != 2
+                        or item["git_subprocesses"] != 0
+                        or item["result_git_processes"] != 0
+                        or item["transaction_entries"] != 0
+                        or item["typed_origin_strategy"] != "U"
+                        or reason not in item["reason"]
+                    ):
+                        raise EvidenceError(
+                            f"{context} rejection {name} entered execution"
+                        )
             cases = observation["cases"]
             if set(cases) != {"blocking", "clean", "unavailable"}:
                 raise EvidenceError(f"{context} event adapter cases changed")
@@ -2775,7 +3016,10 @@ def validate_manifest(manifest):
             observation = row["observation"]
             require_keys(
                 observation,
-                ("baseline", "damaged", "kind"),
+                (
+                    "baseline", "cleanup_failure_closed", "damaged", "kind",
+                    "metrics_published_after_close",
+                ),
                 f"{context}.observation",
             )
             if observation["kind"] != "object-database-descriptor-lifecycle":
@@ -2784,14 +3028,15 @@ def validate_manifest(manifest):
                 )
             baseline = observation["baseline"]
             if set(baseline) != {
-                "abort", "after-exit", "close-live", "stubborn-close"
+                "abort", "after-exit", "close-live", "stubborn-after-kill",
+                "stubborn-close",
             }:
                 raise EvidenceError(
                     f"{context} descriptor baseline modes changed"
                 )
             lifecycle_keys = (
-                "killed", "mode", "process_reaps", "process_terminations",
-                "returncode_is_set",
+                "cleanup_failures", "kill_requested", "killed", "mode",
+                "process_reaps", "process_terminations", "returncode_is_set",
                 "stdin_closed", "stdout_closed",
             )
             for mode, item in baseline.items():
@@ -2799,15 +3044,37 @@ def validate_manifest(manifest):
                     item, lifecycle_keys,
                     f"{context}.observation.baseline.{mode}",
                 )
+                ordinary_mode = mode != "stubborn-after-kill"
                 if (
                     item["mode"] != mode
-                    or item["process_reaps"] != 1
-                    or item["returncode_is_set"] is not True
                     or item["stdin_closed"] is not True
                     or item["stdout_closed"] is not True
-                    or item["killed"] is not (mode == "stubborn-close")
-                    or item["process_terminations"]
-                    != int(mode in {"abort", "stubborn-close"})
+                    or (
+                        ordinary_mode
+                        and (
+                            item["process_reaps"] != 1
+                            or item["returncode_is_set"] is not True
+                            or item["cleanup_failures"]
+                            or item["killed"] is not (mode == "stubborn-close")
+                            or item["process_terminations"]
+                            != int(mode in {"abort", "stubborn-close"})
+                        )
+                    )
+                    or (
+                        not ordinary_mode
+                        and (
+                            item["process_reaps"] != 0
+                            or item["returncode_is_set"] is not False
+                            or item["cleanup_failures"]
+                            != [
+                                "cat-file child did not exit after kill",
+                                "cat-file child did not exit after kill",
+                            ]
+                            or item["process_terminations"] != 1
+                            or item["kill_requested"] is not True
+                            or item["killed"] is not True
+                        )
+                    )
                 ):
                     raise EvidenceError(
                         f"{context} baseline descriptor closure changed"
@@ -2825,6 +3092,9 @@ def validate_manifest(manifest):
                 or damaged["stdout_closed"] is not False
                 or damaged["killed"] is not False
                 or damaged["process_terminations"] != 0
+                or damaged["cleanup_failures"]
+                or observation["cleanup_failure_closed"] is not True
+                or observation["metrics_published_after_close"] is not True
             ):
                 raise EvidenceError(
                     f"{context} leak mutant did not remain observed red"
@@ -3244,13 +3514,23 @@ def validate_manifest(manifest):
         origins,
         (
             "cases", "damage_controls", "decision", "decision_basis",
-            "parent_permutation", "review_merge_parent_permutations",
-            "selection_boundary",
+            "duplicate_parent_header", "parent_permutation",
+            "review_merge_parent_permutations", "selection_boundary",
         ),
         "origin_strategies",
     )
     if origins["decision"] != "U":
         raise EvidenceError("origin strategy decision changed")
+    if origins["duplicate_parent_header"] != {
+        "compatible_carrier_count": 1,
+        "fsck_returncode": 0,
+        "logical_parent_count": 2,
+        "raw_parent_header_count": 3,
+        "source_count": 1,
+    }:
+        raise EvidenceError(
+            "duplicate parent header source/carrier proof changed"
+        )
     required_origin_cases = {
         "R18-U-normal-base-advance-replay",
         "R18-B-normal-base-advance-replay",
@@ -3282,6 +3562,7 @@ def validate_manifest(manifest):
         "R18-U-review-compatible-source-low-reversed",
         "R18-U-review-compatible-source-high",
         "R18-U-review-compatible-source-high-reversed",
+        "R18-U-review-duplicate-parent-header",
         "R18-U-review-three-carrying-parents",
         "R18-U-review-two-valid-sources",
         "R18-U-review-incompatible-carrier",
@@ -3333,6 +3614,7 @@ def validate_manifest(manifest):
         "R18-U-review-compatible-source-low-reversed": "no-finding",
         "R18-U-review-compatible-source-high": "no-finding",
         "R18-U-review-compatible-source-high-reversed": "no-finding",
+        "R18-U-review-duplicate-parent-header": "no-finding",
         "R18-U-review-three-carrying-parents": "no-finding",
         "R18-U-review-two-valid-sources": "no-finding",
         "R18-U-review-incompatible-carrier": "blocking-finding",
@@ -3346,6 +3628,7 @@ def validate_manifest(manifest):
         or name in {
             "R18-U-review-three-carrying-parents",
             "R18-U-review-two-valid-sources",
+            "R18-U-review-duplicate-parent-header",
         }
     }
     for scenario in clean_review_merges:
@@ -3950,7 +4233,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, and v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, and v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -3987,6 +4270,10 @@ def render_readme(manifest):
         "top-level `before`/`after`, requires `after == pull_request.head.sha`, and makes",
         "no API lookup. Created/deleted zero endpoints and an unavailable old `O` are",
         "explicit coverage-unavailable results; the latter exits 2 with no fallback.", "",
+        "All four transports reject identical O/N before the transaction factory or",
+        "any Git child. A budget is likewise admitted before execution only when it is",
+        "`None` or an exact positive integer; zero, negative, Boolean, float, and string",
+        "values fail closed with zero transaction entries and zero Git children.", "",
         "The stable executable adapter entrypoint is",
         "`prototype.py --repo ROOT --event-kind KIND --event-payload EVENT.json`.",
         "Exits 0, 1, and 2 mean clean, blocking, and coverage-unavailable. Importers",
@@ -4023,7 +4310,10 @@ def render_readme(manifest):
         "every remaining edge as a compatible carrier. Real-Git controls vary source",
         "OID order and parent order, cover three carrying parents and two explicit valid",
         "sources, reject a truly incompatible carrier, and observe the old reject-all",
-        "mutant red. Every accepted edge is checked by production mutation semantics.", "",
+        "mutant red. Parent-header multiplicity is deduplicated by logical parent OID",
+        "before classification: a manually encoded, `git fsck`-accepted commit with",
+        "three raw headers and two logical parents produces exactly one source and one",
+        "compatible carrier. Every accepted edge is checked by production mutation semantics.", "",
         "Strategy B layers a canonical birth-state witness on U. Its witness contains",
         "only the production identity transcript, actor, leaf, production delivery",
         "class, frozen skeleton, and initial lifecycle/review-binding projection. It",
@@ -4044,19 +4334,29 @@ def render_readme(manifest):
         "`endpoint-only-origin-equality` observed-red damaged mutant; it is not a normal",
         "strategy branch.", "",
         "## Evidence publication and process cleanup", "",
-        "`audit_readme.py --generate` runs the prototype itself in a fresh temporary",
-        "fixture root. Caller-supplied JSONL and optional comparison input must match",
+        "`python3 -I -S audit_readme.py --generate` requires its own isolated/no-site",
+        "startup and runs the prototype the same way with an allowlisted environment",
+        "and fresh temporary fixture root. Git is selected only from fixed system",
+        "prefixes, smoke-tested after the scrub, and its resolved path and executable",
+        "digest are bound in evidence; caller PATH and Python/Git startup variables are",
+        "not inherited. Caller-supplied JSONL and optional comparison input must match",
         "that replay byte-for-byte before either output file is touched. Raw records are",
         "compact sorted-key JSON, one LF per row, with a final LF and no CR; duplicate",
         "keys, unsorted rows, CRLF, and missing final LF are rejected. The auditor",
         "recomputes aliases, permutations, and summary invariants from scenario/control",
         "rows. Nonexistent-OID and contradictory-result forgeries remain red even when",
         "the same forged file is both `--stream` and `--compare`; all six pre-generation",
-        "damage probes preserve output sentinels.", "",
+        "damage probes preserve output sentinels. Both output files are staged and fsynced",
+        "before namespace publication; an ordinary late second-replace failure restores",
+        "the old pair. Portable filesystems cannot atomically exchange two paths, so an",
+        "unreported process or machine crash between the two replacements remains the",
+        "explicit crash boundary; this is namespace rollback, not a durability claim.", "",
         "The object database closes stdin and stdout on success, abort, an already-exited",
-        "child, and a stubborn child that requires timeout then kill. Repeated close or",
-        "abort is idempotent: one reap and no double-count. The observed-red leak mutant",
-        "leaves both descriptors open after the child has already exited.", "",
+        "child, and a stubborn child that requires timeout then kill. Even an unproved",
+        "post-kill reap closes both descriptors and returns unreadable without recording",
+        "a false reap. Repeated close or abort is idempotent, and published metrics are",
+        "snapshotted only after final cleanup. The observed-red leak mutant leaves both",
+        "descriptors open after the child has already exited.", "",
         "| Fixture | U | B | Witness match |", "|---|---|---|---|",
         f"| Normal base advance + replayed addition | `{origins['cases']['R18-U-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['classification']}` | `{origins['cases']['R18-B-normal-base-advance-replay']['birth_witness_match']}` |",
         f"| Independently identical birth | `{origins['cases']['R18-U-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['classification']}` | `{origins['cases']['R18-B-independent-birth']['birth_witness_match']}` |",
@@ -4145,11 +4445,11 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r19-v7-seed1 > /tmp/production-contract-r19-v7-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r19-v7-seed777 > /tmp/production-contract-r19-v7-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --compare /tmp/production-contract-r19-v7-seed777.jsonl",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --damage-test",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v7-seed1.jsonl --generate",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r19-v8-seed1 > /tmp/production-contract-r19-v8-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r19-v8-seed777 > /tmp/production-contract-r19-v8-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --compare /tmp/production-contract-r19-v8-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --damage-test",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r19-v8-seed1.jsonl --generate",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
@@ -4903,11 +5203,193 @@ def damage_matrix(expected, stream):
         same_file_compare=True,
     )
     results.extend(pre_generation)
+
+    with tempfile.TemporaryDirectory(
+        prefix="production-contract-startup-hook-damage-"
+    ) as raw:
+        hook_root = Path(raw)
+        marker = hook_root / "startup-hook-ran"
+        hook = hook_root / "sitecustomize.py"
+        hook.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n"
+            "print('{\"startup_hook_substituted_replay\":true}')\n",
+            encoding="utf-8",
+        )
+        inherited = {
+            name: os.environ.get(name)
+            for name in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONWARNINGS")
+        }
+        os.environ.update(
+            {
+                "PYTHONPATH": str(hook_root),
+                "PYTHONSTARTUP": str(hook),
+                "PYTHONWARNINGS": "error",
+            }
+        )
+        startup_failure = None
+        try:
+            isolated_replay = internal_replay_stream()
+        except EvidenceError as error:
+            startup_failure = str(error)
+            isolated_replay = None
+        finally:
+            for name, value in inherited.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        cli_stream = hook_root / "stream.jsonl"
+        cli_evidence = hook_root / "evidence.json"
+        cli_readme = hook_root / "README.md"
+        cli_stream.write_bytes(stream.raw)
+        cli_expected = manifest_from_stream(stream)
+        cli_evidence.write_bytes(canonical_bytes(cli_expected))
+        cli_readme.write_bytes(render_readme(cli_expected))
+        hook_environment = os.environ.copy()
+        hook_environment.update(
+            {
+                "PYTHONPATH": str(hook_root),
+                "PYTHONSTARTUP": str(hook),
+            }
+        )
+        cli_arguments = [
+            str(Path(__file__).resolve()),
+            "--stream",
+            str(cli_stream),
+            "--evidence",
+            str(cli_evidence),
+            "--readme",
+            str(cli_readme),
+        ]
+        ordinary_cli = subprocess.run(
+            [sys.executable, *cli_arguments],
+            check=False,
+            env=hook_environment,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            timeout=30,
+        )
+        ordinary_hook_executed = marker.exists()
+        marker.unlink(missing_ok=True)
+        isolated_cli = subprocess.run(
+            [sys.executable, "-I", "-S", *cli_arguments],
+            check=False,
+            env=hook_environment,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            timeout=30,
+        )
+        isolated_hook_ignored = not marker.exists()
+        ordinary_cli_refused = bool(
+            ordinary_cli.returncode != 0
+            and b'"audit": "PASS"' not in ordinary_cli.stdout
+            and b"requires isolated no-site Python" in ordinary_cli.stdout
+        )
+        isolated_cli_passed = bool(
+            isolated_cli.returncode == 0
+            and b'"audit": "PASS"' in isolated_cli.stdout
+            and isolated_hook_ignored
+        )
+        startup_isolated = bool(
+            startup_failure is None
+            and isolated_replay is not None
+            and isolated_replay.raw == stream.raw
+            and ordinary_hook_executed
+            and ordinary_cli_refused
+            and isolated_cli_passed
+        )
+        startup_hook_executed = marker.exists()
+    results.append(
+        {
+            "damage": "isolated-replay-startup-hook",
+            "expected_failure": "ambient startup hook excluded",
+            "observed_failure": startup_failure,
+            "isolated_cli_passed": isolated_cli_passed,
+            "ordinary_cli_refused": ordinary_cli_refused,
+            "ordinary_hook_executed": ordinary_hook_executed,
+            "startup_hook_executed": startup_hook_executed,
+            "status": (
+                "OBSERVED_RED" if startup_isolated else "FALSE_GREEN"
+            ),
+        }
+    )
+
+    with tempfile.TemporaryDirectory(
+        prefix="production-contract-pair-publication-damage-"
+    ) as raw:
+        output_root = Path(raw)
+        evidence_path = output_root / "evidence.json"
+        readme_path = output_root / "README.md"
+        old_evidence = b"OLD-EVIDENCE\n"
+        old_readme = b"OLD-README\n"
+        evidence_path.write_bytes(old_evidence)
+        readme_path.write_bytes(old_readme)
+        replace_calls = 0
+        real_replace = os.replace
+
+        def fail_second_replace(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("injected second artifact replace failure")
+            return real_replace(source, destination)
+
+        publication_failure = None
+        os.replace = fail_second_replace
+        try:
+            publish_generated_artifacts(
+                stream,
+                stream,
+                evidence_path,
+                readme_path,
+                comparison=stream,
+            )
+        except EvidenceError as error:
+            publication_failure = str(error)
+        finally:
+            os.replace = real_replace
+        old_pair_restored = bool(
+            evidence_path.read_bytes() == old_evidence
+            and readme_path.read_bytes() == old_readme
+        )
+    results.append(
+        {
+            "damage": "late-pair-publication-io-failure",
+            "expected_failure": "artifact pair publication failed",
+            "observed_failure": publication_failure,
+            "old_pair_restored": old_pair_restored,
+            "replace_calls": replace_calls,
+            "status": (
+                "OBSERVED_RED"
+                if publication_failure is not None
+                and "artifact pair publication failed" in publication_failure
+                and "old pair restored" in publication_failure
+                and old_pair_restored
+                and replace_calls >= 4
+                else "FALSE_GREEN"
+            ),
+        }
+    )
     return {"audit_damage": "PASS" if all(x["status"] == "OBSERVED_RED" for x in results) else "FAIL",
             "cases": results, "observed_red": sum(x["status"] == "OBSERVED_RED" for x in results), "total": len(results)}
 
 
 def main(argv=None):
+    if not sys.flags.isolated or not sys.flags.no_site:
+        print(
+            json.dumps(
+                {
+                    "audit": "FAIL",
+                    "failures": [
+                        "auditor requires isolated no-site Python; invoke "
+                        "python3 -I -S audit_readme.py"
+                    ],
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
     parser = argparse.ArgumentParser()
     parser.add_argument("--stream", required=True, type=Path)
     parser.add_argument("--compare", type=Path)

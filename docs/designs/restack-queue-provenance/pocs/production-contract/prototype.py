@@ -451,7 +451,16 @@ def event_endpoints(
             raise EventInputError(
                 f"coverage-unavailable: {label} is the zero OID"
             )
+    if O == N:
+        raise EventInputError(
+            "coverage-unavailable: O and N must be distinct Git OIDs"
+        )
     return EventEndpoints(O, N, event_kind, sources)
+
+
+def valid_budget_limit(value: Any) -> bool:
+    """Accept only an exact positive integer or the unbounded sentinel."""
+    return value is None or (type(value) is int and value > 0)
 
 
 def is_git_command(command) -> bool:
@@ -645,6 +654,38 @@ class GitRepository:
             input_text=message + "\n",
             env=self._commit_environment(),
         ).stdout.strip()
+
+    def raw_commit_with_parent_headers(
+        self, tree: str, message: str, *parents: str
+    ) -> str:
+        """Write one commit object without commit-tree parent deduplication."""
+        environment = self._commit_environment()
+        stamp = environment["GIT_AUTHOR_DATE"]
+        identity = (
+            "Production Contract POC "
+            "<production-contract@example.invalid>"
+        )
+        payload = "\n".join(
+            [
+                f"tree {tree}",
+                *(f"parent {parent}" for parent in parents),
+                f"author {identity} {stamp}",
+                f"committer {identity} {stamp}",
+                "",
+                message,
+                "",
+            ]
+        )
+        result = self.run(
+            "hash-object",
+            "-t",
+            "commit",
+            "-w",
+            "--stdin",
+            input_text=payload,
+        ).stdout.strip()
+        self.run("checkout", "-q", "--detach", result)
+        return result
 
     def merge_commit(
         self,
@@ -923,6 +964,8 @@ class ObjectDatabase:
             str | None, dict[tuple, tuple[ActionState, ...]]
         ] = {}
         self._reaped = False
+        self._termination_requested = False
+        self._kill_requested = False
         self.wait_timeout = 5.0
 
     def _close_pipes(self):
@@ -935,46 +978,69 @@ class ObjectDatabase:
                     pipe.close()
 
     def _record_reap(self):
+        if self.process.poll() is None:
+            return False
         if not self._reaped:
             self.metrics.observe("object_process_reaps")
             self._reaped = True
+        return True
 
-    def close(self):
-        # Closing stdin delivers EOF to cat-file.  Pipe closure is deliberately
-        # independent of process liveness: poll() may already report an exited
-        # child while Python still owns open descriptors.
-        if not self.damage.leak_object_database_pipes:
-            pipe = self.process.stdin
-            if pipe is not None and not pipe.closed:
-                with contextlib.suppress(BrokenPipeError, OSError):
-                    pipe.close()
-        if self.process.poll() is None:
-            try:
-                self.process.wait(timeout=self.wait_timeout)
-            except subprocess.TimeoutExpired:
-                self.process.terminate()
-                self.metrics.observe("object_process_terminations")
+    def _terminate_once(self):
+        if self._termination_requested or self.process.poll() is not None:
+            return
+        self.process.terminate()
+        self._termination_requested = True
+        self.metrics.observe("object_process_terminations")
+
+    def _kill_once(self):
+        if self._kill_requested or self.process.poll() is not None:
+            return
+        self.process.kill()
+        self._kill_requested = True
+
+    def _shutdown(self, *, graceful: bool):
+        failure = None
+        try:
+            # Closing stdin delivers EOF to cat-file.  Pipe closure is
+            # independent of liveness: poll() may already report an exited
+            # child while Python still owns both descriptor objects.
+            if graceful and not self.damage.leak_object_database_pipes:
+                pipe = self.process.stdin
+                if pipe is not None and not pipe.closed:
+                    with contextlib.suppress(BrokenPipeError, OSError):
+                        pipe.close()
+            if not graceful:
+                self._terminate_once()
+            if self.process.poll() is None:
                 try:
                     self.process.wait(timeout=self.wait_timeout)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait(timeout=self.wait_timeout)
-        self._record_reap()
-        self._close_pipes()
+                    self._terminate_once()
+                    try:
+                        self.process.wait(timeout=self.wait_timeout)
+                    except subprocess.TimeoutExpired:
+                        self._kill_once()
+                        try:
+                            self.process.wait(timeout=self.wait_timeout)
+                        except subprocess.TimeoutExpired as error:
+                            failure = Unreadable(
+                                "cat-file child did not exit after kill"
+                            )
+                            failure.__cause__ = error
+            if not self._record_reap() and failure is None:
+                failure = Unreadable("cat-file child was not reaped")
+        finally:
+            # Descriptor ownership ends even when wait still times out after
+            # kill.  The leak mutant alone deliberately skips this guarantee.
+            self._close_pipes()
+        if failure is not None:
+            raise failure
+
+    def close(self):
+        self._shutdown(graceful=True)
 
     def abort(self):
-        if self.process.poll() is None:
-            self.process.terminate()
-            self.metrics.observe("object_process_terminations")
-        try:
-            self.process.wait(timeout=self.wait_timeout)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=self.wait_timeout)
-        self._record_reap()
-        self._close_pipes()
-        if self.process.poll() is None:
-            raise RuntimeError("cat-file child was not reaped")
+        self._shutdown(graceful=False)
 
     def read(self, oid: str) -> tuple[str, bytes]:
         if oid in self.objects:
@@ -3184,7 +3250,12 @@ class Classifier:
                 continue
             carrying: list[tuple[str, ActionState]] = []
             absent: list[str] = []
-            for parent in sorted(self.graph.parents.get(child, ())):
+            # A commit object may contain the same parent header more than
+            # once and still be accepted by Git.  Parent identity is logical,
+            # not header multiplicity: classify each parent OID exactly once
+            # so a repeated header cannot turn the selected source into a
+            # later compatible-carrier record during stable serialization.
+            for parent in sorted(set(self.graph.parents.get(child, ()))):
                 self.metrics.charge("origin_parent_edges")
                 parent_states = self.states(parent, identity)
                 if len(parent_states) > 1:
@@ -4744,6 +4815,7 @@ class Classifier:
             },
         }
         objects = None
+        published_result = None
         try:
             with reconciler_repository(
                 fixture.repo.root
@@ -4783,9 +4855,10 @@ class Classifier:
                     )
                 budget_result = self.budget_result(base)
                 if budget_result is not None:
-                    return budget_result
+                    published_result = budget_result
+                    return published_result
                 if self.graph.C == fixture.O:
-                    return {
+                    published_result = {
                         **base,
                         "audit_exit": 0,
                         "classification": "no-finding",
@@ -4806,6 +4879,7 @@ class Classifier:
                         "metrics": self.metrics.as_dict(),
                         "details": fixture.details,
                     }
+                    return published_result
                 old_snapshot = objects.snapshot(fixture.O)
                 actions = [
                     self.classify_old_action(identity, states)
@@ -4894,8 +4968,10 @@ class Classifier:
                 }
                 budget_result = self.budget_result(base)
                 if budget_result is not None:
-                    return budget_result
-                return result
+                    published_result = budget_result
+                    return published_result
+                published_result = result
+                return published_result
         except BudgetExceeded as error:
             if error.C is not None:
                 base["C"] = error.C
@@ -4908,7 +4984,8 @@ class Classifier:
                 raise AssertionError(
                     "pre-charge budget exception lost its overflow"
                 ) from error
-            return result
+            published_result = result
+            return published_result
         except (
             Unreadable,
             RECONCILE.GitSnapshotError,
@@ -4916,7 +4993,7 @@ class Classifier:
             ValueError,
             UnicodeError,
         ) as error:
-            return {
+            published_result = {
                 **base,
                 "audit_exit": 2,
                 "classification": "unreadable",
@@ -4934,9 +5011,44 @@ class Classifier:
                 "metrics": self.metrics.as_dict(),
                 "details": fixture.details,
             }
+            return published_result
         finally:
+            cleanup_error = None
             if objects is not None:
-                objects.close()
+                try:
+                    objects.close()
+                except Exception as error:
+                    cleanup_error = error
+            if published_result is not None:
+                if cleanup_error is not None:
+                    published_result.clear()
+                    published_result.update(
+                        {
+                            **base,
+                            "audit_exit": 2,
+                            "classification": "unreadable",
+                            "evidence_verdict": {
+                                "status": "unreadable",
+                                "reason": (
+                                    "object database cleanup failed: "
+                                    f"{cleanup_error}"
+                                ),
+                            },
+                            "event_mode": "none",
+                            "authority_edges": [],
+                            "propagation_edges": [],
+                            "mutation_edges": [],
+                            "support_checks": [],
+                            "carry_proofs": [],
+                            "actions": [],
+                            "details": fixture.details,
+                        }
+                    )
+                # This is the only authoritative metrics publication.  It is
+                # deliberately after descriptor closure and proven child reap.
+                published_result["metrics"] = self.metrics.as_dict()
+            elif cleanup_error is not None:
+                raise cleanup_error
 
 
 def queue_path(
@@ -9723,6 +9835,7 @@ def r18_origin_fixture(
         "review-compatible-source-high",
         "review-three-carrying-parents",
         "review-two-valid-sources",
+        "review-duplicate-parent-header",
         "review-incompatible-carrier",
     }:
         review_target = evidence_path("r19-review-merge-target")
@@ -9735,7 +9848,10 @@ def r18_origin_fixture(
         )
         lexical_relation = (
             "source-low"
-            if case == "review-compatible-source-low"
+            if case in {
+                "review-compatible-source-low",
+                "review-duplicate-parent-header",
+            }
             else "source-high"
             if case == "review-compatible-source-high"
             else None
@@ -9822,19 +9938,52 @@ def r18_origin_fixture(
                 carriers.append(selected)
 
         parents = tuple(sources + carriers)
+        if case == "review-duplicate-parent-header":
+            # A duplicate source parent header is a real, Git-readable commit
+            # shape.  The proof treats it as one logical parent edge rather
+            # than allowing the repeated edge to erase the source role.
+            parents = (source, source, *carriers)
         if reverse_parents:
             parents = tuple(reversed(parents))
-        merge = repo.merge_commit(
-            parents,
-            "merge published source with compatible pending carrier",
-            writes={
-                candidate_path: source_text,
-                review_target: review_payload,
-            },
-            removes=((conflicting_target,) if incompatible else ()),
-        )
+        if case == "review-duplicate-parent-header":
+            merge = repo.raw_commit_with_parent_headers(
+                source_tree,
+                "merge duplicate source headers with compatible carrier",
+                *parents,
+            )
+        else:
+            merge = repo.merge_commit(
+                parents,
+                "merge published source with compatible pending carrier",
+                writes={
+                    candidate_path: source_text,
+                    review_target: review_payload,
+                },
+                removes=((conflicting_target,) if incompatible else ()),
+            )
         if repo.oid(f"{merge}^{{tree}}") != source_tree:
             raise AssertionError("review compatible merge tree drifted")
+        raw_parent_headers = [
+            line[7:]
+            for line in repo.run("cat-file", "commit", merge).stdout.splitlines()
+            if line.startswith("parent ")
+        ]
+        fsck = repo.run(
+            "fsck", "--strict", "--no-dangling", merge, check=False
+        )
+        if fsck.returncode:
+            raise AssertionError(
+                "duplicate-parent fixture is not accepted by git fsck: "
+                + fsck.stderr.strip()
+            )
+        if case == "review-duplicate-parent-header" and not (
+            len(raw_parent_headers) == 3
+            and len(set(raw_parent_headers)) == 2
+            and raw_parent_headers.count(source) == 2
+        ):
+            raise AssertionError(
+                "raw duplicate-parent fixture lost header multiplicity"
+            )
         N = merge
         landmarks.update(
             {
@@ -9845,6 +9994,12 @@ def r18_origin_fixture(
                 "merge": merge,
                 "lexical_relation": lexical_relation,
                 "incompatible": incompatible,
+                "duplicate_parent_header": (
+                    case == "review-duplicate-parent-header"
+                ),
+                "fsck_returncode": fsck.returncode,
+                "raw_parent_headers": raw_parent_headers,
+                "logical_parent_oids": sorted(set(raw_parent_headers)),
             }
         )
     elif case == "exact-cherry-pick":
@@ -10110,6 +10265,7 @@ def r18_origin_fixture(
         "review-compatible-source-high",
         "review-three-carrying-parents",
         "review-two-valid-sources",
+        "review-duplicate-parent-header",
     }
     if case in clean_cases:
         expected = "no-finding"
@@ -10119,6 +10275,7 @@ def r18_origin_fixture(
             or case in {
                 "review-three-carrying-parents",
                 "review-two-valid-sources",
+                "review-duplicate-parent-header",
             }
             else True
         )
@@ -10822,6 +10979,9 @@ def scenario_builders():
         ),
         lambda root: r18_origin_fixture(
             root, case="review-two-valid-sources"
+        ),
+        lambda root: r18_origin_fixture(
+            root, case="review-duplicate-parent-header"
         ),
         lambda root: r18_origin_fixture(
             root, case="review-incompatible-carrier"
@@ -13135,6 +13295,9 @@ def validate_result(result: dict):
                         lexical_relation = merge_landmarks[
                             "lexical_relation"
                         ]
+                        duplicate_parent_header = merge_landmarks[
+                            "duplicate_parent_header"
+                        ]
                         if (
                             len(merge_edges) != len(sources) + len(carriers)
                             or not valid_source_candidates
@@ -13167,6 +13330,28 @@ def validate_result(result: dict):
                             or (
                                 lexical_relation == "source-high"
                                 and not all(sources[0] > oid for oid in carriers)
+                            )
+                            or (
+                                duplicate_parent_header
+                                and (
+                                    merge_landmarks["fsck_returncode"] != 0
+                                    or len(
+                                        merge_landmarks["raw_parent_headers"]
+                                    )
+                                    != 3
+                                    or merge_landmarks[
+                                        "raw_parent_headers"
+                                    ].count(sources[0])
+                                    != 2
+                                    or len(
+                                        merge_landmarks[
+                                            "logical_parent_oids"
+                                        ]
+                                    )
+                                    != 2
+                                    or len(selected_sources) != 1
+                                    or len(compatible) != 1
+                                )
                             )
                         ):
                             errors.append(
@@ -13522,53 +13707,108 @@ def run_control(name: str, root: Path):
                 ).get("origin_strategy"),
             }
 
-        def seam_probe(event_kind: str, payload: Mapping[str, Any]):
+        def seam_probe(
+            event_kind: str,
+            payload: Mapping[str, Any],
+            *,
+            budget_limit: Any = None,
+        ):
             transaction_entries = 0
             git_subprocesses = 0
 
             @contextlib.contextmanager
             def transaction():
-                nonlocal transaction_entries, git_subprocesses
-                global REAL_POPEN
+                nonlocal transaction_entries
                 transaction_entries += 1
-                prior_popen = REAL_POPEN
+                yield
 
-                def counted_popen(command, *args, **kwargs):
-                    nonlocal git_subprocesses
-                    if is_git_command(command):
-                        git_subprocesses += 1
-                    return prior_popen(command, *args, **kwargs)
+            global REAL_POPEN
+            prior_popen = REAL_POPEN
 
-                REAL_POPEN = counted_popen
-                try:
-                    yield
-                finally:
-                    REAL_POPEN = prior_popen
+            def counted_popen(command, *args, **kwargs):
+                nonlocal git_subprocesses
+                if is_git_command(command):
+                    git_subprocesses += 1
+                return prior_popen(command, *args, **kwargs)
 
-            result = audit_event(
-                fixtures["clean"].repo.root,
-                event_kind,
-                payload,
-                transaction=transaction,
-            )
+            REAL_POPEN = counted_popen
+            try:
+                result = audit_event(
+                    fixtures["clean"].repo.root,
+                    event_kind,
+                    payload,
+                    budget_limit=budget_limit,
+                    transaction=transaction,
+                )
+            finally:
+                REAL_POPEN = prior_popen
             return {
                 "audit_exit": result["audit_exit"],
+                "adapter_status": result["event_adapter"]["status"],
                 "transaction_entries": transaction_entries,
                 "git_subprocesses": git_subprocesses,
                 "result_git_processes": result["metrics"]["git_processes"],
+                "reason": result["evidence_verdict"]["reason"],
                 "typed_origin_strategy": result["input_contract"][
                     "origin_strategy"
                 ],
             }
 
         clean_input = fixtures["clean"].details["event_adapter_input"]
+        same_oid = fixtures["clean"].O
+        same_endpoint_payloads = {
+            "local": {"old": same_oid, "new": same_oid},
+            "pre-push": {"old": same_oid, "new": same_oid},
+            "push": {"before": same_oid, "after": same_oid},
+            "pull-request-synchronize": {
+                "before": same_oid,
+                "after": same_oid,
+                "pull_request": {"head": {"sha": same_oid}},
+            },
+        }
+        identical_endpoint_rejections = {
+            transport: seam_probe(transport, payload)
+            for transport, payload in same_endpoint_payloads.items()
+        }
+        invalid_budget_rejections = {
+            label: seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                budget_limit=value,
+            )
+            for label, value in (
+                ("zero", 0),
+                ("negative", -1),
+                ("bool-false", False),
+                ("bool-true", True),
+                ("float", 1.0),
+                ("string", "1"),
+            )
+        }
         execution_seam = {
             "valid": seam_probe(
                 clean_input["event_kind"], clean_input["payload"]
             ),
             "invalid": seam_probe("local", {"new": "1" * 40}),
+            "identical_endpoint_rejections": identical_endpoint_rejections,
+            "invalid_budget_rejections": invalid_budget_rejections,
         }
         execution_seam["result_owned_by_audit"] = True
+        invalid_shape = {
+            "adapter_status": "coverage-unavailable",
+            "audit_exit": 2,
+            "git_subprocesses": 0,
+            "result_git_processes": 0,
+            "transaction_entries": 0,
+            "typed_origin_strategy": "U",
+        }
+
+        def is_pre_execution_rejection(item, reason_fragment):
+            return (
+                all(item[key] == value for key, value in invalid_shape.items())
+                and reason_fragment in item["reason"]
+            )
+
         observed = bool(
             observations["clean"]["exit"] == 0
             and observations["clean"]["classification"] == "no-finding"
@@ -13592,13 +13832,19 @@ def run_control(name: str, root: Path):
             == execution_seam["valid"]["result_git_processes"]
             and execution_seam["valid"]["typed_origin_strategy"] == "U"
             and execution_seam["result_owned_by_audit"] is True
-            and execution_seam["invalid"] == {
-                "audit_exit": 2,
-                "git_subprocesses": 0,
-                "result_git_processes": 0,
-                "transaction_entries": 0,
-                "typed_origin_strategy": "U",
-            }
+            and is_pre_execution_rejection(
+                execution_seam["invalid"], "local.old is missing"
+            )
+            and all(
+                is_pre_execution_rejection(item, "O and N must be distinct")
+                for item in identical_endpoint_rejections.values()
+            )
+            and all(
+                is_pre_execution_rejection(
+                    item, "budget must be an exact positive integer"
+                )
+                for item in invalid_budget_rejections.values()
+            )
         )
         return {
             "control": name,
@@ -13647,12 +13893,14 @@ def run_control(name: str, root: Path):
 
         def observe(mode: str, damage: Damage | None = None):
             metrics = Metrics()
-            if mode == "stubborn-close":
+            cleanup_failures = []
+            underlying_process = None
+            if mode in {"stubborn-close", "stubborn-after-kill"}:
                 database = ObjectDatabase.__new__(ObjectDatabase)
                 database.root = root
                 database.metrics = metrics
                 database.damage = damage or Damage()
-                database.process = REAL_POPEN(
+                underlying_process = REAL_POPEN(
                     [
                         sys.executable,
                         "-c",
@@ -13667,12 +13915,49 @@ def run_control(name: str, root: Path):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                 )
+                database.process = underlying_process
                 database._reaped = False
+                database._termination_requested = False
+                database._kill_requested = False
                 database.wait_timeout = 0.1
                 if database.process.stdout.read(1) != b"R":
                     raise RuntimeError("stubborn child did not become ready")
-                database.close()
-                database.close()
+                if mode == "stubborn-after-kill":
+                    class UnprovableReap:
+                        def __init__(self, child):
+                            self.child = child
+                            self.stdin = child.stdin
+                            self.stdout = child.stdout
+
+                        @property
+                        def returncode(self):
+                            return self.child.returncode
+
+                        def poll(self):
+                            # Simulate a platform that cannot prove the reap
+                            # even after kill; the real child is reaped below.
+                            return None
+
+                        def wait(self, timeout=None):
+                            raise subprocess.TimeoutExpired(
+                                "cat-file-stubborn-after-kill", timeout
+                            )
+
+                        def terminate(self):
+                            self.child.terminate()
+
+                        def kill(self):
+                            self.child.kill()
+
+                    database.process = UnprovableReap(underlying_process)
+                    for operation in (database.close, database.abort):
+                        try:
+                            operation()
+                        except Unreadable as error:
+                            cleanup_failures.append(str(error))
+                else:
+                    database.close()
+                    database.close()
             else:
                 database = ObjectDatabase(root, metrics, damage=damage)
             if mode == "after-exit":
@@ -13686,13 +13971,20 @@ def run_control(name: str, root: Path):
             elif mode == "close-live":
                 database.close()
                 database.close()
-            elif mode != "stubborn-close":
+            elif mode not in {"stubborn-close", "stubborn-after-kill"}:
                 raise ValueError(mode)
+            if underlying_process is not None:
+                if underlying_process.poll() is None:
+                    underlying_process.kill()
+                underlying_process.wait(timeout=5)
             result = {
                 "killed": (
-                    mode == "stubborn-close"
-                    and database.process.returncode == -signal.SIGKILL
+                    mode in {"stubborn-close", "stubborn-after-kill"}
+                    and underlying_process is not None
+                    and underlying_process.returncode == -signal.SIGKILL
                 ),
+                "cleanup_failures": cleanup_failures,
+                "kill_requested": database._kill_requested,
                 "mode": mode,
                 "process_reaps": metrics.object_process_reaps,
                 "process_terminations": metrics.object_process_terminations,
@@ -13717,7 +14009,11 @@ def run_control(name: str, root: Path):
         baseline = {
             mode: observe(mode)
             for mode in (
-                "close-live", "after-exit", "abort", "stubborn-close"
+                "close-live",
+                "after-exit",
+                "abort",
+                "stubborn-close",
+                "stubborn-after-kill",
             )
         }
         damaged = observe(
@@ -13726,12 +14022,26 @@ def run_control(name: str, root: Path):
         baseline_closed = all(
             item["stdin_closed"]
             and item["stdout_closed"]
-            and item["returncode_is_set"]
-            and item["process_reaps"] == 1
             and (
-                item["killed"]
-                if mode == "stubborn-close"
-                else not item["killed"]
+                item["cleanup_failures"]
+                == [
+                    "cat-file child did not exit after kill",
+                    "cat-file child did not exit after kill",
+                ]
+                and item["process_reaps"] == 0
+                and item["process_terminations"] == 1
+                and item["kill_requested"]
+                if mode == "stubborn-after-kill"
+                else (
+                    item["returncode_is_set"]
+                    and item["process_reaps"] == 1
+                    and not item["cleanup_failures"]
+                    and (
+                        item["killed"]
+                        if mode == "stubborn-close"
+                        else not item["killed"]
+                    )
+                )
             )
             for item in baseline.values()
             for mode in (item["mode"],)
@@ -13742,7 +14052,45 @@ def run_control(name: str, root: Path):
             and damaged["returncode_is_set"]
             and damaged["process_reaps"] == 1
         )
-        observed = baseline_closed and damaged_leaked
+        classification_fixture = ordinary_linear_fixture(
+            root / "metrics-publication", "metrics-publication", valid=True
+        )
+        classification = Classifier(classification_fixture).run()
+        metrics_published_after_close = bool(
+            classification["metrics"]["object_process_reaps"] == 1
+        )
+        original_close = ObjectDatabase.close
+
+        def close_then_report_unproved_reap(database):
+            original_close(database)
+            raise Unreadable("injected unproved post-kill reap")
+
+        ObjectDatabase.close = close_then_report_unproved_reap
+        try:
+            cleanup_failure_result = Classifier(
+                ordinary_linear_fixture(
+                    root / "cleanup-failure",
+                    "cleanup-failure",
+                    valid=True,
+                )
+            ).run()
+        finally:
+            ObjectDatabase.close = original_close
+        cleanup_failure_closed = bool(
+            cleanup_failure_result["audit_exit"] == 2
+            and cleanup_failure_result["classification"] == "unreadable"
+            and not cleanup_failure_result["actions"]
+            and cleanup_failure_result["metrics"]["object_process_reaps"] == 1
+            and "object database cleanup failed" in cleanup_failure_result[
+                "evidence_verdict"
+            ]["reason"]
+        )
+        observed = (
+            baseline_closed
+            and damaged_leaked
+            and metrics_published_after_close
+            and cleanup_failure_closed
+        )
         return {
             "control": name,
             "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
@@ -13757,6 +14105,10 @@ def run_control(name: str, root: Path):
             "object_database_observation": {
                 "baseline": baseline,
                 "damaged": damaged,
+                "metrics_published_after_close": (
+                    metrics_published_after_close
+                ),
+                "cleanup_failure_closed": cleanup_failure_closed,
             },
         }
     if name == "stream-malformed-truncated-final-line":
@@ -14323,13 +14675,15 @@ def ordinary_audit(
         len(value) in {40, 64}
         and all(char in "0123456789abcdef" for char in value)
     )
-    if not valid_oid(O) or not valid_oid(N) or (
-        budget_limit is not None and budget_limit <= 0
+    if (
+        not valid_oid(O)
+        or not valid_oid(N)
+        or not valid_budget_limit(budget_limit)
     ):
         reason = (
             "O and N must be full lowercase hexadecimal object IDs"
             if not valid_oid(O) or not valid_oid(N)
-            else "budget must be a positive integer"
+            else "budget must be an exact positive integer"
         )
         return {
             "scenario": "ordinary-audit",
@@ -14387,6 +14741,10 @@ def audit_event(
     cannot select a different origin strategy, endpoints, or classification.
     """
     try:
+        if not valid_budget_limit(budget_limit):
+            raise EventInputError(
+                "coverage-unavailable: budget must be an exact positive integer"
+            )
         endpoints = event_endpoints(event_kind, payload)
     except EventInputError as error:
         zero = "0" * 40
