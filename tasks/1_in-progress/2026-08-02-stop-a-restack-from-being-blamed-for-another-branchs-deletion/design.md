@@ -4255,3 +4255,181 @@ Production remains unopened. Amendment 29 changes launcher bytes, kernel require
 artifact/receipt schemas, and lifecycle behavior. One new immutable revision must receive
 all three base-lens accepts before budget and core-fit review; no verdict on an earlier SHA
 transfers.
+
+## 2026-09-01 correction amendment 30 — immutable deployment slots and control-plane selection
+
+Fresh review of `305fbadf783e0bb2827843cc57de1790215fd9bd` accepted the
+classifier and sealed-execution chain but rejected four composition gaps. A task branch's
+old tip can predate Gate 2 and therefore cannot select the launcher; a later dormant Gate 2
+would overwrite the one active launcher/manifest/receipt location; `launcher_source` was
+required in an undefined per-scenario bundle that cannot exist under result v2; and the new
+build-job log scan had no byte/token/deadline envelope. This amendment supersedes amendment
+29's source-selection, V4 artifact/receipt, scenario-bundle, build-publication, and upgrade
+wording. O/N graph semantics and result v2 remain unchanged.
+
+### Execution control plane is independent of classified O/N
+
+Define `A` as the immutable control-plane commit already authenticated by the role's trusted
+workflow/host boundary. For an accepted provider run, `A` is the exact trusted default-
+branch workflow/adapter checkout commit after the existing repository, workflow path/ref,
+numeric-ID, and `github.workflow_sha` checks. For an accepted local run, `A` and the active-
+selector digest are explicit host-owned configuration selected from a trusted default-
+branch receipt or immutable host image. A candidate-controlled workflow or direct checkout
+has no accepted `A` and remains advisory/untrusted as already specified.
+
+The fixed active-selector path is
+automation/runtime/ref-update/active.json. Its canonical JSON-plus-LF has exactly
+`schema,slot_id,execution_policy,adapter_policy,receipt_path`:
+
+- `schema` is `agentfold-ref-update-active/v1`;
+- `slot_id` is exactly 32 lowercase hex characters, not all zero;
+- both policies are lowercase prefixed SHA-256 values; and
+- `receipt_path` is exactly
+  `automation/canaries/receipts/ref-update/<slot_id>.json`, with the same literal slot ID.
+
+The raw selector ceiling is 1,024 bytes including LF. Its fields have the bounds above;
+canonical decode/re-encode, exact field order/meaning, missing/extra/duplicate keys, every
+digest/slot/path mutation, and raw 1,024/1,025-byte damage inputs are tested. The exact
+selector bytes are known at Gate 2 and included in the authenticated activation patch even
+though the selector is not installed yet.
+
+An accepted production run reads the selector and named receipt only from `A`, then defines
+`T = receipt.tested_commit`. It reads launcher, runtime, authority, and adapter source blobs
+only from exact commit `T`, after verifying their path/mode/blob-OID/size/digest contracts.
+`O`, `N`, `B`, `C`, the event head, and the current worktree never select executable bytes.
+They remain only the unchanged Strategy A and ordinary-check data-plane inputs. If `A`, its
+selector/receipt, `T`, or a selected object is missing or mismatched, accepted continuity is
+unavailable and fails closed; it never falls back to O/N/current bytes.
+
+This rule covers the central migration case: a task tip `O` created before Gate 2 is still
+classified after activation by the control plane selected from `A` and `T`. The old tip need
+not contain any launcher path. Stale trusted reruns use their original authenticated `A`,
+selector, receipt, and retained `T`; they do not silently adopt a later active slot.
+
+`T` must be a commit in the same authenticated base repository and an ancestor of `A`.
+The verifier proves this with one supervised, no-replace, configuration-closed
+`merge-base --is-ancestor T A` child under the existing 512 MiB/30-second child envelope;
+missing objects, exit 1 for non-ancestry, any other nonzero exit, budget exhaustion, or an
+unrelated/detached commit is unavailable. A provider adapter may obtain exact missing T
+objects only through the existing bounded read-only base-repository transport. It cannot
+fetch from the candidate or
+a fork and cannot follow a moving ref.
+
+The host verifier resolves the launcher without a worktree. In a sanitized base object
+database it runs one literal-path `ls-tree -z --full-tree T -- <exact-source-path>` and
+requires exactly one default-format NUL record with mode `100755`, type `blob`, and the
+receipt OID. With a 64-hex object ID and the inherited 4,096-byte path limit, the record cap
+is 4,174 bytes including NUL; byte 4,175 refuses. It then uses one no-replace
+`cat-file --batch-command --buffer` child admitting only `info <oid>\n`,
+`contents <oid>\n`, and `flush\n`. The largest launcher response is a 79-byte header,
+16,777,216-byte payload, and one delimiter byte: 16,777,296 bytes; byte 16,777,297 refuses.
+The payload streams directly into amendment 29's fresh memfd and is independently hashed.
+
+An ancestry, tree, or batch child never overlaps another Git child. The extraction peak is
+the 256 MiB verifier plus one 512 MiB child; stdout/stderr, 64 KiB chunks, monotonic
+deadlines, process groups, descriptors, overrun bytes, EOF, termination/reaping, and partial
+memfd cleanup use the existing launcher/child envelopes. Before sealed exec, the verifier
+closes its base object database and supplies fd 5 only as the already isolated exact-object
+source whose role table contains authenticated T plus the separately named O/N data objects.
+The launcher may read authority rows only at T and classifier objects only at O/N; equal
+object IDs do not merge those roles.
+
+### Every deployment is a create-once opaque slot
+
+A slot ID is chosen before its path-bound authority and adapter digests are computed. It is
+an opaque namespace, not a content digest: making it a digest of policies whose transcripts
+contain repository paths would be circular. The repository rejects an all-zero ID, a reused
+ID, or any Gate-2 diff that modifies a pre-existing slot or receipt.
+
+All Gate-2 executable/configuration/template bytes that may vary live below the literal
+root pattern automation/runtime/ref-update/slots/<slot_id>/, including the launcher,
+launcher/runtime manifests, authority sources, adapter sources, and dormant workflow and
+activation templates. Every existing authority/adapter manifest row uses those physical
+slot paths, so the chosen ID is already covered by their path framing. The result execution
+digests retain their existing algorithms; no self-referential deployment digest is added.
+
+The canary artifact and receipt become
+`agentfold-ref-update-canary-artifact/v5` and
+`agentfold-ref-update-canary-receipt/v5`. Their exact top-level keys are respectively
+`schema,deployment,tested_commit,execution,adapter_policy,launcher_source,launcher_artifact,fixture,workflow,rows,cleanup`
+and those keys plus `artifact`. `deployment` has exactly
+`slot_id,selector_sha256,receipt_path`; slot/path match the grammar above, and the digest
+hashes the complete future canonical active-selector bytes. `tested_commit` is the Gate-2
+commit `T`. `launcher_source.path` must be below that slot root; its existing exact
+`path,mode,blob_oid,size,sha256` shape is unchanged and is always resolved in `T`.
+
+V4 cannot activate V5 code. V5 deployment, execution, adapter, source, tested-commit, and
+selector values are byte/object-equal across the aggregate artifact, independent verifier,
+receipt, launcher publication, and Gate 3. The receipt verifier proves that every source
+object exists with the named identity in `T` and that neither the slot nor receipt path
+existed with different bytes in any accepted prior deployment.
+
+Initial activation is exactly:
+
+1. Gate 2 adds one new slot; the active selector remains absent and legacy continuity stays
+   active.
+2. The canary explicitly selects that slot from `T` and never consults an active selector.
+3. The records-only PR adds only that slot's V5 receipt; it does not add the selector.
+4. Gate 3 reads slot and receipt from its immutable base `A`, reconstructs the exact
+   canaried candidate, and validates the candidate selector against `selector_sha256`.
+5. One atomic activation creates the selector, installs the canaried live workflow, and
+   removes legacy continuity. Any partial or additional change refuses.
+
+A future upgrade uses the same sequence additively: Gate 2 adds a new slot while the old
+slot, old receipt, and active selector remain byte-identical; canary and receipt explicitly
+target the new slot; existing production continues to select the old slot; and Gate 3
+atomically switches only the selector plus any exact canaried live-template transition.
+Old slots and receipts are retained. Deleting them is outside this task and requires a
+separate retention proof, so in-flight events and stale trusted reruns cannot lose their
+control plane during an upgrade.
+
+Candidate-after preservation is separate from source selection. Ordinary changes may not
+edit the active selector, an active slot, or its receipt. Gate 3 is the sole transition that
+may change the selector, and its candidate manifest proves the exact before/after selector,
+live template, and all other activation bytes before the ref can retire or switch authority.
+
+### Per-scenario result remains result v2
+
+The phrase “every scenario result bundle” is withdrawn; no such schema exists. Each
+per-scenario archive still contains exactly one `result.json` with unchanged result-v2
+keys. Its `execution.launcher_policy` and other execution digests must equal the V5
+aggregate/receipt execution object, and scenario publication v2 continues to bind that
+object. `launcher_source` and `deployment` occur only in the V5 aggregate artifact/receipt
+and launcher publication, where the independent verifier joins their source bytes to the
+same launcher-policy digest. An added sidecar, a launcher-source field in result v2, or a
+second archive entry refuses.
+
+### Build-attempt publication has the same bounded log grammar
+
+The launcher build marker becomes `agentfold-launcher-publication/v2` by adding exactly one
+`deployment` object to amendment 29's closed publication keys. The job emits exactly this
+outer line only after upload succeeds:
+
+```text
+AGENTFOLD_REF_UPDATE_LAUNCHER_PUBLICATION_V2 <unpadded-base64url(canonical-publication-JSON)>\n
+```
+
+Canonical publication JSON includes one LF and has a 65,536-byte raw ceiling. The unpadded
+token is at most 87,382 ASCII bytes and the whole marker line at most 87,428 bytes. The
+verifier streams at most 8 MiB from the exact build job log, bringing the complete scenario
+plus build-log aggregate to 72 MiB, and stays inside the existing 15-minute provider-
+verification deadline. It does not retain unrelated log bytes. The literal marker must be
+delimited by LF or CRLF; no timestamp/presentation byte may split or enter the prefix or
+token. The verifier requires exactly one marker, refuses an overlong token before decode,
+decodes/re-encodes canonical base64url and JSON, hashes the complete canonical JSON, and
+matches every deployment, job, attempt, artifact, source, and policy field.
+
+Tests place one valid marker at the end of an exact 8 MiB log, reject byte 8 MiB + 1 before
+further scanning, exercise token lengths 87,382/87,383 and decoded raw inputs
+65,536/65,537, duplicate/split/CRLF markers, invalid base64/UTF-8/JSON, a stalled download at
+each boundary, and aggregate byte/deadline exhaustion. Raw exact-cap inputs may fail the
+closed publication schema after bounded decode; they are not claimed to be schema-valid
+objects. Every refusal closes the response, discards partial evidence, and cannot create a
+receipt or alter cleanup.
+
+### Gate boundary
+
+Production remains unopened. Amendment 30 changes control-plane selection, all deployment
+paths, selector/source invariants, canary/receipt V5, and launcher publication V2. One new
+immutable revision requires all three base-lens accepts before the budget and core-fit
+lenses; no earlier vote transfers.

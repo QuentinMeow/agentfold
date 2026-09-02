@@ -172,6 +172,36 @@ Independent canonical-JSON probes measured the amendment-28 maximum at 519 bytes
 LF and the amendment-29 complete-argv/sealing-capability maximum at 578 bytes including LF.
 The revised 1,024-byte raw ceiling therefore is not represented as a valid-schema boundary.
 
+## Superseded durable-launcher review
+
+**Reviewed revision:** `305fbadf783e0bb2827843cc57de1790215fd9bd`
+
+- semantic/authority / a26-design-consistency: `approve` — first-instruction trust, sealed
+  memfd execution, durable Git payload identity, V4 schema joins, fail-closed lifecycle, and
+  unchanged POC classifications were coherent. It independently reproduced the 578-byte
+  launcher-policy maximum.
+- workflow/provider / r19-semantic-design: `block` — the first post-activation restack can
+  have an O older than Gate 2 and therefore no launcher if source selection uses O; a future
+  dormant Gate 2 also overwrites fixed active launcher/manifest/receipt locations before
+  its Gate 3 switch. The build-attempt job/log/API join itself was feasible.
+- CLI/resource / am22-cli-review: `block` — it independently reproduced the pre-Gate-2 O
+  ambiguity, found `launcher_source` required in a nonexistent per-scenario bundle, and
+  found the new build-job log scan without its own byte/token/deadline grammar. Empty ABI,
+  memfd/exec feasibility, Git patch forms, policy maxima, and scratch arithmetic passed.
+
+All three reviews were read-only and named the same immutable SHA. Budget and core-fit
+lenses were not run. Production remained unopened.
+
+The revised outer launcher-publication marker arithmetic was executed directly:
+
+```text
+$ python3 - <<'PY'
+p=b'AGENTFOLD_REF_UPDATE_LAUNCHER_PUBLICATION_V2 '
+print(len(p), (4*65536+2)//3, len(p)+(4*65536+2)//3+1)
+PY
+45 87382 87428
+```
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text

@@ -498,3 +498,23 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   578-byte valid maximum plus raw 1,024/1,025-byte damage controls.
 - Production remains unopened pending a fresh three-lens immutable-revision review, then
   budget and core-fit review on that same revision.
+
+## 2026-09-01 — Immutable deployment-slot correction (codex)
+
+- One of three fresh reviews accepted amendment 29; two blocked it because executable
+  source selection still depended ambiguously on a task O that may predate Gate 2, later
+  dormant upgrades overwrote active fixed paths, a per-scenario source bundle was undefined,
+  and the build-attempt log scan was unbounded.
+- Separated control-plane commit `A` and receipt-tested source commit `T` from the classified
+  O/N data plane. Accepted provider/local roles now select execution only from their existing
+  trusted boundary, while pre-Gate-2 tips remain ordinary historical classifier inputs.
+- Added opaque 32-hex create-once deployment slots chosen before path-bearing policy digests,
+  avoiding a path/hash cycle. Initial activation creates one small active selector; later
+  Gate 2 and receipt work are additive, and only Gate 3 switches the selector atomically.
+- Advanced canary/receipt envelopes to V5 with deployment/selector binding, retained result
+  v2 and its one-file scenario archive unchanged, and removed the nonexistent bundle claim.
+- Gave launcher publication V2 the same canonical base64url log grammar plus explicit
+  8 MiB per-build, 72 MiB aggregate-log, token, raw-publication, and deadline bounds with
+  exact/+1, duplicate, split, stall, and cleanup cases.
+- Production remains unopened pending another three-lens immutable-revision review, then
+  budget and core-fit review on that exact revision.
