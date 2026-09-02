@@ -48,6 +48,9 @@ class GitSpawnObserver(Protocol):
 GIT_SPAWN_OBSERVER: contextvars.ContextVar[GitSpawnObserver | None] = (
     contextvars.ContextVar("production_contract_git_spawn_observer", default=None)
 )
+GIT_SPAWN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "production_contract_git_spawn_active", default=False
+)
 
 
 def emit_json(value: Any):
@@ -93,6 +96,7 @@ class BudgetExceeded(RuntimeError):
 
 @dataclasses.dataclass
 class Metrics:
+    git_process_attempts: int = 0
     git_processes: int = 0
     graph_enumerations: int = 0
     graph_commits: int = 0
@@ -412,6 +416,15 @@ def event_endpoints(
     environment, or ``github.sha`` input.
     """
 
+    if not isinstance(event_kind, str):
+        raise EventInputError(
+            "coverage-unavailable: event kind must be a string"
+        )
+    if not isinstance(payload, Mapping):
+        raise EventInputError(
+            "coverage-unavailable: event payload must be a mapping"
+        )
+
     def field(container: Mapping[str, Any], name: str, label: str) -> str:
         value = container.get(name)
         if not isinstance(value, str) or not value:
@@ -525,15 +538,46 @@ def descriptor_is_closed(descriptor: int) -> bool:
     return False
 
 
+def is_cancellation(error: BaseException) -> bool:
+    return isinstance(error, (KeyboardInterrupt, SystemExit))
+
+
+def cleanup_failure_text(error: BaseException) -> str:
+    if isinstance(error, Unreadable):
+        return str(error)
+    return f"{type(error).__name__} during resource cleanup"
+
+
+def raise_deferred_cleanup(
+    failures: list[BaseException], prefix: str
+) -> None:
+    """Raise cancellation after cleanup, otherwise one stable unreadable."""
+    cancellation = next(
+        (error for error in failures if is_cancellation(error)), None
+    )
+    if cancellation is not None:
+        raise cancellation
+    if failures:
+        raise Unreadable(
+            prefix
+            + ": "
+            + "; ".join(
+                dict.fromkeys(cleanup_failure_text(error) for error in failures)
+            )
+        ) from failures[0]
+
+
 def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
     """Close and verify an owned pipe, recovering from wrapper close errors."""
     if pipe is None:
         return
     try:
         descriptor = pipe.fileno()
-    except (OSError, ValueError) as error:
-        if getattr(pipe, "closed", False):
+    except BaseException as error:
+        if not is_cancellation(error) and getattr(pipe, "closed", False):
             return
+        if is_cancellation(error):
+            raise
         raise Unreadable(
             f"cat-file {label} descriptor could not be captured"
         ) from error
@@ -542,7 +586,7 @@ def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
     close_error = None
     try:
         pipe.close()
-    except (BrokenPipeError, OSError, ValueError) as error:
+    except BaseException as error:
         # A wrapper may raise before delegating.  The captured descriptor is
         # still ours, so verify it and fall back to an OS close below.
         close_error = error
@@ -550,8 +594,12 @@ def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
     if needed_raw_fallback:
         try:
             raw_close(descriptor)
-        except OSError as error:
-            if error.errno != errno.EBADF:
+        except BaseException as error:
+            if not (
+                isinstance(error, OSError) and error.errno == errno.EBADF
+            ):
+                if is_cancellation(error):
+                    raise
                 raise Unreadable(
                     f"cat-file {label} descriptor fallback close failed"
                 ) from error
@@ -559,16 +607,23 @@ def close_owned_pipe(pipe, label: str, raw_close: Callable[[int], None]):
         raise Unreadable(
             f"cat-file {label} descriptor remained open after close"
         )
-    if close_error is not None and needed_raw_fallback:
+    if close_error is not None:
+        if is_cancellation(close_error):
+            raise close_error
+        if needed_raw_fallback:
+            detail = (
+                "failed before descriptor release; raw descriptor recovered"
+            )
+        else:
+            detail = "raised after verified descriptor release"
         raise Unreadable(
-            f"cat-file {label} object close failed before descriptor release; "
-            "raw descriptor recovered"
+            f"cat-file {label} object close {detail}"
         ) from close_error
 
 
 def cleanup_unclaimed_process(process: subprocess.Popen) -> None:
     """Reap and close a spawned child that an observer refused to accept."""
-    failures = []
+    failures: list[BaseException] = []
     try:
         if process.poll() is None:
             process.terminate()
@@ -578,61 +633,93 @@ def cleanup_unclaimed_process(process: subprocess.Popen) -> None:
             process.kill()
             process.wait(timeout=5)
         if process.poll() is None:
-            failures.append("child was not reaped")
-    except (OSError, subprocess.TimeoutExpired) as error:
-        failures.append(f"child reap failed: {type(error).__name__}")
+            failures.append(Unreadable("child was not reaped"))
+    except BaseException as error:
+        failures.append(error)
+        try:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+        except BaseException as cleanup_error:
+            failures.append(cleanup_error)
     for label in ("stdin", "stdout", "stderr"):
         try:
             close_owned_pipe(getattr(process, label, None), label, os.close)
-        except (OSError, Unreadable) as error:
-            failures.append(str(error))
-    if failures:
-        raise Unreadable(
-            "Git spawn observer cleanup failed: " + "; ".join(failures)
-        )
+        except BaseException as error:
+            failures.append(error)
+    raise_deferred_cleanup(failures, "Git spawn observer cleanup failed")
 
 
 def spawn_git_process(
     command,
     *args,
-    process_factory: Callable[..., subprocess.Popen] | None = None,
+    metrics: Metrics,
     **kwargs,
 ) -> subprocess.Popen:
     """Create one production-owned Git child with result-blind observation."""
     if not is_git_command(command):
         raise ValueError("spawn_git_process accepts only Git commands")
+    if GIT_SPAWN_ACTIVE.get():
+        raise Unreadable("recursive Git process creation refused")
     exact_command = tuple(str(argument) for argument in command)
     observer = GIT_SPAWN_OBSERVER.get()
-    if observer is not None:
-        before = getattr(observer, "before_spawn", None)
-        after = getattr(observer, "after_spawn", None)
-        if not callable(before) or not callable(after):
-            raise Unreadable(
-                "Git spawn observer must provide before_spawn and after_spawn"
-            )
-        try:
-            before(exact_command)
-        except Exception as error:
-            raise Unreadable(
-                "Git spawn observer failed before process creation"
-            ) from error
-    factory = REAL_POPEN if process_factory is None else process_factory
-    process = factory(command, *args, **kwargs)
-    if observer is not None:
-        try:
-            observer.after_spawn(exact_command, getattr(process, "pid", None))
-        except Exception as error:
-            try:
-                cleanup_unclaimed_process(process)
-            except Exception as cleanup_error:
+    token = GIT_SPAWN_ACTIVE.set(True)
+    try:
+        metrics.charge("git_process_attempts")
+        if observer is not None:
+            before = getattr(observer, "before_spawn", None)
+            after = getattr(observer, "after_spawn", None)
+            if not callable(before) or not callable(after):
                 raise Unreadable(
-                    "Git spawn observer failed after process creation and "
-                    f"cleanup failed: {cleanup_error}"
+                    "Git spawn observer must provide before_spawn and after_spawn"
+                )
+            try:
+                before(exact_command)
+            except BaseException as error:
+                if is_cancellation(error):
+                    raise
+                raise Unreadable(
+                    "Git spawn observer failed before process creation"
                 ) from error
-            raise Unreadable(
-                "Git spawn observer failed after process creation"
-            ) from error
-    return process
+        try:
+            process = REAL_POPEN(command, *args, **kwargs)
+        except BaseException as error:
+            if is_cancellation(error) or isinstance(error, Exception):
+                raise
+            raise Unreadable("Git process factory raised BaseException") from error
+        metrics.observe("git_processes")
+        if observer is not None:
+            try:
+                observer.after_spawn(
+                    exact_command, getattr(process, "pid", None)
+                )
+            except BaseException as error:
+                cleanup_error = None
+                try:
+                    cleanup_unclaimed_process(process)
+                except BaseException as observed_cleanup_error:
+                    cleanup_error = observed_cleanup_error
+                if is_cancellation(error):
+                    if cleanup_error is not None:
+                        error.add_note(
+                            "Git spawn observer cleanup failed after "
+                            "cancellation: "
+                            + cleanup_failure_text(cleanup_error)
+                        )
+                    raise error
+                if cleanup_error is not None:
+                    if is_cancellation(cleanup_error):
+                        raise cleanup_error
+                    raise Unreadable(
+                        "Git spawn observer failed after process creation and "
+                        f"cleanup failed: {cleanup_failure_text(cleanup_error)}"
+                    ) from error
+                raise Unreadable(
+                    "Git spawn observer failed after process creation"
+                ) from error
+        return process
+    finally:
+        GIT_SPAWN_ACTIVE.reset(token)
 
 
 @contextlib.contextmanager
@@ -681,14 +768,13 @@ def count_production_git(
                 and "1" in command_text
             ):
                 metrics.charge("production_parent_queries")
-            metrics.charge("git_processes")
             if stable_git_diagnostics:
                 kwargs["env"] = stable_git_environment(kwargs.get("env"))
         if is_git_command(command):
             return spawn_git_process(
                 command,
                 *args,
-                process_factory=original_popen,
+                metrics=metrics,
                 **kwargs,
             )
         return original_popen(command, *args, **kwargs)
@@ -976,16 +1062,17 @@ def bounded_git_lines(
             result.stderr.encode("utf-8", errors="surrogateescape"),
         )
 
-    metrics.charge("git_processes")
     command = [*command_prefix, *arguments]
+    process_arguments = {
+        "cwd": root,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "env": stable_git_environment() if stable_git_diagnostics else None,
+    }
     process = (
-        spawn_git_process if is_git_command(command) else REAL_POPEN
-    )(
-        command,
-        cwd=root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=(stable_git_environment() if stable_git_diagnostics else None),
+        spawn_git_process(command, metrics=metrics, **process_arguments)
+        if is_git_command(command)
+        else REAL_POPEN(command, **process_arguments)
     )
     assert process.stdout is not None
     assert process.stderr is not None
@@ -1103,10 +1190,10 @@ class ObjectDatabase:
         self.root = root
         self.metrics = metrics
         self.damage = damage or Damage()
-        metrics.charge("git_processes")
         metrics.charge("batch_processes")
         self.process = spawn_git_process(
             ["git", "--no-replace-objects", "cat-file", "--batch"],
+            metrics=metrics,
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -1132,20 +1219,18 @@ class ObjectDatabase:
         """Close and verify both owned descriptors after any child outcome."""
         if self.damage.leak_object_database_pipes:
             return
-        failures = []
+        failures: list[BaseException] = []
         for label, pipe in (
             ("stdin", self.process.stdin),
             ("stdout", self.process.stdout),
         ):
             try:
                 close_owned_pipe(pipe, label, self._raw_close_owned_fd)
-            except (OSError, Unreadable) as error:
-                failures.append(str(error))
-        if failures:
-            raise Unreadable(
-                "cat-file descriptor cleanup failed: "
-                + "; ".join(failures)
-            )
+            except BaseException as error:
+                failures.append(error)
+        raise_deferred_cleanup(
+            failures, "cat-file descriptor cleanup failed"
+        )
 
     def _raw_close_owned_fd(self, descriptor: int):
         """Fallback closure seam retained for a real failure control."""
@@ -1173,7 +1258,7 @@ class ObjectDatabase:
         self._kill_requested = True
 
     def _shutdown(self, *, graceful: bool):
-        failures = []
+        failures: list[BaseException] = []
         try:
             # Closing stdin delivers EOF to cat-file.  Pipe closure is
             # independent of liveness: poll() may already report an exited
@@ -1185,8 +1270,8 @@ class ObjectDatabase:
                         "stdin",
                         self._raw_close_owned_fd,
                     )
-                except (OSError, Unreadable) as error:
-                    failures.append(str(error))
+                except BaseException as error:
+                    failures.append(error)
             if not graceful:
                 self._terminate_once()
             if self.process.poll() is None:
@@ -1202,22 +1287,45 @@ class ObjectDatabase:
                             self.process.wait(timeout=self.wait_timeout)
                         except subprocess.TimeoutExpired as error:
                             failures.append(
-                                "cat-file child did not exit after kill"
+                                Unreadable(
+                                    "cat-file child did not exit after kill"
+                                )
                             )
             if (
                 not self._record_reap()
-                and "cat-file child did not exit after kill" not in failures
+                and not any(
+                    str(error) == "cat-file child did not exit after kill"
+                    for error in failures
+                )
             ):
-                failures.append("cat-file child was not reaped")
+                failures.append(Unreadable("cat-file child was not reaped"))
+        except BaseException as error:
+            failures.append(error)
+            # A cancellation or arbitrary throwable cannot strand the child.
+            # Complete a bounded terminate/kill/reap sequence before it is
+            # re-raised or converted to unreadable below.
+            try:
+                self._terminate_once()
+                if self.process.poll() is None:
+                    try:
+                        self.process.wait(timeout=self.wait_timeout)
+                    except subprocess.TimeoutExpired:
+                        self._kill_once()
+                        self.process.wait(timeout=self.wait_timeout)
+                if not self._record_reap():
+                    failures.append(
+                        Unreadable("cat-file child was not reaped")
+                    )
+            except BaseException as cleanup_error:
+                failures.append(cleanup_error)
         finally:
             # Descriptor ownership ends even when wait still times out after
             # kill.  The leak mutant alone deliberately skips this guarantee.
             try:
                 self._close_pipes()
-            except (OSError, Unreadable) as error:
-                failures.append(str(error))
-        if failures:
-            raise Unreadable("; ".join(dict.fromkeys(failures)))
+            except BaseException as error:
+                failures.append(error)
+        raise_deferred_cleanup(failures, "cat-file cleanup failed")
 
     def close(self):
         self._shutdown(graceful=True)
@@ -13891,14 +13999,21 @@ def run_control(name: str, root: Path):
             }
 
         def seam_probe(
-            event_kind: str,
-            payload: Mapping[str, Any],
+            event_kind: Any,
+            payload: Any,
             *,
             budget_limit: Any = None,
+            repository: Path | None = None,
+            fail_after_spawn: bool = False,
+            ambient_delegating_wrapper: bool = False,
         ):
             transaction_entries = 0
             before_spawns = []
             after_spawns = []
+            ambient_wrapper_calls = 0
+
+            class ObserverBaseException(BaseException):
+                pass
 
             class AccountingObserver:
                 def before_spawn(self, command):
@@ -13906,6 +14021,10 @@ def run_control(name: str, root: Path):
 
                 def after_spawn(self, command, pid):
                     after_spawns.append((command, pid))
+                    if fail_after_spawn:
+                        raise ObserverBaseException(
+                            "injected after-spawn BaseException"
+                        )
 
             @contextlib.contextmanager
             def transaction():
@@ -13913,13 +14032,38 @@ def run_control(name: str, root: Path):
                 transaction_entries += 1
                 yield AccountingObserver()
 
-            result = audit_event(
-                fixtures["clean"].repo.root,
-                event_kind,
-                payload,
-                budget_limit=budget_limit,
-                transaction=transaction,
-            )
+            prior_popen = subprocess.Popen
+
+            def delegating_popen(command, *args, **kwargs):
+                nonlocal ambient_wrapper_calls
+                ambient_wrapper_calls += 1
+                return spawn_git_process(
+                    command, *args, metrics=Metrics(), **kwargs
+                )
+
+            if ambient_delegating_wrapper:
+                subprocess.Popen = delegating_popen
+            try:
+                result = audit_event(
+                    repository or fixtures["clean"].repo.root,
+                    event_kind,
+                    payload,
+                    budget_limit=budget_limit,
+                    transaction=transaction,
+                )
+            finally:
+                subprocess.Popen = prior_popen
+            observed_pids = [pid for _command, pid in after_spawns]
+
+            def process_is_gone(pid):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return True
+                except PermissionError:
+                    return False
+                return False
+
             return {
                 "audit_exit": result["audit_exit"],
                 "adapter_status": result["event_adapter"]["status"],
@@ -13934,6 +14078,17 @@ def run_control(name: str, root: Path):
                     type(pid) is int and pid > 0
                     for _command, pid in after_spawns
                 ),
+                "all_pids_unique": len(set(observed_pids))
+                == len(observed_pids),
+                "all_observed_pids_reaped": (
+                    all(process_is_gone(pid) for pid in observed_pids)
+                    if fail_after_spawn
+                    else None
+                ),
+                "ambient_wrapper_calls": ambient_wrapper_calls,
+                "result_git_process_attempts": result["metrics"][
+                    "git_process_attempts"
+                ],
                 "result_git_processes": result["metrics"]["git_processes"],
                 "reason": result["evidence_verdict"]["reason"],
                 "typed_origin_strategy": result["input_contract"][
@@ -13972,6 +14127,34 @@ def run_control(name: str, root: Path):
                 ("string", "1"),
             )
         }
+        invalid_runtime_inputs = {
+            label: {
+                "observation": seam_probe(event_kind, payload),
+                "reason": reason,
+            }
+            for label, event_kind, payload, reason in (
+                (
+                    "payload-none", "local", None,
+                    "event payload must be a mapping",
+                ),
+                (
+                    "payload-list", "local", [],
+                    "event payload must be a mapping",
+                ),
+                (
+                    "payload-int", "local", 7,
+                    "event payload must be a mapping",
+                ),
+                (
+                    "event-kind-list", ["local"], clean_input["payload"],
+                    "event kind must be a string",
+                ),
+                (
+                    "event-kind-dict", {"kind": "local"},
+                    clean_input["payload"], "event kind must be a string",
+                ),
+            )
+        }
         execution_seam = {
             "valid": seam_probe(
                 clean_input["event_kind"], clean_input["payload"]
@@ -13979,6 +14162,97 @@ def run_control(name: str, root: Path):
             "invalid": seam_probe("local", {"new": "1" * 40}),
             "identical_endpoint_rejections": identical_endpoint_rejections,
             "invalid_budget_rejections": invalid_budget_rejections,
+            "invalid_runtime_inputs": invalid_runtime_inputs,
+            "spawn_factory_failure": seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                repository=Path("missing-production-contract-runtime-root"),
+            ),
+            "after_spawn_base_exception": seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                fail_after_spawn=True,
+            ),
+            "ambient_delegating_wrapper": seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                ambient_delegating_wrapper=True,
+            ),
+        }
+
+        def cancellation_probe(error_type, inject_cleanup_report=False):
+            transaction_entries = 0
+            before_spawns = []
+            after_spawns = []
+
+            class CancellationObserver:
+                def before_spawn(self, command):
+                    before_spawns.append(command)
+
+                def after_spawn(self, command, pid):
+                    after_spawns.append((command, pid))
+                    raise error_type("injected after-spawn cancellation")
+
+            @contextlib.contextmanager
+            def transaction():
+                nonlocal transaction_entries
+                transaction_entries += 1
+                yield CancellationObserver()
+
+            original_cleanup = cleanup_unclaimed_process
+
+            def cleanup_then_report(process):
+                original_cleanup(process)
+                raise Unreadable("injected cleanup reporting failure")
+
+            if inject_cleanup_report:
+                globals()["cleanup_unclaimed_process"] = cleanup_then_report
+            caught = None
+            try:
+                audit_event(
+                    fixtures["clean"].repo.root,
+                    clean_input["event_kind"],
+                    clean_input["payload"],
+                    transaction=transaction,
+                )
+            except BaseException as error:
+                caught = error
+            finally:
+                globals()["cleanup_unclaimed_process"] = original_cleanup
+            observed_pids = [pid for _command, pid in after_spawns]
+
+            def process_is_gone(pid):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return True
+                except PermissionError:
+                    return False
+                return False
+
+            return {
+                "after_spawns": len(after_spawns),
+                "all_observed_pids_reaped": all(
+                    process_is_gone(pid) for pid in observed_pids
+                ),
+                "before_spawns": len(before_spawns),
+                "cleanup_failure_reported": bool(
+                    inject_cleanup_report
+                    and caught is not None
+                    and any(
+                        "cleanup reporting failure" in note
+                        for note in getattr(caught, "__notes__", ())
+                    )
+                ),
+                "transaction_entries": transaction_entries,
+                "throwable": type(caught).__name__ if caught else None,
+            }
+
+        execution_seam["after_spawn_cancellations"] = {
+            "keyboard": cancellation_probe(KeyboardInterrupt),
+            "system-exit-with-cleanup-report": cancellation_probe(
+                SystemExit, inject_cleanup_report=True
+            ),
         }
         execution_seam["result_owned_by_audit"] = True
         invalid_shape = {
@@ -13986,9 +14260,13 @@ def run_control(name: str, root: Path):
             "audit_exit": 2,
             "after_spawns": 0,
             "all_pids_concrete": True,
+            "all_pids_unique": True,
+            "all_observed_pids_reaped": None,
+            "ambient_wrapper_calls": 0,
             "before_spawns": 0,
             "commands_match": True,
             "git_subprocesses": 0,
+            "result_git_process_attempts": 0,
             "result_git_processes": 0,
             "transaction_entries": 0,
             "typed_origin_strategy": "U",
@@ -14023,6 +14301,9 @@ def run_control(name: str, root: Path):
             == execution_seam["valid"]["after_spawns"]
             and execution_seam["valid"]["commands_match"]
             and execution_seam["valid"]["all_pids_concrete"]
+            and execution_seam["valid"]["all_pids_unique"]
+            and execution_seam["valid"]["result_git_process_attempts"]
+            == execution_seam["valid"]["result_git_processes"]
             and execution_seam["valid"]["git_subprocesses"]
             == execution_seam["valid"]["result_git_processes"]
             and execution_seam["valid"]["typed_origin_strategy"] == "U"
@@ -14040,6 +14321,65 @@ def run_control(name: str, root: Path):
                 )
                 for item in invalid_budget_rejections.values()
             )
+            and all(
+                is_pre_execution_rejection(
+                    item["observation"], item["reason"]
+                )
+                for item in invalid_runtime_inputs.values()
+            )
+            and execution_seam["spawn_factory_failure"]["audit_exit"] == 2
+            and execution_seam["spawn_factory_failure"][
+                "transaction_entries"
+            ] == 1
+            and execution_seam["spawn_factory_failure"]["before_spawns"] == 1
+            and execution_seam["spawn_factory_failure"]["after_spawns"] == 0
+            and execution_seam["spawn_factory_failure"][
+                "result_git_process_attempts"
+            ] == 1
+            and execution_seam["spawn_factory_failure"][
+                "result_git_processes"
+            ] == 0
+            and execution_seam["after_spawn_base_exception"]["audit_exit"] == 2
+            and execution_seam["after_spawn_base_exception"]["before_spawns"] == 1
+            and execution_seam["after_spawn_base_exception"]["after_spawns"] == 1
+            and execution_seam["after_spawn_base_exception"][
+                "result_git_processes"
+            ] == 1
+            and execution_seam["after_spawn_base_exception"][
+                "all_observed_pids_reaped"
+            ] is True
+            and execution_seam["after_spawn_cancellations"] == {
+                "keyboard": {
+                    "after_spawns": 1,
+                    "all_observed_pids_reaped": True,
+                    "before_spawns": 1,
+                    "cleanup_failure_reported": False,
+                    "transaction_entries": 1,
+                    "throwable": "KeyboardInterrupt",
+                },
+                "system-exit-with-cleanup-report": {
+                    "after_spawns": 1,
+                    "all_observed_pids_reaped": True,
+                    "before_spawns": 1,
+                    "cleanup_failure_reported": True,
+                    "transaction_entries": 1,
+                    "throwable": "SystemExit",
+                },
+            }
+            and execution_seam["ambient_delegating_wrapper"][
+                "ambient_wrapper_calls"
+            ] == 0
+            and execution_seam["ambient_delegating_wrapper"][
+                "before_spawns"
+            ] == execution_seam["ambient_delegating_wrapper"][
+                "after_spawns"
+            ]
+            == execution_seam["ambient_delegating_wrapper"][
+                "result_git_processes"
+            ]
+            and execution_seam["ambient_delegating_wrapper"][
+                "all_pids_unique"
+            ] is True
         )
         return {
             "control": name,
@@ -14089,14 +14429,47 @@ def run_control(name: str, root: Path):
         class CloseRaisesBeforeDelegate:
             """Keep the real fd open while making the object close fail."""
 
-            def __init__(self, delegate):
+            def __init__(self, delegate, error_type=OSError):
                 self.delegate = delegate
+                self.error_type = error_type
 
             def __getattr__(self, name):
                 return getattr(self.delegate, name)
 
             def close(self):
-                raise OSError(errno.EIO, "injected close-before-delegate")
+                if self.error_type is OSError:
+                    raise OSError(
+                        errno.EIO, "injected close-before-delegate"
+                    )
+                raise self.error_type("injected close-before-delegate")
+
+        class CloseRaisesAfterDelegate(CloseRaisesBeforeDelegate):
+            """Release the real fd, then inject an object-level throwable."""
+
+            def close(self):
+                self.delegate.close()
+                if self.error_type is OSError:
+                    raise OSError(
+                        errno.EIO, "injected close-after-delegate"
+                    )
+                raise self.error_type("injected close-after-delegate")
+
+        class PipeBaseException(BaseException):
+            pass
+
+        raising_modes = {
+            "raising-close": ("close", OSError, "before"),
+            "raising-abort": ("abort", OSError, "before"),
+            "runtime-close": ("close", RuntimeError, "before"),
+            "runtime-abort": ("abort", RuntimeError, "before"),
+            "keyboard-close": ("close", KeyboardInterrupt, "before"),
+            "system-exit-abort": ("abort", SystemExit, "before"),
+            "base-close": ("close", PipeBaseException, "before"),
+            "runtime-after-close": ("close", RuntimeError, "after"),
+            "keyboard-after-close": (
+                "close", KeyboardInterrupt, "after"
+            ),
+        }
 
         def observe(mode: str, damage: Damage | None = None):
             metrics = Metrics()
@@ -14159,12 +14532,17 @@ def run_control(name: str, root: Path):
                     database.process = UnprovableReap(underlying_process)
             else:
                 database = ObjectDatabase(root, metrics, damage=damage)
-            if mode in {"after-exit", "raising-close", "raising-abort"}:
+            if mode == "after-exit" or mode in raising_modes:
                 database.process.terminate()
                 database.process.wait(timeout=5)
-            if mode in {"raising-close", "raising-abort"}:
-                database.process.stdin = CloseRaisesBeforeDelegate(
-                    database.process.stdin
+            if mode in raising_modes:
+                wrapper = (
+                    CloseRaisesAfterDelegate
+                    if raising_modes[mode][2] == "after"
+                    else CloseRaisesBeforeDelegate
+                )
+                database.process.stdin = wrapper(
+                    database.process.stdin, raising_modes[mode][1]
                 )
             owned_descriptors = {
                 label: pipe.fileno()
@@ -14180,18 +14558,19 @@ def run_control(name: str, root: Path):
             elif mode == "abort":
                 database.abort()
                 database.abort()
-            elif mode == "raising-close":
-                for operation in (database.close, database.close):
+            elif mode in raising_modes:
+                operation = (
+                    database.close
+                    if raising_modes[mode][0] == "close"
+                    else database.abort
+                )
+                for _index in range(2):
                     try:
                         operation()
-                    except Unreadable as error:
-                        cleanup_failures.append(str(error))
-            elif mode == "raising-abort":
-                for operation in (database.abort, database.abort):
-                    try:
-                        operation()
-                    except Unreadable as error:
-                        cleanup_failures.append(str(error))
+                    except BaseException as error:
+                        cleanup_failures.append(
+                            f"{type(error).__name__}:{error}"
+                        )
             elif mode == "close-live":
                 database.close()
                 database.close()
@@ -14242,13 +14621,14 @@ def run_control(name: str, root: Path):
                 if not descriptor_is_closed(descriptor):
                     os.close(descriptor)
             for pipe in (database.process.stdin, database.process.stdout):
-                with contextlib.suppress(BrokenPipeError, OSError, ValueError):
-                    pipe.close()
                 if isinstance(pipe, CloseRaisesBeforeDelegate):
+                    with contextlib.suppress(BaseException):
+                        pipe.delegate.close()
+                else:
                     with contextlib.suppress(
                         BrokenPipeError, OSError, ValueError
                     ):
-                        pipe.delegate.close()
+                        pipe.close()
             return result
 
         baseline = {
@@ -14259,6 +14639,13 @@ def run_control(name: str, root: Path):
                 "abort",
                 "raising-close",
                 "raising-abort",
+                "runtime-close",
+                "runtime-abort",
+                "keyboard-close",
+                "system-exit-abort",
+                "base-close",
+                "runtime-after-close",
+                "keyboard-after-close",
                 "stubborn-close",
                 "stubborn-after-kill",
             )
@@ -14270,11 +14657,13 @@ def run_control(name: str, root: Path):
             item["stdin_closed"]
             and item["stdout_closed"]
             and (
-                item["cleanup_failures"]
-                == [
-                    "cat-file child did not exit after kill",
-                    "cat-file child did not exit after kill",
-                ]
+                len(item["cleanup_failures"]) == 2
+                and all(
+                    failure.endswith(
+                        "cat-file child did not exit after kill"
+                    )
+                    for failure in item["cleanup_failures"]
+                )
                 and item["process_reaps"] == 0
                 and item["process_terminations"] == 1
                 and item["kill_requested"]
@@ -14284,15 +14673,41 @@ def run_control(name: str, root: Path):
                     and item["process_reaps"] == 1
                     and (
                         len(item["cleanup_failures"]) == 1
-                        and "raw descriptor recovered"
-                        in item["cleanup_failures"][0]
-                        if mode in {"raising-close", "raising-abort"}
+                        and (
+                            (
+                                item["cleanup_failures"][0].startswith(
+                                    "KeyboardInterrupt:"
+                                )
+                                if mode in {
+                                    "keyboard-close",
+                                    "keyboard-after-close",
+                                }
+                                else item["cleanup_failures"][0].startswith(
+                                    "SystemExit:"
+                                )
+                            )
+                            if mode in {
+                                "keyboard-close", "keyboard-after-close",
+                                "system-exit-abort",
+                            }
+                            else (
+                                "verified descriptor release"
+                                if raising_modes[mode][2] == "after"
+                                else "raw descriptor recovered"
+                            ) in item["cleanup_failures"][0]
+                        )
+                        if mode in raising_modes
                         else not item["cleanup_failures"]
                     )
                     and (
                         item["killed"]
                         if mode == "stubborn-close"
                         else not item["killed"]
+                    )
+                    and item["stdout_object_closed"]
+                    and item["stdin_object_closed"] is (
+                        mode not in raising_modes
+                        or raising_modes[mode][2] == "after"
                     )
                 )
             )
@@ -14322,7 +14737,7 @@ def run_control(name: str, root: Path):
                 database.process.stdin.fileno()
             )
             wrapper = CloseRaisesBeforeDelegate(
-                database.process.stdin
+                database.process.stdin, RuntimeError
             )
             wrapped_classifier_pipes.append(wrapper)
             database.process.stdin = wrapper
