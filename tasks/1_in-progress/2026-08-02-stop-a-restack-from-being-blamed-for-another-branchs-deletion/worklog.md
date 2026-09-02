@@ -337,3 +337,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Expanded the atomic migration to every live workflow, source, help, instruction, handbook,
   test, and ownership reference; a final-tree scan requires zero live displaced-tip names.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Closed-receipt and exact-activation-tree correction (codex)
+
+- Semantic review accepted amendment 18; workflow/CLI review found undercounted batch pipes,
+  noncanonical/open receipt bytes, no negative-observation union, unauthenticated fixture
+  topology, and a path allowlist broad enough to hide unrelated invariant changes.
+- Fixed child topology at three batch pipes, two one-shot pipes, and one exec-status pipe;
+  Linux startup now verifies six exact 64 KiB capacities and cleanup for every descriptor.
+- Defined one canonical JSON encoder, strict re-encoding, receipt/artifact size limits,
+  numeric base/fork/owner identity and topology, exact workflow/artifact/cleanup types, and
+  a 13-scenario literal registry with completed/no-observation/pending/not-applicable rows.
+- Reclassified receipt landing as a tested core-data PR. Negative rows carry bounded provider
+  observations and never fabricate evaluator exits or result digests.
+- Replaced activation path permission with a canaried exact before/after blob manifest and
+  binary-safe patch. Trusted base code reconstructs, fully tests, and tree-compares the exact
+  candidate; any extra hunk, ordinary-check change, test weakening, drift, or mode change
+  refuses activation.
+- Production remains unopened pending another full five-lens immutable-revision review.

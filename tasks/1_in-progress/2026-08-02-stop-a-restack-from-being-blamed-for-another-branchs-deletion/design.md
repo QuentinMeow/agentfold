@@ -2769,3 +2769,163 @@ byte, or receipt change refuses the whole activation before legacy code is remov
 Production remains unopened. A fresh full five-lens review of one immutable revision must
 accept these direct-process, full-workflow, and external-receipt boundaries before dormant
 core implementation starts.
+
+## 2026-09-01 correction amendment 19 — closed receipts and exact activation tree
+
+Review of `c9608fcc191072fbe1bcea27313384eba8e47b9b` accepted classifier
+semantics but rejected the receipt and activation contracts. A batch child needs three
+pipes, not two; receipt JSON escaping, fixture identity, artifact rows, and negative
+observation states were open; and a path-level activation allowlist could hide unrelated
+ordinary-check changes. This section supersedes amendment 18's descriptor, receipt schema,
+scenario-registry, and activation-diff clauses. Direct evaluator, full workflow blobs, and
+adapter transcript remain selected.
+
+### Exact child descriptors and kernel pipe capacity
+
+The centralized Linux child launcher uses explicit `os.pipe2`/fork/exec descriptors rather
+than an implementation-dependent subprocess layout. A one-shot child has stdin bound to a
+read-only /dev/null descriptor plus two pipes: stdout and stderr. The long-lived batch
+child has three pipes: request stdin, response stdout, and stderr. One close-on-exec status
+pipe reports pre-exec resource-limit/group/descriptor failure and closes on successful exec.
+At the maximum overlap, the batch child's three pipes, one one-shot child's two pipes, and
+the one-shot spawn-status pipe make six live kernel pipes.
+
+Before fork, the launcher sets each pipe to exactly 65,536 bytes with Linux `F_SETPIPE_SZ`
+and verifies it with `F_GETPIPE_SZ`; inability to obtain and verify that exact size makes
+Strategy A unavailable before the child exists. Therefore the closed peak kernel pipe
+capacity is `6 * 65,536 = 393,216` bytes. Parent ends are nonblocking and served by one
+selector; child ends are blocking. Every request, response, stderr, and status byte is also
+charged to its logical cap before retention. Exec success closes/reaps the status pipe;
+every other completion closes every end, terminates the child's group if needed, drains
+bounded readable data, waits, and reaps. Fault tests stop reads/writes on each of the six
+pipes, leak each descriptor in turn, fail before/after exec, and prove the exact capacity,
+deadline, EOF, cleanup, and at-most-two-child registry.
+
+### One canonical receipt and artifact encoder
+
+Canary artifact and receipt JSON use exactly Python's semantic encoding
+`json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":"))`
+encoded as ASCII plus one LF. Forward slashes are not escaped; non-ASCII uses lowercase
+`\\u` escapes and valid surrogate pairs; integers have no leading zero; booleans/null use
+lowercase JSON spellings. Strict decoding rejects duplicate keys, floats, NaN/infinity,
+unpaired surrogates, unknown/omitted keys, and any byte sequence whose decode/re-encode is
+not identical. Receipt bytes are capped at 2 MiB, rows at 32, strings at 8 KiB each, and all
+provider integer IDs at `1..2^63-1`; the existing 64 MiB compressed/128 MiB extracted
+artifact caps still apply. Fixed cold-clone golden bytes cover slashes, quotes, controls,
+non-ASCII, surrogate pairs, every integer boundary, duplicate keys, and each cap/+1.
+
+The canary artifact has exactly top-level keys
+`schema,tested_commit,authority_policy,adapter_policy,fixture,workflow,rows,cleanup`; its
+schema is `agentfold-ref-update-canary-artifact/v1`. The committed receipt has those exact
+members plus `artifact`; its schema is `agentfold-ref-update-canary-receipt/v1`. Every
+shared nested value in the receipt must be object-equal and canonically byte-equal to the
+downloaded artifact projection; metadata cannot replace the artifact's claims.
+
+`fixture` has exactly these scalar keys:
+
+```text
+scenario_nonce, manifest_sha256,
+base_repository_id, base_repository_full_name, base_owner_id, base_owner_login,
+fork_repository_id, fork_repository_full_name, fork_owner_id, fork_owner_login,
+fork, parent_repository_id, source_repository_id
+```
+
+Repository/owner IDs are positive bounded integers; full names/logins are exact provider
+ASCII strings. Base/fork repository IDs and owner IDs must differ, `fork` is literal true,
+and both parent/source repository IDs equal the base repository ID. The verifier re-fetches
+both repositories by numeric ID, requires the recorded names, owners, `fork`, parent, and
+source to match, and refuses a rename or topology change rather than following it.
+
+`workflow` has exactly
+`repository_id,repository_full_name,workflow_path,workflow_sha,head_sha,run_id,run_attempt,conclusion`.
+The repository pair must equal the base fixture, conclusion is `success`, workflow/head
+SHAs are full OIDs, run attempt is `1..1,000`, and all other IDs use the provider integer
+bound. `artifact` remains exactly `artifact_id,name,size,sha256`; size is within the artifact
+cap and name is the one literal registry value. `cleanup` remains exactly
+`manifest_sha256,status`, where status is `complete` and the digest equals fixture manifest.
+
+### Tagged observation rows and literal scenario registry
+
+All row variants share exact keys
+`kind,scenario,source_repository_id,source_repository_full_name,old,new`. Source identity
+must equal either the base or fork fixture pair; O/N are full object-format tokens, with an
+all-zero event sentinel allowed only in a not-applicable creation/deletion row.
+
+- `completed` adds exactly `state,evaluator_exit,result_sha256,job_id,job_conclusion`.
+  State is `clean|blocked`, exit is respectively 0|1, conclusion is `success|failure` under
+  the closed result mapping, and no zero endpoint is allowed.
+- `no-observation` adds exactly
+  `observation,reason,event_sha256,polls,runs_examined,matching_tuples,window_complete`.
+  It has no evaluator exit/result/job. Counts are bounded nonnegative integers,
+  `matching_tuples=0`, and `window_complete=true`.
+- `pending` adds exactly
+  `observation,reason,event_sha256,run_id,run_attempt,job_id,job_conclusion`.
+  It has no evaluator exit/result; conclusion is one of
+  `queued|waiting|action_required|approval_required`.
+- `not-applicable` adds exactly `observation,reason,event_sha256` and has no evaluator or
+  job fields.
+
+Every event/artifact SHA-256 is over exact downloaded raw bytes and uses lowercase
+`sha256:<64-hex>`. The provider verifier independently repeats bounded discovery and
+requires each negative/pending fact; controller exit or artifact success can never stand in
+for an evaluator result.
+
+The literal sorted scenario registry and required kind is:
+
+```text
+approval-pending-public-fork                 pending
+branch-creation                              not-applicable
+branch-deletion                              not-applicable
+conflicted-public-fork-invalid               completed
+conflicted-public-fork-valid                 completed
+public-fork-invalid                          completed
+public-fork-valid                            completed
+retention-expired                            no-observation
+same-repository-invalid                      completed
+same-repository-valid                        completed
+sha-like-public-fork                         no-observation
+sha-like-same-repository                     no-observation
+stale-rerun-exact-edge                       completed
+```
+
+The artifact and receipt contain each registry name exactly once, sorted, with the exact
+kind. Completed valid/invalid rows must exercise both exit mappings; stale rerun must reuse
+the original event O/N; retention and SHA-like rows must carry real zero-match discovery;
+pending must bind the provider attempt. An unexpected `unavailable` row never substitutes
+for a registry entry.
+
+The receipt is an automation input, so its isolated landing is a core-data PR, not a
+records-only PR. It runs core-scope, schema, provider-reverification, and cold-clone golden
+tests before becoming the immutable base of activation.
+
+### Activation is one authenticated blob transition, not a path allowlist
+
+Gate 2 also lands two digest-covered files: a canonical activation manifest and its exact
+binary-safe patch. The manifest has schema `agentfold-ref-update-activation/v1`, the patch
+SHA-256, and a sorted row for every live runtime/workflow/contract/help/test/ownership path.
+Each row has exactly `path,mode,before_blob,after_blob`; a new/deleted blob uses JSON null on
+the absent side. Blob OIDs are full repository-object-format IDs and modes are the exact Git
+tree modes. The patch is reviewable source; a test applies it to a temporary tree whose
+before blobs equal the manifest, then requires every resulting mode/blob to equal the after
+side and no other non-record path to change.
+
+The adapter-policy manifest hashes both activation files before live canaries. The canary
+receipt binds their adapter digest. At gate 3, trusted default-branch code reads the
+activation manifest/patch and receipt from the immutable base, requires every candidate
+non-record change to be exactly one listed before→after transition, and requires every
+listed transition. It separately permits only task/worklog/verification record changes,
+which cannot affect runtime or tests. Candidate tests do not define the expected tree; the
+base-authenticated after blob IDs do.
+
+The trusted gate then applies the base patch in a temporary tree, runs the full repository
+suite, source/workflow damage guards, reconciler, and live-reference scan against that exact
+tree, and requires its tree to equal the candidate. A modified ordinary check, weakened
+test, extra hunk, omitted documentation repair, new live legacy reference, before-blob drift,
+or different file mode changes a blob/tree ID and refuses activation. Default-branch drift
+invalidates the before set and returns to gate 2; it is never three-way merged into an
+uncertified activation.
+
+### Gate boundary
+
+Production remains unopened. A new immutable revision needs all five fresh lenses before
+dormant core work begins.

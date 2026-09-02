@@ -61,6 +61,17 @@ The three-to-two panel rejected the revision. No production implementation began
 The revision was rejected after two independent blocks; the remaining lenses were not run.
 No production implementation began from it.
 
+## Superseded direct-evaluator design review
+
+**Reviewed revision:** `c9608fcc191072fbe1bcea27313384eba8e47b9b`
+
+- semantic/DAG/executable / a15-semantic-review: `approve` — direct in-process parity, endpoint/fast-forward/divergent behavior, two-arm proofs, identity framing, counters, and policy binding remained POC-equivalent.
+- workflow/provider/human / r19-semantic-design: `block` — the receipt could not represent required no-observation/pending scenarios and did not close numeric fixture/fork topology identity.
+- CLI/contracts/testability / final-cli-panel: `block` — batch descriptors were undercounted, receipt JSON/schema was open, and path-level activation permission allowed unrelated invariant/test edits.
+
+The revision was rejected after two independent blocks; the remaining lenses were not run.
+No production implementation began from it.
+
 ## Superseded observer-only design review
 
 **Reviewed revision:** `a79425b7de1234b390ed0c495b6ed774a6b32c51`
