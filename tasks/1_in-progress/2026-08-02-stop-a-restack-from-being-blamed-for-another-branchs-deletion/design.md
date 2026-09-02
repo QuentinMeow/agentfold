@@ -3545,3 +3545,107 @@ separate tests.
 
 Production remains unopened. One new immutable revision needs the three base lenses before
 budget and core-fit review.
+
+## 2026-09-01 correction amendment 25 — mode-bound authority and executable bounds
+
+Fresh review of `38ce7a911af196b9ea88b5252f05abca89f31f87` found three independent
+contract defects. A schema-valid control-character path made Git quote patch headers that
+the parser could not admit; two source-derived scratch maxima incorrectly promised
+independent `+1` fixtures; and an authority file could change from a regular file to a
+same-payload symlink without changing the byte-only policy digest. This amendment supersedes
+the policy/adapter transcript framing, activation path domain/diff command, and amendment
+24's every-category `+1` sentence. Classifier/DAG semantics and the five Git section forms
+are unchanged.
+
+### Executable identities bind Git mode and never follow symlinks
+
+The unactivated `authority-policy/v1` and `adapter-policy/v1` byte-only domains are replaced
+by `authority-policy/v2` and `adapter-policy/v2`. For either domain, each fixed registry row
+is now framed as:
+
+```text
+uint64be(len(UTF8(path))) || UTF8(path)
+|| uint64be(6) || ASCII(git_mode)
+|| uint64be(len(blob_payload)) || blob_payload
+```
+
+The domain label, zero separator, row count, fixed registry order, SHA-256, and every other
+existing framing rule remain. `git_mode` is exactly `100644` or `100755`; the tree entry must
+be a blob. A symlink `120000`, gitlink, tree, absent entry, unsupported mode, duplicate, or
+mode/payload lookup failure refuses before hashing. Thus a regular executable-bit change is
+a policy/adapter digest change, while a regular-to-symlink change is never a valid executable
+registry at all.
+
+Authority digest comparison at O, N, and the executing evaluator binds each exact tree mode
+as well as path and payload. The evaluator's on-disk self-check walks from an already opened
+checkout-root descriptor, opens every directory component with no-follow directory
+semantics, opens the final component with `O_NOFOLLOW`, and hashes from that same descriptor.
+`fstat` must report a regular file whose executable-bit class agrees with the authenticated
+Git mode: any of `0111` set means `100755`, and none set means `100644`; other permission
+bits are not Git tree identity. Substitution, a symlink in any component, executable-class
+drift, path replacement during the walk, unsupported no-follow semantics, or byte drift is
+`policy-version-mismatch` before classification. The import/registry audit uses the same
+mode-bound rows.
+
+The adapter canary and Gate 3 apply the identical rule to every adapter-policy registry
+entry. The canary receipt schema is consequently
+`agentfold-ref-update-canary-receipt/v2`; it carries the v2 authority and adapter digests,
+and an old v1 receipt cannot authorize activation. Gate 3 compares candidate tree modes and
+payloads to the immutable-base receipt before accepting the activation patch. Damage tests
+change each authority and adapter file independently through `100644 -> 100755`,
+`100755 -> 100644`, and regular -> same-payload symlink; change a parent directory to a
+symlink; and replace a checked file between path walk and read. Every case refuses before a
+domain result. The semantic regression includes the reviewer's latent
+`os.path.islink(policy.__file__)` false-clean construction and requires it to stop at policy
+verification.
+
+### Activation paths have one unquoted UTF-8 domain
+
+Activation-manifest paths remain strict UTF-8 and keep every existing relative-path,
+segment, length, uniqueness, and ordering rule. They now additionally reject any UTF-8 byte
+in `00..1f`, byte `22` (`"`), byte `5c` (`\\`), or byte `7f`. This is a byte predicate after
+strict UTF-8 validation; non-ASCII UTF-8 remains distinct and is not Unicode-normalized.
+
+Patch generation adds the literal Git option `-c core.quotePath=false` before `diff` in the
+already sanitized invocation. For the admitted byte domain, every `diff --git`, `---`, and
+`+++` pathname is therefore the raw manifest UTF-8 path with the exact configured `a/` or
+`b/` prefix, never a C-quoted or escaped spelling. The parser constructs each complete
+expected header from authenticated path bytes and compares it byte-for-byte; it does not
+split on spaces or decode a second pathname language. Any quote byte, escape, unexpected
+prefix, raw/manifest mismatch, or quoted header refuses before body parsing.
+
+Cold-clone fixtures accept spaces, leading/trailing space, single quote, `#`, a leading
+hyphen, and multi-byte UTF-8 under `core.quotePath=false`, and prove literal generation,
+bounded parse, apply, and final-tree equality. They reject NUL, every ASCII control byte,
+double quote, backslash, and DEL before starting `git diff`; damaged fixtures inject Git
+C-quoted, octal-escaped, raw high-byte, and mixed raw/quoted headers. The reviewer's
+`line<LF>break` regular/symlink transition is a mandatory pre-child schema refusal rather
+than a generated patch that the parser cannot authenticate.
+
+### Working-copy and loose-object values are derived reservations
+
+The logical ledger has six mutually exclusive accounting tags but only four independently
+refusing byte counters: patch, manifest, retained output, and metadata. Their existing exact
+limits and independent exact/`+1` fixtures remain.
+
+Working-copy and loose-object charges are checked, source-derived reservations. The
+working-copy expression reaches `301,989,888` exactly only when the already independent
+before-total, after-total, and largest-blob inputs reach 128 MiB, 128 MiB, and 32 MiB. The
+loose-object expression reaches `135,313,924` exactly only at the already bounded 256 rows,
+128 MiB after-total shape of four 32 MiB rows plus 252 zero-byte rows. Checked-uint64
+recomputation from authenticated manifest rows must equal the ledger reservation before any
+child starts; exceeding either constant still refuses defensively, but no structurally valid
+manifest can exceed only that derived value.
+
+Tests therefore reach both derived maxima with valid manifests and retain the source-bound
+exact/`+1` tests. For each derived expression, a test-only `observed - 1` limit applied to
+the unchanged maximum transcript proves the reservation is charged before work; it is an
+observed-red damage control, not a fictitious production `+1` fixture. Unknown, double, or
+missing accounting tags and checked arithmetic still refuse. The six-class reported maximum
+sum remains `462,469,636`; it is derived rather than a seventh gate, and the hard one-GiB
+private-volume quota remains the containment boundary.
+
+### Gate boundary
+
+Production remains unopened. This corrected immutable revision must pass all three base
+lenses again before budget and core-fit review; no verdict on a prior SHA transfers.

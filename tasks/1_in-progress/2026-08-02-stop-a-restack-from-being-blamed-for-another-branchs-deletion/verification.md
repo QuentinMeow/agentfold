@@ -68,12 +68,39 @@ Budget and core-fit lenses were not run. Production remained unopened.
 
 Budget and core-fit lenses were not run. Production remained unopened.
 
+## Superseded file-type and single-charge review
+
+**Reviewed revision:** `38ce7a911af196b9ea88b5252f05abca89f31f87`
+
+- semantic/DAG / a15-semantic-review: `block` — the authority digest bound path and payload
+  but not Git mode, so a regular authority file could become a same-payload symlink and make
+  a latent `os.path.islink()` branch return a false `clean` without a digest change.
+- workflow/provider / r19-semantic-design: `block` — provider joins and the new file-type
+  pair were coherent, but a schema-valid LF pathname made literal Git emit quoted headers
+  outside the parser's admitted grammar.
+- CLI/resource / am22-cli-review: `block` — it independently reproduced the quoted-path
+  mismatch and proved working-copy and loose-object `+1` fixtures unreachable because their
+  limits equal the mathematical maxima of earlier source bounds.
+
+All reviewers confirmed that amendment 24's safe-path regular/symlink fixtures emitted the
+required consecutive delete/create pair and applied to the exact intended tree. Budget and
+core-fit lenses were not run. Production remained unopened.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text
 $ python3 -c 'raw=134217728; rows=256; n=raw+14*rows; loose=n+(n>>12)+(n>>14)+(n>>25)+13*rows+4095*rows; cats=[301989888,loose,16777216,2097152,4194304,2097152]; print(loose); print(sum(cats))'
 135313924
 462469636
+```
+
+The amendment-25 source-derived maxima were recomputed directly:
+
+```text
+$ python3 -c 'b=134217728;a=134217728;m=33554432; q=lambda n:n+(n>>12)+(n>>14)+(n>>25)+27+4095; working=b+a+m; loose=4*q(m)+252*q(0); print(f"working={working}"); print(f"loose={loose}"); print(f"sum={working+loose+16777216+2097152+4194304+2097152}")'
+working=301989888
+loose=135313924
+sum=462469636
 ```
 
 ## Superseded bounded-materialization review

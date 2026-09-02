@@ -423,3 +423,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Made scratch category tags mutually exclusive so patch, manifest, output, metadata,
   worktree, and loose-object bytes are each charged exactly once.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Mode-bound authority and executable-bound correction (codex)
+
+- Three fresh reviews blocked amendment 24 on an admitted-but-quoted Git path, unreachable
+  derived-resource `+1` fixtures, and a same-payload symlink that changed authority behavior
+  without changing the policy digest.
+- Reframed authority/adapter v2 digests over path, exact regular-file Git mode, and payload;
+  added fd-relative no-follow on-disk verification and retired byte-only canary receipts.
+- Narrowed activation paths to Git's unquoted UTF-8 byte domain under an explicit
+  `core.quotePath=false`, with safe Unicode/space cases and every quote trigger tested.
+- Made working-copy and loose-object maxima source-derived reservations with observed-red
+  damage controls, while retaining four independent counter boundaries and the hard quota.
+- Production remains unopened pending another full five-lens immutable-revision review.
