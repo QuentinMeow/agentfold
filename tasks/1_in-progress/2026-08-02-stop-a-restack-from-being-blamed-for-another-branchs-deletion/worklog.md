@@ -436,3 +436,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Made working-copy and loose-object maxima source-derived reservations with observed-red
   damage controls, while retaining four independent counter boundaries and the hard quota.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Authenticated-source and literal-path correction (codex)
+
+- Three fresh reviews blocked amendment 25 on stale v2 framing budgets, Git pathspec magic,
+  Python bytecode-cache substitution, and an impossible post-open namespace-race promise.
+- Updated exact authority/adapter v2 maxima and classified mode framing without borrowing
+  from payload categories.
+- Made every manifest path a literal Git pathspec and added concrete magic-prefix fixtures.
+- Replaced normal authority imports with isolated in-memory compile/exec from authenticated
+  no-follow descriptors, excluding pyc, zip, shadow-path, preloaded, and dynamic loaders.
+- Bound post-open execution to retained descriptor bytes; races before open refuse, while
+  races after open cannot affect execution and no longer claim impossible detection.
+- Production remains unopened pending another full five-lens immutable-revision review.

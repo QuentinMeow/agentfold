@@ -86,6 +86,25 @@ All reviewers confirmed that amendment 24's safe-path regular/symlink fixtures e
 required consecutive delete/create pair and applied to the exact intended tree. Budget and
 core-fit lenses were not run. Production remained unopened.
 
+## Superseded mode-bound execution review
+
+**Reviewed revision:** `3f3a9554708f7b7f8fb6eac6eb7ee2503f046e48`
+
+- semantic/DAG / a15-semantic-review: `block` — Python could execute a timestamp-valid
+  untracked `.pyc` containing different equal-length code while the authenticated regular
+  source, mode, size, timestamp, and v2 digest all passed.
+- workflow/provider / r19-semantic-design: `block` — provider/receipt sequencing passed,
+  but v2 row framing retained v1 numeric maxima and undercounted maximum authority and
+  adapter transcripts by 1,920 and 320 bytes respectively.
+- CLI/resource / am22-cli-review: `block` — it confirmed the framing defect, proved
+  `:(literal)foo` was interpreted as Git pathspec magic and produced an empty patch, and
+  showed that an opened descriptor cannot detect a later pathname replacement as amendment
+  25 required.
+
+The provider lane, amendment-25 quoted-path domain, safe-path file-type pairs, and
+four-independent/two-derived scratch model passed their assigned attacks. Budget and
+core-fit lenses were not run. Production remained unopened.
+
 The amendment-22 scratch arithmetic was executed directly:
 
 ```text
@@ -101,6 +120,16 @@ $ python3 -c 'b=134217728;a=134217728;m=33554432; q=lambda n:n+(n>>12)+(n>>14)+(
 working=301989888
 loose=135313924
 sum=462469636
+```
+
+The amendment-26 v2 maxima were recomputed directly:
+
+```text
+$ python3 -c 'authority_framing=3*(30+2+32*30+8192); authority_payload=12582912; adapter_framing=39+32+2+16*30+4096; adapter_payload=27262976; print(f"authority_framing={authority_framing}"); print(f"authority_total={authority_framing+authority_payload}"); print(f"adapter_framing={adapter_framing}"); print(f"adapter_total={adapter_framing+adapter_payload}")'
+authority_framing=27552
+authority_total=12610464
+adapter_framing=4649
+adapter_total=27267625
 ```
 
 ## Superseded bounded-materialization review

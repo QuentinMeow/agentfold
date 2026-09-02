@@ -3649,3 +3649,120 @@ private-volume quota remains the containment boundary.
 
 Production remains unopened. This corrected immutable revision must pass all three base
 lenses again before budget and core-fit review; no verdict on a prior SHA transfers.
+
+## 2026-09-01 correction amendment 26 — authenticated source execution and literal paths
+
+Fresh review of `3f3a9554708f7b7f8fb6eac6eb7ee2503f046e48` rejected four
+executable gaps. The v2 row framing grew without updated budgets; Git still interpreted an
+admitted `:(literal)foo` as pathspec magic; a timestamp-valid untracked `.pyc` could execute
+different authority code while the authenticated source passed; and an opened descriptor
+cannot observe a later pathname replacement. This amendment supersedes the affected v2
+framing maxima, diff invocation, ordinary Python import wording, and amendment 25's
+post-open-race refusal. Provider evidence, Git section forms, and Strategy A semantics remain
+unchanged.
+
+### V2 framing has v2 limits
+
+Mode length and mode bytes are framing, not payload. Under amendment 25's exact
+`uint64 path length + uint64 mode length + six mode bytes + uint64 payload length` row, the
+three-source authority maximum is:
+
+```text
+3 * (30-byte domain + 2-byte count + 32 * 30-byte row framing + 8,192 path bytes)
+= 27,552 framing bytes
+12,582,912 payload bytes + 27,552 = 12,610,464 total digest-input bytes
+```
+
+These values supersede `25,632` and `12,608,544`. The adapter maximum is:
+
+```text
+39-byte domain + 32-byte authority digest + 2-byte count
++ 16 * 30-byte row framing + 4,096 path bytes = 4,649 framing bytes
+27,262,976 payload bytes + 4,649 = 27,267,625 total digest-input bytes
+```
+
+These values supersede `4,329` and `27,267,305`. Every allocator, precharge, counter limit,
+golden transcript, receipt verifier, and exact/`+1` case uses the v2 values. Payload-category
+limits do not borrow the extra framing bytes, and all additions/multiplications are checked
+before hashing.
+
+### Manifest paths are literal Git arguments
+
+Patch generation adds the global option `--literal-pathspecs` before amendment 25's
+`-c core.quotePath=false` and `diff`. The complete command prefix is therefore:
+
+```text
+git --no-replace-objects --literal-pathspecs -c core.quotePath=false diff
+    --binary --full-index --no-color --no-ext-diff --no-textconv --no-renames
+    --src-prefix=a/ --dst-prefix=b/ <before-tree> <after-tree> -- <manifest paths...>
+```
+
+The sanitized environment also removes every `GIT_*_PATHSPECS` variable; command-line
+literal semantics are still mandatory and cannot be supplied only by ambient configuration.
+Golden fixtures change files literally named `:(literal)foo`, `:(glob)*`, `:/top`, `:!drop`,
+`:^drop`, and `:` and require a nonempty exact patch whenever the trees differ. Damage tests
+remove or reorder `--literal-pathspecs`, inject hostile pathspec environment variables, and
+prove the candidate tree is never silently projected to an empty or different path set.
+
+### Authority modules execute only authenticated source bytes
+
+"Imports ref_update_core in process" now means an authenticated in-memory source load, not
+Python's filesystem import machinery. The local CLI and GitHub evaluator are each launched
+as a direct source script by the host-pinned CPython executable with exact `-I -S -B` flags,
+an allowlisted environment, empty user import paths, and the supported interpreter profile.
+Module, directory, zipapp, `runpy`, sourceless, and `-c` entry shapes are unavailable. Each
+entrypoint verifies those flags/profile before importing or executing any authority module;
+failure is exit 2 with no classifier result.
+
+Before authority execution, the bootstrap completes amendment 25's O/N/evaluator v2
+mode/payload verification and retains one immutable byte buffer per evaluator registry row
+from the already opened no-follow descriptor. It rejects any authority module name already
+present in `sys.modules`, preloads only the pinned standard-library allowlist under the
+isolated interpreter, removes filesystem/zip/path-hook finders, and installs one loader whose
+closed name table maps only authority module names to those buffers.
+
+For every authority module, that loader:
+
+1. strictly decodes the authenticated payload as UTF-8;
+2. compiles that exact text with a fixed synthetic `agentfold-authority:<path>` filename,
+   `dont_inherit=True`, `optimize=0`, and no caller-supplied flags;
+3. creates a fresh module with the fixed registry name/package and no `__file__` or
+   `__cached__` value; and
+4. executes only the returned code object in that module namespace.
+
+It never asks `PathFinder`, `SourceFileLoader`, `SourcelessFileLoader`, a cache tag, bytecode
+magic, `marshal`, or an on-disk path for code. The source/import audit rejects authority use
+of `__file__`, `__cached__`, dynamic `compile`/`eval`/`exec`/`__import__`, importlib/runpy/
+pkgutil/marshal loaders, or an undeclared module edge. After preload, an allowlisted standard
+library module can be reused from `sys.modules`; no new filesystem import is possible during
+classification. The adapter evaluator applies the same loader contract rather than using a
+second implementation of authority imports, and local/provider parity compares the complete
+canonical result.
+
+Untracked timestamp-valid, checked-hash, unchecked-hash, corrupt, and sourceless `.pyc`
+files; a same-name zip module; a source-shadow directory; preloaded `sys.modules` entry;
+hostile meta/path hook; and every cache-tag spelling are mandatory damage fixtures. Each is
+either ignored because no filesystem loader is consulted or refused before authority code;
+none can change one result byte or counter. A control compiles different equal-length source
+into a timestamp-valid cache, restores the authenticated source/mode/timestamp, and must
+still execute the authenticated `blocked` source rather than the cached `clean` code.
+
+### An opened descriptor is the namespace boundary
+
+The impossible promise that a rename after successful `open(..., O_NOFOLLOW)` must be
+detected is withdrawn. A replacement before the final open is still refused by no-follow,
+regular-mode, size, and payload verification. Once opened, the descriptor and retained bytes
+are the authority: a later rename or symlink cannot alter `fstat`, the bytes compiled, or the
+in-memory module, and authority code has no source pathname capability to re-open or inspect.
+
+Race tests pause immediately before open and require a replacement to refuse; then pause
+immediately after open, replace the namespace entry with different bytes and with a
+same-payload symlink, and require byte-identical execution from the opened descriptor. The
+reviewer's latent `os.path.islink(policy.__file__)` source is rejected by the authority audit,
+and its untracked-pyc false-clean construction executes the authenticated source. This is
+execution binding, not a claim that POSIX reports a post-open rename.
+
+### Gate boundary
+
+Production remains unopened. A new immutable revision must again pass all three base lenses
+before budget and core-fit review; prior accepts and partial positive controls do not carry.
