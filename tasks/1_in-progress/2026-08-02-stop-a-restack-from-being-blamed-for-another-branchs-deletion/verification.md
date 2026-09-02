@@ -61,6 +61,17 @@ The three-to-two panel rejected the revision. No production implementation began
 The revision was rejected after two independent blocks; the remaining lenses were not run.
 No production implementation began from it.
 
+## Superseded closed-receipt design review
+
+**Reviewed revision:** `7a6eec531026e5c59af4a7a2affd0f07952483d7`
+
+- semantic/DAG/executable / a15-semantic-review: `approve` — classifier and tagged receipt states remained separate and POC-equivalent; exact activation did not authorize an authority change.
+- workflow/provider/human / r19-semantic-design: `block` — pending schema confused run status with nullable job conclusion and full-tree equality contradicted permitted lifecycle record updates.
+- CLI/contracts/testability / final-cli-panel: `block` — scalar/count/reason limits, artifact name, activation manifest/patch bytes, and record-tree comparison were not executable.
+
+The revision was rejected after two independent blocks; the remaining lenses were not run.
+No production implementation began from it.
+
 ## Superseded direct-evaluator design review
 
 **Reviewed revision:** `c9608fcc191072fbe1bcea27313384eba8e47b9b`

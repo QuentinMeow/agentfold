@@ -2929,3 +2929,126 @@ uncertified activation.
 
 Production remains unopened. A new immutable revision needs all five fresh lenses before
 dormant core work begins.
+
+## 2026-09-01 correction amendment 20 — provider-real pending and projected activation
+
+Review of `7a6eec531026e5c59af4a7a2affd0f07952483d7` again accepted
+classifier semantics and rejected CLI/workflow closure. Pending run status was placed in a
+job conclusion that may be null or absent; string/count/reason limits and artifact name were
+open; activation-manifest bytes/modes/patch commands were undefined; and record permission
+contradicted full-tree equality. This section supersedes amendment 19's pending row, scalar
+limits/enums, activation-manifest encoding, and final comparison. Other receipt variants,
+fixture topology, pipe layout, and exact-blob authority remain.
+
+### Scalar charges and closed provider reasons
+
+Every decoded JSON string is first charged by strict UTF-8 payload bytes, with an 8,192-byte
+maximum. Its complete canonical JSON string token, including quotes and escapes, is then
+charged with the derived maximum 49,154 ASCII bytes: 8,192 one-byte control scalars can each
+expand to six `\\u00xx` bytes plus quotes. Neither count is a Unicode-code-point limit.
+Exactly 8,192 UTF-8 bytes succeeds when the whole receipt cap also permits it; the next byte
+refuses before encoding. Golden cases cover ASCII, NUL controls, two-/three-/four-byte UTF-8,
+combining sequences, and the derived escape maximum. The aggregate 2 MiB receipt cap is
+charged on final canonical bytes including LF.
+
+Provider discovery counts have exact limits inherited from the polling contract:
+`polls <= 90`, `runs_examined <= 100`, and `matching_tuples <= 1`; a no-observation row
+requires zero matches. Run attempts remain `1..1,000`, row count is exactly 13, and numeric
+provider IDs remain `1..2^63-1`. The artifact name is exactly
+`agentfold-ref-update-canary-v1`.
+
+Observation/reason pairs are fixed by scenario:
+
+```text
+approval-pending-public-fork   pending         fork-approval-required
+branch-creation                not-applicable  zero-old-endpoint
+branch-deletion                not-applicable  zero-new-endpoint
+retention-expired              no-observation  artifact-expired
+sha-like-public-fork           no-observation  sha-like-head-suppressed
+sha-like-same-repository       no-observation  sha-like-head-suppressed
+```
+
+Completed rows have no observation/reason fields. Stale rerun is completed and must bind its
+original exact event. Unknown reason text, provider outage, controller success, or another
+scenario's pair is a schema refusal rather than an unavailable substitute.
+
+### Pending reflects run status; job is optional evidence
+
+The `pending` variant's additional exact keys are now
+`observation,reason,event_sha256,run_id,run_attempt,run_status,run_conclusion,job`.
+`observation=pending`, `reason=fork-approval-required`, `run_status` is one of
+`queued|waiting|pending|requested`, and `run_conclusion` is JSON null. `job` is either JSON
+null when GitHub has not materialized one, or an object with exactly
+`job_id,status,conclusion`; its status is `queued|waiting|pending`, its conclusion is null,
+and its positive ID uses the provider bound. A completed/action-required run does not satisfy
+this scenario. The verifier binds the raw workflow-run object by run/attempt and, when
+present, the job object by ID; it never copies status into conclusion or invents a job.
+
+Fixed golden/live fixtures cover queued null-job, waiting null-job, and pending-with-job.
+If repository approval policy cannot produce one of the permitted pending observations
+within the bounded window, the adapter gate is unavailable and activation does not replace
+the scenario with a completed or fabricated row.
+
+### Canonical activation manifest and patch
+
+The activation manifest uses the exact amendment-19 JSON encoder and a 2 MiB including-LF
+cap. It has exactly top-level keys `schema,patch_format,patch_size,patch_sha256,paths`.
+`schema` is `agentfold-ref-update-activation/v1`; `patch_format` is
+`git-diff-binary-v1`; patch size is `0..16,777,216` and equals exact patch bytes; digest is
+their lowercase SHA-256. There are 1–256 unique path rows sorted by strict UTF-8 bytes,
+with 4,096 UTF-8 bytes per path and 1 MiB aggregate path bytes. Paths are normalized
+repository-relative strings with no empty, absolute, dot, dot-dot, backslash, NUL, or
+duplicate segment/entry.
+
+Each row has exactly
+`path,before_mode,before_blob,after_mode,after_blob`. A present mode is one ASCII string in
+`100644|100755|120000`; its paired blob is a full object-format OID. An absent side has both
+fields JSON null. Both sides cannot be absent. Mode-only, create, delete, and payload changes
+therefore have one representation.
+
+Patch bytes are produced in a sanitized-config temporary clone by the literal argument
+sequence:
+
+```text
+git --no-replace-objects diff --binary --full-index --no-color --no-ext-diff
+    --no-textconv --src-prefix=a/ --dst-prefix=b/ <before-tree> <after-tree>
+    -- <manifest paths in UTF-8 order>
+```
+
+The environment disables external diff, textconv, filters, attributes outside the exact
+trees, locale variation, pager, replacement refs, and config includes. The patch is applied
+only with `git --no-replace-objects apply --binary --index --whitespace=nowarn <exact-file>`
+to an index/worktree initialized at the recorded before blobs; fuzz, three-way fallback,
+recount, rejects, and whitespace repair are forbidden. The post-apply index modes/blob IDs
+must equal every after row before tests. Cold-clone golden fixtures cover text, executable,
+symlink, binary, create/delete/mode change, path ordering, every malformed header, patch
+size/+1, and byte/digest drift.
+
+### Runtime projection plus constrained record overlay
+
+The authenticated activation patch owns every non-record candidate change. Define the
+runtime projection as all tree entries except these four exact current-task record paths:
+`design.md`, `plan.md`, `verification.md`, and `worklog.md` under task
+`2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion` at its unchanged
+`1_in-progress` location. No other task, queue, memory, history, roadmap, template, or record
+path is excluded.
+
+Trusted base code first applies the authenticated patch to the base and requires the
+candidate runtime projection—paths, modes, and blob IDs—to equal that patched runtime
+projection exactly. It then admits a record overlay only when all four paths remain regular
+`100644` files: design/worklog/verification may only append bytes to their base contents;
+plan may only replace existing literal `- [ ]` tokens with equal-length `- [x]` tokens and
+must be otherwise byte-identical. Missing, renamed, extra, truncated, or altered prefix
+bytes refuse.
+
+The gate overlays those exact candidate record blobs onto the patched temporary tree and
+then requires the full tree ID to equal the candidate tree. The full suite, source/workflow
+guards, reconciler, core-scope receipt check, and live-reference scan run after this overlay,
+so record schema and cross-links are evaluated without letting record bytes define expected
+runtime. A later task-status move or handover is a separate post-activation record commit;
+it cannot ride inside the authenticated activation.
+
+### Gate boundary
+
+Production remains unopened. A new immutable revision needs all five fresh review lenses
+before dormant core implementation.

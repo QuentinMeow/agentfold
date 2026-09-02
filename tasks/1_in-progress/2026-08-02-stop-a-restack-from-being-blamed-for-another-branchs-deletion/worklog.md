@@ -355,3 +355,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   candidate; any extra hunk, ordinary-check change, test weakening, drift, or mode change
   refuses activation.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Provider-real pending and projected-activation correction (codex)
+
+- Semantic review accepted amendment 19; workflow/CLI review found a fabricated pending-job
+  shape, undefined scalar/count/reason boundaries, open activation bytes, and contradictory
+  record/tree equality.
+- Mapped the public-fork hold state to the provider's real run status with null conclusion and an
+  optional tagged job object. A completed/action-required run cannot masquerade as pending.
+- Defined UTF-8 and canonical-token string charges, every provider count maximum, literal
+  artifact name, and exact observation/reason pairs for all negative scenario rows.
+- Closed activation JSON, modes, path grammar, size limits, exact Git binary-diff/apply
+  arguments, sanitized environment, and cold-clone golden vectors.
+- Split candidate comparison into an exact authenticated runtime projection and four-path
+  append/checkbox-only record overlay, then reconstructed and tested the complete candidate
+  tree after overlay.
+- Production remains unopened pending another full five-lens immutable-revision review.
