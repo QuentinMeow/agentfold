@@ -2380,3 +2380,111 @@ pass. Workflow shell commands retain their separate guard.
 Production remains unopened. A fresh full five-lens review must accept this separated CLI,
 canonical byte contract, recursive guard, and atomic activation plan. Only then may the
 dormant additive core units start.
+
+## 2026-09-01 correction amendment 16 — preserved rows and accepted delivery
+
+Independent semantic and budget reviews rejected
+`28d63c0e654bbadfd932f69908512c755c848987`. The semantic review found that amendment 15
+turned the accepted POC's clean persisted-action result into a blocker and replaced stable
+identity-based Finding keys with movable paths. The budget review proved that a process
+cannot roll back a partially written 32 MiB stdout stream when its reader stalls past the
+deadline. This section supersedes amendment 15's status/finding rules, Finding projection,
+and zero-stdout-on-delivery-failure claim. The classifier, separated-command boundary, and
+atomic activation sequence remain unchanged.
+
+### Persisted is a first-class clean status
+
+Every identity at `O` still has exactly one result row. The closed status set is now:
+
+- `preserved`: the identity is live at `N` and its unique persisted occurrence has a
+  complete valid `C`-rooted continuity proof;
+- `valid`: the identity is absent at `N` and exactly one valid causal resolution root, with
+  no competitor, explains that absence;
+- `none`: the identity is absent at `N` and no causal root exists;
+- `invalid`: at least one required proof is complete and invalid; or
+- `ambiguous`: multiplicity, competing roots, or complete contradictory proofs prevent one
+  conclusion.
+
+The production port maps the POC's `status=none`, `finding=false`,
+`reason_code=identity-preserved` tuple to `status=preserved`; the POC's disappeared
+`status=none`, `finding=true`, `reason_code=no-resolution-root` remains `status=none`.
+Golden oracle tests require that mapping explicitly, including `P8-path-timing-move`.
+`finding` is null exactly for `preserved` and `valid`. It is present for `none`, `invalid`,
+and `ambiguous`. `state=clean` requires every row to be `preserved` or `valid` (or no rows)
+and exits 0; any other complete row makes `state=blocked` and exits 1.
+
+Amendment 15's exact top-level key set is superseded by
+`schema,policy,old,new,common,state,rows,counters`. `policy` is the lowercase
+`sha256:<64-hex>` authority-policy digest already required to match O, N, and the executing
+evaluator. It is present even when `rows` is empty, so a consumer can always bind the
+accepted result to the immutable policy invocation.
+
+The row keys remain exactly `identity,paths,status,reasons,finding,evidence`, but their
+previously open scalar meanings are closed here. `identity` is the same lowercase
+`sha256:<64-hex>` domain-separated identity digest used by the Finding, never the raw
+identity tuple. `evidence` is a lowercase `sha256:<64-hex>` digest over the library's
+complete canonical retained row evidence; the full bounded proof remains available to
+in-process verification but raw action text and a recursively open proof schema do not
+enter the CLI format. `counters` is an object containing every policy-bound counter-registry
+name exactly once, with no unknown or omitted name; each value has exactly integer keys
+`used` and `limit`, and `0 <= used <= limit`. Registry names and limits are part of the
+authority-policy digest. These choices make every nested CLI type closed while retaining a
+cryptographic binding to the complete proof exercised by tests.
+
+### Finding identity never follows a path
+
+The row's sorted `paths` remain bounded human context only. The exact Finding object has
+keys `check`, `subject`, `message`, and `fix`, with this projection:
+
+```text
+check   = queue-resolution
+subject = message-queue/action-identities/<domain-separated-identity-digest>
+message = divergent ref update has no unique valid continuity proof for old action <identity-digest>: <comma-joined-reason-codes>
+fix     = restore the old action or create one complete evidence-valid resolution in a new ref update; preserve every required commit, tree, and blob
+```
+
+The digest is the earlier collision-checked digest of the full authoritative identity;
+neither a representative path nor raw action text enters the Finding key or message. A path
+move therefore preserves retry identity, while digest collision remains incomplete exit 2.
+
+### Complete bytes versus accepted bytes
+
+Classification and serialization finish into one bounded immutable byte buffer before the
+first stdout write. The 32 MiB result-serialization ceiling includes the final LF. The
+writer uses the same absolute 120-second transaction deadline, makes stdout nonblocking
+where the descriptor supports it, accounts every attempted byte, handles short writes, and
+never retries beyond the remaining deadline. A successful delivery writes the entire one-
+line canonical buffer, observes no write error, and then exits 0 or 1 according to state.
+
+There is deliberately no claim that an operating system can retract bytes already accepted
+by an output sink. Pre-delivery incompleteness emits zero stdout. A short write, `EPIPE`,
+`ENOSPC`, closed descriptor, deadline, or other delivery failure may leave a prefix on
+stdout, but exits 2; that prefix is transport debris, not a result. The command attempts the
+canonical bounded incomplete diagnostic on stderr, but a failed stderr sink cannot be made
+reliable and the exit remains 2. No partial stream is a Finding, retry, evidence record, or
+provider conclusion.
+
+Every authority-bearing caller must capture stdout and stderr without teeing or publishing,
+drain both concurrently under their respective byte caps, wait for process termination, and
+accept a continuity result only when all of these hold:
+
+1. exit is exactly 0 or 1 and agrees with the decoded `state`;
+2. stderr is empty and stdout reaches EOF within 32 MiB including LF;
+3. stdout is exactly one LF-terminated JSON value with no prefix or suffix;
+4. strict parsing, exact schema/key/type validation, and canonical re-encoding reproduce
+   the captured bytes; and
+5. schema, `old`, `new`, and policy identity match the immutable invocation.
+
+Anything else is incomplete and must be discarded before logs, annotations, artifacts,
+Findings, or ordinary-check composition. The GitHub adapter and local wrapper own this
+capture protocol; a shell pipeline or `tee` is not an authority-bearing caller. Tests cover
+slow readers, a reader that stops after 64 KiB, closed stdout/stderr, short writes, `EPIPE`,
+`ENOSPC`, failure after a complete buffer but before exit, deadline during delivery, an
+exit/state mismatch, a truncated final LF, over-cap output, noncanonical JSON, and a forged
+endpoint. Each attack must produce no accepted result and no repository mutation.
+
+### Gate boundary
+
+Production remains unopened. A new immutable revision must receive the full five-lens
+review; the prior two blocks are rejection evidence, not approvals transferable to this
+amendment.

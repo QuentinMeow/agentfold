@@ -286,3 +286,19 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   verified fork network/owner relationships; run-attempt identity; and the atomic empty-tip
   lease for first publication.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Preserved-status and accepted-delivery correction (codex)
+
+- Semantic review reproduced the accepted POC's clean persisted-action `none` row and proved
+  amendment 15 would turn it into a blocker. It also caught a regression from stable action-
+  identity Finding subjects to movable representative paths.
+- Budget review proved that a stalled reader can accept a stdout prefix and then force a
+  choice between the aggregate deadline and the false promise of rolling output back to
+  zero bytes.
+- Added first-class clean `preserved` status, restored the domain-separated identity digest
+  as the Finding subject, and kept paths as diagnostic context only.
+- Defined accepted-result semantics: serialize completely before output, bound delivery,
+  and require callers to capture, terminate, size-check, parse, canonicalize, and match
+  exit/state/endpoints before publishing anything. A failed delivery may leave transport
+  debris but can never become an accepted result.
+- Production remains unopened pending a fresh full five-lens immutable-revision review.

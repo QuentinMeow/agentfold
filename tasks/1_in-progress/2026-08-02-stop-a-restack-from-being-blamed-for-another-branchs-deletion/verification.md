@@ -17,6 +17,16 @@ their immutable revision and remain explicitly superseded when a later correctio
 
 The four-to-one panel rejected the revision. No production implementation began from it.
 
+## Superseded separated-CLI design review
+
+**Reviewed revision:** `28d63c0e654bbadfd932f69908512c755c848987`
+
+- semantic/DAG/executable / a15-semantic-review: `block` — amendment 15 conflated the POC's clean persisted `none` with a missing-resolution `none`, and made movable representative paths the stable Finding subject.
+- budgets/transaction/composition / a15-budget-review: `block` — a 32 MiB stdout result cannot both meet the absolute deadline and guarantee zero emitted bytes when a pipe reader stalls after accepting a prefix.
+
+The revision was rejected before the remaining lenses. No production implementation began
+from it.
+
 ## Superseded corrected-design review
 
 **Reviewed revision:** `30c9cc0f9a71a3ae5f82cefb7928a818c383f421`
